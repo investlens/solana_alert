@@ -1,0 +1,16 @@
+cat > .gitignore <<'EOF'
+node_modules
+.env
+.env.*
+dist
+build
+coverage
+*.log
+.DS_Store
+.vscode
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.pdf
+EOF
