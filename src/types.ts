@@ -46,6 +46,36 @@ export type TakeoverToken = {
   tokenAddress?: string;
 };
 
+export type FreeTrialInfo = {
+  used: number;
+  limit: number;
+  fastDelayActive: boolean;
+  freeDelaySec: number;
+};
+
+export type MarketSafetyResult = {
+  marketSafetyScore: number;
+  marketSafetyLabel: 'GOOD' | 'WATCH' | 'RISKY';
+  reasonsGood: string[];
+  reasonsWarn: string[];
+  reasonsBad: string[];
+};
+
+export type AuthorityInfo = {
+  mintAuthority: string | null;
+  freezeAuthority: string | null;
+  updateAuthority: string | null;
+  isMutable: boolean | null;
+};
+
+export type AuthoritySafetyResult = {
+  authoritySafetyScore: number;
+  authoritySafetyLabel: 'GOOD' | 'WATCH' | 'RISK';
+  reasonsGood: string[];
+  reasonsWarn: string[];
+  reasonsBad: string[];
+};
+
 export type RiskResult = {
   score: number;
   risk: 'LOW' | 'MEDIUM' | 'HIGH';
@@ -61,11 +91,19 @@ export type RiskResult = {
   boosts: number;
   paidApproved: boolean;
   hasProfileLinks: boolean;
-  marketSafetyScore: number;
-  marketSafetyLabel: 'GOOD' | 'WATCH' | 'RISKY';
   fdv: number;
   marketCap: number;
   currentPrice: number | null;
+
+  marketSafetyScore: number;
+  marketSafetyLabel: 'GOOD' | 'WATCH' | 'RISKY';
+
+  authoritySafetyScore: number;
+  authoritySafetyLabel: 'GOOD' | 'WATCH' | 'RISK';
+  mintAuthority: string | null;
+  freezeAuthority: string | null;
+  updateAuthority: string | null;
+  isMutable: boolean | null;
 };
 
 export type TokenState = {
@@ -81,6 +119,7 @@ export type TokenState = {
 
   alertId?: string;
   adminDelivered?: boolean;
+  adminEarlyDelivered?: boolean;
 
   alertPrice?: number | null;
   alertLiquidity?: number;
@@ -92,19 +131,4 @@ export type TokenState = {
 export type EnrichedToken = {
   pair: DexPair;
   result: RiskResult;
-};
-
-export type MarketSafetyResult = {
-  marketSafetyScore: number;
-  marketSafetyLabel: 'GOOD' | 'WATCH' | 'RISKY';
-  reasonsGood: string[];
-  reasonsWarn: string[];
-  reasonsBad: string[];
-};
-
-export type FreeTrialInfo = {
-  used: number;
-  limit: number;
-  fastDelayActive: boolean;
-  freeDelaySec: number;
 };

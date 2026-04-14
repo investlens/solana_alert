@@ -41,6 +41,12 @@ export const config = {
   freeTrialLimit: 5,
   freeTrialFastDelaySec: 60,
   freeTrialSlowDelaySec: 300,
+    heliusApiKey: process.env.HELIUS_API_KEY ?? '',
+  watchedWallets: (process.env.WATCHED_WALLETS ?? '')
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean),
+  walletWatchPollMs: num('WALLET_WATCH_POLL_MS', 8000),
   upgradeUrl: process.env.UPGRADE_URL ?? 'https://t.me/yourpaidchannel',
   sponsor: {
     label: process.env.SPONSOR_LABEL ?? 'PARTNER SLOT',

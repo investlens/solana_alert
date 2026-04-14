@@ -1,14 +1,16 @@
 import { config } from '../config.js';
 import type { DexPair, DexProfile, RiskResult } from '../types.js';
 import { computeMarketSafetyScore } from './marketSafety.js';
+import { fetchAuthorityInfo } from './helius.js';
+import { computeAuthoritySafetyScore } from './authoritySafety.js';
 
-export function scoreToken(args: {
+export async function scoreToken(args: {
   pair: DexPair;
   profile: DexProfile;
   paidApproved: boolean;
   boostAmount: number;
   hasTakeover: boolean;
-}): RiskResult {
+}): Promise<RiskResult> {
   const { pair, profile, paidApproved, boostAmount, hasTakeover } = args;
 
   const liquidityUsd = Number(pair.liquidity?.usd ?? 0);
@@ -24,10 +26,6 @@ export function scoreToken(args: {
   const fdvToLiq = liquidityUsd > 0 ? fdv / liquidityUsd : 99999;
   const currentPrice = pair.priceUsd ? Number(pair.priceUsd) : null;
 
-  let score = 0;
-  const checksGood: string[] = [];
-  const checksWarn: string[] = [];
-
   const marketSafety = computeMarketSafetyScore({
     liquidityUsd,
     fdv,
@@ -39,8 +37,23 @@ export function scoreToken(args: {
     boosts,
   });
 
+  const mintAddress = pair.baseToken?.address ?? '';
+
+  const authorityInfo = mintAddress
+    ? await fetchAuthorityInfo(mintAddress)
+    : {
+        mintAuthority: null,
+        freezeAuthority: null,
+        updateAuthority: null,
+        isMutable: null,
+      };
+
+  const authoritySafety = computeAuthoritySafetyScore(authorityInfo);
+
+  let score = 0;
+  const checksGood: string[] = [];
+  const checksWarn: string[] = [];
   const checksBad: string[] = [];
-  
 
   if (liquidityUsd >= config.minLiqUsd * 2) {
     score += 20;
@@ -124,6 +137,7 @@ export function scoreToken(args: {
 
   let risk: RiskResult['risk'] = 'HIGH';
   let action: RiskResult['action'] = 'SKIP';
+
   if (score >= 82) {
     risk = 'LOW';
     action = 'WATCH';
@@ -143,8 +157,6 @@ export function scoreToken(args: {
     ageMin,
     buys5m,
     sells5m,
-    marketSafetyScore: marketSafety.marketSafetyScore,
-    marketSafetyLabel: marketSafety.marketSafetyLabel,
     volume5m,
     boosts,
     paidApproved,
@@ -152,6 +164,15 @@ export function scoreToken(args: {
     fdv,
     marketCap,
     currentPrice,
+
+    marketSafetyScore: marketSafety.marketSafetyScore,
+    marketSafetyLabel: marketSafety.marketSafetyLabel,
+
+    authoritySafetyScore: authoritySafety.authoritySafetyScore,
+    authoritySafetyLabel: authoritySafety.authoritySafetyLabel,
+    mintAuthority: authorityInfo.mintAuthority,
+    freezeAuthority: authorityInfo.freezeAuthority,
+    updateAuthority: authorityInfo.updateAuthority,
+    isMutable: authorityInfo.isMutable,
   };
 }
-

@@ -155,7 +155,19 @@ export async function enrichToken(
   const paidApproved = Array.isArray(orders) && orders.some((o) => o.status === 'approved');
   const boostAmount = boostMap.get(tokenAddress) ?? 0;
   const hasTakeover = takeoverSet.has(tokenAddress);
-  const result = scoreToken({ pair, profile, paidApproved, boostAmount, hasTakeover });
+  const result = await scoreToken({ pair, profile, paidApproved, boostAmount, hasTakeover });
 
   return { pair, result };
+}
+
+export async function enrichTokenByMintAddress(mintAddress: string) {
+  const profile = {
+    chainId: config.discoveryChain,
+    tokenAddress: mintAddress,
+  };
+
+  const boostMap = await fetchBoostMap();
+  const takeoverSet = await fetchTakeoverSet();
+
+  return enrichToken(profile, boostMap, takeoverSet);
 }

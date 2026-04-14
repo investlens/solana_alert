@@ -20,6 +20,13 @@ import {
 } from './services/dexscreener.js';
 import { sendTelegram } from './services/telegram.js';
 import type { DexProfile, RiskResult, TokenState } from './types.js';
+import { pollWatchedWallets } from './core/walletWatcher.js';
+import { enrichTokenByMintAddress } from './services/dexscreener.js';
+import {
+  buildPrivateWalletBuyMessage,
+  buildPrivateWalletLaunchMessage,
+} from './ui/privateMessageBuilder.js';
+import { fmtUsd } from './utils/format.js';
 import { sleep } from './utils/format.js';
 import { buildMessage } from './ui/messageBuilder.js';
 
@@ -177,6 +184,63 @@ async function processNewProfiles() {
     } catch (error) {
       console.error('processNewProfiles error', tokenAddress, error);
     }
+  }
+}
+
+async function startWalletWatch() {
+  console.log('Starting private wallet watch...');
+
+  while (true) {
+    try {
+      const events = await pollWatchedWallets();
+
+      for (const event of events) {
+        if (!event.tokenMint) continue;
+
+        const enriched = await enrichTokenByMintAddress(event.tokenMint);
+        const pair = enriched?.pair;
+        const result = enriched?.result;
+
+        const chartUrl = pair?.url ?? null;
+        const buyUrl = pair?.baseToken?.address
+          ? `https://jup.ag/swap/SOL-${pair.baseToken.address}`
+          : null;
+        const tokenName = pair?.baseToken?.symbol || pair?.baseToken?.name || event.tokenMint;
+        const marketCap = result?.marketCap ? fmtUsd(result.marketCap) : null;
+
+        if (event.kind === 'buy') {
+          await sendTelegram(
+            config.adminTelegramId,
+            buildPrivateWalletBuyMessage({
+              wallet: event.wallet,
+              tokenName,
+              tokenMint: event.tokenMint,
+              marketCap,
+              amountSol: event.amountSol,
+              chartUrl,
+              buyUrl,
+            })
+          );
+        }
+
+        if (event.kind === 'launch') {
+          await sendTelegram(
+            config.adminTelegramId,
+            buildPrivateWalletLaunchMessage({
+              wallet: event.wallet,
+              tokenName,
+              tokenMint: event.tokenMint,
+              chartUrl,
+              buyUrl,
+            })
+          );
+        }
+      }
+    } catch (error) {
+      console.error('wallet watch loop error', error);
+    }
+
+    await sleep(config.walletWatchPollMs);
   }
 }
 
@@ -363,7 +427,7 @@ async function startBot() {
 
 async function main() {
   console.log('main() started');
-  await Promise.all([startBot(), startScanner()]);
+  await Promise.all([startBot(), startScanner(), startWalletWatch()]);
 }
 
 main().catch((err) => {
