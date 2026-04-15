@@ -1,6 +1,7 @@
 /// <reference types="node" />
 import { config } from './config.js';
 import { createBot } from './bot/index.js';
+import { buildEarlyAdminMessage } from './ui/earlyAdminMessageBuilder.js';
 import { captureAlertSnapshot } from './core/tracker.js';
 import {
   createAlertDelivery,
@@ -155,6 +156,7 @@ async function processNewProfiles() {
         lastScore: result.score,
         lastPairAddress: pair.pairAddress ?? undefined,
         adminDelivered: false,
+        adminEarlyDelivered: false,
       };
 
       captureAlertSnapshot(state, result);
@@ -292,8 +294,22 @@ async function processTierDispatch() {
         bucket,
       });
 
-      for (const user of users) {
+            for (const user of users) {
         const telegramId = user.telegram_id;
+
+        if (
+          user.tier === 'admin' &&
+          !state.adminEarlyDelivered &&
+          isEarlyAdminWatch(result)
+        ) {
+          await sendTelegram(
+            telegramId,
+            buildEarlyAdminMessage({ pair, result, state }),
+            getAdminOnlyButtons(pair)
+          );
+
+          state.adminEarlyDelivered = true;
+        }
 
         if (user.tier === 'admin' && !state.adminDelivered && shouldSendToAdmin(result)) {
           await sendTelegram(
@@ -434,3 +450,31 @@ main().catch((err) => {
   console.error(err);
   process.exit(1);
 });
+
+function isEarlyAdminWatch(result: RiskResult) {
+  return (
+    result.ageMin <= 5 &&
+    result.liquidityUsd >= 3000 &&
+    result.volume5m >= 800 &&
+    result.buys5m >= result.sells5m &&
+    result.marketSafetyScore >= 55 &&
+    result.authoritySafetyScore >= 40
+  );
+}
+
+function getAdminOnlyButtons(pair: {
+  url?: string | null;
+  baseToken?: { address?: string } | null;
+}) {
+  const chartUrl = pair.url ?? 'https://dexscreener.com';
+  const buyUrl = pair.baseToken?.address
+    ? `https://jup.ag/swap/SOL-${pair.baseToken.address}`
+    : 'https://jup.ag';
+
+  return [
+    [
+      { text: '📈 Chart', url: chartUrl },
+      { text: '🟢 Buy', url: buyUrl },
+    ],
+  ];
+}
