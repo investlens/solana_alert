@@ -2,7 +2,8 @@ import { config } from '../config.js';
 
 type InlineButton = {
   text: string;
-  url: string;
+  url?: string;
+  callback_data?: string;
 };
 
 export async function sendTelegram(

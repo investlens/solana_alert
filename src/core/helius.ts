@@ -17,14 +17,58 @@ type HeliusTokenMetadataResponse = Array<{
   } | null;
 }>;
 
+const EMPTY_AUTHORITY_INFO: AuthorityInfo = {
+  mintAuthority: null,
+  freezeAuthority: null,
+  updateAuthority: null,
+  isMutable: null,
+};
+
+const authorityCache = new Map<string, { data: AuthorityInfo; cachedAt: number }>();
+
+const AUTHORITY_CACHE_TTL_MS = 30 * 60 * 1000;
+const HELIUS_BACKOFF_MS = 5 * 60 * 1000;
+
+let heliusBackoffUntil = 0;
+
+function now() {
+  return Date.now();
+}
+
+function getCachedAuthorityInfo(mintAddress: string): AuthorityInfo | null {
+  const cached = authorityCache.get(mintAddress);
+
+  if (!cached) return null;
+
+  if (now() - cached.cachedAt > AUTHORITY_CACHE_TTL_MS) {
+    authorityCache.delete(mintAddress);
+    return null;
+  }
+
+  return cached.data;
+}
+
+function setCachedAuthorityInfo(mintAddress: string, data: AuthorityInfo) {
+  authorityCache.set(mintAddress, {
+    data,
+    cachedAt: now(),
+  });
+}
+
 export async function fetchAuthorityInfo(mintAddress: string): Promise<AuthorityInfo> {
   if (!config.heliusApiKey) {
-    return {
-      mintAuthority: null,
-      freezeAuthority: null,
-      updateAuthority: null,
-      isMutable: null,
-    };
+    return EMPTY_AUTHORITY_INFO;
+  }
+
+  const cached = getCachedAuthorityInfo(mintAddress);
+  if (cached) {
+    return cached;
+  }
+
+  if (heliusBackoffUntil > now()) {
+    const waitSec = Math.ceil((heliusBackoffUntil - now()) / 1000);
+    console.log(`Helius token-metadata backoff active: ${waitSec}s remaining`);
+    return EMPTY_AUTHORITY_INFO;
   }
 
   try {
@@ -43,40 +87,35 @@ export async function fetchAuthorityInfo(mintAddress: string): Promise<Authority
 
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      console.error('Helius token-metadata failed:', res.status, text);
 
-      return {
-        mintAuthority: null,
-        freezeAuthority: null,
-        updateAuthority: null,
-        isMutable: null,
-      };
+      if (res.status === 429) {
+        heliusBackoffUntil = now() + HELIUS_BACKOFF_MS;
+        console.log('Helius token-metadata 429, backing off 5 minutes');
+
+        setCachedAuthorityInfo(mintAddress, EMPTY_AUTHORITY_INFO);
+        return EMPTY_AUTHORITY_INFO;
+      }
+
+      console.error('Helius token-metadata failed:', res.status, text);
+      setCachedAuthorityInfo(mintAddress, EMPTY_AUTHORITY_INFO);
+      return EMPTY_AUTHORITY_INFO;
     }
 
     const data = (await res.json()) as HeliusTokenMetadataResponse;
     const token = data?.[0];
 
-    const mintAuthority = token?.onChainMetadata?.mintAuthority ?? null;
-    const freezeAuthority = token?.onChainMetadata?.freezeAuthority ?? null;
-    const updateAuthority =
-      token?.onChainMetadata?.metadata?.updateAuthority ?? null;
-    const isMutable =
-      token?.onChainMetadata?.metadata?.isMutable ?? null;
-
-    return {
-      mintAuthority,
-      freezeAuthority,
-      updateAuthority,
-      isMutable,
+    const authorityInfo: AuthorityInfo = {
+      mintAuthority: token?.onChainMetadata?.mintAuthority ?? null,
+      freezeAuthority: token?.onChainMetadata?.freezeAuthority ?? null,
+      updateAuthority: token?.onChainMetadata?.metadata?.updateAuthority ?? null,
+      isMutable: token?.onChainMetadata?.metadata?.isMutable ?? null,
     };
+
+    setCachedAuthorityInfo(mintAddress, authorityInfo);
+    return authorityInfo;
   } catch (error) {
     console.error('fetchAuthorityInfo error:', error);
-
-    return {
-      mintAuthority: null,
-      freezeAuthority: null,
-      updateAuthority: null,
-      isMutable: null,
-    };
+    setCachedAuthorityInfo(mintAddress, EMPTY_AUTHORITY_INFO);
+    return EMPTY_AUTHORITY_INFO;
   }
 }

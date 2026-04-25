@@ -5,11 +5,6 @@ function divider() {
   return '━━━━━━━━━━━━━━━';
 }
 
-function fmtPct(value?: number | null): string {
-  if (value == null || !Number.isFinite(value)) return 'n/a';
-  return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
-}
-
 export function buildEarlyAdminMessage(args: {
   pair: DexPair;
   result: RiskResult;
@@ -42,18 +37,13 @@ export function buildEarlyAdminMessage(args: {
   lines.push(`<b>Buys/Sells</b>  ${result.buys5m}/${result.sells5m}`);
   lines.push(`<b>Vol 5m</b>  ${escapeHtml(fmtUsd(result.volume5m))}`);
   lines.push(`<b>Setup</b>  ${result.score}`);
-  lines.push(`<b>Safety</b>  ${result.marketSafetyScore} (${result.marketSafetyLabel})`);
+  lines.push(`<b>Market</b>  ${result.marketSafetyScore} (${result.marketSafetyLabel})`);
+  lines.push(`<b>Authority</b>  ${result.authoritySafetyScore} (${result.authoritySafetyLabel})`);
   lines.push('');
 
   lines.push('✅ Pair is fresh');
   lines.push('✅ Liquidity formed');
   lines.push('⚠️ Early and volatile');
-  lines.push('');
-
-  if (pair.url) lines.push(`📈 ${escapeHtml(pair.url)}`);
-  if (pair.baseToken?.address) {
-    lines.push(`🟢 https://jup.ag/swap/SOL-${pair.baseToken.address}`);
-  }
 
   return lines.join('\n');
 }

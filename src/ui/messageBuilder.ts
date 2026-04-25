@@ -3,21 +3,21 @@ import { getPerformance } from '../core/tracker.js';
 import type { DexPair, FreeTrialInfo, RiskResult, TokenState } from '../types.js';
 import { escapeHtml, fmtPrice, fmtUsd } from '../utils/format.js';
 
-function fmtPct(value?: number | null): string {
-  if (value == null || !Number.isFinite(value)) return 'n/a';
-  return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
+function getActionBucket(result: RiskResult): 'BUY' | 'HIGH_BUY' {
+  if (
+    result.score >= 82 &&
+    result.marketSafetyScore >= 75 &&
+    result.authoritySafetyScore >= 40
+  ) {
+    return 'HIGH_BUY';
+  }
+
+  return 'BUY';
 }
 
-function getActionBucket(result: RiskResult): 'MEDIUM_BUY' | 'BUY' | 'HIGH_BUY' {
-  if (result.score >= 82 && result.marketSafetyScore >= 75) return 'HIGH_BUY';
-  if (result.score >= 68) return 'BUY';
-  return 'MEDIUM_BUY';
-}
-
-function getHeader(bucket: 'MEDIUM_BUY' | 'BUY' | 'HIGH_BUY') {
+function getHeader(bucket: 'BUY' | 'HIGH_BUY') {
   if (bucket === 'HIGH_BUY') return '🚀 <b>HIGH BUY</b>';
-  if (bucket === 'BUY') return '🟢 <b>BUY</b>';
-  return '🟡 <b>MEDIUM BUY</b>';
+  return '🟢 <b>BUY</b>';
 }
 
 function divider() {
@@ -38,14 +38,12 @@ function getCompactFlags(result: RiskResult): string[] {
     flags.push('✅ Market structure looks healthy');
   } else if (result.marketSafetyLabel === 'WATCH') {
     flags.push('⚠️ Market structure needs watching');
-  } else {
-    flags.push('⚠️ Market structure looks risky');
   }
 
-  if (result.liquidityUsd >= 10000) {
+  if (result.liquidityUsd >= 5000) {
     flags.push('✅ Liquidity looks strong');
-  } else if (result.liquidityUsd >= 5000) {
-    flags.push('⚠️ Liquidity is acceptable');
+  } else if (result.liquidityUsd >= 2000) {
+    flags.push('✅ Liquidity formed');
   }
 
   if (flags.length < 2 && result.buys5m > result.sells5m) {
@@ -83,8 +81,6 @@ export function buildMessage(args: {
   const perf = getPerformance(state, result);
   const bucket = getActionBucket(result);
   const flags = getCompactFlags(result);
-  const flow = getFlowLabel(result.buys5m, result.sells5m);
-
   const marketCapText =
     result.marketCap && result.marketCap > 0
       ? fmtUsd(result.marketCap)
@@ -107,12 +103,21 @@ export function buildMessage(args: {
 
   lines.push(formatMetricRow('Buys/Sells', `${result.buys5m}/${result.sells5m}`));
   lines.push(formatMetricRow('Vol 5m', fmtUsd(result.volume5m)));
-  lines.push(formatMetricRow('Flow', flow));
+  lines.push(formatMetricRow('Flow', getFlowLabel(result.buys5m, result.sells5m)));
+  lines.push('');
+
+  lines.push(formatMetricRow('Alert Price', fmtPrice(perf.thenPrice)));
+  lines.push(formatMetricRow('Highest After', 'Tracking...'));
+  lines.push(formatMetricRow('Current Price', fmtPrice(perf.nowPrice)));
   lines.push('');
 
   lines.push(formatMetricRow('Setup', String(result.score)));
-  lines.push(formatMetricRow('Safety', `${result.marketSafetyScore} (${result.marketSafetyLabel})`));
-  lines.push(formatMetricRow('ROI Now', fmtPct(perf.movePct)));
+  lines.push(
+    formatMetricRow(
+      'Safety',
+      `${result.marketSafetyScore} (${result.marketSafetyLabel})`
+    )
+  );
   lines.push('');
 
   for (const flag of flags) {

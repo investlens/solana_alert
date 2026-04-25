@@ -1,7 +1,7 @@
 import type { RiskResult, TokenState } from '../types.js';
 
 export function captureAlertSnapshot(state: TokenState, result: RiskResult) {
-  state.alertPrice = result.currentPrice;
+  state.alertPrice = result.currentPrice ?? null;
   state.alertLiquidity = result.liquidityUsd;
   state.alertScore = result.score;
   state.alertBuys5m = result.buys5m;
@@ -9,26 +9,25 @@ export function captureAlertSnapshot(state: TokenState, result: RiskResult) {
 }
 
 export function getPerformance(state: TokenState, result: RiskResult) {
-  const thenPrice = state.alertPrice ?? null;
-  const nowPrice = result.currentPrice ?? null;
+  const alertPrice = state.alertPrice ?? result.currentPrice ?? null;
+  const currentPrice = result.currentPrice ?? null;
 
-  const movePct =
-    thenPrice != null && nowPrice != null && thenPrice > 0
-      ? ((nowPrice - thenPrice) / thenPrice) * 100
-      : null;
-
-  let trend = 'UNCHANGED';
-  if (movePct != null) {
-    if (movePct > 3) trend = 'IMPROVING';
-    else if (movePct < -3) trend = 'WEAKENING';
+  let movePct: number | null = null;
+  if (
+    alertPrice != null &&
+    currentPrice != null &&
+    Number.isFinite(alertPrice) &&
+    Number.isFinite(currentPrice) &&
+    alertPrice > 0
+  ) {
+    movePct = ((currentPrice - alertPrice) / alertPrice) * 100;
   }
 
   return {
-    thenPrice,
-    nowPrice,
+    thenPrice: alertPrice,
+    nowPrice: currentPrice,
     movePct,
-    thenScore: state.alertScore ?? null,
-    nowScore: result.score,
-    trend,
+    trend:
+      movePct == null ? 'n/a' : movePct > 0 ? 'up' : movePct < 0 ? 'down' : 'flat',
   };
 }

@@ -1,5 +1,6 @@
 import { Markup, Telegraf } from 'telegraf';
 import { config } from '../config.js';
+import { adminBuyToken, adminSellTokenPercent } from '../core/adminTrading.js';
 import {
   approveLatestPendingPayment,
   createPendingPayment,
@@ -23,38 +24,40 @@ function formatDate(value?: string | null) {
   return new Date(value).toLocaleString('en-IN', { hour12: true });
 }
 
-export function registerBotCommands(bot: Telegraf) {
+export function registerBotCommands(bot: Telegraf<any>) {
   bot.start(async (ctx) => {
-  const telegramId = String(ctx.from?.id ?? '');
-  const username = ctx.from?.username;
-  const firstName = ctx.from?.first_name;
+    const telegramId = String(ctx.from?.id ?? '');
+    const username = ctx.from?.username;
+    const firstName = ctx.from?.first_name;
 
-  await upsertUser({ telegramId, username, firstName });
-  const user = await getUserByTelegramId(telegramId);
+    await upsertUser({ telegramId, username, firstName });
+    const user = await getUserByTelegramId(telegramId);
 
-  const lines = [
-    '⚡ *Welcome to Solana Alert Bot*',
-    '',
-    'Curated early momentum alerts with tier-based timing.',
-    '',
-    `*Your tier:* ${String(user?.tier ?? 'free').toUpperCase()}`,
-  ];
+    const lines = [
+      '⚡ *Welcome to Solana Alert Bot*',
+      '',
+      'Curated early momentum alerts with tier-based timing.',
+      '',
+      `*Your tier:* ${String(user?.tier ?? 'free').toUpperCase()}`,
+    ];
 
-  if (user?.tier === 'admin') {
-    lines.push(`*Access:* Full admin control`);
-    lines.push(`*Priority:* Instant alerts`);
-  } else {
-    lines.push(`*Free trial:* ${user?.free_trial_used ?? 0}/${user?.free_trial_limit ?? 5} fast alerts used`);
+    if (user?.tier === 'admin') {
+      lines.push(`*Access:* Full admin control`);
+      lines.push(`*Priority:* Instant alerts`);
+    } else {
+      lines.push(
+        `*Free trial:* ${user?.free_trial_used ?? 0}/${user?.free_trial_limit ?? 5} fast alerts used`
+      );
+      lines.push('');
+      lines.push('Use /plans to view pricing.');
+      lines.push('Use /upgrade to activate paid access.');
+    }
+
     lines.push('');
-    lines.push('Use /plans to view pricing.');
-    lines.push('Use /upgrade to activate paid access.');
-  }
+    lines.push('Use /status to check your membership.');
 
-  lines.push('');
-  lines.push('Use /status to check your membership.');
-
-  await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' });
-});
+    await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' });
+  });
 
   bot.command('plans', async (ctx) => {
     await ctx.reply(
@@ -107,33 +110,32 @@ export function registerBotCommands(bot: Telegraf) {
   });
 
   bot.command('status', async (ctx) => {
-  const telegramId = String(ctx.from?.id ?? '');
-  const user = await getUserByTelegramId(telegramId);
+    const telegramId = String(ctx.from?.id ?? '');
+    const user = await getUserByTelegramId(telegramId);
 
-  if (!user) {
-    await ctx.reply('No user record found yet. Send /start first.');
-    return;
-  }
+    if (!user) {
+      await ctx.reply('No user record found yet. Send /start first.');
+      return;
+    }
 
-  const tier = String(user.tier).toUpperCase();
+    const tier = String(user.tier).toUpperCase();
+    const lines = ['📋 *Your Status*', '', `*Tier:* ${tier}`];
 
-  const lines = ['📋 *Your Status*', '', `*Tier:* ${tier}`];
+    if (user.tier === 'admin') {
+      lines.push(`*Access:* Full`);
+      lines.push(`*Priority:* Instant`);
+      lines.push(`*Trial:* Not applicable`);
+      lines.push(`*Subscription:* Active`);
+    } else {
+      lines.push(`*Subscription:* ${String(user.subscription_status).toUpperCase()}`);
+      lines.push(`*Free Trial Used:* ${user.free_trial_used}/${user.free_trial_limit}`);
+      lines.push(`*Paid Plan Days:* ${user.paid_plan_days ?? 'n/a'}`);
+      lines.push(`*Started:* ${formatDate(user.paid_started_at)}`);
+      lines.push(`*Active Until:* ${formatDate(user.paid_active_until)}`);
+    }
 
-  if (user.tier === 'admin') {
-    lines.push(`*Access:* Full`);
-    lines.push(`*Priority:* Instant`);
-    lines.push(`*Trial:* Not applicable`);
-    lines.push(`*Subscription:* Active`);
-  } else {
-    lines.push(`*Subscription:* ${String(user.subscription_status).toUpperCase()}`);
-    lines.push(`*Free Trial Used:* ${user.free_trial_used}/${user.free_trial_limit}`);
-    lines.push(`*Paid Plan Days:* ${user.paid_plan_days ?? 'n/a'}`);
-    lines.push(`*Started:* ${formatDate(user.paid_started_at)}`);
-    lines.push(`*Active Until:* ${formatDate(user.paid_active_until)}`);
-  }
-
-  await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' });
-});
+    await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' });
+  });
 
   bot.command('stats', async (ctx) => {
     const telegramId = String(ctx.from?.id ?? '');
@@ -311,6 +313,122 @@ export function registerBotCommands(bot: Telegraf) {
       ].join('\n'),
       { parse_mode: 'Markdown' }
     );
+  });
+
+  bot.action(/^ADMIN_BUY_SMALL_(.+)$/, async (ctx) => {
+    const telegramId = String(ctx.from?.id ?? '');
+    if (!isAdmin(telegramId)) {
+      await ctx.answerCbQuery('Admin only');
+      return;
+    }
+
+    const mint = (ctx.match as RegExpExecArray)[1];
+
+    try {
+      await ctx.answerCbQuery(`Buying ${config.adminBuyAmountSmallSol} SOL...`);
+
+      const trade = await adminBuyToken({
+        outputMint: mint,
+        amountSol: config.adminBuyAmountSmallSol,
+      });
+
+      await ctx.reply(
+        [
+          '✅ <b>BUY EXECUTED</b>',
+          `Mint: <code>${mint}</code>`,
+          `Spent: <b>${config.adminBuyAmountSmallSol} SOL</b>`,
+          `Tx: <code>${trade.signature}</code>`,
+        ].join('\n'),
+        {
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: 'Sell 25%', callback_data: `ADMIN_SELL_25_${mint}` },
+                { text: 'Sell 50%', callback_data: `ADMIN_SELL_50_${mint}` },
+                { text: 'Sell All', callback_data: `ADMIN_SELL_100_${mint}` },
+              ],
+            ],
+          },
+        }
+      );
+    } catch (error) {
+      await ctx.reply(`❌ Buy failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  });
+
+  bot.action(/^ADMIN_BUY_DEFAULT_(.+)$/, async (ctx) => {
+    const telegramId = String(ctx.from?.id ?? '');
+    if (!isAdmin(telegramId)) {
+      await ctx.answerCbQuery('Admin only');
+      return;
+    }
+
+    const mint = (ctx.match as RegExpExecArray)[1];
+
+    try {
+      await ctx.answerCbQuery(`Buying ${config.adminBuyAmountDefaultSol} SOL...`);
+
+      const trade = await adminBuyToken({
+        outputMint: mint,
+        amountSol: config.adminBuyAmountDefaultSol,
+      });
+
+      await ctx.reply(
+        [
+          '✅ <b>BUY EXECUTED</b>',
+          `Mint: <code>${mint}</code>`,
+          `Spent: <b>${config.adminBuyAmountDefaultSol} SOL</b>`,
+          `Tx: <code>${trade.signature}</code>`,
+        ].join('\n'),
+        {
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: 'Sell 25%', callback_data: `ADMIN_SELL_25_${mint}` },
+                { text: 'Sell 50%', callback_data: `ADMIN_SELL_50_${mint}` },
+                { text: 'Sell All', callback_data: `ADMIN_SELL_100_${mint}` },
+              ],
+            ],
+          },
+        }
+      );
+    } catch (error) {
+      await ctx.reply(`❌ Buy failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  });
+
+  bot.action(/^ADMIN_SELL_(25|50|100)_(.+)$/, async (ctx) => {
+    const telegramId = String(ctx.from?.id ?? '');
+    if (!isAdmin(telegramId)) {
+      await ctx.answerCbQuery('Admin only');
+      return;
+    }
+
+    const percent = Number((ctx.match as RegExpExecArray)[1]) as 25 | 50 | 100;
+    const mint = (ctx.match as RegExpExecArray)[2];
+
+    try {
+      await ctx.answerCbQuery(`Selling ${percent}%...`);
+
+      const trade = await adminSellTokenPercent({
+        inputMint: mint,
+        percent,
+      });
+
+      await ctx.reply(
+        [
+          '✅ <b>SELL EXECUTED</b>',
+          `Mint: <code>${mint}</code>`,
+          `Sold: <b>${percent}%</b>`,
+          `Tx: <code>${trade.signature}</code>`,
+        ].join('\n'),
+        { parse_mode: 'HTML' }
+      );
+    } catch (error) {
+      await ctx.reply(`❌ Sell failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   });
 
   bot.on('text', async (ctx, next) => {

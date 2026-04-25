@@ -3,6 +3,8 @@ import { config } from './config.js';
 import { createBot } from './bot/index.js';
 import { buildEarlyAdminMessage } from './ui/earlyAdminMessageBuilder.js';
 import { captureAlertSnapshot } from './core/tracker.js';
+import { pollPumpfunEarlyFeed } from './core/pumpfunWatcher.js';
+import { buildPumpfunEarlyMessage } from './ui/pumpfunMessageBuilder.js';
 import {
   createAlertDelivery,
   createAlertRecord,
@@ -26,6 +28,7 @@ import { enrichTokenByMintAddress } from './services/dexscreener.js';
 import {
   buildPrivateWalletBuyMessage,
   buildPrivateWalletLaunchMessage,
+  buildPrivateWalletSellMessage,
 } from './ui/privateMessageBuilder.js';
 import { fmtUsd } from './utils/format.js';
 import { sleep } from './utils/format.js';
@@ -51,10 +54,26 @@ function getAlertButtons(pair: {
   ];
 }
 
-function getActionBucket(result: RiskResult): 'MEDIUM_BUY' | 'BUY' | 'HIGH_BUY' | 'IGNORE' {
-  if (result.score >= 82 && result.marketSafetyScore >= 75) return 'HIGH_BUY';
-  if (result.score >= 68) return 'BUY';
-  if (result.score >= 60) return 'MEDIUM_BUY';
+function getActionBucket(result: RiskResult): 'BUY' | 'HIGH_BUY' | 'IGNORE' {
+  if (
+    result.score >= 82 &&
+    result.marketSafetyScore >= 75 &&
+    result.authoritySafetyScore >= 40
+  ) {
+    return 'HIGH_BUY';
+  }
+
+  if (
+    result.score >= 60 &&
+    result.marketSafetyScore >= 60 &&
+    result.authoritySafetyScore >= 40 &&
+    result.liquidityUsd >= 2000 &&
+    result.volume5m >= 800 &&
+    result.buys5m >= result.sells5m
+  ) {
+    return 'BUY';
+  }
+
   return 'IGNORE';
 }
 
@@ -62,9 +81,47 @@ function shouldStoreCandidate(result: RiskResult) {
   return getActionBucket(result) !== 'IGNORE';
 }
 
+async function startPumpfunWatch() {
+  console.log('Starting Pump.fun early watch...');
+
+  while (true) {
+    try {
+      const events = await pollPumpfunEarlyFeed();
+
+      for (const event of events) {
+        const text = buildPumpfunEarlyMessage({
+          symbol: event.symbol,
+          name: event.name,
+          mint: event.mint,
+          creator: event.creator,
+          progressPct: event.progressPct,
+          buyCount: event.buyCount,
+          sellCount: event.sellCount,
+          volumeUsd: event.volumeUsd,
+          marketCapUsd: event.marketCapUsd,
+          launchScore: event.launchScore,
+          isMutable: event.isMutable,
+        });
+
+        const chartUrl = `https://pump.fun/${event.mint}`;
+
+        await sendTelegram(
+          config.ownerChatId,
+          text,
+          [[{ text: '📈 Open Pump.fun', url: chartUrl }]]
+        );
+      }
+    } catch (error) {
+      console.error('pumpfun watch loop error', error);
+    }
+
+    await sleep(120000);
+  }
+}
+
 function shouldSendToAdmin(result: RiskResult) {
   const bucket = getActionBucket(result);
-  return bucket === 'MEDIUM_BUY' || bucket === 'BUY' || bucket === 'HIGH_BUY';
+  return bucket === 'BUY' || bucket === 'HIGH_BUY';
 }
 
 function shouldSendToPaid(result: RiskResult) {
@@ -135,6 +192,26 @@ async function processNewProfiles() {
 
       if (result.score < config.minOwnerScore) {
         console.log(`Skip score: ${tokenAddress} score=${result.score}`);
+        continue;
+      }
+
+            if (result.marketSafetyScore < 60) {
+        console.log(`Skip market safety: ${tokenAddress} safety=${result.marketSafetyScore}`);
+        continue;
+      }
+
+      if (result.authoritySafetyScore < 40) {
+        console.log(`Skip authority safety: ${tokenAddress} authority=${result.authoritySafetyScore}`);
+        continue;
+      }
+
+      if (result.volume5m < 800) {
+        console.log(`Skip volume: ${tokenAddress} volume=${result.volume5m}`);
+        continue;
+      }
+
+      if (result.buys5m < result.sells5m) {
+        console.log(`Skip flow: ${tokenAddress} buys=${result.buys5m} sells=${result.sells5m}`);
         continue;
       }
 
@@ -225,6 +302,20 @@ async function startWalletWatch() {
           );
         }
 
+        if (event.kind === 'sell') {
+          await sendTelegram(
+            config.adminTelegramId,
+            buildPrivateWalletSellMessage({
+              wallet: event.wallet,
+              tokenName,
+              tokenMint: event.tokenMint,
+              marketCap,
+              amountSol: event.amountSol,
+              chartUrl,
+            })
+          );
+        }
+
         if (event.kind === 'launch') {
           await sendTelegram(
             config.adminTelegramId,
@@ -297,18 +388,28 @@ async function processTierDispatch() {
             for (const user of users) {
         const telegramId = user.telegram_id;
 
-        if (
-          user.tier === 'admin' &&
-          !state.adminEarlyDelivered &&
-          isEarlyAdminWatch(result)
-        ) {
-          await sendTelegram(
-            telegramId,
-            buildEarlyAdminMessage({ pair, result, state }),
-            getAdminOnlyButtons(pair)
-          );
+        if (user.tier === 'admin' && !state.adminEarlyDelivered) {
+          console.log('early admin check:', {
+            token: tokenAddress,
+            ageMin: result.ageMin,
+            liquidityUsd: result.liquidityUsd,
+            volume5m: result.volume5m,
+            buys5m: result.buys5m,
+            sells5m: result.sells5m,
+            marketSafetyScore: result.marketSafetyScore,
+            authoritySafetyScore: result.authoritySafetyScore,
+            passes: isEarlyAdminWatch(result),
+          });
 
-          state.adminEarlyDelivered = true;
+          if (isEarlyAdminWatch(result)) {
+            await sendTelegram(
+              telegramId,
+              buildEarlyAdminMessage({ pair, result, state }),
+              getAdminOnlyButtons(pair)
+            );
+
+            state.adminEarlyDelivered = true;
+          }
         }
 
         if (user.tier === 'admin' && !state.adminDelivered && shouldSendToAdmin(result)) {
@@ -443,7 +544,14 @@ async function startBot() {
 
 async function main() {
   console.log('main() started');
-  await Promise.all([startBot(), startScanner(), startWalletWatch()]);
+
+  const tasks = [startScanner(), startWalletWatch(), startPumpfunWatch()];
+
+  if (process.env.RUN_TELEGRAM_BOT === 'true') {
+    tasks.unshift(startBot());
+  }
+
+  await Promise.all(tasks);
 }
 
 main().catch((err) => {
@@ -453,12 +561,12 @@ main().catch((err) => {
 
 function isEarlyAdminWatch(result: RiskResult) {
   return (
-    result.ageMin <= 5 &&
-    result.liquidityUsd >= 3000 &&
-    result.volume5m >= 800 &&
-    result.buys5m >= result.sells5m &&
-    result.marketSafetyScore >= 55 &&
-    result.authoritySafetyScore >= 40
+    result.ageMin <= 8 &&
+    result.liquidityUsd >= 1500 &&
+    result.volume5m >= 200 &&
+    result.marketSafetyScore >= 50 &&
+    result.authoritySafetyScore >= 35 &&
+    result.buys5m + result.sells5m >= 5
   );
 }
 
@@ -467,14 +575,13 @@ function getAdminOnlyButtons(pair: {
   baseToken?: { address?: string } | null;
 }) {
   const chartUrl = pair.url ?? 'https://dexscreener.com';
-  const buyUrl = pair.baseToken?.address
-    ? `https://jup.ag/swap/SOL-${pair.baseToken.address}`
-    : 'https://jup.ag';
+  const mint = pair.baseToken?.address ?? '';
 
   return [
     [
       { text: '📈 Chart', url: chartUrl },
-      { text: '🟢 Buy', url: buyUrl },
+      { text: 'Buy 0.03 SOL', callback_data: `ADMIN_BUY_SMALL_${mint}` },
+      { text: 'Buy 0.05 SOL', callback_data: `ADMIN_BUY_DEFAULT_${mint}` },
     ],
   ];
 }
