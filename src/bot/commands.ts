@@ -12,6 +12,7 @@ import {
   upsertUser,
 } from '../core/subscriptions.js';
 import type { PendingUpgradeSession } from '../types/bot.js';
+import { backToMainMenu, mainAlphaMenu } from './menus.js';
 
 const upgradeSessions = new Map<string, PendingUpgradeSession>();
 
@@ -24,6 +25,39 @@ function formatDate(value?: string | null) {
   return new Date(value).toLocaleString('en-IN', { hour12: true });
 }
 
+async function sendMainMenu(ctx: any) {
+  const telegramId = String(ctx.from?.id ?? '');
+  const user = await getUserByTelegramId(telegramId);
+  const tier = String(user?.tier ?? 'free').toUpperCase();
+
+  await ctx.reply(
+    [
+  '⚡ <b>ALPHA RADAR</b>',
+  '',
+  '<b>Smart Money. Early Signals. Faster Conviction.</b>',
+  '',
+  `Tier: <b>${tier}</b>`,
+  user?.tier === 'admin'
+    ? 'Access: <b>Admin Alpha Terminal</b>'
+    : '🎁 <b>48 Hour Premium Trial Active</b>',
+  '',
+  user?.tier === 'admin'
+    ? 'Instant admin access enabled.'
+    : 'You currently have instant Alpha Alerts, Whale Radar access, and DEX Paid signals.',
+  '',
+  user?.tier === 'admin'
+    ? ''
+    : 'After 48 hours, free delayed alerts continue. Upgrade anytime for unlimited instant alpha.',
+  '',
+  'Choose a module below:',
+].filter(Boolean).join('\n'),
+    {
+      parse_mode: 'HTML',
+      ...mainAlphaMenu(),
+    }
+  );
+}
+
 export function registerBotCommands(bot: Telegraf<any>) {
   bot.start(async (ctx) => {
     const telegramId = String(ctx.from?.id ?? '');
@@ -31,50 +65,294 @@ export function registerBotCommands(bot: Telegraf<any>) {
     const firstName = ctx.from?.first_name;
 
     await upsertUser({ telegramId, username, firstName });
-    const user = await getUserByTelegramId(telegramId);
+    await sendMainMenu(ctx);
+  });
 
-    const lines = [
-      '⚡ *Welcome to Solana Alert Bot*',
-      '',
-      'Curated early momentum alerts with tier-based timing.',
-      '',
-      `*Your tier:* ${String(user?.tier ?? 'free').toUpperCase()}`,
-    ];
+  bot.action('MAIN_MENU', async (ctx) => {
+    await ctx.answerCbQuery();
+    await sendMainMenu(ctx);
+  });
 
-    if (user?.tier === 'admin') {
-      lines.push(`*Access:* Full admin control`);
-      lines.push(`*Priority:* Instant alerts`);
-    } else {
-      lines.push(
-        `*Free trial:* ${user?.free_trial_used ?? 0}/${user?.free_trial_limit ?? 5} fast alerts used`
-      );
-      lines.push('');
-      lines.push('Use /plans to view pricing.');
-      lines.push('Use /upgrade to activate paid access.');
-    }
+  bot.action('ALPHA_FEED', async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      [
+        '🚀 <b>Alpha Feed</b>',
+        '',
+        'Live signal streams:',
+        '',
+        '💎 DEX Paid Early Runners',
+        '🐋 Whale Wallet Buys',
+        '🐋🐋 Whale Cluster Buys',
+        '🧠 Proven Creator Launches',
+        '⚡ Momentum Spikes',
+        '',
+        'Each signal will show conviction, risk, and reason.',
+      ].join('\n'),
+      { parse_mode: 'HTML', ...backToMainMenu() }
+    );
+  });
 
-    lines.push('');
-    lines.push('Use /status to check your membership.');
+  bot.action('DEX_PAID', async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      [
+        '💎 <b>DEX Paid Radar</b>',
+        '',
+        'Tracks tokens where DEX visibility is paid/boosted and momentum begins forming.',
+        '',
+        'Coming next:',
+        '• Fresh paid listings',
+        '• Early liquidity runners',
+        '• Volume spike confirmation',
+        '• Alpha score label',
+      ].join('\n'),
+      { parse_mode: 'HTML', ...backToMainMenu() }
+    );
+  });
 
-    await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' });
+  bot.action('WHALE_RADAR', async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      [
+        '🐋 <b>Whale Radar</b>',
+        '',
+        'Tracks selected smart wallets and whale activity.',
+        '',
+        'Signals:',
+        '• Wallet buy',
+        '• Wallet sell',
+        '• Multiple wallets buying same token',
+        '• Early smart-money entries',
+      ].join('\n'),
+      { parse_mode: 'HTML', ...backToMainMenu() }
+    );
+  });
+
+  bot.action('CREATOR_INTEL', async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      [
+        '🧠 <b>Creator Intel</b>',
+        '',
+        'Future premium engine:',
+        '',
+        '• Creators with past $1M+ launches',
+        '• Repeat winner wallets',
+        '• Creator reputation score',
+        '• Rug/farm creator blacklist',
+      ].join('\n'),
+      { parse_mode: 'HTML', ...backToMainMenu() }
+    );
+  });
+
+  bot.action('TRADE_MENU', async (ctx) => {
+    await ctx.answerCbQuery();
+
+    const telegramId = String(ctx.from?.id ?? '');
+    const admin = isAdmin(telegramId);
+
+    await ctx.reply(
+      [
+        '⚡ <b>Trade Terminal</b>',
+        '',
+        admin
+          ? 'Admin trading is enabled for the configured trading wallet only.'
+          : 'Public trading wallet integration is coming later. For now, use chart/buy links from alerts.',
+        '',
+        'Safety note: Alpha Radar will not ask public users to paste private keys in Telegram chat.',
+      ].join('\n'),
+      {
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: admin
+            ? [
+                [
+                  { text: 'Buy 0.03 SOL', callback_data: 'TRADE_INFO' },
+                  { text: 'Buy 0.05 SOL', callback_data: 'TRADE_INFO' },
+                ],
+                [
+                  { text: 'Sell 25%', callback_data: 'TRADE_INFO' },
+                  { text: 'Sell All', callback_data: 'TRADE_INFO' },
+                ],
+                [{ text: '⬅️ Main Menu', callback_data: 'MAIN_MENU' }],
+              ]
+            : [[{ text: '⬅️ Main Menu', callback_data: 'MAIN_MENU' }]],
+        },
+      }
+    );
+  });
+
+  bot.action('TRADE_INFO', async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      [
+        '⚡ <b>Trade Buttons</b>',
+        '',
+        'Buy/Sell buttons appear directly under eligible token alerts.',
+        '',
+        'Example:',
+        '• Buy 0.03 SOL',
+        '• Buy 0.05 SOL',
+        '• Sell 25%',
+        '• Sell All',
+      ].join('\n'),
+      { parse_mode: 'HTML' }
+    );
+  });
+
+  bot.action('POSITIONS', async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      [
+        '📈 <b>Positions</b>',
+        '',
+        'Coming soon:',
+        '• Open positions',
+        '• Entry price',
+        '• Current value',
+        '• PnL',
+        '• Exit buttons',
+      ].join('\n'),
+      { parse_mode: 'HTML', ...backToMainMenu() }
+    );
+  });
+
+  bot.action('SNIPER', async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      [
+        '🎯 <b>Sniper</b>',
+        '',
+        'Planned modules:',
+        '• Creator sniper',
+        '• DEX paid sniper',
+        '• Wallet copy-watch',
+        '• Admin-only fast buy',
+      ].join('\n'),
+      { parse_mode: 'HTML', ...backToMainMenu() }
+    );
+  });
+
+  bot.action('RISK_CONTROLS', async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      [
+        '🛡 <b>Risk Controls</b>',
+        '',
+        'Planned:',
+        '• 20% stop loss',
+        '• Trailing stop',
+        '• Take profit ladder',
+        '• Moon bag mode',
+        '',
+        'Public wallet safety will be handled carefully before release.',
+      ].join('\n'),
+      { parse_mode: 'HTML', ...backToMainMenu() }
+    );
+  });
+
+  bot.action('ALPHA_POINTS', async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      [
+        '🏆 <b>Alpha Points</b>',
+        '',
+        'Coming soon.',
+        '',
+        'Points will be based on verified activity only:',
+        '• Verified signal entries',
+        '• Verified exits',
+        '• Approved wallet/creator contributions',
+        '• Paid membership multiplier',
+        '',
+        'No click farming. No fake activity.',
+      ].join('\n'),
+      { parse_mode: 'HTML', ...backToMainMenu() }
+    );
+  });
+
+  bot.action('PREMIUM', async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      [
+        '👑 <b>Alpha Radar Premium</b>',
+        '',
+        '<b>Free</b>',
+        '• Delayed / limited signals',
+        '• 1x future Alpha Points',
+        '',
+        '<b>Pro</b>',
+        '• Faster signals',
+        '• Whale Radar',
+        '• Creator Intel',
+        '• Higher points multiplier',
+        '',
+        '<b>VIP</b>',
+        '• Highest conviction feed',
+        '• Advanced tools',
+        '• Priority alpha access',
+        '',
+        'Use /upgrade to activate paid access.',
+      ].join('\n'),
+      { parse_mode: 'HTML', ...backToMainMenu() }
+    );
+  });
+
+  bot.action('SETTINGS', async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      [
+        '⚙ <b>Settings</b>',
+        '',
+        'Coming soon:',
+        '• Alert sensitivity',
+        '• Signal categories',
+        '• Wallet watchlist',
+        '• Risk profile',
+      ].join('\n'),
+      { parse_mode: 'HTML', ...backToMainMenu() }
+    );
+  });
+
+  bot.action('WALLET', async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      [
+        '💰 <b>Wallet</b>',
+        '',
+        'Public wallet linking is not enabled yet.',
+        '',
+        'For safety, Alpha Radar will not ask public users to paste private keys in Telegram chat.',
+        '',
+        'Admin trading uses a separate configured trading wallet only.',
+      ].join('\n'),
+      { parse_mode: 'HTML', ...backToMainMenu() }
+    );
   });
 
   bot.command('plans', async (ctx) => {
     await ctx.reply(
       [
-        '💎 *Paid Plans*',
+        '👑 *Alpha Radar Plans*',
         '',
         '*15 Days* — `0.1 SOL`',
         '*30 Days* — `0.15 SOL`',
         '',
         '*Free*',
-        '• First 5 alerts fast',
-        '• After that delayed alerts',
+        '• Limited / delayed signals',
+        '• Basic Alpha Feed',
         '',
-        '*Paid*',
-        '• Earlier alerts',
-        '• Better timing edge',
-        '• Premium access',
+        '*Pro*',
+        '• Faster signals',
+        '• Whale Radar',
+        '• Creator Intel',
+        '• Higher future Alpha Points multiplier',
+        '',
+        '*VIP*',
+        '• Highest conviction feed',
+        '• Advanced trading tools',
+        '• Priority alpha access',
         '',
         'Use /upgrade to continue.',
       ].join('\n'),
@@ -87,7 +365,7 @@ export function registerBotCommands(bot: Telegraf<any>) {
 
     await ctx.reply(
       [
-        '💎 *Upgrade to Paid*',
+        '👑 *Upgrade Alpha Radar*',
         '',
         '*15 Days* — `0.1 SOL`',
         '*30 Days* — `0.15 SOL`',
@@ -119,10 +397,10 @@ export function registerBotCommands(bot: Telegraf<any>) {
     }
 
     const tier = String(user.tier).toUpperCase();
-    const lines = ['📋 *Your Status*', '', `*Tier:* ${tier}`];
+    const lines = ['📋 *Alpha Radar Status*', '', `*Tier:* ${tier}`];
 
     if (user.tier === 'admin') {
-      lines.push(`*Access:* Full`);
+      lines.push(`*Access:* Full Alpha Terminal`);
       lines.push(`*Priority:* Instant`);
       lines.push(`*Trial:* Not applicable`);
       lines.push(`*Subscription:* Active`);
@@ -149,7 +427,7 @@ export function registerBotCommands(bot: Telegraf<any>) {
 
     await ctx.reply(
       [
-        '📊 *Solana Alert Bot Stats*',
+        '📊 *Alpha Radar Stats*',
         '',
         `*Total Users:* ${counts?.total_users ?? 0}`,
         `*Admin Users:* ${counts?.admin_users ?? 0}`,
@@ -222,7 +500,7 @@ export function registerBotCommands(bot: Telegraf<any>) {
       await bot.telegram.sendMessage(
         Number(targetTelegramId),
         [
-          '✅ Your paid membership is now active.',
+          '✅ Your Alpha Radar membership is now active.',
           '',
           `Plan: ${planDays} days`,
           `Active Until: ${formatDate(result.paidActiveUntil)}`,
@@ -283,12 +561,7 @@ export function registerBotCommands(bot: Telegraf<any>) {
 
     await ctx.answerCbQuery();
     await ctx.reply(
-      [
-        '✅ Plan selected: *15 days*',
-        'Amount: `0.1 SOL`',
-        '',
-        'Now paste your transaction hash.',
-      ].join('\n'),
+      ['✅ Plan selected: *15 days*', 'Amount: `0.1 SOL`', '', 'Now paste your transaction hash.'].join('\n'),
       { parse_mode: 'Markdown' }
     );
   });
@@ -305,12 +578,7 @@ export function registerBotCommands(bot: Telegraf<any>) {
 
     await ctx.answerCbQuery();
     await ctx.reply(
-      [
-        '✅ Plan selected: *30 days*',
-        'Amount: `0.15 SOL`',
-        '',
-        'Now paste your transaction hash.',
-      ].join('\n'),
+      ['✅ Plan selected: *30 days*', 'Amount: `0.15 SOL`', '', 'Now paste your transaction hash.'].join('\n'),
       { parse_mode: 'Markdown' }
     );
   });
@@ -418,12 +686,7 @@ export function registerBotCommands(bot: Telegraf<any>) {
       });
 
       await ctx.reply(
-        [
-          '✅ <b>SELL EXECUTED</b>',
-          `Mint: <code>${mint}</code>`,
-          `Sold: <b>${percent}%</b>`,
-          `Tx: <code>${trade.signature}</code>`,
-        ].join('\n'),
+        ['✅ <b>SELL EXECUTED</b>', `Mint: <code>${mint}</code>`, `Sold: <b>${percent}%</b>`, `Tx: <code>${trade.signature}</code>`].join('\n'),
         { parse_mode: 'HTML' }
       );
     } catch (error) {

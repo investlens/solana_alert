@@ -4,6 +4,7 @@ import { createBot } from './bot/index.js';
 import { buildEarlyAdminMessage } from './ui/earlyAdminMessageBuilder.js';
 import { captureAlertSnapshot } from './core/tracker.js';
 import { pollPumpfunEarlyFeed } from './core/pumpfunWatcher.js';
+import { runDexPaidEngine } from './engines/dexPaidEngine.js';
 import { buildPumpfunEarlyMessage } from './ui/pumpfunMessageBuilder.js';
 import {
   createAlertDelivery,
@@ -517,6 +518,7 @@ async function startScanner() {
     try {
       console.log('scanner loop tick');
       await processNewProfiles();
+      await runDexPaidEngine();
       await processTierDispatch();
     } catch (error) {
       console.error('main loop error', error);
