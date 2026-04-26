@@ -1,4 +1,5 @@
 import { config } from '../config.js';
+import { recordWhaleHit } from '../engines/whaleClusterEngine.js';
 
 type EnhancedTx = {
   description?: string;
@@ -242,6 +243,14 @@ export async function pollWatchedWallets(): Promise<WalletWatchEvent[]> {
             type: tx.type,
             tokenMint: buyEvent.tokenMint,
             amountSol: buyEvent.amountSol,
+          });
+
+          recordWhaleHit({
+            wallet,
+            token: buyEvent.tokenMint ?? '',
+            symbol: 'Unknown',
+            usdSize: Number(buyEvent.amountSol ?? 0) * 150,
+            timestamp: Date.now(),
           });
 
           events.push(buyEvent);

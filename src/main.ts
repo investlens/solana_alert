@@ -5,6 +5,8 @@ import { buildEarlyAdminMessage } from './ui/earlyAdminMessageBuilder.js';
 import { captureAlertSnapshot } from './core/tracker.js';
 import { pollPumpfunEarlyFeed } from './core/pumpfunWatcher.js';
 import { runDexPaidEngine } from './engines/dexPaidEngine.js';
+import { runWhaleClusterEngine } from './engines/whaleClusterEngine.js';
+import { runSignalPerformanceEngine } from './engines/signalPerformanceEngine.js';
 import { buildPumpfunEarlyMessage } from './ui/pumpfunMessageBuilder.js';
 import {
   createAlertDelivery,
@@ -519,6 +521,8 @@ async function startScanner() {
       console.log('scanner loop tick');
       await processNewProfiles();
       await runDexPaidEngine();
+      await runSignalPerformanceEngine();
+      await runWhaleClusterEngine();
       await processTierDispatch();
     } catch (error) {
       console.error('main loop error', error);

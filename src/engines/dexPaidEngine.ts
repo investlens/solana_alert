@@ -1,5 +1,7 @@
 import { config } from '../config.js';
 import { sendTelegram } from '../services/telegram.js';
+import { getDeliverableUsers } from '../core/delivery.js';
+import { addAlphaSignal } from './alphaFeed.js';
 import {
   enrichToken,
   fetchBoostMap,
@@ -35,6 +37,32 @@ function fmtPrice(value: number | null) {
   if (value < 0.000001) return `$${value.toExponential(2)}`;
   if (value < 0.01) return `$${value.toFixed(8)}`;
   return `$${value.toFixed(6)}`;
+}
+
+async function sendAlphaAlertToUsers(message: string, buttons: any[][]) {
+  const users = await getDeliverableUsers();
+
+  for (const user of users) {
+    const isAdmin = user.tier === 'admin';
+    const isPaid = user.tier === 'paid' && user.subscription_status === 'active';
+    const isFree = user.tier === 'free';
+
+    if (!(isAdmin || isPaid || isFree)) continue;
+
+    try {
+      await sendTelegram(user.telegram_id, message, buttons);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+
+      console.log('alpha alert delivery failed:', {
+        telegramId: user.telegram_id,
+        tier: user.tier,
+        error: msg,
+      });
+
+      continue;
+    }
+  }
 }
 
 function buyRatio(c: Candidate) {
@@ -233,8 +261,22 @@ export async function runDexPaidEngine() {
 
     seen.add(c.token);
 
-    await sendTelegram(
-      config.ownerChatId,
+    addAlphaSignal({
+    type: 'DEX_PAID',
+    title: label === 'WHALE GRADE' ? '🐋 Whale Grade Alpha' : label === 'STRONG ALPHA' ? '🔥 Strong Alpha' : '💎 DEX Paid Watchlist',
+    symbol: c.symbol,
+    token: c.token,
+    score,
+    conviction: label,
+    summary: `Liq ${fmtUsd(c.liquidity)} • Vol ${fmtUsd(c.volume5m)} • Buys/Sells ${c.buys5m}/${c.sells5m}`,
+    dexUrl: c.dexUrl,
+    buyUrl: c.buyUrl,
+    alertPrice: c.priceUsd,
+    currentPrice: c.priceUsd,
+    highAfterAlert: c.priceUsd,
+    });
+
+ await sendAlphaAlertToUsers(
       [
         label === 'WHALE GRADE'
           ? '🐋 <b>WHALE GRADE ALPHA</b>'

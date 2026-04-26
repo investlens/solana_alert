@@ -1,6 +1,8 @@
 import { Markup, Telegraf } from 'telegraf';
+import { getAlphaSignalsByType, getLatestAlphaSignals } from '../engines/alphaFeed.js';
 import { config } from '../config.js';
 import { adminBuyToken, adminSellTokenPercent } from '../core/adminTrading.js';
+import { fetchBestStoredSignals } from '../storage/signalStore.js';
 import {
   approveLatestPendingPayment,
   createPendingPayment,
@@ -73,42 +75,135 @@ export function registerBotCommands(bot: Telegraf<any>) {
     await sendMainMenu(ctx);
   });
 
-  bot.action('ALPHA_FEED', async (ctx) => {
+    bot.action('ALPHA_FEED', async (ctx) => {
     await ctx.answerCbQuery();
-    await ctx.reply(
-      [
-        '🚀 <b>Alpha Feed</b>',
-        '',
-        'Live signal streams:',
-        '',
-        '💎 DEX Paid Early Runners',
-        '🐋 Whale Wallet Buys',
-        '🐋🐋 Whale Cluster Buys',
-        '🧠 Proven Creator Launches',
-        '⚡ Momentum Spikes',
-        '',
-        'Each signal will show conviction, risk, and reason.',
-      ].join('\n'),
-      { parse_mode: 'HTML', ...backToMainMenu() }
-    );
+
+    const signals = getLatestAlphaSignals(10);
+
+    if (!signals.length) {
+      await ctx.reply(
+        [
+          '🚀 <b>Alpha Feed</b>',
+          '',
+          'No live alpha signals captured yet.',
+          '',
+          'Active engines:',
+          '💎 DEX Paid Early Runners',
+          '🐋🐋 Whale Cluster Buys',
+          '',
+          'New signals will appear here after they fire.',
+        ].join('\n'),
+        { parse_mode: 'HTML', ...backToMainMenu() }
+      );
+      return;
+    }
+
+    const lines = [
+      '🚀 <b>Alpha Feed</b>',
+      '',
+      `<b>Latest ${signals.length} signals</b>`,
+      '',
+      ...signals.map((s, i) =>
+  [
+    `${i + 1}. <b>${s.title}</b>`,
+    `<b>${s.symbol}</b>`,
+
+    `Conviction: <b>${s.conviction}</b>`,
+    s.score != null
+      ? `Score: <b>${s.score}/100</b>`
+      : '',
+
+    s.alertPrice != null
+      ? `Alert Price: <b>$${s.alertPrice}</b>`
+      : '',
+
+    s.highAfterAlert != null
+      ? `High After Alert: <b>$${s.highAfterAlert}</b>`
+      : '',
+
+    s.currentPrice != null
+      ? `Current Price: <b>$${s.currentPrice}</b>`
+      : '',
+
+    s.roiHigh != null
+      ? `ROI High: <b>${s.roiHigh.toFixed(1)}%</b>`
+      : '',
+
+    s.roiNow != null
+      ? `ROI Now: <b>${s.roiNow.toFixed(1)}%</b>`
+      : '',
+
+    s.summary,
+
+    `Mint: <code>${s.token}</code>`,
+  ]
+    .filter(Boolean)
+    .join('\n')
+),
+    ];
+
+    await ctx.reply(lines.join('\n\n'), {
+      parse_mode: 'HTML',
+      ...backToMainMenu(),
+    });
   });
 
-  bot.action('DEX_PAID', async (ctx) => {
+    bot.action('DEX_PAID', async (ctx) => {
     await ctx.answerCbQuery();
-    await ctx.reply(
-      [
-        '💎 <b>DEX Paid Radar</b>',
-        '',
-        'Tracks tokens where DEX visibility is paid/boosted and momentum begins forming.',
-        '',
-        'Coming next:',
-        '• Fresh paid listings',
-        '• Early liquidity runners',
-        '• Volume spike confirmation',
-        '• Alpha score label',
-      ].join('\n'),
-      { parse_mode: 'HTML', ...backToMainMenu() }
-    );
+
+    const signals = getAlphaSignalsByType('DEX_PAID', 10);
+
+    if (!signals.length) {
+      await ctx.reply(
+        [
+          '💎 <b>DEX Paid Radar</b>',
+          '',
+          'No DEX Paid alpha signals captured yet.',
+          '',
+          'The engine is watching for:',
+          '• Fresh paid / profiled tokens',
+          '• Tradable liquidity',
+          '• Strong 5m volume',
+          '• Buy pressure > sell pressure',
+          '',
+          'When a signal fires, it will appear here.',
+        ].join('\n'),
+        { parse_mode: 'HTML', ...backToMainMenu() }
+      );
+      return;
+    }
+
+    const lines = [
+      '💎 <b>DEX Paid Radar</b>',
+      '',
+      `<b>Latest ${signals.length} DEX Paid signals</b>`,
+      '',
+      ...signals.map((s, i) =>
+        [
+          `${i + 1}. <b>${s.title}</b>`,
+          `<b>${s.symbol}</b>`,
+          `Conviction: <b>${s.conviction}</b>`,
+          s.score != null ? `Score: <b>${s.score}/100</b>` : '',
+          s.summary,
+          `Mint: <code>${s.token}</code>`,
+        ]
+          .filter(Boolean)
+          .join('\n')
+      ),
+    ];
+
+    await ctx.reply(lines.join('\n\n'), {
+      parse_mode: 'HTML',
+      reply_markup: {
+        inline_keyboard: [
+          ...signals.slice(0, 5).map((s) => [
+            { text: `📈 ${s.symbol}`, url: s.dexUrl || `https://dexscreener.com/solana/${s.token}` },
+            { text: '🟢 Buy', url: s.buyUrl || `https://jup.ag/swap/SOL-${s.token}` },
+          ]),
+          [{ text: '⬅️ Main Menu', callback_data: 'MAIN_MENU' }],
+        ],
+      },
+    });
   });
 
   bot.action('WHALE_RADAR', async (ctx) => {
@@ -268,6 +363,82 @@ export function registerBotCommands(bot: Telegraf<any>) {
         '',
         'No click farming. No fake activity.',
       ].join('\n'),
+      { parse_mode: 'HTML', ...backToMainMenu() }
+    );
+  });
+
+      bot.action('HISTORY', async (ctx) => {
+    await ctx.answerCbQuery();
+
+    const signals = await fetchBestStoredSignals(10);
+
+    function fmtPrice(value: unknown) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return 'n/a';
+      if (n < 0.000001) return `$${n.toExponential(2)}`;
+      if (n < 0.01) return `$${n.toFixed(8)}`;
+      return `$${n.toFixed(6)}`;
+    }
+
+    function fmtRoi(value: unknown) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return 'n/a';
+      return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
+    }
+
+    function resultLabel(value: unknown) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return 'Tracking';
+      if (n >= 200) return '🚀 Moonshot';
+      if (n >= 100) return '🔥 2x+ Winner';
+      if (n >= 50) return '💎 Strong Winner';
+      if (n >= 20) return '✅ Winner';
+      if (n >= 0) return '🟡 Green';
+      return '🔻 Drawdown';
+    }
+
+    if (!signals.length) {
+      await ctx.reply(
+        [
+          '📜 <b>Alpha History</b>',
+          '',
+          'No completed signal performance yet.',
+          '',
+          'Once calls start moving, this page will show:',
+          '• Alert Price',
+          '• High After Alert',
+          '• Current Price',
+          '• ROI High',
+          '• ROI Now',
+        ].join('\n'),
+        { parse_mode: 'HTML', ...backToMainMenu() }
+      );
+      return;
+    }
+
+    await ctx.reply(
+      [
+        '📜 <b>ALPHA HISTORY</b>',
+        '',
+        '<b>Best Calls by High ROI</b>',
+        '',
+        ...signals.map((s: any, i: number) =>
+          [
+            `${i + 1}. <b>${s.symbol ?? 'Unknown'}</b>`,
+            `${s.title ?? 'Alpha Signal'}`,
+            '',
+            `🚀 ROI High: <b>${fmtRoi(s.roi_high)}</b>`,
+            `💰 ROI Now: <b>${fmtRoi(s.roi_now)}</b>`,
+            '',
+            `🎯 Alert Price: <b>${fmtPrice(s.alert_price)}</b>`,
+            `📈 High After Alert: <b>${fmtPrice(s.high_after_alert)}</b>`,
+            `📍 Current Price: <b>${fmtPrice(s.current_price)}</b>`,
+            '',
+            `Status: <b>${resultLabel(s.roi_high)}</b>`,
+            `Mint: <code>${s.token}</code>`,
+          ].join('\n')
+        ),
+      ].join('\n\n'),
       { parse_mode: 'HTML', ...backToMainMenu() }
     );
   });

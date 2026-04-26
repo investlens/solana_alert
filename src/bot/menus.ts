@@ -19,8 +19,11 @@ export function mainAlphaMenu() {
       Markup.button.callback('🛡 Risk Controls', 'RISK_CONTROLS'),
     ],
     [
-      Markup.button.callback('🏆 Alpha Points', 'ALPHA_POINTS'),
-      Markup.button.callback('👑 Premium', 'PREMIUM'),
+    Markup.button.callback('📜 History', 'HISTORY'),
+    Markup.button.callback('👑 Premium', 'PREMIUM'),
+    ],
+    [
+    Markup.button.callback('🏆 Alpha Points', 'ALPHA_POINTS'),
     ],
     [
       Markup.button.callback('⚙ Settings', 'SETTINGS'),
