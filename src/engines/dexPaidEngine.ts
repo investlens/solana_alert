@@ -3,6 +3,7 @@ import { sendTelegram } from '../services/telegram.js';
 import { getDeliverableUsers } from '../core/delivery.js';
 import { getConsolidationRisk } from '../scoring/consolidationRisk.js';
 import { addAlphaSignal } from './alphaFeed.js';
+import { recordDecisionForToken } from '../agents/decisionAgent.js';
 import {
   getCreatorReputation,
   creatorTrustLabel,
@@ -386,6 +387,23 @@ export async function runDexPaidEngine() {
     const creatorScore = creatorRep?.trust_score ?? 50;
     const creatorLabel = creatorTrustLabel(creatorScore);
 
+    const aiDecision = await recordDecisionForToken({
+      token: c.token,
+      symbol: c.symbol,
+      input: {
+        score,
+        marketSafetyScore: score,
+        authoritySafetyScore: 40,
+        liquidityUsd: c.liquidity,
+        volume5m: c.volume5m,
+        buys5m: c.buys5m,
+        sells5m: c.sells5m,
+        holderRiskScore: holderRisk.score,
+        bundleRiskScore: consolidationRisk.score,
+        smartWalletCount: c.earlyBuyers.length,
+      },
+    });
+
     try {
       holderRisk = await getHolderRisk(c.token);
 
@@ -520,9 +538,19 @@ export async function runDexPaidEngine() {
       `<b>${escapeHtml(c.socialSummary)}</b>`,
       '',
       '🧠 <b>Creator</b>',
-      `Trust: <b>${creatorLabel}</b> (${creatorScore}/100)`,
-      '',
-      '🛡 <b>Risk</b>',
+        `Trust: <b>${creatorLabel}</b> (${creatorScore}/100)`,
+        '',
+
+        '🤖 <b>AI Verdict</b>',
+        `Decision: <b>${aiDecision.verdict}</b>`,
+        `Confidence: <b>${aiDecision.confidence}/100</b>`,
+        `Reason: <b>${
+          aiDecision.reasons.slice(0, 2).join(', ') ||
+          'Watching conditions'
+        }</b>`,
+        '',
+
+        '🛡 <b>Risk</b>',
       `Holder Risk: <b>${
         holderRisk.topHolderCount > 0
           ? `${holderRisk.score}/100`
