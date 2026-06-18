@@ -55,6 +55,8 @@ type WalletLaunchEvent = Extract<WalletWatchEvent, { kind: 'launch' }>;
 const seenSignatures = new Set<string>();
 const walletBackoffUntil = new Map<string, number>();
 
+const tokenBuyerMap = new Map<string, Set<string>>();
+
 function now() {
   return Date.now();
 }
@@ -237,6 +239,12 @@ export async function pollWatchedWallets(): Promise<WalletWatchEvent[]> {
         const launchEvent = extractLaunchEvent(wallet, tx);
 
         if (buyEvent) {
+          if (buyEvent.tokenMint) {
+          const set = tokenBuyerMap.get(buyEvent.tokenMint) ?? new Set<string>();
+          set.add(wallet);
+          tokenBuyerMap.set(buyEvent.tokenMint, set);
+        }
+
           console.log('wallet buy detected:', {
             wallet,
             signature: tx.signature,
@@ -292,4 +300,8 @@ export async function pollWatchedWallets(): Promise<WalletWatchEvent[]> {
   }
 
   return events;
+}
+
+export function getTokenBuyers(token: string): string[] {
+  return [...(tokenBuyerMap.get(token) ?? new Set())];
 }

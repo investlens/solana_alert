@@ -119,3 +119,113 @@ export async function fetchAuthorityInfo(mintAddress: string): Promise<Authority
     return EMPTY_AUTHORITY_INFO;
   }
 }
+
+export type HeliusEnhancedTx = {
+  description?: string;
+  type?: string;
+  signature?: string;
+  timestamp?: number;
+  source?: string;
+  nativeTransfers?: Array<{
+    fromUserAccount?: string;
+    toUserAccount?: string;
+    amount?: number;
+  }>;
+  tokenTransfers?: Array<{
+    fromUserAccount?: string;
+    toUserAccount?: string;
+    mint?: string;
+    tokenAmount?: number;
+  }>;
+};
+
+const enhancedTxBackoffUntil = new Map<string, number>();
+
+export async function fetchEnhancedTransactionsForAddress(
+  address: string,
+  limit = 50
+): Promise<HeliusEnhancedTx[]> {
+  if (!config.heliusApiKey) return [];
+
+  const backoffUntil = enhancedTxBackoffUntil.get(address) ?? 0;
+
+  if (backoffUntil > now()) {
+    const waitSec = Math.ceil((backoffUntil - now()) / 1000);
+    console.log(`Helius enhanced tx backoff active for ${address}: ${waitSec}s remaining`);
+    return [];
+  }
+
+  const safeLimit = Math.max(1, Math.min(limit, 100));
+
+  const url =
+    `https://api-mainnet.helius-rpc.com/v0/addresses/${address}/transactions` +
+    `?api-key=${config.heliusApiKey}&limit=${safeLimit}`;
+
+  try {
+    const res = await fetch(url);
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+
+      if (res.status === 429) {
+        enhancedTxBackoffUntil.set(address, now() + HELIUS_BACKOFF_MS);
+        console.log(`Helius enhanced tx 429 for ${address}, backing off 5 minutes`);
+        return [];
+      }
+
+      console.error(`Helius enhanced tx failed ${res.status}:`, text);
+      return [];
+    }
+
+    return (await res.json()) as HeliusEnhancedTx[];
+  } catch (error) {
+    console.error('fetchEnhancedTransactionsForAddress error:', error);
+    return [];
+  }
+}
+
+export type HolderInfo = {
+  owner: string;
+  amount: number;
+};
+
+export async function fetchTopHolders(
+  mintAddress: string
+): Promise<HolderInfo[]> {
+  if (!config.heliusApiKey) return [];
+
+  const url =
+    `https://mainnet.helius-rpc.com/?api-key=${config.heliusApiKey}`;
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'holders',
+        method: 'getTokenLargestAccounts',
+        params: [mintAddress],
+      }),
+    });
+
+    if (!res.ok) {
+      console.log('fetchTopHolders failed:', res.status);
+      return [];
+    }
+
+    const json = await res.json();
+
+    const values = json?.result?.value ?? [];
+
+    return values.map((v: any) => ({
+      owner: v.address,
+      amount: Number(v.uiAmount ?? 0),
+    }));
+  } catch (err) {
+    console.log('fetchTopHolders error:', err);
+    return [];
+  }
+}

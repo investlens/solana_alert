@@ -31,6 +31,22 @@ export async function upsertAlphaSignal(signal: AlphaSignal) {
   if (error) throw error;
 }
 
+export async function fetchSignalsByType(
+  type: string,
+  limit = 10
+) {
+  const { data, error } = await supabase
+    .from('alpha_signals')
+    .select('*')
+    .eq('type', type)
+    .order('created_at', { ascending:false })
+    .limit(limit);
+
+  if(error) throw error;
+
+  return data ?? [];
+}
+
 export async function fetchLatestStoredSignals(limit = 10) {
   const { data, error } = await supabase
     .from('alpha_signals')

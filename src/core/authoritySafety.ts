@@ -14,14 +14,14 @@ export function computeAuthoritySafetyScore(info: AuthorityInfo): AuthoritySafet
     info.isMutable === null;
 
   if (noData) {
-    return {
-      authoritySafetyScore: 0,
-      authoritySafetyLabel: 'WATCH',
-      reasonsGood: [],
-      reasonsWarn: ['Authority data unavailable'],
-      reasonsBad: [],
-    };
-  }
+  return {
+    authoritySafetyScore: 40,
+    authoritySafetyLabel: 'WATCH',
+    reasonsGood: [],
+    reasonsWarn: ['Authority data unavailable'],
+    reasonsBad: [],
+  };
+}
 
   // Mint authority
   if (info.mintAuthority == null) {

@@ -1,5 +1,10 @@
 import { config } from '../config.js';
 
+import {
+  saveCreatorLaunch,
+  getProvenCreator,
+} from './creatorIntelStore.js';
+
 export type PumpfunTokenEvent = {
   mint: string;
   symbol?: string | null;
@@ -13,6 +18,7 @@ export type PumpfunTokenEvent = {
   marketCapUsd?: number | null;
   progressPct?: number | null;
   launchScore?: number | null;
+  buyVelocityScore?: number | null;
 };
 
 const seenPumpfunMints = new Set<string>();
@@ -105,13 +111,14 @@ function getLaunchScore(args: {
 }) {
   let score = 0;
 
-  if (!looksLikeJunkSymbol(args.symbol)) score += 35;
-  if (!looksLikeJunkName(args.name)) score += 35;
+  if (!looksLikeJunkSymbol(args.symbol)) score += 40;
+  if (!looksLikeJunkName(args.name)) score += 40;
 
   if (args.creatorSeen === 0) score += 15;
-  else if (args.creatorSeen < 3) score += 8;
+  else if (args.creatorSeen < 2) score += 8;
 
-  if (args.isMutable === false) score += 15;
+  if (args.isMutable === false) score += 20;
+  else score -= 10;
 
   return score;
 }
@@ -252,6 +259,11 @@ export async function pollPumpfunEarlyFeed(): Promise<PumpfunTokenEvent[]> {
       isMutable: token.isMutable,
     });
 
+    const buyVelocityScore =
+      (token.buyCount ?? 0) * 2 - (token.sellCount ?? 0);
+
+    token.buyVelocityScore = buyVelocityScore;
+
     console.log('pumpfun candidate:', {
       mint: token.mint,
       symbol,
@@ -261,11 +273,29 @@ export async function pollPumpfunEarlyFeed(): Promise<PumpfunTokenEvent[]> {
       launchScore,
     });
 
+    try {
+  await saveCreatorLaunch({
+    creatorWallet: creator || null,
+    token: token.mint,
+    symbol: symbol || null,
+    name: name || null,
+    initialMarketCap: token.marketCapUsd ?? null,
+  });
+
+  console.log('creator launch saved:', {
+    creator,
+    token: token.mint,
+    symbol,
+  });
+} catch (err) {
+  console.log('creator save failed:', err);
+}
+
     const passes =
       !looksLikeJunkSymbol(symbol) &&
       !looksLikeJunkName(name) &&
-      creatorSeen < 3 &&
-      launchScore >= 60;
+      creatorSeen < 2 &&
+      launchScore >= 75;
 
     if (!passes) {
       console.log('pumpfun rejected:', {
@@ -275,7 +305,7 @@ export async function pollPumpfunEarlyFeed(): Promise<PumpfunTokenEvent[]> {
         reason: {
           symbolOk: !looksLikeJunkSymbol(symbol),
           nameOk: !looksLikeJunkName(name),
-          creatorOk: creatorSeen < 3,
+          creatorOk: creatorSeen < 2,
           launchScore,
         },
       });
@@ -294,11 +324,31 @@ export async function pollPumpfunEarlyFeed(): Promise<PumpfunTokenEvent[]> {
 
     seenPumpfunMints.add(token.mint);
 
-    if (creator) {
-      seenCreators.set(creator, creatorSeen + 1);
-    }
+if (creator) {
+  seenCreators.set(creator, creatorSeen + 1);
+}
 
-    events.push(token);
+
+// ✅ CHECK IF PROVEN CREATOR
+try {
+  const proven = await getProvenCreator(creator);
+
+  if (proven) {
+    console.log('🚨 PROVEN CREATOR LAUNCH DETECTED:', {
+      creator,
+      token: token.mint,
+      symbol,
+      bestToken: proven.best_token,
+      bestMarketCap: proven.best_market_cap,
+    });
+
+    // 👉 Later we will send Telegram alert here
+  }
+} catch (err) {
+  console.log('proven creator check failed:', err);
+}
+
+events.push(token);
   }
 
   return events;

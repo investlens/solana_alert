@@ -23,8 +23,9 @@ function fmtUsd(value?: number | null) {
 
 function getScoreLabel(score?: number | null) {
   if (score == null || !Number.isFinite(score)) return 'WATCH';
+  if (score >= 90) return 'ELITE EARLY';
   if (score >= 80) return 'HIGH PRIORITY';
-  if (score >= 65) return 'STRONG WATCH';
+  if (score >= 75) return 'STRONG WATCH';
   return 'WATCH';
 }
 

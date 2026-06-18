@@ -1,8 +1,23 @@
 import { Markup, Telegraf } from 'telegraf';
-import { getAlphaSignalsByType, getLatestAlphaSignals } from '../engines/alphaFeed.js';
 import { config } from '../config.js';
-import { adminBuyToken, adminSellTokenPercent } from '../core/adminTrading.js';
-import { fetchBestStoredSignals } from '../storage/signalStore.js';
+import { getTradeLearningSummary } from '../core/tradeLearning.js';
+import {
+  getAdminWalletAddress,
+  getAdminWalletBalance,
+} from '../services/wallet.js';
+import { adminBuyToken, adminSellTokenPercentWithRetry } from '../core/adminTrading.js';
+import {
+  getAutoTradeStats,
+  manualCloseAutoTrade,
+  pauseAutoTrade,
+  resumeAutoTrade,
+  isAutoTradePaused,
+} from '../core/autoTradeManager.js';
+import {
+ fetchSignalsByType,
+ fetchLatestStoredSignals,
+ fetchBestStoredSignals
+} from '../storage/signalStore.js';
 import {
   approveLatestPendingPayment,
   createPendingPayment,
@@ -14,7 +29,12 @@ import {
   upsertUser,
 } from '../core/subscriptions.js';
 import type { PendingUpgradeSession } from '../types/bot.js';
-import { backToMainMenu, mainAlphaMenu } from './menus.js';
+import {
+  backToMainMenu,
+  mainAlphaMenu,
+  alphaFeedMenu,
+  tradeTerminalMenu,
+} from './menus.js';
 
 const upgradeSessions = new Map<string, PendingUpgradeSession>();
 
@@ -25,6 +45,14 @@ function isAdmin(telegramId: string) {
 function formatDate(value?: string | null) {
   if (!value) return 'n/a';
   return new Date(value).toLocaleString('en-IN', { hour12: true });
+}
+
+async function renderScreen(ctx: any, text: string, options: any) {
+  try {
+    await ctx.editMessageText(text, options);
+  } catch {
+    await ctx.reply(text, options);
+  }
 }
 
 async function sendMainMenu(ctx: any) {
@@ -75,83 +103,213 @@ export function registerBotCommands(bot: Telegraf<any>) {
     await sendMainMenu(ctx);
   });
 
-    bot.action('ALPHA_FEED', async (ctx) => {
-    await ctx.answerCbQuery();
+ bot.action('ALPHA_FEED', async (ctx) => {
+  await ctx.answerCbQuery();
 
-    const signals = getLatestAlphaSignals(10);
+  await renderScreen(ctx,
+    [
+      '🚀 <b>ALPHA FEED</b>',
+      '━━━━━━━━━━━━━━━━',
+      '',
+      '<b>High-conviction signals only.</b>',
+      '',
+      '🔥 Live Alpha — strongest current calls',
+      '🐋 Whale Radar — smart wallet activity',
+      '🧠 Creator Intel — launch reputation',
+      '📜 History — tracked performance',
+      '',
+      'Choose a module:',
+    ].join('\n'),
+    {
+      parse_mode: 'HTML',
+      reply_markup: alphaFeedMenu().reply_markup,
+    }
+  );
+});
 
-    if (!signals.length) {
-      await ctx.reply(
-        [
-          '🚀 <b>Alpha Feed</b>',
-          '',
-          'No live alpha signals captured yet.',
-          '',
-          'Active engines:',
-          '💎 DEX Paid Early Runners',
-          '🐋🐋 Whale Cluster Buys',
-          '',
-          'New signals will appear here after they fire.',
-        ].join('\n'),
-        { parse_mode: 'HTML', ...backToMainMenu() }
-      );
+bot.command('wallet', async (ctx) => {
+  const telegramId = String(ctx.from?.id ?? '');
+
+  if (!isAdmin(telegramId)) {
+    await ctx.reply('Admin only.');
+    return;
+  }
+
+  try {
+    const address = getAdminWalletAddress();
+    const balance = await getAdminWalletBalance();
+
+    await ctx.reply(
+      [
+        '💰 <b>Admin Wallet</b>',
+        '',
+        `Address: <code>${address}</code>`,
+        `Balance: <b>${balance.toFixed(4)} SOL</b>`,
+        '',
+        'Funds are used for auto trades.',
+      ].join('\n'),
+      { parse_mode: 'HTML' }
+    );
+  } catch (err) {
+    await ctx.reply(
+      `❌ Failed to fetch wallet: ${
+        err instanceof Error ? err.message : 'Unknown error'
+      }`
+    );
+  }
+});
+
+bot.action('LEARNING_SUMMARY', async (ctx) => {
+  const telegramId = String(ctx.from?.id ?? '');
+  if (!isAdmin(telegramId)) return ctx.answerCbQuery('Admin only');
+
+  await ctx.answerCbQuery();
+
+  const summary = await getTradeLearningSummary();
+
+  await ctx.reply(
+    [
+      '🧠 <b>Learning Summary</b>',
+      '━━━━━━━━━━━━━━━━',
+      '',
+      `Closed Trades: <b>${summary.total}</b>`,
+      `Avg PnL: <b>${summary.avgPnl.toFixed(1)}%</b>`,
+      `Win Rate: <b>${summary.winRate.toFixed(1)}%</b>`,
+      '',
+      summary.bestSocials
+        ? [
+            '🏆 <b>Best Social Pattern</b>',
+            `Socials: <b>${summary.bestSocials.socials}</b>`,
+            `Trades: <b>${summary.bestSocials.count}</b>`,
+            `Avg PnL: <b>${summary.bestSocials.avgPnl.toFixed(1)}%</b>`,
+          ].join('\n')
+        : 'No learning pattern yet.',
+    ].join('\n'),
+    { parse_mode: 'HTML' }
+  );
+});
+
+  bot.command('autostats', async (ctx) => {
+    const telegramId = String(ctx.from?.id ?? '');
+
+    if (!isAdmin(telegramId)) {
+      await ctx.reply('Admin only.');
       return;
     }
 
-    const lines = [
-      '🚀 <b>Alpha Feed</b>',
-      '',
-      `<b>Latest ${signals.length} signals</b>`,
-      '',
-      ...signals.map((s, i) =>
-  [
-    `${i + 1}. <b>${s.title}</b>`,
-    `<b>${s.symbol}</b>`,
+    const stats = getAutoTradeStats();
 
-    `Conviction: <b>${s.conviction}</b>`,
-    s.score != null
-      ? `Score: <b>${s.score}/100</b>`
-      : '',
-
-    s.alertPrice != null
-      ? `Alert Price: <b>$${s.alertPrice}</b>`
-      : '',
-
-    s.highAfterAlert != null
-      ? `High After Alert: <b>$${s.highAfterAlert}</b>`
-      : '',
-
-    s.currentPrice != null
-      ? `Current Price: <b>$${s.currentPrice}</b>`
-      : '',
-
-    s.roiHigh != null
-      ? `ROI High: <b>${s.roiHigh.toFixed(1)}%</b>`
-      : '',
-
-    s.roiNow != null
-      ? `ROI Now: <b>${s.roiNow.toFixed(1)}%</b>`
-      : '',
-
-    s.summary,
-
-    `Mint: <code>${s.token}</code>`,
-  ]
-    .filter(Boolean)
-    .join('\n')
-),
-    ];
-
-    await ctx.reply(lines.join('\n\n'), {
-      parse_mode: 'HTML',
-      ...backToMainMenu(),
-    });
+    await ctx.reply(
+      [
+        '🤖 <b>Auto Trade Stats</b>',
+        '',
+        `<b>Closed Trades:</b> ${stats.total}`,
+        `<b>Wins:</b> ${stats.wins}`,
+        `<b>Losses:</b> ${stats.losses}`,
+        `<b>Win Rate:</b> ${stats.winRate.toFixed(1)}%`,
+        `<b>Avg ROI:</b> ${stats.avgRoi.toFixed(1)}%`,
+        `<b>Total Paper PnL:</b> ${stats.totalPnlSol >= 0 ? '+' : ''}${stats.totalPnlSol.toFixed(4)} SOL`,
+        '',
+        stats.best
+          ? `<b>Best Trade:</b> ${stats.best.symbol} • ${stats.best.finalRoi.toFixed(1)}%`
+          : '<b>Best Trade:</b> n/a',
+        '',
+        `<b>Open Trades:</b> ${stats.openTrades.length}`,
+        ...stats.openTrades.map(
+          (t, i) =>
+            `${i + 1}. ${t.symbol} • Entry $${t.entryPrice} • Stop $${t.stopPrice}`
+        ),
+      ].join('\n'),
+      { parse_mode: 'HTML' }
+    );
   });
 
-    bot.action('DEX_PAID', async (ctx) => {
+  bot.action('PAUSE_AUTO_TRADE', async (ctx) => {
+  const telegramId = String(ctx.from?.id ?? '');
+  if (!isAdmin(telegramId)) return ctx.answerCbQuery('Admin only');
+
+  pauseAutoTrade();
+  await ctx.answerCbQuery('Auto trade paused');
+  await ctx.reply('⏸️ <b>Auto Trade Paused</b>\n\nNo new auto-buys will be opened.', {
+    parse_mode: 'HTML',
+  });
+});
+
+bot.action('RESUME_AUTO_TRADE', async (ctx) => {
+  const telegramId = String(ctx.from?.id ?? '');
+  if (!isAdmin(telegramId)) return ctx.answerCbQuery('Admin only');
+
+  resumeAutoTrade();
+  await ctx.answerCbQuery('Auto trade resumed');
+  await ctx.reply('▶️ <b>Auto Trade Resumed</b>\n\nEligible high-conviction signals can auto-buy again.', {
+    parse_mode: 'HTML',
+  });
+});
+
+bot.action('AUTO_TRADE_STATUS', async (ctx) => {
+  const telegramId = String(ctx.from?.id ?? '');
+  if (!isAdmin(telegramId)) return ctx.answerCbQuery('Admin only');
+
+  const stats = getAutoTradeStats();
+  const paused = isAutoTradePaused();
+
+  await ctx.answerCbQuery();
+  await ctx.reply(
+    [
+      '🤖 <b>Auto Trade Control</b>',
+      '',
+      `Status: <b>${paused ? 'PAUSED' : 'LIVE'}</b>`,
+      `Open Trades: <b>${stats.openTrades.length}</b>`,
+      `Closed Trades: <b>${stats.total}</b>`,
+      `Win Rate: <b>${stats.winRate.toFixed(1)}%</b>`,
+      `Avg ROI: <b>${stats.avgRoi.toFixed(1)}%</b>`,
+    ].join('\n'),
+    {
+      parse_mode: 'HTML',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '⏸ Pause', callback_data: 'PAUSE_AUTO_TRADE' },
+            { text: '▶️ Resume', callback_data: 'RESUME_AUTO_TRADE' },
+          ],
+          [{ text: '⬅️ Main Menu', callback_data: 'MAIN_MENU' }],
+        ],
+      },
+    }
+  );
+});
+
+    bot.action(/^AUTO_SELL_(25|50|100)_(.+)$/, async (ctx) => {
+    const telegramId = String(ctx.from?.id ?? '');
+
+    if (!isAdmin(telegramId)) {
+      await ctx.answerCbQuery('Admin only');
+      return;
+    }
+
+    const percent = Number((ctx.match as RegExpExecArray)[1]) as 25 | 50 | 100;
+    const mint = (ctx.match as RegExpExecArray)[2];
+
+    try {
+      await ctx.answerCbQuery(`Auto trade sell ${percent}%...`);
+
+      const result = await manualCloseAutoTrade(mint, percent);
+
+      await ctx.reply(
+        result.ok ? `✅ ${result.message}` : `⚠️ ${result.message}`,
+        { parse_mode: 'HTML' }
+      );
+    } catch (error) {
+      await ctx.reply(
+        `❌ Auto sell failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    }
+  });
+
+      bot.action('DEX_PAID', async (ctx) => {
     await ctx.answerCbQuery();
 
-    const signals = getAlphaSignalsByType('DEX_PAID', 10);
+    const signals = await fetchSignalsByType('DEX_PAID', 10);
 
     if (!signals.length) {
       await ctx.reply(
@@ -178,13 +336,18 @@ export function registerBotCommands(bot: Telegraf<any>) {
       '',
       `<b>Latest ${signals.length} DEX Paid signals</b>`,
       '',
-      ...signals.map((s, i) =>
+      ...signals.map((s: any, i: number) =>
         [
-          `${i + 1}. <b>${s.title}</b>`,
-          `<b>${s.symbol}</b>`,
-          `Conviction: <b>${s.conviction}</b>`,
-          s.score != null ? `Score: <b>${s.score}/100</b>` : '',
-          s.summary,
+          `${i + 1}. <b>${s.title ?? 'DEX Paid Signal'}</b>`,
+          `<b>${s.symbol ?? 'Unknown'}</b>`,
+          `Conviction: <b>${s.conviction ?? 'n/a'}</b>`,
+          s.score != null ? `Score: <b>${Number(s.score).toFixed(0)}/100</b>` : '',
+          s.roi_high != null ? `ROI High: <b>${Number(s.roi_high).toFixed(1)}%</b>` : '',
+          s.roi_now != null ? `ROI Now: <b>${Number(s.roi_now).toFixed(1)}%</b>` : '',
+          s.alert_price != null ? `Alert Price: <b>$${s.alert_price}</b>` : '',
+          s.high_after_alert != null ? `High After Alert: <b>$${s.high_after_alert}</b>` : '',
+          s.current_price != null ? `Current Price: <b>$${s.current_price}</b>` : '',
+          s.summary ?? '',
           `Mint: <code>${s.token}</code>`,
         ]
           .filter(Boolean)
@@ -196,9 +359,15 @@ export function registerBotCommands(bot: Telegraf<any>) {
       parse_mode: 'HTML',
       reply_markup: {
         inline_keyboard: [
-          ...signals.slice(0, 5).map((s) => [
-            { text: `📈 ${s.symbol}`, url: s.dexUrl || `https://dexscreener.com/solana/${s.token}` },
-            { text: '🟢 Buy', url: s.buyUrl || `https://jup.ag/swap/SOL-${s.token}` },
+          ...signals.slice(0, 5).map((s: any) => [
+            {
+              text: `📈 ${s.symbol ?? 'Chart'}`,
+              url: s.dex_url || `https://dexscreener.com/solana/${s.token}`,
+            },
+            {
+              text: '🟢 Buy',
+              url: s.buy_url || `https://jup.ag/swap/SOL-${s.token}`,
+            },
           ]),
           [{ text: '⬅️ Main Menu', callback_data: 'MAIN_MENU' }],
         ],
@@ -242,41 +411,35 @@ export function registerBotCommands(bot: Telegraf<any>) {
   });
 
   bot.action('TRADE_MENU', async (ctx) => {
-    await ctx.answerCbQuery();
+  await ctx.answerCbQuery();
 
-    const telegramId = String(ctx.from?.id ?? '');
-    const admin = isAdmin(telegramId);
+  const telegramId = String(ctx.from?.id ?? '');
+  const admin = isAdmin(telegramId);
+  const stats = getAutoTradeStats();
+  const paused = isAutoTradePaused();
 
-    await ctx.reply(
-      [
-        '⚡ <b>Trade Terminal</b>',
-        '',
-        admin
-          ? 'Admin trading is enabled for the configured trading wallet only.'
-          : 'Public trading wallet integration is coming later. For now, use chart/buy links from alerts.',
-        '',
-        'Safety note: Alpha Radar will not ask public users to paste private keys in Telegram chat.',
-      ].join('\n'),
-      {
-        parse_mode: 'HTML',
-        reply_markup: {
-          inline_keyboard: admin
-            ? [
-                [
-                  { text: 'Buy 0.03 SOL', callback_data: 'TRADE_INFO' },
-                  { text: 'Buy 0.05 SOL', callback_data: 'TRADE_INFO' },
-                ],
-                [
-                  { text: 'Sell 25%', callback_data: 'TRADE_INFO' },
-                  { text: 'Sell All', callback_data: 'TRADE_INFO' },
-                ],
-                [{ text: '⬅️ Main Menu', callback_data: 'MAIN_MENU' }],
-              ]
-            : [[{ text: '⬅️ Main Menu', callback_data: 'MAIN_MENU' }]],
-        },
-      }
-    );
-  });
+  await renderScreen(ctx,
+    [
+      '📈 <b>TRADE TERMINAL</b>',
+      '━━━━━━━━━━━━━━━━',
+      '',
+      admin
+        ? '<b>Admin trading wallet active.</b>'
+        : '<b>Trading controls are admin-only for now.</b>',
+      '',
+      `Auto Trade: <b>${paused ? 'PAUSED' : 'LIVE'}</b>`,
+      `Open Trades: <b>${stats.openTrades.length}</b>`,
+      `Closed Trades: <b>${stats.total}</b>`,
+      `Win Rate: <b>${stats.winRate.toFixed(1)}%</b>`,
+      '',
+      'Manage entries, exits, and risk controls below.',
+    ].join('\n'),
+    {
+      parse_mode: 'HTML',
+      reply_markup: tradeTerminalMenu(admin).reply_markup,
+    }
+  );
+});
 
   bot.action('TRADE_INFO', async (ctx) => {
     await ctx.answerCbQuery();
@@ -851,7 +1014,7 @@ export function registerBotCommands(bot: Telegraf<any>) {
     try {
       await ctx.answerCbQuery(`Selling ${percent}%...`);
 
-      const trade = await adminSellTokenPercent({
+      const trade = await adminSellTokenPercentWithRetry({
         inputMint: mint,
         percent,
       });

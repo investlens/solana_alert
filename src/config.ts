@@ -46,11 +46,12 @@ export const config = {
   botVersion: process.env.BOT_VERSION ?? 'v1.1.0',
 
   pollMs: num('POLL_MS', 20_000),
+  pumpfunPollMs: num('PUMPFUN_POLL_MS', 120_000),
   paidDelaySec: num('PAID_DELAY_SEC', 60),
   freeDelaySec: num('FREE_DELAY_SEC', 300),
 
   minLiqUsd: num('MIN_LIQ_USD', 8000),
-  maxAgeMin: num('MAX_AGE_MIN', 10),
+  maxAgeMin: num('MAX_AGE_MIN', 90),
   minOwnerScore: num('MIN_OWNER_SCORE', 62),
   minPaidScore: num('MIN_PAID_SCORE', 70),
   minFreeScore: num('MIN_FREE_SCORE', 78),

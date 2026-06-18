@@ -58,6 +58,10 @@ export function buildPrivateWalletSellMessage(args: {
 }) {
   const lines: string[] = [];
 
+  const pumpfunUrl = args.tokenMint
+  ? `https://pump.fun/${args.tokenMint}`
+  : null;
+
   lines.push('📤 <b>WALLET SELL</b>');
   lines.push(divider());
   lines.push(`Wallet  <code>${shortWallet(args.wallet)}</code>`);
@@ -78,9 +82,13 @@ export function buildPrivateWalletSellMessage(args: {
   lines.push('⚠️ Wallet reduced position');
 
   if (args.chartUrl) {
-    lines.push('');
-    lines.push(`📈 ${args.chartUrl}`);
-  }
+  lines.push('');
+  lines.push(`📈 Chart: ${args.chartUrl}`);
+}
+
+if (pumpfunUrl) {
+  lines.push(`🚀 Pump.fun: ${pumpfunUrl}`);
+}
 
   return lines.join('\n');
 }
@@ -93,6 +101,9 @@ export function buildPrivateWalletLaunchMessage(args: {
   buyUrl?: string | null;
 }) {
   const lines: string[] = [];
+  const pumpfunUrl = args.tokenMint
+  ? `https://pump.fun/${args.tokenMint}`
+  : null;
 
   lines.push('🚨 <b>WATCHED WALLET LAUNCH</b>');
   lines.push(divider());
@@ -106,9 +117,13 @@ export function buildPrivateWalletLaunchMessage(args: {
   lines.push('🔥 Watched wallet launched a fresh token');
 
   if (args.chartUrl) {
-    lines.push('');
-    lines.push(`📈 ${args.chartUrl}`);
-  }
+  lines.push('');
+  lines.push(`📈 Chart: ${args.chartUrl}`);
+}
+
+if (pumpfunUrl) {
+  lines.push(`🚀 Pump.fun: ${pumpfunUrl}`);
+}
 
   if (args.buyUrl) {
     lines.push(`🟢 ${args.buyUrl}`);

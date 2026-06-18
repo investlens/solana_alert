@@ -6,8 +6,10 @@ import { captureAlertSnapshot } from './core/tracker.js';
 import { pollPumpfunEarlyFeed } from './core/pumpfunWatcher.js';
 import { runDexPaidEngine } from './engines/dexPaidEngine.js';
 import { runWhaleClusterEngine } from './engines/whaleClusterEngine.js';
+import { runPumpEarlyEngine } from './engines/pumpEarlyEngine.js';
 import { runSignalPerformanceEngine } from './engines/signalPerformanceEngine.js';
 import { buildPumpfunEarlyMessage } from './ui/pumpfunMessageBuilder.js';
+import { runAutoTradeManager } from './core/autoTradeManager.js';
 import {
   createAlertDelivery,
   createAlertRecord,
@@ -60,18 +62,19 @@ function getAlertButtons(pair: {
 function getActionBucket(result: RiskResult): 'BUY' | 'HIGH_BUY' | 'IGNORE' {
   if (
     result.score >= 82 &&
-    result.marketSafetyScore >= 75 &&
-    result.authoritySafetyScore >= 40
+    result.marketSafetyScore >= 70 &&
+    result.liquidityUsd >= 10_000 &&
+    result.volume5m >= 5_000 &&
+    result.buys5m > result.sells5m
   ) {
     return 'HIGH_BUY';
   }
 
   if (
-    result.score >= 60 &&
-    result.marketSafetyScore >= 60 &&
-    result.authoritySafetyScore >= 40 &&
-    result.liquidityUsd >= 2000 &&
-    result.volume5m >= 800 &&
+    result.score >= 68 &&
+    result.marketSafetyScore >= 50 &&
+    result.liquidityUsd >= 5_000 &&
+    result.volume5m >= 1_500 &&
     result.buys5m >= result.sells5m
   ) {
     return 'BUY';
@@ -118,7 +121,7 @@ async function startPumpfunWatch() {
       console.error('pumpfun watch loop error', error);
     }
 
-    await sleep(120000);
+    await sleep(config.pumpfunPollMs);
   }
 }
 
@@ -203,7 +206,7 @@ async function processNewProfiles() {
         continue;
       }
 
-      if (result.authoritySafetyScore < 40) {
+      if (result.authoritySafetyScore < 0) {
         console.log(`Skip authority safety: ${tokenAddress} authority=${result.authoritySafetyScore}`);
         continue;
       }
@@ -283,9 +286,15 @@ async function startWalletWatch() {
         const pair = enriched?.pair;
         const result = enriched?.result;
 
-        const chartUrl = pair?.url ?? null;
+        const chartUrl =
+        pair?.url ??
+        (event.tokenMint?.endsWith('pump')
+          ? `https://pump.fun/${event.tokenMint}`
+          : null);
         const buyUrl = pair?.baseToken?.address
-          ? `https://jup.ag/swap/SOL-${pair.baseToken.address}`
+        ? `https://jup.ag/swap/SOL-${pair.baseToken.address}`
+        : event.tokenMint?.endsWith('pump')
+          ? `https://pump.fun/${event.tokenMint}`
           : null;
         const tokenName = pair?.baseToken?.symbol || pair?.baseToken?.name || event.tokenMint;
         const marketCap = result?.marketCap ? fmtUsd(result.marketCap) : null;
@@ -521,8 +530,10 @@ async function startScanner() {
       console.log('scanner loop tick');
       await processNewProfiles();
       await runDexPaidEngine();
+      await runPumpEarlyEngine();
       await runSignalPerformanceEngine();
       await runWhaleClusterEngine();
+      await runAutoTradeManager();
       await processTierDispatch();
     } catch (error) {
       console.error('main loop error', error);
@@ -544,7 +555,10 @@ async function startBot() {
     console.error('deleteWebhook failed', error);
   }
 
-  await bot.launch();
+  await bot.telegram.deleteWebhook().catch(() => {});
+  await bot.launch({
+    dropPendingUpdates: true,
+  });
   console.log('Telegram bot commands are live.');
 }
 
@@ -567,12 +581,12 @@ main().catch((err) => {
 
 function isEarlyAdminWatch(result: RiskResult) {
   return (
-    result.ageMin <= 8 &&
-    result.liquidityUsd >= 1500 &&
-    result.volume5m >= 200 &&
+    result.score >= 65 &&
+    result.liquidityUsd >= 5000 &&
+    result.volume5m >= 1500 &&
+    result.buys5m >= result.sells5m &&
     result.marketSafetyScore >= 50 &&
-    result.authoritySafetyScore >= 35 &&
-    result.buys5m + result.sells5m >= 5
+    result.authoritySafetyScore >= 0
   );
 }
 
