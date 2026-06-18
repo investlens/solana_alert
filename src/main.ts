@@ -59,6 +59,23 @@ function getAlertButtons(pair: {
   ];
 }
 
+async function safeSendTelegram(
+  telegramId: string,
+  message: string,
+  buttons?: any
+) {
+  try {
+    await sendTelegram(telegramId, message, buttons);
+    return true;
+  } catch (error) {
+    console.log('safeSendTelegram failed:', {
+      telegramId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
 function getActionBucket(result: RiskResult): 'BUY' | 'HIGH_BUY' | 'IGNORE' {
   if (
     result.score >= 82 &&
@@ -398,7 +415,7 @@ async function processTierDispatch() {
       });
 
             for (const user of users) {
-        const telegramId = user.telegram_id;
+          const telegramId = user.telegram_id;
 
         if (user.tier === 'admin' && !state.adminEarlyDelivered) {
           console.log('early admin check:', {
@@ -414,7 +431,7 @@ async function processTierDispatch() {
           });
 
           if (isEarlyAdminWatch(result)) {
-            await sendTelegram(
+            await safeSendTelegram(
               telegramId,
               buildEarlyAdminMessage({ pair, result, state }),
               getAdminOnlyButtons(pair)
@@ -425,7 +442,7 @@ async function processTierDispatch() {
         }
 
         if (user.tier === 'admin' && !state.adminDelivered && shouldSendToAdmin(result)) {
-          await sendTelegram(
+          await safeSendTelegram(
             telegramId,
             buildMessage({ tier: 'OWNER', pair, result, state }),
             buttons
@@ -448,7 +465,7 @@ async function processTierDispatch() {
           now >= state.paidDueAt &&
           shouldSendToPaid(result)
         ) {
-          await sendTelegram(
+          await safeSendTelegram(
             telegramId,
             buildMessage({ tier: 'PAID', pair, result, state }),
             buttons
@@ -485,7 +502,7 @@ async function processTierDispatch() {
               freeDelaySec,
             };
 
-            await sendTelegram(
+            await safeSendTelegram(
               telegramId,
               buildMessage({ tier: 'FREE', pair, result, state, freeTrialInfo }),
               buttons
