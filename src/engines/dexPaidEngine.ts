@@ -214,22 +214,31 @@ function conviction(score: number) {
 function qualifies(c: Candidate) {
   if (looksBadSymbol(c.symbol)) return false;
   if (!c.hasStrongSocials) return false;
-  if (!c.marketCap || c.marketCap >= 80_000) return false;
-  if (c.volume5m < 10_000) return false;
-  if (c.liquidity < 12_000) return false;
-  if (c.buys5m < 50) return false;
-  if (sellBuyRatio(c) > 0.6) return false;
-  if (buyRatio(c) < 1.6) return false;
-  if (c.ageMin > 60) return false;
 
-  return alphaScore(c) >= 78;
+  // Must be early, not already mature
+  if (!c.marketCap || c.marketCap >= 35_000) return false;
+  if (c.ageMin > 20) return false;
+
+  // Needs real liquidity, but not too late
+  if (c.liquidity < 8_000) return false;
+  if (c.liquidity > 45_000) return false;
+
+  // Needs strong fresh demand
+  if (c.volume5m < 8_000) return false;
+  if (c.buys5m < 100) return false;
+
+  // Sell pressure must be very low
+  if (sellBuyRatio(c) > 0.4) return false;
+  if (buyRatio(c) < 2.2) return false;
+
+  // Need either strong socials or known wallet activity
+  if (c.socialScore < 35 && c.earlyBuyers.length < 2) return false;
+
+  return alphaScore(c) >= 80;
 }
 
 function qualifiesForAutoBuy(c: Candidate, score: number) {
-  if (isAutoTradePaused()) return false;
-  if (!qualifies(c)) return false;
-
-  return score >= 80 && c.priceUsd != null && canStartNewTrade(c.token);
+  return false;
 }
 
 function getRejectReasons(c: Candidate, score: number) {
@@ -515,7 +524,7 @@ export async function runDexPaidEngine() {
     const message = [
       score >= 85
         ? '🐋 <b>WHALE GRADE SIGNAL</b>'
-        : '🔥 <b>HIGH CONVICTION SIGNAL</b>',
+        : '👀 <b>DEX WATCH SIGNAL</b>',
       '━━━━━━━━━━━━━━━━━━',
       '',
       `<b>${escapeHtml(c.symbol)}</b>`,
