@@ -4,6 +4,7 @@ import { getDeliverableUsers } from '../core/delivery.js';
 import { getConsolidationRisk } from '../scoring/consolidationRisk.js';
 import { addAlphaSignal } from './alphaFeed.js';
 import { recordDecisionForToken } from '../agents/decisionAgent.js';
+import { canSendTokenAlert } from '../core/alertDeduper.js';
 import {
   getCreatorReputation,
   creatorTrustLabel,
@@ -579,6 +580,10 @@ export async function runDexPaidEngine() {
           ? '🟢 Live (Ready)'
           : '👀 Monitoring',
     ].join('\n');
+
+    if (!canSendTokenAlert(c.token, 'DEX_PAID')) {
+      continue;
+    }
 
     await sendAlphaAlertToUsers({
       message,
