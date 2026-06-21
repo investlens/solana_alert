@@ -78,21 +78,27 @@ async function safeSendTelegram(
 
 function getActionBucket(result: RiskResult): 'BUY' | 'HIGH_BUY' | 'IGNORE' {
   if (
-    result.score >= 82 &&
-    result.marketSafetyScore >= 70 &&
-    result.liquidityUsd >= 10_000 &&
-    result.volume5m >= 5_000 &&
-    result.buys5m > result.sells5m
+    result.score >= 85 &&
+    result.marketSafetyScore >= 75 &&
+    result.liquidityUsd >= 8_000 &&
+    result.liquidityUsd <= 45_000 &&
+    result.volume5m >= 8_000 &&
+    result.buys5m >= 100 &&
+    result.buys5m > result.sells5m * 2.2 &&
+    result.ageMin <= 20
   ) {
     return 'HIGH_BUY';
   }
 
   if (
-    result.score >= 68 &&
-    result.marketSafetyScore >= 50 &&
-    result.liquidityUsd >= 5_000 &&
-    result.volume5m >= 1_500 &&
-    result.buys5m >= result.sells5m
+    result.score >= 78 &&
+    result.marketSafetyScore >= 65 &&
+    result.liquidityUsd >= 8_000 &&
+    result.liquidityUsd <= 45_000 &&
+    result.volume5m >= 5_000 &&
+    result.buys5m >= 80 &&
+    result.buys5m > result.sells5m * 2 &&
+    result.ageMin <= 20
   ) {
     return 'BUY';
   }
@@ -598,11 +604,14 @@ main().catch((err) => {
 
 function isEarlyAdminWatch(result: RiskResult) {
   return (
-    result.score >= 65 &&
-    result.liquidityUsd >= 5000 &&
-    result.volume5m >= 1500 &&
-    result.buys5m >= result.sells5m &&
-    result.marketSafetyScore >= 50 &&
+    result.score >= 78 &&
+    result.liquidityUsd >= 8_000 &&
+    result.liquidityUsd <= 45_000 &&
+    result.volume5m >= 5_000 &&
+    result.buys5m >= 80 &&
+    result.buys5m > result.sells5m * 2 &&
+    result.ageMin <= 20 &&
+    result.marketSafetyScore >= 65 &&
     result.authoritySafetyScore >= 0
   );
 }
