@@ -67,13 +67,13 @@ export async function recordCreatorLaunch(args: {
     bestMarketCap,
   });
 
-  if (trustScore >= 70 || bestMarketCap >= 1_000_000) {
+  if (trustScore >= 70 || bestMarketCap >= 500_000) {
     await recordOpportunity({
       opportunityType: 'TOKEN_CREATOR',
       assetId: args.token,
       chain: 'solana',
       sourceAgent: args.sourceAgent ?? 'CreatorIntelligenceAgent',
-      title: `Proven creator launch: ${args.symbol ?? args.token}`,
+      title: `P0 Proven Creator Launch: ${args.symbol ?? args.token}`,
       entryPrice: null,
       exitPrice: null,
       expectedProfit: null,
