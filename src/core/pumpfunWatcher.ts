@@ -1,4 +1,5 @@
 import { config } from '../config.js';
+import { recordCreatorLaunch } from '../agents/creatorIntelligenceAgent.js';
 
 import {
   saveCreatorLaunch,
@@ -296,6 +297,15 @@ export async function pollPumpfunEarlyFeed(): Promise<PumpfunTokenEvent[]> {
       !looksLikeJunkName(name) &&
       creatorSeen < 2 &&
       launchScore >= 75;
+
+    await recordCreatorLaunch({
+      creatorWallet: token.creator ?? null,
+      token: token.mint,
+      symbol: token.symbol ?? token.name ?? null,
+      marketCap: token.marketCapUsd ?? null,
+      sourceAgent: 'PumpFunDiscoveryAgent',
+      rawData: token as unknown as Record<string, unknown>,
+    });
 
     if (!passes) {
       console.log('pumpfun rejected:', {
