@@ -5,11 +5,17 @@ export async function recordWalletBuy(args: {
   token: string;
   amountSol?: number | null;
 }) {
-  const { data: existing } = await supabase
+  console.log('recordWalletBuy called:', args);
+
+  const { data: existing, error: fetchError } = await supabase
     .from('wallet_intelligence')
     .select('*')
     .eq('wallet', args.wallet)
     .maybeSingle();
+
+  if (fetchError) {
+    console.log('recordWalletBuy fetch error:', fetchError);
+  }
 
   const totalBuys = Number(existing?.total_buys ?? 0) + 1;
   const tokensSeen = Number(existing?.tokens_seen ?? 0) + 1;
@@ -32,23 +38,40 @@ export async function recordWalletBuy(args: {
 
   if (error) {
     console.log('recordWalletBuy error:', error);
+    return;
   }
+
+  console.log('recordWalletBuy success:', {
+    wallet: args.wallet,
+    token: args.token,
+    totalBuys,
+    tokensSeen,
+    trustScore,
+  });
 }
 
 export async function recordWalletSell(args: {
   wallet: string;
   token?: string | null;
 }) {
-  const { data: existing } = await supabase
+  console.log('recordWalletSell called:', args);
+
+  const { data: existing, error: fetchError } = await supabase
     .from('wallet_intelligence')
     .select('*')
     .eq('wallet', args.wallet)
     .maybeSingle();
 
+  if (fetchError) {
+    console.log('recordWalletSell fetch error:', fetchError);
+  }
+
+  const totalSells = Number(existing?.total_sells ?? 0) + 1;
+
   const { error } = await supabase.from('wallet_intelligence').upsert({
     wallet: args.wallet,
     total_buys: Number(existing?.total_buys ?? 0),
-    total_sells: Number(existing?.total_sells ?? 0) + 1,
+    total_sells: totalSells,
     tokens_seen: Number(existing?.tokens_seen ?? 0),
     wins: Number(existing?.wins ?? 0),
     losses: Number(existing?.losses ?? 0),
@@ -61,7 +84,14 @@ export async function recordWalletSell(args: {
 
   if (error) {
     console.log('recordWalletSell error:', error);
+    return;
   }
+
+  console.log('recordWalletSell success:', {
+    wallet: args.wallet,
+    token: args.token,
+    totalSells,
+  });
 }
 
 export async function getWalletTrust(wallet: string) {
@@ -84,10 +114,13 @@ export async function getWalletTrust(wallet: string) {
   const trustScore = Number(data.trust_score ?? 50);
 
   const label =
-    trustScore >= 80 ? 'SMART' :
-    trustScore >= 65 ? 'PROMISING' :
-    trustScore >= 45 ? 'UNKNOWN' :
-    'WEAK';
+    trustScore >= 80
+      ? 'SMART'
+      : trustScore >= 65
+        ? 'PROMISING'
+        : trustScore >= 45
+          ? 'UNKNOWN'
+          : 'WEAK';
 
   return {
     wallet,
