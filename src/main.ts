@@ -11,6 +11,7 @@ import { runSignalPerformanceEngine } from './engines/signalPerformanceEngine.js
 import { buildPumpfunEarlyMessage } from './ui/pumpfunMessageBuilder.js';
 import { runAutoTradeManager } from './core/autoTradeManager.js';
 import { runCreatorMarketTracker } from './agents/creatorMarketTrackerAgent.js';
+import { runOutcomeLearningAgent } from './agents/outcomeLearningAgent.js';
 import {
   createAlertDelivery,
   createAlertRecord,
@@ -546,6 +547,20 @@ async function processTierDispatch() {
   }
 }
 
+let lastCreatorMarketTrackerRun = 0;
+
+let lastOutcomeLearningRun = 0;
+
+function shouldRunOutcomeLearningAgent() {
+  const intervalMs = Number(process.env.OUTCOME_LEARNING_MS ?? 10 * 60 * 1000);
+  return Date.now() - lastOutcomeLearningRun >= intervalMs;
+}
+
+function shouldRunCreatorMarketTracker() {
+  const intervalMs = Number(process.env.CREATOR_MARKET_TRACKER_MS ?? 10 * 60 * 1000);
+  return Date.now() - lastCreatorMarketTrackerRun >= intervalMs;
+}
+
 async function startScanner() {
   console.log('Starting momentum risk bot...');
 
@@ -558,7 +573,14 @@ async function startScanner() {
       await runSignalPerformanceEngine();
       await runWhaleClusterEngine();
       await runAutoTradeManager();
-      await runCreatorMarketTracker();
+      if (shouldRunCreatorMarketTracker()) {
+        lastCreatorMarketTrackerRun = Date.now();
+        await runCreatorMarketTracker();
+      }
+      if (shouldRunOutcomeLearningAgent()) {
+        lastOutcomeLearningRun = Date.now();
+        await runOutcomeLearningAgent();
+      }
       await processTierDispatch();
     } catch (error) {
       console.error('main loop error', error);

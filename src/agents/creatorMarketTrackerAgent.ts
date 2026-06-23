@@ -46,7 +46,7 @@ export async function runCreatorMarketTracker() {
       new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
     )
     .order('last_checked_at', { ascending: true })
-    .limit(10);
+    .limit(3);
 
   if (error) {
     console.log('creator market tracker fetch error:', error);
