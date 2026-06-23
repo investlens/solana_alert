@@ -10,6 +10,7 @@ import { runPumpEarlyEngine } from './engines/pumpEarlyEngine.js';
 import { runSignalPerformanceEngine } from './engines/signalPerformanceEngine.js';
 import { buildPumpfunEarlyMessage } from './ui/pumpfunMessageBuilder.js';
 import { runAutoTradeManager } from './core/autoTradeManager.js';
+import { runCreatorMarketTracker } from './agents/creatorMarketTrackerAgent.js';
 import {
   createAlertDelivery,
   createAlertRecord,
@@ -557,6 +558,7 @@ async function startScanner() {
       await runSignalPerformanceEngine();
       await runWhaleClusterEngine();
       await runAutoTradeManager();
+      await runCreatorMarketTracker();
       await processTierDispatch();
     } catch (error) {
       console.error('main loop error', error);

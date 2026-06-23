@@ -34,11 +34,11 @@ export async function getHolderRisk(
   const holders = await fetchTopHolders(mintAddress);
 
   if (!holders.length) {
-    return {
-      score: 25,
-      level: 'MEDIUM',
-      reasons: ['No holder data available'],
-      topHolderCount: 0,
+  return {
+    score: 0,
+    level: 'LOW',
+    reasons: ['Holder data not available yet'],
+    topHolderCount: 0,
     };
   }
 
