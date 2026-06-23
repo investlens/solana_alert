@@ -14,6 +14,27 @@ function num(value: unknown) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function isPumpToken(token: string) {
+  return token.endsWith('pump');
+}
+
+function isBlockedSymbol(symbol?: string | null) {
+  const s = (symbol ?? '').trim().toUpperCase();
+
+  return [
+    'USDC',
+    'USDT',
+    'SOL',
+    'WSOL',
+    'BTC',
+    'ETH',
+    'WETH',
+    'BONK',
+    'JUP',
+    'RAY',
+  ].includes(s);
+}
+
 export async function runCreatorMarketTracker() {
   const { data, error } = await supabase
     .from('creator_launches')
@@ -42,6 +63,23 @@ export async function runCreatorMarketTracker() {
 
   for (const row of rows) {
     if (!row.token) continue;
+
+    if (!isPumpToken(row.token) || isBlockedSymbol(row.symbol)) {
+      console.log('creator market tracker skipped non-pump/blocked token:', {
+        token: row.token,
+        symbol: row.symbol,
+      });
+
+      await supabase
+        .from('creator_launches')
+        .update({
+          last_checked_at: new Date().toISOString(),
+          crossed_1m: false,
+        })
+        .eq('token', row.token);
+
+      continue;
+    }
 
     try {
       const enriched = await enrichTokenByMintAddress(row.token);
