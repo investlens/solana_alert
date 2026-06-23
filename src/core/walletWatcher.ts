@@ -1,5 +1,6 @@
 import { config } from '../config.js';
 import { recordWhaleHit } from '../engines/whaleClusterEngine.js';
+import { recordWalletTrade } from '../agents/smartWalletAgent.js';
 import {
   recordWalletBuy,
   recordWalletSell,
@@ -271,6 +272,13 @@ export async function pollWatchedWallets(): Promise<WalletWatchEvent[]> {
             amountSol: buyEvent.amountSol,
           });
 
+          await recordWalletTrade({
+            wallet,
+            token: buyEvent.tokenMint ?? '',
+            action: 'BUY',
+            amountSol: buyEvent.amountSol,
+          });
+
           events.push(buyEvent);
           seenSignatures.add(tx.signature);
           continue;
@@ -288,6 +296,13 @@ export async function pollWatchedWallets(): Promise<WalletWatchEvent[]> {
           await recordWalletSell({
             wallet,
             token: sellEvent.tokenMint,
+          });
+
+          await recordWalletTrade({
+            wallet,
+            token: sellEvent.tokenMint ?? '',
+            action: 'SELL',
+            amountSol: sellEvent.amountSol,
           });
 
           events.push(sellEvent);
