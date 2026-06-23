@@ -1,6 +1,7 @@
 import { supabase } from '../services/supabase.js';
 import { enrichTokenByMintAddress } from '../services/dexscreener.js';
 import { markProvenCreator } from '../core/creatorIntelStore.js';
+import { fetchPumpfunMarketCap } from '../services/pumpfunMarketCap.js';
 
 type CreatorLaunchRow = {
   creator_wallet: string | null;
@@ -85,7 +86,12 @@ export async function runCreatorMarketTracker() {
       const enriched = await enrichTokenByMintAddress(row.token);
       const result = enriched?.result;
 
-      const currentMarketCap = num(result?.marketCap);
+      let currentMarketCap = num(result?.marketCap);
+
+        if (!currentMarketCap) {
+        const pumpMarketCap = await fetchPumpfunMarketCap(row.token);
+        currentMarketCap = num(pumpMarketCap);
+        }
       const previousPeak = num(row.peak_market_cap);
       const peakMarketCap = Math.max(previousPeak, currentMarketCap);
       const crossed1m = peakMarketCap >= 1_000_000;
