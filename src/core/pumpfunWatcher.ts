@@ -187,16 +187,25 @@ query PumpfunEarlyFeed {
   });
 
   if (!res.ok) {
-    const text = await res.text().catch(() => '');
+  const text = await res.text().catch(() => '');
+  const lower = text.toLowerCase();
 
-    if (res.status === 402) {
-      bitqueryBackoffUntil = now() + 5 * 60 * 1000;
-      console.log('pumpfun: Bitquery points exceeded, backing off for 5 minutes');
-      return [];
-    }
-
-    throw new Error(`Bitquery request failed: ${res.status} ${text}`);
+  if (
+    res.status === 402 ||
+    res.status === 403 ||
+    lower.includes('points limit exceeded') ||
+    lower.includes('usage quota')
+  ) {
+    bitqueryBackoffUntil = now() + 30 * 60 * 1000;
+    console.log('pumpfun: Bitquery quota exceeded, backing off for 30 minutes', {
+      status: res.status,
+      body: text.slice(0, 200),
+    });
+    return [];
   }
+
+  throw new Error(`Bitquery request failed: ${res.status} ${text}`);
+}
 
   const json = await res.json();
 
@@ -208,8 +217,8 @@ query PumpfunEarlyFeed {
     );
 
     if (hasPointsError) {
-      bitqueryBackoffUntil = now() + 5 * 60 * 1000;
-      console.log('pumpfun: GraphQL points exceeded, backing off for 5 minutes');
+      bitqueryBackoffUntil = now() + 30 * 60 * 1000;
+      console.log('pumpfun: GraphQL points exceeded, backing off for 30 minutes');
       return [];
     }
   }
