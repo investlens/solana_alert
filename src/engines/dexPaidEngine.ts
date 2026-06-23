@@ -5,6 +5,7 @@ import { getConsolidationRisk } from '../scoring/consolidationRisk.js';
 import { addAlphaSignal } from './alphaFeed.js';
 import { recordDecisionForToken } from '../agents/decisionAgent.js';
 import { canSendTokenAlert } from '../core/alertDeduper.js';
+import { calculateConfidence } from '../agents/confidenceAgent.js';
 import {
   getCreatorReputation,
   creatorTrustLabel,
@@ -449,6 +450,21 @@ export async function runDexPaidEngine() {
     );
     const creatorLabel = creatorTrustLabel(creatorScore);
 
+    let confidenceResult = calculateConfidence({
+      score,
+      creatorScore,
+      smartWalletCount: c.earlyBuyers.length,
+      liquidity: c.liquidity,
+      volume5m: c.volume5m,
+      buys5m: c.buys5m,
+      sells5m: c.sells5m,
+      socialScore: c.socialScore,
+      holderRiskScore: holderRisk.score,
+      bundleRiskScore: consolidationRisk.score,
+      marketCap: c.marketCap,
+      ageMin: c.ageMin,
+    });
+
     const aiDecision = await recordDecisionForToken({
       token: c.token,
       symbol: c.symbol,
@@ -511,6 +527,21 @@ export async function runDexPaidEngine() {
       console.log('consolidation error:', err);
     }
 
+    confidenceResult = calculateConfidence({
+      score,
+      creatorScore,
+      smartWalletCount: c.earlyBuyers.length,
+      liquidity: c.liquidity,
+      volume5m: c.volume5m,
+      buys5m: c.buys5m,
+      sells5m: c.sells5m,
+      socialScore: c.socialScore,
+      holderRiskScore: holderRisk.score,
+      bundleRiskScore: consolidationRisk.score,
+      marketCap: c.marketCap,
+      ageMin: c.ageMin,
+    });
+
     if (score < 60) continue;
 
     console.log('alpha radar dex candidate:', {
@@ -519,6 +550,9 @@ export async function runDexPaidEngine() {
       score,
       label,
       tier,
+      confidence: confidenceResult.confidence,
+      riskLevel: confidenceResult.riskLevel,
+      confidenceReasons: confidenceResult.reasons,
       liquidity: c.liquidity,
       marketCap: c.marketCap,
       volume5m: c.volume5m,
@@ -589,6 +623,8 @@ export async function runDexPaidEngine() {
       `<code>${escapeHtml(c.token)}</code>`,
       '',
       `Score: <b>${score}/100</b>`,
+      `AI Confidence: <b>${confidenceResult.confidence}/100</b>`,
+      `Risk Level: <b>${confidenceResult.riskLevel}</b>`,
       `Confidence: <b>${confidenceBar}</b>`,
       `Timing: <b>${entryTiming}</b>`,
       '',
@@ -636,6 +672,10 @@ export async function runDexPaidEngine() {
         : autoBuyPasses
           ? '🟢 Live (Ready)'
           : '👀 Monitoring',
+          
+        '',
+        '<b>🧠 AI Reasoning</b>',
+        ...confidenceResult.reasons.map((r) => `• ${r}`),
     ].join('\n');
 
     if (!canSendTokenAlert(c.token, 'DEX_PAID')) {
