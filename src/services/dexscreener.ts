@@ -9,20 +9,67 @@ import type {
 } from '../types.js';
 import { scoreToken } from '../core/scoring.js';
 
+const jsonCache = new Map<string, { expiresAt: number; data: unknown }>();
+const backoffUntil = new Map<string, number>();
+
+function cacheMsForUrl(url: string) {
+  if (url.includes('/token-profiles/latest')) return 60_000;
+  if (url.includes('/token-boosts/latest')) return 90_000;
+  if (url.includes('/community-takeovers/latest')) return 90_000;
+  if (url.includes('/token-pairs/')) return 45_000;
+  if (url.includes('/orders/')) return 120_000;
+  return 60_000;
+}
+
 async function getJson<T>(url: string): Promise<T> {
+  const now = Date.now();
+
+  const cached = jsonCache.get(url);
+  if (cached && cached.expiresAt > now) {
+    return cached.data as T;
+  }
+
+  const blockedUntil = backoffUntil.get(url) ?? 0;
+  if (blockedUntil > now) {
+    if (cached) return cached.data as T;
+    throw new Error(`DexScreener backoff active for ${url}`);
+  }
+
   const res = await fetch(url, {
     headers: {
       accept: 'application/json',
-      'user-agent': 'momentum-risk-bot/4.0',
+      'user-agent': 'alphaos-agent/1.0',
     },
   });
 
   if (!res.ok) {
     const body = await res.text().catch(() => '');
+
+    if (res.status === 429) {
+      const waitMs = 5 * 60 * 1000;
+      backoffUntil.set(url, now + waitMs);
+
+      console.log('DexScreener 429 backoff:', {
+        url,
+        waitSec: waitMs / 1000,
+      });
+
+      if (cached) {
+        return cached.data as T;
+      }
+    }
+
     throw new Error(`HTTP ${res.status} for ${url} :: ${body.slice(0, 250)}`);
   }
 
-  return (await res.json()) as T;
+  const data = (await res.json()) as T;
+
+  jsonCache.set(url, {
+    expiresAt: now + cacheMsForUrl(url),
+    data,
+  });
+
+  return data;
 }
 
 export async function fetchLatestProfiles(): Promise<DexProfile[]> {

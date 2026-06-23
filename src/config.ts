@@ -28,7 +28,7 @@ export const config = {
     .split(',')
     .map((x) => x.trim())
     .filter(Boolean),
-  walletWatchPollMs: num('WALLET_WATCH_POLL_MS', 8000),
+  walletWatchPollMs: num('WALLET_WATCH_POLL_MS', 60_000),
 
   adminTradingEnabled: bool('ADMIN_TRADING_ENABLED', false),
   adminTradingPrivateKey: process.env.ADMIN_TRADING_PRIVATE_KEY ?? '',
@@ -45,8 +45,8 @@ export const config = {
   discoveryChain: (process.env.DISCOVERY_CHAIN ?? 'solana').toLowerCase(),
   botVersion: process.env.BOT_VERSION ?? 'v1.1.0',
 
-  pollMs: num('POLL_MS', 20_000),
-  pumpfunPollMs: num('PUMPFUN_POLL_MS', 120_000),
+  pollMs: num('POLL_MS', 120_000),
+  pumpfunPollMs: num('PUMPFUN_POLL_MS', 180_000),
   paidDelaySec: num('PAID_DELAY_SEC', 60),
   freeDelaySec: num('FREE_DELAY_SEC', 300),
 
