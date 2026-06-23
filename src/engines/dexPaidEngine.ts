@@ -217,25 +217,72 @@ function qualifies(c: Candidate) {
   if (!c.hasStrongSocials) return false;
 
   // Must be early, not already mature
-  if (!c.marketCap || c.marketCap >= 35_000) return false;
-  if (c.ageMin > 20) return false;
+  if (!c.marketCap || c.marketCap >= 120_000) return false;
+  if (c.ageMin > 60) return false;
 
   // Needs real liquidity, but not too late
   if (c.liquidity < 8_000) return false;
   if (c.liquidity > 45_000) return false;
 
   // Needs strong fresh demand
-  if (c.volume5m < 8_000) return false;
-  if (c.buys5m < 100) return false;
+  if (c.volume5m < 7_500) return false;
+  if (c.buys5m < 40) return false;
 
   // Sell pressure must be very low
-  if (sellBuyRatio(c) > 0.4) return false;
-  if (buyRatio(c) < 2.2) return false;
+  if (sellBuyRatio(c) > 0.6) return false;
+  if (buyRatio(c) < 1.5) return false;
 
   // Need either strong socials or known wallet activity
   if (c.socialScore < 35 && c.earlyBuyers.length < 2) return false;
 
   return alphaScore(c) >= 80;
+}
+
+function signalTier(
+  c: Candidate,
+  score: number,
+  creatorScore: number
+) {
+  const smartWallets = c.earlyBuyers.length;
+
+  const provenCreator = creatorScore >= 70;
+
+  const whaleInterest =
+    smartWallets >= 2;
+
+  const breakout =
+    c.marketCap &&
+    c.marketCap <= 120_000 &&
+    c.volume5m >= 15_000 &&
+    c.liquidity >= 15_000 &&
+    buyRatio(c) >= 1.8;
+
+  if (
+    score >= 88 &&
+    (
+      provenCreator ||
+      whaleInterest ||
+      breakout
+    )
+  ) {
+    return 'P0';
+  }
+
+  if (
+    score >= 78 &&
+    (
+      provenCreator ||
+      whaleInterest
+    )
+  ) {
+    return 'P1';
+  }
+
+  if (score >= 70) {
+    return 'P2';
+  }
+
+  return 'REJECT';
 }
 
 function qualifiesForAutoBuy(c: Candidate, score: number) {
@@ -395,6 +442,11 @@ export async function runDexPaidEngine() {
 
     const creatorRep = await getCreatorReputation(c.creatorWallet);
     const creatorScore = creatorRep?.trust_score ?? 50;
+    const tier = signalTier(
+      c,
+      score,
+      creatorScore
+    );
     const creatorLabel = creatorTrustLabel(creatorScore);
 
     const aiDecision = await recordDecisionForToken({
@@ -466,6 +518,7 @@ export async function runDexPaidEngine() {
       symbol: c.symbol,
       score,
       label,
+      tier,
       liquidity: c.liquidity,
       marketCap: c.marketCap,
       volume5m: c.volume5m,
@@ -482,7 +535,9 @@ export async function runDexPaidEngine() {
       rejectReasons: getRejectReasons(c, score),
     });
 
-    if (!passes) continue;
+    if (tier === 'REJECT') {
+      continue;
+    }
 
     seen.add(c.token);
 
@@ -523,9 +578,11 @@ export async function runDexPaidEngine() {
       '🔻 LATE';
 
     const message = [
-      score >= 85
-        ? '🐋 <b>WHALE GRADE SIGNAL</b>'
-        : '👀 <b>DEX WATCH SIGNAL</b>',
+      tier === 'P0'
+      ? '🐋 <b>P0 BLUE CHIP SIGNAL</b>'
+      : tier === 'P1'
+        ? '🔥 <b>P1 HIGH CONVICTION SIGNAL</b>'
+        : '👀 <b>P2 WATCHLIST SIGNAL</b>',
       '━━━━━━━━━━━━━━━━━━',
       '',
       `<b>${escapeHtml(c.symbol)}</b>`,
@@ -585,11 +642,13 @@ export async function runDexPaidEngine() {
       continue;
     }
 
-    await sendAlphaAlertToUsers({
-      message,
-      token: c.token,
-      dexUrl: c.dexUrl,
-      buyUrl: c.buyUrl,
-    });
+    if (tier === 'P0' || tier === 'P1') {
+      await sendAlphaAlertToUsers({
+        message,
+        token: c.token,
+        dexUrl: c.dexUrl,
+        buyUrl: c.buyUrl,
+      });
+    }
   }
 }
