@@ -133,14 +133,30 @@ function getLargestSolInflowToWallet(wallet: string, tx: EnhancedTx): number | n
   return Math.max(...candidates);
 }
 
+function isIgnoredTokenMint(mint?: string | null) {
+  if (!mint) return true;
+
+  const ignored = new Set([
+    'So11111111111111111111111111111111111111112', // WSOL
+    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
+    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY7sc5uM8dDuLzz', // USDT
+  ]);
+
+  return ignored.has(mint);
+}
+
 function extractBuyEvent(wallet: string, tx: EnhancedTx): WalletBuyEvent | null {
   const type = tx.type ?? 'UNKNOWN';
   if (!['SWAP', 'BUY'].includes(type)) return null;
 
-  const tokenMint =
-    tx.tokenTransfers?.find((t) => t.toUserAccount === wallet && t.mint)?.mint ??
-    tx.tokenTransfers?.find((t) => t.mint)?.mint ??
-    null;
+  const receivedToken = tx.tokenTransfers?.find(
+    (t) =>
+      t.toUserAccount === wallet &&
+      t.mint &&
+      !isIgnoredTokenMint(t.mint)
+  );
+
+  const tokenMint = receivedToken?.mint ?? null;
 
   if (!tokenMint) return null;
 
@@ -163,7 +179,10 @@ function extractSellEvent(wallet: string, tx: EnhancedTx): WalletSellEvent | nul
   if (!['SWAP', 'SELL'].includes(type)) return null;
 
   const soldTokenTransfer = tx.tokenTransfers?.find(
-    (t) => t.fromUserAccount === wallet && t.mint
+  (t) =>
+    t.fromUserAccount === wallet &&
+    t.mint &&
+    !isIgnoredTokenMint(t.mint)
   );
 
   if (!soldTokenTransfer?.mint) return null;
