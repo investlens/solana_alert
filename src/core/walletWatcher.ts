@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 import { recordWhaleHit } from '../engines/whaleClusterEngine.js';
 import { recordWalletTrade } from '../agents/smartWalletAgent.js';
+import { supabase } from '../services/supabase.js';
 import {
   recordWalletBuy,
   recordWalletSell,
@@ -351,6 +352,24 @@ export async function pollWatchedWallets(): Promise<WalletWatchEvent[]> {
   return events;
 }
 
-export function getTokenBuyers(token: string): string[] {
-  return [...(tokenBuyerMap.get(token) ?? new Set())];
+export async function getTokenBuyers(token: string): Promise<string[]> {
+  const memoryBuyers = [...(tokenBuyerMap.get(token) ?? new Set())];
+
+  const { data, error } = await supabase
+    .from('wallet_trade_history')
+    .select('wallet')
+    .eq('token', token)
+    .eq('action', 'BUY')
+    .limit(20);
+
+  if (error) {
+    console.log('getTokenBuyers db error:', error);
+    return memoryBuyers;
+  }
+
+  const dbBuyers = (data ?? [])
+    .map((row) => row.wallet)
+    .filter(Boolean);
+
+  return [...new Set([...memoryBuyers, ...dbBuyers])];
 }

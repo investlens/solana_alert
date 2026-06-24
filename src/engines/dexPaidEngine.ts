@@ -377,7 +377,7 @@ async function fetchCandidates(): Promise<Candidate[]> {
       const pair: any = enriched.pair;
       const token = profile.tokenAddress!;
       const social = getSocialQuality(profile);
-      const earlyBuyers = getTokenBuyers(token);
+      const earlyBuyers = await getTokenBuyers(token);
 
       const liquidity = Number(pair.liquidity?.usd ?? 0);
       const volume5m = Number(pair.volume?.m5 ?? 0);
