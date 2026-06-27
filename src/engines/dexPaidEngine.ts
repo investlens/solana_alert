@@ -697,7 +697,7 @@ export async function runDexPaidEngine() {
       continue;
     }
 
-    if (tier === 'P0' || tier === 'P1') {
+    if (tier === 'P0' || tier === 'P1' || tier === 'P2') {
       await sendAlphaAlertToUsers({
         message,
         token: c.token,
