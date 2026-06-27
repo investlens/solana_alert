@@ -542,7 +542,22 @@ export async function runDexPaidEngine() {
       ageMin: c.ageMin,
     });
 
-    if (score < 60) continue;
+   if (score < 60) {
+    console.log('alpha candidate rejected before tier:', {
+      token: c.token,
+      symbol: c.symbol,
+      score,
+      liquidity: c.liquidity,
+      marketCap: c.marketCap,
+      volume5m: c.volume5m,
+      buys5m: c.buys5m,
+      sells5m: c.sells5m,
+      ageMin: c.ageMin,
+      rejectReasons: getRejectReasons(c, score),
+    });
+
+    continue;
+  }
 
     console.log('alpha radar dex candidate:', {
       token: c.token,
