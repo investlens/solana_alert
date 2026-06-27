@@ -79,28 +79,31 @@ async function safeSendTelegram(
 }
 
 function getActionBucket(result: RiskResult): 'BUY' | 'HIGH_BUY' | 'IGNORE' {
+  const buyRatio =
+    result.sells5m <= 0 ? result.buys5m : result.buys5m / result.sells5m;
+
   if (
-    result.score >= 85 &&
-    result.marketSafetyScore >= 75 &&
+    result.score >= 82 &&
+    result.marketSafetyScore >= 70 &&
     result.liquidityUsd >= 8_000 &&
-    result.liquidityUsd <= 45_000 &&
+    result.liquidityUsd <= 60_000 &&
     result.volume5m >= 8_000 &&
     result.buys5m >= 100 &&
-    result.buys5m > result.sells5m * 2.2 &&
-    result.ageMin <= 20
+    buyRatio >= 1.8 &&
+    result.ageMin <= 45
   ) {
     return 'HIGH_BUY';
   }
 
   if (
-    result.score >= 78 &&
-    result.marketSafetyScore >= 65 &&
-    result.liquidityUsd >= 8_000 &&
-    result.liquidityUsd <= 45_000 &&
-    result.volume5m >= 5_000 &&
-    result.buys5m >= 80 &&
-    result.buys5m > result.sells5m * 2 &&
-    result.ageMin <= 20
+    result.score >= 72 &&
+    result.marketSafetyScore >= 60 &&
+    result.liquidityUsd >= 6_000 &&
+    result.liquidityUsd <= 65_000 &&
+    result.volume5m >= 3_000 &&
+    result.buys5m >= 40 &&
+    buyRatio >= 1.4 &&
+    result.ageMin <= 75
   ) {
     return 'BUY';
   }
