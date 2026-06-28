@@ -294,6 +294,14 @@ async function processNewProfiles() {
       console.log(
         `ALERT STORED: ${pair.baseToken?.symbol ?? tokenAddress} score=${result.score} bucket=${getActionBucket(result)}`
       );
+
+      console.log('ALERT DELIVERY CHECK:', {
+        token: tokenAddress,
+        symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
+        bucket: getActionBucket(result),
+        score: result.score,
+      });
+
     } catch (error) {
       console.error('processNewProfiles error', tokenAddress, error);
     }
