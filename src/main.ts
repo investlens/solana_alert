@@ -584,10 +584,10 @@ async function startScanner() {
       await runSignalPerformanceEngine();
       await runWhaleClusterEngine();
       await runAutoTradeManager();
-      if (shouldRunCreatorMarketTracker()) {
+      console.log('creator tracker debug: attempting run');
+
         lastCreatorMarketTrackerRun = Date.now();
         await runCreatorMarketTracker();
-      }
       if (shouldRunOutcomeLearningAgent()) {
         lastOutcomeLearningRun = Date.now();
         await runOutcomeLearningAgent();
