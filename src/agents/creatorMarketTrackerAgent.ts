@@ -2,6 +2,7 @@ import { supabase } from '../services/supabase.js';
 import { enrichTokenByMintAddress } from '../services/dexscreener.js';
 import { markProvenCreator } from '../core/creatorIntelStore.js';
 import { fetchPumpfunMarketCap } from '../services/pumpfunMarketCap.js';
+import { fetchDexscreenerPairMarketCap } from '../services/dexscreenerPairs.js';
 
 type CreatorLaunchRow = {
   creator_wallet: string | null;
@@ -41,6 +42,7 @@ export async function runCreatorMarketTracker() {
     .from('creator_launches')
     .select('creator_wallet, token, symbol, peak_market_cap')
     .eq('crossed_1m', false)
+    .is('peak_market_cap', null)
     .order('last_checked_at', { ascending: true })
     .limit(25);
 
@@ -85,8 +87,13 @@ export async function runCreatorMarketTracker() {
       let currentMarketCap = num(result?.marketCap);
 
         if (!currentMarketCap) {
-        const pumpMarketCap = await fetchPumpfunMarketCap(row.token);
-        currentMarketCap = num(pumpMarketCap);
+          const pairMarketCap = await fetchDexscreenerPairMarketCap(row.token);
+          currentMarketCap = num(pairMarketCap);
+        }
+
+        if (!currentMarketCap) {
+          const pumpMarketCap = await fetchPumpfunMarketCap(row.token);
+          currentMarketCap = num(pumpMarketCap);
         }
       const previousPeak = num(row.peak_market_cap);
       const peakMarketCap = Math.max(previousPeak, currentMarketCap);
