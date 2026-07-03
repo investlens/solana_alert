@@ -46,7 +46,7 @@ export async function runCreatorMarketTracker() {
       new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
     )
     .order('last_checked_at', { ascending: true })
-    .limit(3);
+    .limit(25);
 
   if (error) {
     console.log('creator market tracker fetch error:', error);
@@ -95,12 +95,20 @@ export async function runCreatorMarketTracker() {
       const previousPeak = num(row.peak_market_cap);
       const peakMarketCap = Math.max(previousPeak, currentMarketCap);
       const crossed1m = peakMarketCap >= 1_000_000;
+      const crossed50k = peakMarketCap >= 50_000;
+      const crossed100k = peakMarketCap >= 100_000;
+      const crossed250k = peakMarketCap >= 250_000;
+      const crossed500k = peakMarketCap >= 500_000;
 
       const { error: updateError } = await supabase
         .from('creator_launches')
         .update({
           current_market_cap: currentMarketCap || null,
           peak_market_cap: peakMarketCap || null,
+          crossed_50k: crossed50k,
+          crossed_100k: crossed100k,
+          crossed_250k: crossed250k,
+          crossed_500k: crossed500k,
           crossed_1m: crossed1m,
           last_checked_at: new Date().toISOString(),
         })
