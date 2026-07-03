@@ -41,10 +41,6 @@ export async function runCreatorMarketTracker() {
     .from('creator_launches')
     .select('creator_wallet, token, symbol, peak_market_cap')
     .eq('crossed_1m', false)
-    .gte(
-      'launched_at',
-      new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
-    )
     .order('last_checked_at', { ascending: true })
     .limit(25);
 
