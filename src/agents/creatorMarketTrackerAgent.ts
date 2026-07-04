@@ -86,15 +86,32 @@ export async function runCreatorMarketTracker() {
 
       let currentMarketCap = num(result?.marketCap);
 
+      console.log('creator enrichment result:', {
+        token: row.token,
+        symbol: row.symbol,
+        dexMarketCap: result?.marketCap ?? null,
+      });
+
         if (!currentMarketCap) {
           const pairMarketCap = await fetchDexscreenerPairMarketCap(row.token);
           currentMarketCap = num(pairMarketCap);
         }
 
+        console.log('creator pair fallback:', {
+          token: row.token,
+          pairMarketCap: currentMarketCap,
+        });
+
         if (!currentMarketCap) {
           const pumpMarketCap = await fetchPumpfunMarketCap(row.token);
           currentMarketCap = num(pumpMarketCap);
         }
+
+        console.log('creator final market cap:', {
+          token: row.token,
+          finalMarketCap: currentMarketCap,
+        });
+        
       const previousPeak = num(row.peak_market_cap);
       const peakMarketCap = Math.max(previousPeak, currentMarketCap);
       const crossed1m = peakMarketCap >= 1_000_000;
