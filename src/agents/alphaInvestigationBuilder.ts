@@ -1,4 +1,5 @@
 import type { DexPair, RiskResult } from '../types.js';
+import { getCreatorProfile } from '../profiles/creatorProfile.js';
 import type {
   AlphaChecklistItem,
   AlphaInvestigation,
@@ -118,7 +119,7 @@ function buildExecutiveSummary(args: {
   const riskSignals = [...result.checksWarn, ...result.checksBad].slice(0, 2);
 
   const verdictText = verdict
-    .replaceAll('_', ' ')
+    .replace(/_/g, ' ')
     .toLowerCase();
 
   const goodText =
@@ -134,17 +135,19 @@ function buildExecutiveSummary(args: {
   return `AlphaOS classifies ${symbol} as ${verdictText} with ${confidence}% confidence. Positive evidence includes ${goodText}. Key risks include ${riskText}. This is a research assessment, not a buy signal.`;
 }
 
-export function buildAlphaInvestigation(args: {
+export async function buildAlphaInvestigation(args: {
   tokenAddress: string;
   pair: DexPair;
   result: RiskResult;
-}): AlphaInvestigation {
+  creatorWallet?: string | null;
+}): Promise<AlphaInvestigation> {
   const { tokenAddress, pair, result } = args;
 
   const verdict = getVerdict(result);
   const confidence = buildConfidence(result);
   const suggestedAction = getSuggestedAction(verdict);
   const checklist = getChecklist(result);
+  const creator = await getCreatorProfile(args.creatorWallet ?? null);
 
   const evidence = [
     ...result.checksGood,
@@ -200,6 +203,7 @@ export function buildAlphaInvestigation(args: {
       isMutable: result.isMutable,
     },
 
+    creator,
     evidence,
     risks,
     warnings,

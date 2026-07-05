@@ -28,6 +28,22 @@ export type AlphaMetric = {
   status?: ChecklistStatus;
 };
 
+export type AlphaCreatorProfile = {
+  wallet: string | null;
+  rating: 'PROVEN' | 'PROMISING' | 'UNKNOWN' | 'RISKY' | 'AVOID';
+  trustScore: number;
+  launches: number;
+  successfulLaunches: number;
+  failedLaunches: number;
+  rugs: number;
+  highestMarketCap: number;
+  averageMarketCap: number;
+  bestToken: string | null;
+  bestSymbol: string | null;
+  summary: string;
+  hasData: boolean;
+};
+
 export type AlphaInvestigation = {
   tokenAddress: string;
   chain: string;
@@ -63,6 +79,8 @@ export type AlphaInvestigation = {
     freezeAuthority: string | null;
     isMutable: boolean | null;
   };
+
+  creator: AlphaCreatorProfile;
 
   evidence: string[];
   risks: string[];

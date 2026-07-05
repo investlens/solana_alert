@@ -421,10 +421,11 @@ async function processTierDispatch() {
       const buttons = getAlertButtons(pair);
       const bucket = getActionBucket(result);
 
-      const investigation = buildAlphaInvestigation({
+      const investigation = await buildAlphaInvestigation({
         tokenAddress,
         pair,
         result,
+        creatorWallet: null,
       });
 
       const alphaMessage = buildAlphaInvestigationTelegramMessage(investigation);

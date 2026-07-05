@@ -72,6 +72,17 @@ export function buildAlphaInvestigationTelegramMessage(
   }
 
   lines.push('');
+
+lines.push('');
+lines.push('<b>Creator Intelligence</b>');
+lines.push(`• Rating: <b>${escapeHtml(investigation.creator.rating)}</b>`);
+lines.push(`• Trust Score: <b>${investigation.creator.trustScore}/100</b>`);
+lines.push(`• Launches: <b>${investigation.creator.launches}</b>`);
+lines.push(`• Successful: <b>${investigation.creator.successfulLaunches}</b>`);
+lines.push(`• Highest MC: <b>${money(investigation.creator.highestMarketCap)}</b>`);
+lines.push(`• Summary: ${escapeHtml(investigation.creator.summary)}`);
+lines.push('');
+
   lines.push('<b>Market Snapshot</b>');
   lines.push(`• Market Cap: <b>${money(investigation.market.marketCap)}</b>`);
   lines.push(`• FDV: <b>${money(investigation.market.fdv)}</b>`);
