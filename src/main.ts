@@ -1,6 +1,9 @@
 /// <reference types="node" />
 import { config } from './config.js';
 import { createBot } from './bot/index.js';
+import { buildMessage } from './ui/messageBuilder.js';
+import { buildAlphaInvestigation } from './agents/alphaInvestigationBuilder.js';
+import { buildAlphaInvestigationTelegramMessage } from './ui/alphaInvestigationMessageBuilder.js';
 import { buildEarlyAdminMessage } from './ui/earlyAdminMessageBuilder.js';
 import { captureAlertSnapshot } from './core/tracker.js';
 import { pollPumpfunEarlyFeed } from './core/pumpfunWatcher.js';
@@ -39,7 +42,6 @@ import {
 } from './ui/privateMessageBuilder.js';
 import { fmtUsd } from './utils/format.js';
 import { sleep } from './utils/format.js';
-import { buildMessage } from './ui/messageBuilder.js';
 
 const tokenStates = new Map<string, TokenState>();
 const seenTokens = new Set<string>();
@@ -56,7 +58,7 @@ function getAlertButtons(pair: {
   return [
     [
       { text: '📈 Chart', url: chartUrl },
-      { text: '🟢 Buy', url: buyUrl },
+      { text: '🟢 Buy on Jupiter', url: buyUrl },
     ],
   ];
 }
@@ -419,6 +421,14 @@ async function processTierDispatch() {
       const buttons = getAlertButtons(pair);
       const bucket = getActionBucket(result);
 
+      const investigation = buildAlphaInvestigation({
+        tokenAddress,
+        pair,
+        result,
+      });
+
+      const alphaMessage = buildAlphaInvestigationTelegramMessage(investigation);
+
       state.lastScore = result.score;
       state.lastPairAddress = pair.pairAddress ?? undefined;
 
@@ -463,7 +473,7 @@ async function processTierDispatch() {
         if (user.tier === 'admin' && !state.adminDelivered && shouldSendToAdmin(result)) {
           await safeSendTelegram(
             telegramId,
-            buildMessage({ tier: 'OWNER', pair, result, state }),
+            alphaMessage,
             buttons
           );
 
@@ -486,7 +496,7 @@ async function processTierDispatch() {
         ) {
           await safeSendTelegram(
             telegramId,
-            buildMessage({ tier: 'PAID', pair, result, state }),
+            alphaMessage,
             buttons
           );
 
