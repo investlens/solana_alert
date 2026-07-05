@@ -416,7 +416,7 @@ async function fetchCandidates(): Promise<Candidate[]> {
         socialSummary: social.socialSummary,
         hasStrongSocials: social.hasStrongSocials,
         earlyBuyers,
-        creatorWallet: null,
+        creatorWallet: (profile as any).creatorWallet ?? (profile as any).creator ?? null,
       });
     } catch (error) {
       console.log('dexPaid candidate skip', profile.tokenAddress, error);

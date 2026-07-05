@@ -62,25 +62,24 @@ async function sendMainMenu(ctx: any) {
 
   await ctx.reply(
     [
-  '⚡ <b>ALPHA RADAR</b>',
-  '',
-  '<b>Smart Money. Early Signals. Faster Conviction.</b>',
-  '',
-  `Tier: <b>${tier}</b>`,
-  user?.tier === 'admin'
-    ? 'Access: <b>Admin Alpha Terminal</b>'
-    : '🎁 <b>48 Hour Premium Trial Active</b>',
-  '',
-  user?.tier === 'admin'
-    ? 'Instant admin access enabled.'
-    : 'You currently have instant Alpha Alerts, Whale Radar access, and DEX Paid signals.',
-  '',
-  user?.tier === 'admin'
-    ? ''
-    : 'After 48 hours, free delayed alerts continue. Upgrade anytime for unlimited instant alpha.',
-  '',
-  'Choose a module below:',
-].filter(Boolean).join('\n'),
+      '🧠 <b>AlphaOS AI</b>',
+      '',
+      '<b>AI Crypto Research Terminal</b>',
+      '',
+      `Plan: <b>${tier}</b>`,
+      user?.tier === 'admin'
+        ? 'Access: <b>Admin Research Terminal</b>'
+        : '🎁 <b>48 Hour Research Trial Active</b>',
+      '',
+      'AlphaOS investigates crypto opportunities using AI, creator intelligence, smart wallet activity, liquidity, market structure, and risk evidence.',
+      '',
+      'This is not a signal bot.',
+      '<b>Evidence before execution.</b>',
+      '',
+      '━━━━━━━━━━━━━━━━━━━━━━',
+      '',
+      '<b>Choose your workspace</b>',
+    ].filter(Boolean).join('\n'),
     {
       parse_mode: 'HTML',
       ...mainAlphaMenu(),
@@ -108,15 +107,15 @@ export function registerBotCommands(bot: Telegraf<any>) {
 
   await renderScreen(ctx,
     [
-      '🚀 <b>ALPHA FEED</b>',
+      '🧠 <b>ALPHAOS RESEARCH</b>',
       '━━━━━━━━━━━━━━━━',
       '',
-      '<b>High-conviction signals only.</b>',
+      '<b>AI-ranked institutional opportunities.</b>',
       '',
-      '🔥 Live Alpha — strongest current calls',
+      '🧠 AI Investigations — strongest current calls',
       '🐋 Whale Radar — smart wallet activity',
-      '🧠 Creator Intel — launch reputation',
-      '📜 History — tracked performance',
+      '👤 Creator Intelligence — launch reputation',
+      '📈 Performance Archive — tracked performance',
       '',
       'Choose a module:',
     ].join('\n'),
