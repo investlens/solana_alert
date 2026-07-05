@@ -15,6 +15,7 @@ import { buildPumpfunEarlyMessage } from './ui/pumpfunMessageBuilder.js';
 import { runAutoTradeManager } from './core/autoTradeManager.js';
 import { runCreatorMarketTracker } from './agents/creatorMarketTrackerAgent.js';
 import { runOutcomeLearningAgent } from './agents/outcomeLearningAgent.js';
+import { getCreatorProfile } from './profiles/creatorProfile.js';
 import {
   createAlertDelivery,
   createAlertRecord,
@@ -125,11 +126,14 @@ async function startPumpfunWatch() {
       const events = await pollPumpfunEarlyFeed();
 
       for (const event of events) {
+        const creatorProfile = await getCreatorProfile(event.creator ?? null);
+
         const text = buildPumpfunEarlyMessage({
           symbol: event.symbol,
           name: event.name,
           mint: event.mint,
           creator: event.creator,
+          creatorProfile,
           progressPct: event.progressPct,
           buyCount: event.buyCount,
           sellCount: event.sellCount,
