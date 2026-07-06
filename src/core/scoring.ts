@@ -1,7 +1,6 @@
 import { config } from '../config.js';
 import type { DexPair, DexProfile, RiskResult } from '../types.js';
 import { computeMarketSafetyScore } from './marketSafety.js';
-import { fetchAuthorityInfo } from './helius.js';
 import { computeAuthoritySafetyScore } from './authoritySafety.js';
 
 export async function scoreToken(args: {
@@ -39,14 +38,12 @@ export async function scoreToken(args: {
 
   const mintAddress = pair.baseToken?.address ?? '';
 
-  const authorityInfo = mintAddress
-    ? await fetchAuthorityInfo(mintAddress)
-    : {
-        mintAuthority: null,
-        freezeAuthority: null,
-        updateAuthority: null,
-        isMutable: null,
-      };
+  const authorityInfo = {
+    mintAuthority: null,
+    freezeAuthority: null,
+    updateAuthority: null,
+    isMutable: null,
+  };
 
   const authoritySafety = computeAuthoritySafetyScore(authorityInfo);
 

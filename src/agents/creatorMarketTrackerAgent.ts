@@ -42,8 +42,7 @@ export async function runCreatorMarketTracker() {
     .from('creator_launches')
     .select('creator_wallet, token, symbol, peak_market_cap')
     .eq('crossed_1m', false)
-    .is('peak_market_cap', null)
-    .order('last_checked_at', { ascending: true })
+    .order('last_checked_at', { ascending: true, nullsFirst: true })
     .limit(25);
 
   if (error) {

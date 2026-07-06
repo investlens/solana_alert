@@ -7,6 +7,12 @@ import { recordDecisionForToken } from '../agents/decisionAgent.js';
 import { canSendTokenAlert } from '../core/alertDeduper.js';
 import { calculateConfidence } from '../agents/confidenceAgent.js';
 import {
+  getCreatorIntelligenceV2,
+  getCreatorWalletForTokenV2,
+  buildCreatorIntelligenceV2Lines,
+} from '../profiles/creatorIntelligenceV2.js';
+import { getCreatorWalletForToken } from '../profiles/tokenCreatorLookup.js';
+import {
   getCreatorReputation,
   creatorTrustLabel,
 } from '../core/creatorReputation.js';
@@ -416,7 +422,10 @@ async function fetchCandidates(): Promise<Candidate[]> {
         socialSummary: social.socialSummary,
         hasStrongSocials: social.hasStrongSocials,
         earlyBuyers,
-        creatorWallet: (profile as any).creatorWallet ?? (profile as any).creator ?? null,
+        creatorWallet:
+            (profile as any).creatorWallet ??
+            (profile as any).creator ??
+            (await getCreatorWalletForToken(token)),
       });
     } catch (error) {
       console.log('dexPaid candidate skip', profile.tokenAddress, error);
@@ -441,8 +450,12 @@ export async function runDexPaidEngine() {
 
     let holderRisk = { score: 0, level: 'LOW', reasons: [] as string[], topHolderCount: 0 };
 
-    const creatorRep = await getCreatorReputation(c.creatorWallet);
-    const creatorScore = creatorRep?.trust_score ?? 50;
+    const creatorWallet =
+  c.creatorWallet ?? (await getCreatorWalletForTokenV2(c.token));
+
+    const creatorIntel = await getCreatorIntelligenceV2(creatorWallet);
+
+    const creatorScore = creatorIntel.score;
     const tier = signalTier(
       c,
       score,
@@ -655,9 +668,8 @@ export async function runDexPaidEngine() {
       '🌐 <b>Socials</b>',
       `<b>${escapeHtml(c.socialSummary)}</b>`,
       '',
-      '🧠 <b>Creator</b>',
-        `Trust: <b>${creatorLabel}</b> (${creatorScore}/100)`,
-        '',
+      ...buildCreatorIntelligenceV2Lines(creatorIntel),
+      '', 
 
         '🤖 <b>AI Verdict</b>',
         `Decision: <b>${aiDecision.verdict}</b>`,
