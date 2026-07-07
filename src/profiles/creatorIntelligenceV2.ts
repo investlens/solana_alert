@@ -195,26 +195,52 @@ export function buildCreatorIntelligenceV2Lines(intel: CreatorIntelligenceV2) {
   const lines: string[] = [];
 
   lines.push('👤 <b>Creator Intelligence</b>');
+
+  if (!intel.creatorWallet || intel.status === 'UNKNOWN') {
+    lines.push('Status: <b>Not identified yet</b>');
+    lines.push('Verdict: <b>Creator wallet not available for this token source.</b>');
+    lines.push('Note: AlphaOS will continue tracking once creator data is available.');
+    return lines;
+  }
+
   lines.push(`Wallet: <code>${shortWallet(intel.creatorWallet)}</code>`);
   lines.push(`Status: <b>${intel.status}</b>`);
   lines.push(`Score: <b>${intel.score}/100</b>`);
-  lines.push(`Launches: <b>${intel.totalLaunches}</b>`);
-  lines.push(`Best MC: <b>${fmtUsd(intel.bestMarketCap)}</b>`);
-  lines.push(`Crossed $50K: <b>${intel.crossed50k}</b>`);
-  lines.push(`Crossed $100K: <b>${intel.crossed100k}</b>`);
-  lines.push(`Crossed $1M: <b>${intel.crossed1m}</b>`);
+  lines.push(`Launches Tracked: <b>${intel.totalLaunches}</b>`);
+
+  if (intel.bestMarketCap > 0) {
+    lines.push(`Best MC: <b>${fmtUsd(intel.bestMarketCap)}</b>`);
+  }
+
+  const wins =
+    intel.crossed1m > 0
+      ? `${intel.crossed1m} crossed $1M`
+      : intel.crossed500k > 0
+        ? `${intel.crossed500k} crossed $500K`
+        : intel.crossed250k > 0
+          ? `${intel.crossed250k} crossed $250K`
+          : intel.crossed100k > 0
+            ? `${intel.crossed100k} crossed $100K`
+            : intel.crossed50k > 0
+              ? `${intel.crossed50k} crossed $50K`
+              : null;
+
+  if (wins) {
+    lines.push(`Wins: <b>${wins}</b>`);
+  }
+
   lines.push(`Verdict: <b>${intel.verdict}</b>`);
 
   if (intel.strengths.length) {
     lines.push('');
-    lines.push('<b>Creator Strengths</b>');
-    lines.push(...intel.strengths.slice(0, 3).map((x) => `✅ ${x}`));
+    lines.push('<b>Strengths</b>');
+    lines.push(...intel.strengths.slice(0, 2).map((x) => `✅ ${x}`));
   }
 
   if (intel.risks.length) {
     lines.push('');
-    lines.push('<b>Creator Risks</b>');
-    lines.push(...intel.risks.slice(0, 3).map((x) => `⚠️ ${x}`));
+    lines.push('<b>Risks</b>');
+    lines.push(...intel.risks.slice(0, 2).map((x) => `⚠️ ${x}`));
   }
 
   return lines;
