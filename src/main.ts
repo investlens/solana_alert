@@ -17,6 +17,8 @@ import { runCreatorMarketTracker } from './agents/creatorMarketTrackerAgent.js';
 import { recordTokenMemoryEvent } from './memory/tokenMemoryEvents.js';
 import { runOutcomeLearningAgent } from './agents/outcomeLearningAgent.js';
 import { getCreatorProfile } from './profiles/creatorProfile.js';
+import { startMemoryTracker } from './agents/memoryTrackerAgent.js';
+import { buildProAlertMessage } from './ui/proAlertMessageBuilder.js';
 import { upsertTokenMemory } from './memory/tokenMemory.js';
 import {
   createAlertDelivery,
@@ -477,7 +479,12 @@ async function processTierDispatch() {
         creatorWallet: null,
       });
 
-      const alphaMessage = buildAlphaInvestigationTelegramMessage(investigation);
+      const alphaMessage = buildProAlertMessage({
+        pair,
+        result,
+        state,
+        bucket,
+      });
 
       state.lastScore = result.score;
       state.lastPairAddress = pair.pairAddress ?? undefined;
@@ -683,7 +690,12 @@ async function startBot() {
 async function main() {
   console.log('main() started');
 
-  const tasks = [startScanner(), startWalletWatch(), startPumpfunWatch()];
+  const tasks = [
+    startScanner(),
+    startWalletWatch(),
+    startPumpfunWatch(),
+    startMemoryTracker(),
+  ];
 
   if (process.env.RUN_TELEGRAM_BOT === 'true') {
     tasks.unshift(startBot());

@@ -29,13 +29,45 @@ function cleanNumber(value?: number | null) {
   return value != null && Number.isFinite(value) ? value : null;
 }
 
+async function hasExistingAlertCreated(token: string) {
+  const { data, error } = await supabase
+    .from('token_memory_events')
+    .select('id')
+    .eq('token', token)
+    .eq('event_type', 'ALERT_CREATED')
+    .limit(1);
+
+  if (error) {
+    console.log('hasExistingAlertCreated error:', {
+      token,
+      error: error.message,
+    });
+    return false;
+  }
+
+  return Boolean(data?.length);
+}
+
 export async function recordTokenMemoryEvent(input: TokenMemoryEventInput) {
   if (!input.token) return;
+
+  const eventType = input.eventType ?? 'SNAPSHOT';
+
+  if (eventType === 'ALERT_CREATED') {
+    const exists = await hasExistingAlertCreated(input.token);
+
+    if (exists) {
+      console.log('token memory event skipped duplicate ALERT_CREATED:', {
+        token: input.token,
+      });
+      return;
+    }
+  }
 
   const { error } = await supabase.from('token_memory_events').insert({
     token: input.token,
     chain: input.chain ?? 'solana',
-    event_type: input.eventType ?? 'SNAPSHOT',
+    event_type: eventType,
     event_source: input.eventSource ?? null,
 
     market_cap: cleanNumber(input.marketCap),
