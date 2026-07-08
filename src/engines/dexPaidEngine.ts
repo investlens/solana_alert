@@ -6,6 +6,7 @@ import { addAlphaSignal } from './alphaFeed.js';
 import { recordDecisionForToken } from '../agents/decisionAgent.js';
 import { canSendTokenAlert } from '../core/alertDeduper.js';
 import { calculateConfidence } from '../agents/confidenceAgent.js';
+import { upsertTokenMemory } from '../memory/tokenMemory.js';
 import {
   getCreatorIntelligenceV2,
   getCreatorWalletForTokenV2,
@@ -602,6 +603,29 @@ export async function runDexPaidEngine() {
     }
 
     seen.add(c.token);
+
+    await upsertTokenMemory({
+      token: c.token,
+      symbol: c.symbol,
+      chain: 'solana',
+      creatorWallet,
+      marketCap: c.marketCap,
+      liquidity: c.liquidity,
+      price: c.priceUsd,
+      buys: c.buys5m,
+      sells: c.sells5m,
+      confidence: confidenceResult.confidence,
+      riskLevel: confidenceResult.riskLevel,
+      creatorScore,
+      holderScore: holderRisk.score,
+      raw: {
+        source: 'DEX_PAID',
+        tier,
+        score,
+        socialScore: c.socialScore,
+        socialSummary: c.socialSummary,
+      },
+    });
 
     addAlphaSignal({
       type: 'DEX_PAID',

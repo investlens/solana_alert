@@ -14,8 +14,10 @@ import { runSignalPerformanceEngine } from './engines/signalPerformanceEngine.js
 import { buildPumpfunEarlyMessage } from './ui/pumpfunMessageBuilder.js';
 import { runAutoTradeManager } from './core/autoTradeManager.js';
 import { runCreatorMarketTracker } from './agents/creatorMarketTrackerAgent.js';
+import { recordTokenMemoryEvent } from './memory/tokenMemoryEvents.js';
 import { runOutcomeLearningAgent } from './agents/outcomeLearningAgent.js';
 import { getCreatorProfile } from './profiles/creatorProfile.js';
+import { upsertTokenMemory } from './memory/tokenMemory.js';
 import {
   createAlertDelivery,
   createAlertRecord,
@@ -296,6 +298,49 @@ async function processNewProfiles() {
 
       state.alertId = alertRecord.id;
       tokenStates.set(tokenAddress, state);
+
+      await upsertTokenMemory({
+        token: tokenAddress,
+        symbol: pair.baseToken?.symbol ?? null,
+        name: pair.baseToken?.name ?? null,
+        chain: config.discoveryChain,
+        marketCap: result.marketCap,
+        liquidity: result.liquidityUsd,
+        price: result.currentPrice,
+        buys: result.buys5m,
+        sells: result.sells5m,
+        confidence: result.score,
+        riskLevel: result.risk,
+        holderScore: result.marketSafetyScore,
+        authorityScore: result.authoritySafetyScore,
+        raw: {
+          source: 'MAIN_ALERT',
+          actionBucket: getActionBucket(result),
+          alertId: alertRecord.id,
+        },
+      });
+
+      await recordTokenMemoryEvent({
+        token: tokenAddress,
+        chain: config.discoveryChain,
+        eventType: 'ALERT_CREATED',
+        eventSource: 'MAIN_ALERT',
+        marketCap: result.marketCap,
+        liquidity: result.liquidityUsd,
+        price: result.currentPrice,
+        buys: result.buys5m,
+        sells: result.sells5m,
+        alphaScore: result.score,
+        aiConfidence: result.score,
+        riskLevel: result.risk,
+        holderScore: result.marketSafetyScore,
+        note: `${pair.baseToken?.symbol ?? tokenAddress} alert created with ${getActionBucket(result)} bucket`,
+        raw: {
+          actionBucket: getActionBucket(result),
+          alertId: alertRecord.id,
+          pairAddress: pair.pairAddress ?? null,
+        },
+      });
 
       console.log(
         `ALERT STORED: ${pair.baseToken?.symbol ?? tokenAddress} score=${result.score} bucket=${getActionBucket(result)}`
