@@ -654,79 +654,115 @@ export async function runDexPaidEngine() {
       });
     }
 
-    const barUnits = Math.max(0, Math.min(10, Math.floor(score / 10)));
-    const confidenceBar = '█'.repeat(barUnits) + '░'.repeat(10 - barUnits);
+    const confidenceUnits = Math.max(
+      0,
+      Math.min(10, Math.floor(confidenceResult.confidence / 10))
+    );
+
+    const confidenceBar =
+      '█'.repeat(confidenceUnits) + '░'.repeat(10 - confidenceUnits);
 
     const entryTiming =
-      c.ageMin <= 10 ? '🔥 EARLY' :
-      c.ageMin <= 30 ? '⚡ EARLY-MID' :
-      c.ageMin <= 60 ? '🟡 MID' :
-      '🔻 LATE';
+      c.ageMin <= 10
+        ? '🔥 EARLY'
+        : c.ageMin <= 30
+          ? '⚡ EARLY-MID'
+          : c.ageMin <= 60
+            ? '🟡 MID'
+            : '🔻 LATE';
+
+    const signalTitle =
+      tier === 'P0'
+        ? '🚀 <b>HIGH CONVICTION SIGNAL</b>'
+        : tier === 'P1'
+          ? '🔥 <b>PRIORITY BUY SIGNAL</b>'
+          : '🟡 <b>WATCHLIST SIGNAL</b>';
+
+    const shortToken = `${c.token.slice(0, 6)}...${c.token.slice(-6)}`;
+
+    const holderRiskText =
+      holderRisk.topHolderCount > 0
+        ? `${holderRisk.level} (${holderRisk.score}/100)`
+        : 'Pending — not enough holder data yet';
+
+    const bundleRiskText =
+    c.earlyBuyers.length > 0
+      ? consolidationRisk.score >= 70
+        ? `HIGH (${consolidationRisk.score}/100)`
+        : consolidationRisk.score >= 40
+          ? `MEDIUM (${consolidationRisk.score}/100)`
+          : `LOW (${consolidationRisk.score}/100)`
+      : 'Pending — not enough wallet data yet';
+
+    const creatorSummary =
+      creatorIntel.creatorWallet
+        ? `${creatorIntel.status} • ${creatorIntel.score}/100 • ${creatorIntel.totalLaunches} launches`
+        : 'Not identified yet — AlphaOS will keep tracking';
+
+    const aiReason =
+      aiDecision.reasons.slice(0, 2).join(', ') ||
+      confidenceResult.reasons.slice(0, 2).join(', ') ||
+      'Watching confirmation signals';
 
     const message = [
-      tier === 'P0'
-      ? '🐋 <b>P0 BLUE CHIP SIGNAL</b>'
-      : tier === 'P1'
-        ? '🔥 <b>P1 HIGH CONVICTION SIGNAL</b>'
-        : '👀 <b>P2 WATCHLIST SIGNAL</b>',
+      '🧠 <b>ALPHAOS AI</b>',
+      signalTitle,
       '━━━━━━━━━━━━━━━━━━',
       '',
-      `<b>${escapeHtml(c.symbol)}</b>`,
-      `<code>${escapeHtml(c.token)}</code>`,
+      `🪙 <b>${escapeHtml(c.symbol)}</b>`,
+      `<code>${escapeHtml(shortToken)}</code>`,
       '',
-      `Score: <b>${score}/100</b>`,
-      `AI Confidence: <b>${confidenceResult.confidence}/100</b>`,
-      `Risk Level: <b>${confidenceResult.riskLevel}</b>`,
-      `Confidence: <b>${confidenceBar}</b>`,
-      `Timing: <b>${entryTiming}</b>`,
+      `⭐ Alpha Score: <b>${score}/100</b>`,
+      `🧠 AI Confidence: <b>${confidenceResult.confidence}/100</b>`,
+      `🛡 Risk Level: <b>${confidenceResult.riskLevel}</b>`,
+      `📊 Confidence: <b>${confidenceBar}</b>`,
+      `⏱ Timing: <b>${entryTiming}</b>`,
       '',
-      '📊 <b>Market</b>',
-      `MC: <b>${fmtUsd(c.marketCap)}</b>`,
-      `Liq: <b>${fmtUsd(c.liquidity)}</b>`,
-      `Vol(5m): <b>${fmtUsd(c.volume5m)}</b>`,
+      '━━━━━━━━━━━━━━━━━━',
+      '💰 <b>Market Structure</b>',
+      `Market Cap: <b>${fmtUsd(c.marketCap)}</b>`,
+      `Liquidity: <b>${fmtUsd(c.liquidity)}</b>`,
+      `5m Volume: <b>${fmtUsd(c.volume5m)}</b>`,
+      `Price: <b>${fmtPrice(c.priceUsd)}</b>`,
       '',
       '⚡ <b>Orderflow</b>',
       `Buy Ratio: <b>${buyRatio(c).toFixed(2)}x</b>`,
       `Buys/Sells: <b>${c.buys5m}/${c.sells5m}</b>`,
       '',
-      '🌐 <b>Socials</b>',
+      '🌐 <b>Social Layer</b>',
       `<b>${escapeHtml(c.socialSummary)}</b>`,
       '',
-      ...buildCreatorIntelligenceV2Lines(creatorIntel),
-      '', 
-
-        '🤖 <b>AI Verdict</b>',
-        `Decision: <b>${aiDecision.verdict}</b>`,
-        `Confidence: <b>${aiDecision.confidence}/100</b>`,
-        `Reason: <b>${
-          aiDecision.reasons.slice(0, 2).join(', ') ||
-          'Watching conditions'
-        }</b>`,
-        '',
-
-        '🛡 <b>Risk</b>',
-      `Holder Risk: <b>${
-        holderRisk.topHolderCount > 0
-          ? `${holderRisk.score}/100`
-          : 'Data unavailable'
-      }</b>`,
-      `Bundle Risk: <b>${
-        c.earlyBuyers.length > 0
-          ? `${consolidationRisk.score}/100`
-          : 'Not enough wallet data'
-      }</b>`,
+      '━━━━━━━━━━━━━━━━━━',
+      '👤 <b>Creator Intelligence</b>',
+      `<b>${creatorSummary}</b>`,
+      creatorIntel.bestMarketCap > 0
+        ? `Best MC: <b>${fmtUsd(creatorIntel.bestMarketCap)}</b>`
+        : 'Best MC: <b>Tracking</b>',
+      creatorIntel.verdict
+        ? `Verdict: <b>${escapeHtml(creatorIntel.verdict)}</b>`
+        : 'Verdict: <b>Learning profile</b>',
+      '',
+      '🛡 <b>Risk Intelligence</b>',
+      `Holder Risk: <b>${holderRiskText}</b>`,
+      `Bundle Risk: <b>${bundleRiskText}</b>`,
       `Known Buyers: <b>${c.earlyBuyers.length}</b>`,
+      '',
+      '━━━━━━━━━━━━━━━━━━',
+      '🤖 <b>AlphaOS Verdict</b>',
+      `Decision: <b>${aiDecision.verdict}</b>`,
+      `AI Confidence: <b>${aiDecision.confidence}/100</b>`,
+      `Reason: <b>${escapeHtml(aiReason)}</b>`,
+      '',
+      '📚 <b>Alpha Memory</b>',
+      'This token is now being tracked.',
+      'Future updates will improve AlphaOS scoring.',
       '',
       '🤖 <b>Auto Trade</b>',
       isAutoTradePaused()
         ? '⏸ Paused'
         : autoBuyPasses
-          ? '🟢 Live (Ready)'
+          ? '🟢 Live — ready'
           : '👀 Monitoring',
-          
-        '',
-        '<b>🧠 AI Reasoning</b>',
-        ...confidenceResult.reasons.map((r) => `• ${r}`),
     ].join('\n');
 
     if (!canSendTokenAlert(c.token, 'DEX_PAID')) {

@@ -1,6 +1,7 @@
 import { Markup, Telegraf } from 'telegraf';
 import { config } from '../config.js';
 import { getTradeLearningSummary } from '../core/tradeLearning.js';
+import { registerAdminTerminal } from './admin/terminal.js';
 import {
   getAdminWalletAddress,
   getAdminWalletBalance,
@@ -88,6 +89,7 @@ async function sendMainMenu(ctx: any) {
 }
 
 export function registerBotCommands(bot: Telegraf<any>) {
+  registerAdminTerminal(bot);
   bot.start(async (ctx) => {
     const telegramId = String(ctx.from?.id ?? '');
     const username = ctx.from?.username;
