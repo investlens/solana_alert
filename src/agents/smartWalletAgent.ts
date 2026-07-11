@@ -15,23 +15,40 @@ export async function recordWalletTrade(args: {
   action: 'BUY' | 'SELL';
   amountSol?: number | null;
   marketCapAtAction?: number | null;
+  entryPrice?: number | null;
+  entryLiquidity?: number | null;
 }) {
   if (!args.wallet || !args.token) return;
 
-  const { error } = await supabase.from('wallet_trade_history').upsert(
-    {
+  const payload: Record<string, unknown> = {
+    wallet: args.wallet,
+    token: args.token,
+    action: args.action,
+    amount_sol: args.amountSol ?? null,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (args.action === 'BUY') {
+    payload.market_cap_at_action = args.marketCapAtAction ?? null;
+    payload.entry_price = args.entryPrice ?? null;
+    payload.entry_liquidity = args.entryLiquidity ?? null;
+    payload.outcome = 'TRACKING';
+  }
+
+  const { error } = await supabase
+    .from('wallet_trade_history')
+    .upsert(payload, {
+      onConflict: 'wallet,token,action',
+    });
+
+  if (error) {
+    console.log('recordWalletTrade error:', {
       wallet: args.wallet,
       token: args.token,
       action: args.action,
-      amount_sol: args.amountSol ?? null,
-      market_cap_at_action: args.marketCapAtAction ?? null,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: 'wallet,token,action' }
-  );
+      error: error.message,
+    });
 
-  if (error) {
-    console.log('recordWalletTrade error:', error);
     return;
   }
 
@@ -39,7 +56,10 @@ export async function recordWalletTrade(args: {
     wallet: args.wallet,
     token: args.token,
     action: args.action,
+    amountSol: args.amountSol ?? null,
     marketCapAtAction: args.marketCapAtAction ?? null,
+    entryPrice: args.entryPrice ?? null,
+    entryLiquidity: args.entryLiquidity ?? null,
   });
 }
 

@@ -16,10 +16,16 @@ import { runAutoTradeManager } from './core/autoTradeManager.js';
 import { runCreatorMarketTracker } from './agents/creatorMarketTrackerAgent.js';
 import { recordTokenMemoryEvent } from './memory/tokenMemoryEvents.js';
 import { runOutcomeLearningAgent } from './agents/outcomeLearningAgent.js';
+import { runCreatorReputationEngine } from './agents/creatorReputationEngine.js';
 import { getCreatorProfile } from './profiles/creatorProfile.js';
 import { startMemoryTracker } from './agents/memoryTrackerAgent.js';
 import { buildProAlertMessage } from './ui/proAlertMessageBuilder.js';
+import { startOutcomeCheckpointAgent } from './agents/outcomeCheckpointAgent.js';
 import { upsertTokenMemory } from './memory/tokenMemory.js';
+import {
+  syncWalletTradeOutcomes,
+  recalculateAllWalletReputations,
+} from './agents/walletOutcomeEngine.js';
 import {
   createAlertDelivery,
   createAlertRecord,
@@ -629,6 +635,18 @@ let lastCreatorMarketTrackerRun = 0;
 
 let lastOutcomeLearningRun = 0;
 
+let lastCreatorReputationRun = 0;
+
+let lastWalletOutcomeRun = 0;
+
+function shouldRunCreatorReputationEngine() {
+  const intervalMs = Number(
+    process.env.CREATOR_REPUTATION_MS ?? 15 * 60 * 1000
+  );
+
+  return Date.now() - lastCreatorReputationRun >= intervalMs;
+}
+
 function shouldRunOutcomeLearningAgent() {
   const intervalMs = Number(process.env.OUTCOME_LEARNING_MS ?? 10 * 60 * 1000);
   return Date.now() - lastOutcomeLearningRun >= intervalMs;
@@ -655,6 +673,19 @@ async function startScanner() {
 
         lastCreatorMarketTrackerRun = Date.now();
         await runCreatorMarketTracker();
+        if (shouldRunCreatorReputationEngine()) {
+          lastCreatorReputationRun = Date.now();
+          await runCreatorReputationEngine();
+        }
+        const walletOutcomeInterval = Number(
+          process.env.WALLET_OUTCOME_MS ?? 10 * 60 * 1000
+        );
+
+        if (Date.now() - lastWalletOutcomeRun >= walletOutcomeInterval) {
+          lastWalletOutcomeRun = Date.now();
+          await syncWalletTradeOutcomes();
+        }
+
       if (shouldRunOutcomeLearningAgent()) {
         lastOutcomeLearningRun = Date.now();
         await runOutcomeLearningAgent();
@@ -695,6 +726,7 @@ async function main() {
     startWalletWatch(),
     startPumpfunWatch(),
     startMemoryTracker(),
+    startOutcomeCheckpointAgent(),
   ];
 
   if (process.env.RUN_TELEGRAM_BOT === 'true') {

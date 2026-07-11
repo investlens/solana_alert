@@ -59,6 +59,11 @@ export async function upsertTokenMemory(input: TokenMemoryInput) {
 
     last_updated: new Date().toISOString(),
 
+    alert_market_cap: existing ? undefined : marketCap,
+    alert_price: existing ? undefined : price,
+    alert_liquidity: existing ? undefined : liquidity,
+    alert_created_at: existing ? undefined : new Date().toISOString(),
+
     first_market_cap: existing ? undefined : marketCap,
     current_market_cap: marketCap,
     peak_market_cap: peakMarketCap,

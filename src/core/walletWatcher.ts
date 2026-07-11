@@ -1,6 +1,9 @@
 import { config } from '../config.js';
 import { recordWhaleHit } from '../engines/whaleClusterEngine.js';
 import { recordWalletTrade } from '../agents/smartWalletAgent.js';
+import { enrichTokenByMintAddress } from '../services/dexscreener.js';
+import { upsertTokenMemory } from '../memory/tokenMemory.js';
+import { fetchEnhancedTransactionsForAddress } from './helius.js';
 import { supabase } from '../services/supabase.js';
 import {
   recordWalletBuy,
@@ -59,7 +62,6 @@ type WalletSellEvent = Extract<WalletWatchEvent, { kind: 'sell' }>;
 type WalletLaunchEvent = Extract<WalletWatchEvent, { kind: 'launch' }>;
 
 const seenSignatures = new Set<string>();
-const walletBackoffUntil = new Map<string, number>();
 
 const tokenBuyerMap = new Map<string, Set<string>>();
 
@@ -67,35 +69,6 @@ function now() {
   return Date.now();
 }
 
-async function fetchEnhancedTransactionsForWallet(wallet: string): Promise<EnhancedTx[]> {
-  if (!config.heliusApiKey) return [];
-
-  const backoffUntil = walletBackoffUntil.get(wallet) ?? 0;
-
-  if (backoffUntil > now()) {
-    const waitSec = Math.ceil((backoffUntil - now()) / 1000);
-    console.log(`wallet watcher backoff active for ${wallet}: ${waitSec}s remaining`);
-    return [];
-  }
-
-  const url = `https://api-mainnet.helius-rpc.com/v0/addresses/${wallet}/transactions?api-key=${config.heliusApiKey}&limit=10`;
-
-  const res = await fetch(url);
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-
-    if (res.status === 429) {
-      walletBackoffUntil.set(wallet, now() + 5 * 60 * 1000);
-      console.log(`wallet watcher 429 for ${wallet}, backing off 5 minutes`);
-      return [];
-    }
-
-    throw new Error(`Helius wallet tx fetch failed ${res.status}: ${text}`);
-  }
-
-  return (await res.json()) as EnhancedTx[];
-}
 
 function lamportsToSol(lamports?: number): number | null {
   if (lamports == null || !Number.isFinite(lamports)) return null;
@@ -246,7 +219,10 @@ export async function pollWatchedWallets(): Promise<WalletWatchEvent[]> {
 
   for (const wallet of config.watchedWallets) {
     try {
-      const txs = await fetchEnhancedTransactionsForWallet(wallet);
+      const txs = (await fetchEnhancedTransactionsForAddress(
+        wallet,
+        10
+      )) as EnhancedTx[];
 
       for (const tx of txs) {
         if (!tx.signature) continue;
@@ -292,12 +268,107 @@ export async function pollWatchedWallets(): Promise<WalletWatchEvent[]> {
             amountSol: buyEvent.amountSol,
           });
 
-          await recordWalletTrade({
-            wallet,
-            token: buyEvent.tokenMint ?? '',
-            action: 'BUY',
-            amountSol: buyEvent.amountSol,
-          });
+        let pair: any = null;
+let result: any = null;
+
+let marketCapAtAction: number | null = null;
+let entryPrice: number | null = null;
+let entryLiquidity: number | null = null;
+
+try {
+  const enriched = buyEvent.tokenMint
+    ? await enrichTokenByMintAddress(buyEvent.tokenMint)
+    : null;
+
+  pair = enriched?.pair ?? null;
+  result = enriched?.result ?? null;
+
+  marketCapAtAction =
+    result?.marketCap != null &&
+    Number.isFinite(Number(result.marketCap))
+      ? Number(result.marketCap)
+      : null;
+
+  entryPrice =
+    result?.currentPrice != null &&
+    Number.isFinite(Number(result.currentPrice))
+      ? Number(result.currentPrice)
+      : null;
+
+  entryLiquidity =
+    result?.liquidityUsd != null &&
+    Number.isFinite(Number(result.liquidityUsd))
+      ? Number(result.liquidityUsd)
+      : null;
+} catch (error) {
+  console.log('wallet buy enrichment failed:', {
+    wallet,
+    token: buyEvent.tokenMint,
+    error: error instanceof Error ? error.message : String(error),
+  });
+}
+
+/*
+ * Every watched-wallet BUY must also enter Alpha Memory.
+ * This connects the wallet trade to the token outcome checkpoints.
+ */
+if (buyEvent.tokenMint) {
+  try {
+    await upsertTokenMemory({
+      token: buyEvent.tokenMint,
+      symbol: pair?.baseToken?.symbol ?? null,
+      name: pair?.baseToken?.name ?? null,
+      chain: 'solana',
+      creatorWallet: null,
+
+      marketCap: marketCapAtAction,
+      liquidity: entryLiquidity,
+      price: entryPrice,
+
+      buys: result?.buys5m ?? null,
+      sells: result?.sells5m ?? null,
+
+      confidence: result?.score ?? null,
+      riskLevel: result?.risk ?? null,
+
+      creatorScore: null,
+      holderScore: result?.marketSafetyScore ?? null,
+      authorityScore: result?.authoritySafetyScore ?? null,
+
+      raw: {
+        source: 'SMART_WALLET_BUY',
+        wallet,
+        signature: buyEvent.signature,
+        amountSol: buyEvent.amountSol,
+      },
+    });
+
+    console.log('wallet buy added to token memory:', {
+      wallet,
+      token: buyEvent.tokenMint,
+      symbol: pair?.baseToken?.symbol ?? null,
+      marketCapAtAction,
+      entryPrice,
+      entryLiquidity,
+    });
+  } catch (error) {
+    console.log('wallet token-memory save failed:', {
+      wallet,
+      token: buyEvent.tokenMint,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+await recordWalletTrade({
+  wallet,
+  token: buyEvent.tokenMint ?? '',
+  action: 'BUY',
+  amountSol: buyEvent.amountSol,
+  marketCapAtAction,
+  entryPrice,
+  entryLiquidity,
+});
 
           events.push(buyEvent);
           seenSignatures.add(tx.signature);

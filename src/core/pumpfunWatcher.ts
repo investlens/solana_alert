@@ -1,5 +1,6 @@
 import { config } from '../config.js';
 import { recordCreatorLaunch } from '../agents/creatorIntelligenceAgent.js';
+import { upsertTokenMemory } from '../memory/tokenMemory.js';
 
 import {
   saveCreatorLaunch,
@@ -291,6 +292,34 @@ export async function pollPumpfunEarlyFeed(): Promise<PumpfunTokenEvent[]> {
     name: name || null,
     initialMarketCap: token.marketCapUsd ?? null,
   });
+
+  await upsertTokenMemory({
+      token: token.mint,
+      symbol: token.symbol ?? null,
+      name: token.name ?? null,
+      chain: 'solana',
+      creatorWallet: token.creator ?? null,
+
+      marketCap: token.marketCapUsd ?? null,
+      liquidity: null,
+      price: null,
+
+      buys: token.buyCount ?? null,
+      sells: token.sellCount ?? null,
+
+      confidence: launchScore,
+      riskLevel: null,
+
+      creatorScore: null,
+      holderScore: null,
+      authorityScore: null,
+
+      raw: {
+        source: 'PUMPFUN_LAUNCH',
+        progressPct: token.progressPct ?? null,
+        isMutable: token.isMutable ?? null,
+  },
+});
 
   console.log('creator launch saved:', {
     creator,

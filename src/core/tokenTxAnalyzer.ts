@@ -5,17 +5,22 @@ export type EarlyBuyerScan = {
   txCount: number;
 };
 
-export async function scanEarlyBuyers(token: string): Promise<EarlyBuyerScan> {
-  const txs = await fetchEnhancedTransactionsForAddress(token, 100);
+export async function scanEarlyBuyers(
+  token: string
+): Promise<EarlyBuyerScan> {
+  const txs = await fetchEnhancedTransactionsForAddress(token, 20);
 
   console.log('helius tx count:', txs.length, 'for token:', token);
 
   const buyers = new Set<string>();
 
   for (const tx of txs) {
-    for (const t of tx.tokenTransfers ?? []) {
-      if (t.mint !== token) continue;
-      if (t.toUserAccount) buyers.add(t.toUserAccount);
+    for (const transfer of tx.tokenTransfers ?? []) {
+      if (transfer.mint !== token) continue;
+
+      if (transfer.toUserAccount) {
+        buyers.add(transfer.toUserAccount);
+      }
     }
   }
 
@@ -25,7 +30,9 @@ export async function scanEarlyBuyers(token: string): Promise<EarlyBuyerScan> {
   };
 }
 
-export async function getEarlyBuyers(token: string): Promise<string[]> {
+export async function getEarlyBuyers(
+  token: string
+): Promise<string[]> {
   const scan = await scanEarlyBuyers(token);
   return scan.buyers;
 }

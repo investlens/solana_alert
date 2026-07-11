@@ -184,6 +184,8 @@ export async function fetchEnhancedTransactionsForAddress(
   }
 }
 
+let holderRiskBackoffUntil = 0;
+
 export type HolderInfo = {
   owner: string;
   amount: number;
@@ -193,6 +195,18 @@ export async function fetchTopHolders(
   mintAddress: string
 ): Promise<HolderInfo[]> {
   if (!config.heliusApiKey) return [];
+
+  if (Date.now() < holderRiskBackoffUntil) {
+    const waitSec = Math.ceil(
+      (holderRiskBackoffUntil - Date.now()) / 1000
+    );
+
+    console.log(
+      `Helius holder backoff active: ${waitSec}s remaining`
+    );
+
+    return [];
+  }
 
   const url =
     `https://mainnet.helius-rpc.com/?api-key=${config.heliusApiKey}`;
@@ -212,20 +226,47 @@ export async function fetchTopHolders(
     });
 
     if (!res.ok) {
-      console.log('fetchTopHolders failed:', res.status);
+      const text = await res.text().catch(() => '');
+
+      if (res.status === 429) {
+        holderRiskBackoffUntil =
+          Date.now() + 10 * 60 * 1000;
+
+        console.log(
+          'Helius holder endpoint rate limited, backing off 10 minutes'
+        );
+
+        return [];
+      }
+
+      console.log('fetchTopHolders failed:', {
+        status: res.status,
+        body: text,
+      });
+
       return [];
     }
 
     const json = await res.json();
-
     const values = json?.result?.value ?? [];
 
-    return values.map((v: any) => ({
-      owner: v.address,
-      amount: Number(v.uiAmount ?? 0),
+    return values.map((value: any) => ({
+      owner: value.address,
+      amount: Number(
+        value.uiAmount ??
+        value.uiAmountString ??
+        value.amount ??
+        0
+      ),
     }));
-  } catch (err) {
-    console.log('fetchTopHolders error:', err);
+  } catch (error) {
+    console.log(
+      'fetchTopHolders error:',
+      error instanceof Error
+        ? error.message
+        : String(error)
+    );
+
     return [];
   }
 }

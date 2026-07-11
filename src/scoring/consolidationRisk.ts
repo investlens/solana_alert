@@ -7,6 +7,10 @@ export type ConsolidationRisk = {
   destinationWallets: string[];
 };
 
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
 export async function getConsolidationRisk(
   mintAddress: string,
   buyers: string[]
@@ -22,23 +26,50 @@ export async function getConsolidationRisk(
 
   const destinationCounts = new Map<string, number>();
 
-  for (const wallet of buyers.slice(0, 5)) {
-    const txs = await fetchEnhancedTransactionsForAddress(wallet, 20);
+  // Only inspect the first three early buyers.
+  // This protects the Helius allowance while still providing a useful signal.
+  const walletsToInspect = buyers.slice(0, 3);
 
-    for (const tx of txs) {
-      for (const transfer of tx.tokenTransfers ?? []) {
-        if (transfer.mint !== mintAddress) continue;
-        if (!transfer.fromUserAccount || !transfer.toUserAccount) continue;
-        if (transfer.fromUserAccount === transfer.toUserAccount) continue;
+  for (let index = 0; index < walletsToInspect.length; index += 1) {
+    const wallet = walletsToInspect[index];
 
-        const current = destinationCounts.get(transfer.toUserAccount) ?? 0;
-        destinationCounts.set(transfer.toUserAccount, current + 1);
+    try {
+      const txs = await fetchEnhancedTransactionsForAddress(wallet, 10);
+
+      for (const tx of txs) {
+        for (const transfer of tx.tokenTransfers ?? []) {
+          if (transfer.mint !== mintAddress) continue;
+          if (!transfer.fromUserAccount || !transfer.toUserAccount) continue;
+          if (transfer.fromUserAccount === transfer.toUserAccount) continue;
+
+          const current =
+            destinationCounts.get(transfer.toUserAccount) ?? 0;
+
+          destinationCounts.set(
+            transfer.toUserAccount,
+            current + 1
+          );
+        }
       }
+    } catch (error) {
+      console.log('consolidation wallet scan failed:', {
+        mintAddress,
+        wallet,
+        error:
+          error instanceof Error
+            ? error.message
+            : String(error),
+      });
+    }
+
+    // Avoid sending all Helius requests in one burst.
+    if (index < walletsToInspect.length - 1) {
+      await sleep(800);
     }
   }
 
   const suspiciousDestinations = [...destinationCounts.entries()]
-    .filter(([, count]) => count >= 3)
+    .filter(([, count]) => count >= 2)
     .map(([wallet]) => wallet);
 
   if (suspiciousDestinations.length > 0) {

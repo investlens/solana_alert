@@ -496,26 +496,46 @@ export async function runDexPaidEngine() {
       },
     });
 
-    try {
-      holderRisk = await getHolderRisk(c.token);
+    const shouldRunHolderRisk =
+      score >= 70 &&
+      c.liquidity >= 6_000 &&
+      c.volume5m >= 3_000;
 
-      console.log('holder risk check:', {
-        token: c.token,
-        holderRisk,
-      });
+    if (shouldRunHolderRisk) {
+      try {
+        holderRisk = await getHolderRisk(c.token);
 
-      if (holderRisk.score >= 70) {
-        console.log('filtered holder concentration risk:', {
+        console.log('holder risk check:', {
           token: c.token,
           symbol: c.symbol,
+          score,
           holderRisk,
         });
 
-        seen.add(c.token);
-        continue;
+        if (holderRisk.score >= 70) {
+          console.log('filtered holder concentration risk:', {
+            token: c.token,
+            symbol: c.symbol,
+            holderRisk,
+          });
+
+          seen.add(c.token);
+          continue;
+        }
+      } catch (err) {
+        console.log('holder risk error:', {
+          token: c.token,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
-    } catch (err) {
-      console.log('holder risk error:', err);
+    } else {
+      console.log('holder risk skipped for low-priority candidate:', {
+        token: c.token,
+        symbol: c.symbol,
+        score,
+        liquidity: c.liquidity,
+        volume5m: c.volume5m,
+      });
     }
 
     try {
