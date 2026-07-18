@@ -25,8 +25,26 @@ export async function getDeliverableUsers(): Promise<DeliverableUser[]> {
     )
     .eq('is_blocked', false);
 
-  if (error) throw error;
-  return (data ?? []) as DeliverableUser[];
+  if (error) {
+    console.error('getDeliverableUsers failed:', error);
+    throw error;
+  }
+
+  const users = (data ?? []) as DeliverableUser[];
+
+  console.log('deliverable users loaded:', {
+    count: users.length,
+    users: users.map((user) => ({
+      telegramId: user.telegram_id,
+      username: user.username,
+      firstName: user.first_name,
+      tier: user.tier,
+      subscriptionStatus: user.subscription_status,
+      isBlocked: user.is_blocked,
+    })),
+  });
+
+  return users;
 }
 
 export async function incrementFreeTrialUsed(telegramId: string) {
@@ -120,6 +138,25 @@ export async function hasAlertDelivery(args: {
 
   if (error) throw error;
   return !!data;
+}
+
+export async function markTelegramUserBlocked(
+  telegramId: string
+): Promise<void> {
+  const { error } = await supabase
+    .from('users')
+    .update({
+      is_blocked: true,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('telegram_id', telegramId);
+
+  if (error) {
+    console.error('markTelegramUserBlocked failed:', {
+      telegramId,
+      error,
+    });
+  }
 }
 
 export async function updateAlertPerformance(args: {

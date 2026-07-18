@@ -332,6 +332,21 @@ async function processCheckpoint(
     return;
   }
 
+  await supabase
+  .from('creator_launches')
+  .update({
+    peak_market_cap: peakMarketCap,
+
+    crossed_50k: peakMarketCap >= 50_000,
+    crossed_100k: peakMarketCap >= 100_000,
+    crossed_250k: peakMarketCap >= 250_000,
+    crossed_500k: peakMarketCap >= 500_000,
+    crossed_1m: peakMarketCap >= 1_000_000,
+
+    last_updated: now,
+  })
+  .eq('token', row.token);
+
   await recordTokenMemoryEvent({
     token: row.token,
     chain: row.chain ?? 'solana',

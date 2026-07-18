@@ -1,26 +1,30 @@
 import { config } from '../config.js';
 import { sendTelegram } from '../services/telegram.js';
-import { getDeliverableUsers } from '../core/delivery.js';
+import {
+  getDeliverableUsers,
+  markTelegramUserBlocked,
+} from '../core/delivery.js';
 import { getConsolidationRisk } from '../scoring/consolidationRisk.js';
 import { addAlphaSignal } from './alphaFeed.js';
 import { recordDecisionForToken } from '../agents/decisionAgent.js';
 import { canSendTokenAlert } from '../core/alertDeduper.js';
 import { calculateConfidence } from '../agents/confidenceAgent.js';
 import { upsertTokenMemory } from '../memory/tokenMemory.js';
+import { buildInvestigation } from '../builders/investigationBuilder.js';
+import { renderTelegramInvestigation } from '../renderers/telegramRenderer.js';
+import { buildTelegramButtons } from '../ui/telegramButtons.js';
+import type { Investigation } from '../models/investigation.js';
 import {
   getCreatorIntelligenceV2,
   getCreatorWalletForTokenV2,
-  buildCreatorIntelligenceV2Lines,
 } from '../profiles/creatorIntelligenceV2.js';
 import { getCreatorWalletForToken } from '../profiles/tokenCreatorLookup.js';
 import {
-  getCreatorReputation,
   creatorTrustLabel,
 } from '../core/creatorReputation.js';
 import { getHolderRisk } from '../scoring/holderRisk.js';
 import {
   startAdminAutoTrade,
-  canStartNewTrade,
   isAutoTradePaused,
 } from '../core/autoTradeManager.js';
 import { getTokenBuyers } from '../core/walletWatcher.js';
@@ -48,6 +52,9 @@ type Candidate = {
   socialScore: number;
   socialSummary: string;
   hasStrongSocials: boolean;
+  websiteUrl?: string;
+  xUrl?: string;
+  telegramUrl?: string;
   earlyBuyers: string[];
   creatorWallet: string | null;
 };
@@ -84,45 +91,79 @@ function sellBuyRatio(c: Candidate) {
 function getSocialQuality(profile: any) {
   const links = Array.isArray(profile.links) ? profile.links : [];
 
-  const text = links
-    .map((l: any) => `${l.type ?? ''} ${l.label ?? ''} ${l.url ?? ''}`)
-    .join(' ')
-    .toLowerCase();
+  let websiteUrl: string | undefined;
+  let xUrl: string | undefined;
+  let telegramUrl: string | undefined;
 
-  const hasX =
-    text.includes('twitter') ||
-    text.includes('x.com') ||
-    text.includes('twitter.com');
+  for (const link of links) {
+    const url = String(link?.url ?? '').trim();
+    const type = String(link?.type ?? '').toLowerCase();
+    const label = String(link?.label ?? '').toLowerCase();
+    const combined = `${type} ${label} ${url.toLowerCase()}`;
 
-  const hasTelegram = text.includes('telegram') || text.includes('t.me');
+    if (!url.startsWith('http')) continue;
 
-  const hasWebsite = links.some((l: any) => {
-    const url = String(l.url ?? '').toLowerCase();
-    return url.startsWith('http') && !url.includes('dexscreener');
-  });
+    if (
+      !xUrl &&
+      (
+        combined.includes('twitter') ||
+        combined.includes('x.com') ||
+        url.toLowerCase().includes('twitter.com')
+      )
+    ) {
+      xUrl = url;
+      continue;
+    }
+
+    if (
+      !telegramUrl &&
+      (
+        combined.includes('telegram') ||
+        url.toLowerCase().includes('t.me/')
+      )
+    ) {
+      telegramUrl = url;
+      continue;
+    }
+
+    if (
+      !websiteUrl &&
+      !url.toLowerCase().includes('dexscreener') &&
+      !url.toLowerCase().includes('twitter.com') &&
+      !url.toLowerCase().includes('x.com') &&
+      !url.toLowerCase().includes('t.me/')
+    ) {
+      websiteUrl = url;
+    }
+  }
 
   let score = 0;
   const parts: string[] = [];
 
-  if (hasX) {
+  if (xUrl) {
     score += 25;
     parts.push('X');
   }
 
-  if (hasTelegram) {
+  if (telegramUrl) {
     score += 20;
     parts.push('Telegram');
   }
 
-  if (hasWebsite) {
+  if (websiteUrl) {
     score += 10;
     parts.push('Website');
   }
 
   return {
     socialScore: score,
-    socialSummary: parts.length ? parts.join(' + ') : 'No verified socials',
+    socialSummary: parts.length
+      ? parts.join(' + ')
+      : 'No verified socials',
     hasStrongSocials: score >= 25,
+    websiteUrl,
+    xUrl,
+    telegramUrl,
   };
 }
 
@@ -318,51 +359,80 @@ function makeBuyUrl(token: string) {
   return `https://jup.ag/swap/SOL-${token}`;
 }
 
-async function sendAlphaAlertToUsers(args: {
-  message: string;
-  token: string;
-  dexUrl: string;
-  buyUrl: string;
-}) {
+async function sendAlphaAlertToUsers(
+  investigation: Investigation
+) {
   const users = await getDeliverableUsers();
+  console.log('══════════════════════════════');
+    console.log('ALPHA ALERT');
+    console.log('Users:', users.length);
+
+    users.forEach((user) => {
+      console.log({
+        telegramId: user.telegram_id,
+        username: user.username,
+        firstName: user.first_name,
+        tier: user.tier,
+        subscription: user.subscription_status,
+        blocked: user.is_blocked,
+      });
+    });
+
+    console.log('══════════════════════════════');
+
+  const message = renderTelegramInvestigation(investigation);
 
   for (const user of users) {
     const isAdmin = user.tier === 'admin';
-    const isPaid = user.tier === 'paid' && user.subscription_status === 'active';
+    const isPaid =
+      user.tier === 'paid' &&
+      user.subscription_status === 'active';
     const isFree = user.tier === 'free';
 
     if (!(isAdmin || isPaid || isFree)) continue;
 
-    const buttons = isAdmin
-  ? [
-      [
-        { text: '📈 Chart', url: args.dexUrl },
-        { text: '🟢 Jupiter', url: args.buyUrl },
-      ],
-      [
-        { text: '⚡ Buy 0.03 SOL', callback_data: `ADMIN_BUY_SMALL_${args.token}` },
-        { text: '🔥 Buy 0.05 SOL', callback_data: `ADMIN_BUY_DEFAULT_${args.token}` },
-      ],
-      [
-        { text: '⏸ Pause Auto', callback_data: 'PAUSE_AUTO_TRADE' },
-        { text: '📊 Auto Status', callback_data: 'AUTO_TRADE_STATUS' },
-      ],
-    ]
-  : [
-      [
-        { text: '📈 Chart', url: args.dexUrl },
-        { text: '🟢 Buy', url: args.buyUrl },
-      ],
-    ];
+    const buttons = buildTelegramButtons(investigation, {
+      isAdmin,
+    });
 
     try {
-      await sendTelegram(user.telegram_id, args.message, buttons);
-    } catch (error) {
+      await sendTelegram(
+        user.telegram_id,
+        message,
+        buttons
+      );
+
+      console.log('telegram alert sent:', {
+        telegramId: user.telegram_id,
+        username: user.username,
+        tier: user.tier,
+      });
+      
+        } catch (error) {
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : String(error);
+
       console.log('alpha alert delivery failed:', {
         telegramId: user.telegram_id,
+        username: user.username,
         tier: user.tier,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
       });
+
+      if (
+        errorMessage.includes('403') ||
+        errorMessage.includes('bot was blocked by the user') ||
+        errorMessage.includes('chat not found')
+      ) {
+        await markTelegramUserBlocked(user.telegram_id);
+
+        console.log('user marked blocked:', {
+          telegramId: user.telegram_id,
+          username: user.username,
+        });
+      }
     }
   }
 }
@@ -422,6 +492,9 @@ async function fetchCandidates(): Promise<Candidate[]> {
         socialScore: social.socialScore,
         socialSummary: social.socialSummary,
         hasStrongSocials: social.hasStrongSocials,
+        websiteUrl: social.websiteUrl,
+        xUrl: social.xUrl,
+        telegramUrl: social.telegramUrl,
         earlyBuyers,
         creatorWallet:
             (profile as any).creatorWallet ??
@@ -442,7 +515,13 @@ export async function runDexPaidEngine() {
   for (const c of candidates) {
     if (seen.has(c.token)) continue;
 
-    const score = alphaScore(c);
+  let score = alphaScore(c);
+
+    const learningAdjustment = {
+      totalAdjustment: 0,
+      reasons: [],
+    };
+
     const label = conviction(score);
     const passes = qualifies(c);
     const autoBuyPasses = qualifiesForAutoBuy(c, score);
@@ -674,128 +753,101 @@ export async function runDexPaidEngine() {
       });
     }
 
-    const confidenceUnits = Math.max(
-      0,
-      Math.min(10, Math.floor(confidenceResult.confidence / 10))
-    );
+    const aiReasons = [
+  ...aiDecision.reasons,
+  ...confidenceResult.reasons,
+];
 
-    const confidenceBar =
-      '█'.repeat(confidenceUnits) + '░'.repeat(10 - confidenceUnits);
+const reportBaseUrl =
+  process.env.ALPHAOS_WEB_URL ||
+  process.env.NEXT_PUBLIC_APP_URL ||
+  '';
 
-    const entryTiming =
-      c.ageMin <= 10
-        ? '🔥 EARLY'
-        : c.ageMin <= 30
-          ? '⚡ EARLY-MID'
-          : c.ageMin <= 60
-            ? '🟡 MID'
-            : '🔻 LATE';
+const reportUrl = reportBaseUrl
+  ? `${reportBaseUrl.replace(/\/$/, '')}/report/${c.token}`
+  : undefined;
 
-    const signalTitle =
-      tier === 'P0'
-        ? '🚀 <b>HIGH CONVICTION SIGNAL</b>'
-        : tier === 'P1'
-          ? '🔥 <b>PRIORITY BUY SIGNAL</b>'
-          : '🟡 <b>WATCHLIST SIGNAL</b>';
+const investigation = buildInvestigation({
+  chain: config.discoveryChain || 'solana',
 
-    const shortToken = `${c.token.slice(0, 6)}...${c.token.slice(-6)}`;
+  token: {
+    address: c.token,
+    symbol: c.symbol,
+  },
 
-    const holderRiskText =
-      holderRisk.topHolderCount > 0
-        ? `${holderRisk.level} (${holderRisk.score}/100)`
-        : 'Pending — not enough holder data yet';
+  signal: {
+    tier: tier as 'P0' | 'P1' | 'P2',
+    ageMinutes: c.ageMin,
+  },
 
-    const bundleRiskText =
-    c.earlyBuyers.length > 0
-      ? consolidationRisk.score >= 70
-        ? `HIGH (${consolidationRisk.score}/100)`
-        : consolidationRisk.score >= 40
-          ? `MEDIUM (${consolidationRisk.score}/100)`
-          : `LOW (${consolidationRisk.score}/100)`
-      : 'Pending — not enough wallet data yet';
+  market: {
+    marketCap: c.marketCap,
+    liquidity: c.liquidity,
+    volume5m: c.volume5m,
+    priceUsd: c.priceUsd,
+  },
 
-    const creatorSummary =
-      creatorIntel.creatorWallet
-        ? `${creatorIntel.status} • ${creatorIntel.score}/100 • ${creatorIntel.totalLaunches} launches`
-        : 'Not identified yet — AlphaOS will keep tracking';
+  orderflow: {
+    buys5m: c.buys5m,
+    sells5m: c.sells5m,
+    buyRatio: buyRatio(c),
+  },
 
-    const aiReason =
-      aiDecision.reasons.slice(0, 2).join(', ') ||
-      confidenceResult.reasons.slice(0, 2).join(', ') ||
-      'Watching confirmation signals';
+  ai: {
+    baseScore:
+      score - learningAdjustment.totalAdjustment,
+    historicalEdge:
+      learningAdjustment.totalAdjustment,
+    finalScore: score,
+    confidence: confidenceResult.confidence,
+    decisionConfidence: aiDecision.confidence,
+    verdict: aiDecision.verdict,
+    riskLevel: confidenceResult.riskLevel,
+    reasons: aiReasons,
+  },
 
-    const message = [
-      '🧠 <b>ALPHAOS AI</b>',
-      signalTitle,
-      '━━━━━━━━━━━━━━━━━━',
-      '',
-      `🪙 <b>${escapeHtml(c.symbol)}</b>`,
-      `<code>${escapeHtml(shortToken)}</code>`,
-      '',
-      `⭐ Alpha Score: <b>${score}/100</b>`,
-      `🧠 AI Confidence: <b>${confidenceResult.confidence}/100</b>`,
-      `🛡 Risk Level: <b>${confidenceResult.riskLevel}</b>`,
-      `📊 Confidence: <b>${confidenceBar}</b>`,
-      `⏱ Timing: <b>${entryTiming}</b>`,
-      '',
-      '━━━━━━━━━━━━━━━━━━',
-      '💰 <b>Market Structure</b>',
-      `Market Cap: <b>${fmtUsd(c.marketCap)}</b>`,
-      `Liquidity: <b>${fmtUsd(c.liquidity)}</b>`,
-      `5m Volume: <b>${fmtUsd(c.volume5m)}</b>`,
-      `Price: <b>${fmtPrice(c.priceUsd)}</b>`,
-      '',
-      '⚡ <b>Orderflow</b>',
-      `Buy Ratio: <b>${buyRatio(c).toFixed(2)}x</b>`,
-      `Buys/Sells: <b>${c.buys5m}/${c.sells5m}</b>`,
-      '',
-      '🌐 <b>Social Layer</b>',
-      `<b>${escapeHtml(c.socialSummary)}</b>`,
-      '',
-      '━━━━━━━━━━━━━━━━━━',
-      '👤 <b>Creator Intelligence</b>',
-      `<b>${creatorSummary}</b>`,
-      creatorIntel.bestMarketCap > 0
-        ? `Best MC: <b>${fmtUsd(creatorIntel.bestMarketCap)}</b>`
-        : 'Best MC: <b>Tracking</b>',
-      creatorIntel.verdict
-        ? `Verdict: <b>${escapeHtml(creatorIntel.verdict)}</b>`
-        : 'Verdict: <b>Learning profile</b>',
-      '',
-      '🛡 <b>Risk Intelligence</b>',
-      `Holder Risk: <b>${holderRiskText}</b>`,
-      `Bundle Risk: <b>${bundleRiskText}</b>`,
-      `Known Buyers: <b>${c.earlyBuyers.length}</b>`,
-      '',
-      '━━━━━━━━━━━━━━━━━━',
-      '🤖 <b>AlphaOS Verdict</b>',
-      `Decision: <b>${aiDecision.verdict}</b>`,
-      `AI Confidence: <b>${aiDecision.confidence}/100</b>`,
-      `Reason: <b>${escapeHtml(aiReason)}</b>`,
-      '',
-      '📚 <b>Alpha Memory</b>',
-      'This token is now being tracked.',
-      'Future updates will improve AlphaOS scoring.',
-      '',
-      '🤖 <b>Auto Trade</b>',
-      isAutoTradePaused()
-        ? '⏸ Paused'
-        : autoBuyPasses
-          ? '🟢 Live — ready'
-          : '👀 Monitoring',
-    ].join('\n');
+  creator: {
+    wallet: creatorIntel.creatorWallet,
+    status: creatorIntel.status,
+    score: creatorIntel.score,
+    launches: creatorIntel.totalLaunches,
+    crossed50k: creatorIntel.crossed50k,
+    crossed100k: creatorIntel.crossed100k,
+    crossed250k: creatorIntel.crossed250k,
+    bestMarketCap: creatorIntel.bestMarketCap,
+    verdict: creatorIntel.verdict,
+  },
+
+  risk: {
+    holderScore: holderRisk.score,
+    holderLevel: holderRisk.level,
+    holderHasData: holderRisk.topHolderCount > 0,
+    bundleScore: consolidationRisk.score,
+    bundleHasData: c.earlyBuyers.length > 0,
+    knownBuyers: c.earlyBuyers.length,
+  },
+
+  socials: {
+    score: c.socialScore,
+    summary: c.socialSummary,
+    websiteUrl: c.websiteUrl,
+    xUrl: c.xUrl,
+    telegramUrl: c.telegramUrl,
+  },
+
+  links: {
+    reportUrl,
+    chartUrl: c.dexUrl,
+    buyUrl: c.buyUrl,
+  },
+});
 
     if (!canSendTokenAlert(c.token, 'DEX_PAID')) {
       continue;
     }
 
     if (tier === 'P0' || tier === 'P1' || tier === 'P2') {
-      await sendAlphaAlertToUsers({
-        message,
-        token: c.token,
-        dexUrl: c.dexUrl,
-        buyUrl: c.buyUrl,
-      });
+      await sendAlphaAlertToUsers(investigation);
     }
   }
 }

@@ -8,6 +8,7 @@ import { buildEarlyAdminMessage } from './ui/earlyAdminMessageBuilder.js';
 import { captureAlertSnapshot } from './core/tracker.js';
 import { pollPumpfunEarlyFeed } from './core/pumpfunWatcher.js';
 import { runDexPaidEngine } from './engines/dexPaidEngine.js';
+import { getCreatorWalletForToken } from './profiles/tokenCreatorLookup.js';
 import { runWhaleClusterEngine } from './engines/whaleClusterEngine.js';
 import { runPumpEarlyEngine } from './engines/pumpEarlyEngine.js';
 import { runSignalPerformanceEngine } from './engines/signalPerformanceEngine.js';
@@ -15,13 +16,17 @@ import { buildPumpfunEarlyMessage } from './ui/pumpfunMessageBuilder.js';
 import { runAutoTradeManager } from './core/autoTradeManager.js';
 import { runCreatorMarketTracker } from './agents/creatorMarketTrackerAgent.js';
 import { recordTokenMemoryEvent } from './memory/tokenMemoryEvents.js';
-import { runOutcomeLearningAgent } from './agents/outcomeLearningAgent.js';
+import { getAdaptiveLearningAdjustment } from './ai/learningEngine.js';
+import { runOutcomeLearning } from './agents/outcomeLearningAgent.js';
 import { runCreatorReputationEngine } from './agents/creatorReputationEngine.js';
 import { getCreatorProfile } from './profiles/creatorProfile.js';
 import { startMemoryTracker } from './agents/memoryTrackerAgent.js';
 import { buildProAlertMessage } from './ui/proAlertMessageBuilder.js';
 import { startOutcomeCheckpointAgent } from './agents/outcomeCheckpointAgent.js';
-import { upsertTokenMemory } from './memory/tokenMemory.js';
+import {
+  hasTokenAlertCreated,
+  upsertTokenMemory,
+} from './memory/tokenMemory.js';
 import {
   syncWalletTradeOutcomes,
   recalculateAllWalletReputations,
@@ -214,20 +219,71 @@ async function processNewProfiles() {
 
       const { pair, result } = enriched;
 
-      console.log('Candidate check:', {
+      const creatorWallet =
+        (profile as any).creatorWallet ??
+        (profile as any).creator ??
+        (await getCreatorWalletForToken(tokenAddress));
+
+      const learningAdjustment =
+  await getAdaptiveLearningAdjustment({
+    marketCap: result.marketCap,
+    liquidity: result.liquidityUsd,
+    buys5m: result.buys5m,
+    sells5m: result.sells5m,
+  });
+
+const effectiveScore = Math.max(
+  0,
+  Math.min(
+    100,
+    result.score + learningAdjustment.totalAdjustment
+  )
+);
+
+const scoredResult = {
+  ...result,
+  score: effectiveScore,
+};
+
+console.log('main adaptive learning adjustment:', {
+  token: tokenAddress,
+  symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
+  baseScore: result.score,
+  adjustment: learningAdjustment.totalAdjustment,
+  finalScore: effectiveScore,
+  reasons: learningAdjustment.reasons,
+});
+
+console.log('Candidate check:', {
         token: tokenAddress,
         symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
         liquidity: result.liquidityUsd,
         ageMin: Math.floor(result.ageMin),
-        score: result.score,
+        baseScore: result.score,
+        score: scoredResult.score,
         buys5m: result.buys5m,
         sells5m: result.sells5m,
         volume5m: result.volume5m,
         paidApproved: result.paidApproved,
-        actionBucket: getActionBucket(result),
+        actionBucket: getActionBucket(scoredResult),
       });
 
-      if (seenTokens.has(tokenAddress)) continue;
+      if (seenTokens.has(tokenAddress)) {
+        continue;
+      }
+
+      const alreadyAlerted =
+        await hasTokenAlertCreated(tokenAddress);
+
+      if (alreadyAlerted) {
+        console.log(
+          `Skip existing database alert: ${tokenAddress}`
+        );
+
+        seenTokens.add(tokenAddress);
+        continue;
+      }
+
       seenTokens.add(tokenAddress);
 
       if (result.ageMin > config.maxAgeMin) {
@@ -240,8 +296,10 @@ async function processNewProfiles() {
         continue;
       }
 
-      if (result.score < config.minOwnerScore) {
-        console.log(`Skip score: ${tokenAddress} score=${result.score}`);
+      if (scoredResult.score < config.minOwnerScore) {
+        console.log(
+          `Skip score: ${tokenAddress} base=${result.score} adjusted=${scoredResult.score}`
+        );
         continue;
       }
 
@@ -265,8 +323,10 @@ async function processNewProfiles() {
         continue;
       }
 
-      if (!shouldStoreCandidate(result)) {
-        console.log(`Skip bucket: ${tokenAddress} bucket=${getActionBucket(result)}`);
+      if (!shouldStoreCandidate(scoredResult)) {
+        console.log(
+          `Skip bucket: ${tokenAddress} bucket=${getActionBucket(scoredResult)}`
+        );
         continue;
       }
 
@@ -280,7 +340,7 @@ async function processNewProfiles() {
         freeSent: false,
         paidDueAt: now + config.paidDelaySec * 1000,
         freeDueAt: now + config.freeDelaySec * 1000,
-        lastScore: result.score,
+        lastScore: scoredResult.score,
         lastPairAddress: pair.pairAddress ?? undefined,
         adminDelivered: false,
         adminEarlyDelivered: false,
@@ -312,19 +372,30 @@ async function processNewProfiles() {
         symbol: pair.baseToken?.symbol ?? null,
         name: pair.baseToken?.name ?? null,
         chain: config.discoveryChain,
+        creatorWallet,
         marketCap: result.marketCap,
         liquidity: result.liquidityUsd,
         price: result.currentPrice,
         buys: result.buys5m,
         sells: result.sells5m,
-        confidence: result.score,
+        confidence: scoredResult.score,
         riskLevel: result.risk,
         holderScore: result.marketSafetyScore,
         authorityScore: result.authoritySafetyScore,
         raw: {
           source: 'MAIN_ALERT',
-          actionBucket: getActionBucket(result),
+          actionBucket: getActionBucket(scoredResult),
           alertId: alertRecord.id,
+          creatorWallet,
+
+          baseScore: result.score,
+          adjustedScore: scoredResult.score,
+
+          learningAdjustment:
+            learningAdjustment.totalAdjustment,
+
+          learningReasons:
+            learningAdjustment.reasons,
         },
       });
 
@@ -338,27 +409,40 @@ async function processNewProfiles() {
         price: result.currentPrice,
         buys: result.buys5m,
         sells: result.sells5m,
-        alphaScore: result.score,
-        aiConfidence: result.score,
+        alphaScore: scoredResult.score,
+        aiConfidence: scoredResult.score,
         riskLevel: result.risk,
         holderScore: result.marketSafetyScore,
-        note: `${pair.baseToken?.symbol ?? tokenAddress} alert created with ${getActionBucket(result)} bucket`,
+        note: `${pair.baseToken?.symbol ?? tokenAddress} alert created with ${getActionBucket(scoredResult)} bucket`,
         raw: {
-          actionBucket: getActionBucket(result),
+          source: 'MAIN_ALERT',
+          actionBucket: getActionBucket(scoredResult),
           alertId: alertRecord.id,
           pairAddress: pair.pairAddress ?? null,
+          creatorWallet,
+
+          baseScore: result.score,
+          adjustedScore: scoredResult.score,
+
+          learningAdjustment:
+            learningAdjustment.totalAdjustment,
+
+          learningReasons:
+            learningAdjustment.reasons,
         },
       });
 
       console.log(
-        `ALERT STORED: ${pair.baseToken?.symbol ?? tokenAddress} score=${result.score} bucket=${getActionBucket(result)}`
+        `ALERT STORED: ${pair.baseToken?.symbol ?? tokenAddress} base=${result.score} adjusted=${scoredResult.score} bucket=${getActionBucket(scoredResult)}`
       );
 
       console.log('ALERT DELIVERY CHECK:', {
         token: tokenAddress,
         symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
-        bucket: getActionBucket(result),
-        score: result.score,
+        bucket: getActionBucket(scoredResult),
+        baseScore: result.score,
+        score: scoredResult.score,
+        learningAdjustment: learningAdjustment.totalAdjustment,
       });
 
     } catch (error) {
@@ -688,7 +772,7 @@ async function startScanner() {
 
       if (shouldRunOutcomeLearningAgent()) {
         lastOutcomeLearningRun = Date.now();
-        await runOutcomeLearningAgent();
+        await runOutcomeLearning();
       }
       await processTierDispatch();
     } catch (error) {

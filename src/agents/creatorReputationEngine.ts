@@ -308,7 +308,7 @@ export async function runCreatorReputationEngine() {
           'MOONSHOT'
     ).length;
 
-    const trackedLaunches = tracked.length;
+    const trackedLaunches = completed.length;
     const totalLaunches = creator.launches.length;
 
     const successRate =

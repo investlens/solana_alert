@@ -1,4 +1,5 @@
 import { supabase } from '../services/supabase.js';
+import { getCreatorWalletForToken } from './tokenCreatorLookup.js';
 
 export type CreatorIntelligenceV2 = {
   creatorWallet: string | null;
@@ -44,21 +45,10 @@ function getStatus(score: number, launches: number): CreatorIntelligenceV2['stat
   return 'NEW';
 }
 
-export async function getCreatorWalletForTokenV2(token: string | null | undefined) {
-  if (!token) return null;
-
-  const { data, error } = await supabase
-    .from('creator_launches')
-    .select('creator_wallet')
-    .eq('token', token)
-    .maybeSingle();
-
-  if (error) {
-    console.log('getCreatorWalletForTokenV2 error:', error.message);
-    return null;
-  }
-
-  return data?.creator_wallet ?? null;
+export async function getCreatorWalletForTokenV2(
+  token: string | null | undefined
+): Promise<string | null> {
+  return getCreatorWalletForToken(token);
 }
 
 export async function getCreatorIntelligenceV2(
