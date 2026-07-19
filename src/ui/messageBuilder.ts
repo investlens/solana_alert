@@ -1,70 +1,24 @@
 import { config } from '../config.js';
 import { getPerformance } from '../core/tracker.js';
 import type { DexPair, FreeTrialInfo, RiskResult, TokenState } from '../types.js';
-import { escapeHtml, fmtPrice, fmtUsd } from '../utils/format.js';
+import { fmtPrice } from '../utils/format.js';
+import { buildAlphaAlert, formatUsd } from './alphaAlert/index.js';
 
 function getActionBucket(result: RiskResult): 'BUY' | 'HIGH_BUY' {
-  if (
-    result.score >= 82 &&
-    result.marketSafetyScore >= 75 &&
-    result.authoritySafetyScore >= 40
-  ) {
-    return 'HIGH_BUY';
-  }
-
-  return 'BUY';
+  return result.score >= 82 && result.marketSafetyScore >= 75 && result.authoritySafetyScore >= 40 ? 'HIGH_BUY' : 'BUY';
 }
 
-function getHeader(bucket: 'BUY' | 'HIGH_BUY') {
-  if (bucket === 'HIGH_BUY') return '🚀 <b>HIGH BUY</b>';
-  return '🟢 <b>BUY</b>';
-}
-
-function divider() {
-  return '━━━━━━━━━━━━━━━';
-}
-
-function getFlowLabel(buys: number, sells: number) {
-  if (buys >= sells * 1.8) return 'Strong buy pressure';
-  if (buys > sells) return 'Buy pressure positive';
+function flowLabel(buys: number, sells: number): string {
+  if (buys >= sells * 1.8) return 'Strong buyer dominance';
+  if (buys > sells) return 'Positive buyer pressure';
   if (buys === sells) return 'Balanced flow';
   return 'Sell pressure rising';
 }
 
-function getCompactFlags(result: RiskResult): string[] {
-  const flags: string[] = [];
-
-  if (result.marketSafetyLabel === 'GOOD') {
-    flags.push('✅ Market structure looks healthy');
-  } else if (result.marketSafetyLabel === 'WATCH') {
-    flags.push('⚠️ Market structure needs watching');
-  }
-
-  if (result.liquidityUsd >= 5000) {
-    flags.push('✅ Liquidity looks strong');
-  } else if (result.liquidityUsd >= 2000) {
-    flags.push('✅ Liquidity formed');
-  }
-
-  if (flags.length < 2 && result.buys5m > result.sells5m) {
-    flags.push('✅ Buy pressure is positive');
-  }
-
-  return flags.slice(0, 2);
-}
-
-function buildUpgradeLine(freeTrialInfo?: FreeTrialInfo) {
-  if (!freeTrialInfo) return '';
-
-  if (freeTrialInfo.fastDelayActive) {
-    return `🧪 Trial <b>${freeTrialInfo.used}/${freeTrialInfo.limit}</b> fast alerts used • <b>/upgrade</b>`;
-  }
-
-  return `🔒 Free is delayed • Paid gets this earlier • <b>/upgrade</b>`;
-}
-
-function formatMetricRow(label: string, value: string) {
-  return `<b>${escapeHtml(label)}</b>  ${escapeHtml(value)}`;
+function upgradeLine(freeTrialInfo?: FreeTrialInfo): string | null {
+  if (!freeTrialInfo) return null;
+  if (freeTrialInfo.fastDelayActive) return `Trial: ${freeTrialInfo.used}/${freeTrialInfo.limit} fast alerts used · /upgrade`;
+  return 'Free alerts are delayed · Upgrade for earlier intelligence · /upgrade';
 }
 
 export function buildMessage(args: {
@@ -75,82 +29,62 @@ export function buildMessage(args: {
   freeTrialInfo?: FreeTrialInfo;
 }): string {
   const { tier, pair, result, state, freeTrialInfo } = args;
-
   const name = pair.baseToken?.name || pair.baseToken?.symbol || 'Unknown';
   const symbol = pair.baseToken?.symbol || name;
+  const address = pair.baseToken?.address ?? null;
   const perf = getPerformance(state, result);
   const bucket = getActionBucket(result);
-  const flags = getCompactFlags(result);
-  const marketCapText =
-    result.marketCap && result.marketCap > 0
-      ? fmtUsd(result.marketCap)
-      : result.fdv && result.fdv > 0
-      ? fmtUsd(result.fdv)
-      : 'n/a';
+  const marketCap = result.marketCap && result.marketCap > 0 ? result.marketCap : result.fdv;
+  const evidence: string[] = [];
 
-  const lines: string[] = [];
+  if (result.marketSafetyLabel === 'GOOD') evidence.push('✅ Market structure looks healthy');
+  else if (result.marketSafetyLabel === 'WATCH') evidence.push('⚠️ Market structure needs confirmation');
+  if (result.liquidityUsd >= 5000) evidence.push('✅ Liquidity threshold cleared');
+  if (result.buys5m > result.sells5m) evidence.push('✅ Buyer pressure is positive');
+  if (bucket === 'HIGH_BUY') evidence.push('✅ Highest-priority setup threshold reached');
 
-  lines.push(getHeader(bucket));
-  lines.push(divider());
-  lines.push(`<b>${escapeHtml(name)} • ${escapeHtml(symbol)}</b>`);
-  lines.push('');
+  const trial = tier === 'FREE' ? upgradeLine(freeTrialInfo) : null;
+  const sponsor = config.sponsor.title ? `Partner: ${config.sponsor.title}` : null;
 
-  lines.push(formatMetricRow('Liquidity', fmtUsd(result.liquidityUsd)));
-  lines.push(formatMetricRow('Price', fmtPrice(result.currentPrice)));
-  lines.push(formatMetricRow('MCap', marketCapText));
-  lines.push(formatMetricRow('Age', `${Math.floor(result.ageMin)}m`));
-  lines.push('');
-
-  lines.push(formatMetricRow('Buys/Sells', `${result.buys5m}/${result.sells5m}`));
-  lines.push(formatMetricRow('Vol 5m', fmtUsd(result.volume5m)));
-  lines.push(formatMetricRow('Flow', getFlowLabel(result.buys5m, result.sells5m)));
-  lines.push('');
-
-  lines.push(formatMetricRow('Alert Price', fmtPrice(perf.thenPrice)));
-  lines.push(formatMetricRow('Highest After', 'Tracking...'));
-  lines.push(formatMetricRow('Current Price', fmtPrice(perf.nowPrice)));
-  lines.push('');
-
-  lines.push(formatMetricRow('Setup', String(result.score)));
-  lines.push(
-    formatMetricRow(
-      'Safety',
-      `${result.marketSafetyScore} (${result.marketSafetyLabel})`
-    )
-  );
-  lines.push('');
-
-  for (const flag of flags) {
-    lines.push(flag);
-  }
-
-  if (bucket === 'HIGH_BUY') {
-    lines.push('🔥 Highest priority setup');
-  }
-
-  lines.push('');
-  lines.push(divider());
-
-  if (pair.url) {
-    lines.push(`📈 ${escapeHtml(pair.url)}`);
-  }
-
-  if (pair.baseToken?.address) {
-    lines.push(`🟢 https://jup.ag/swap/SOL-${pair.baseToken.address}`);
-  }
-
-  if (tier === 'FREE') {
-    const upgradeLine = buildUpgradeLine(freeTrialInfo);
-    if (upgradeLine) {
-      lines.push('');
-      lines.push(upgradeLine);
-    }
-  }
-
-  if (config.sponsor.title) {
-    lines.push('');
-    lines.push(`• ${escapeHtml(config.sponsor.title)}`);
-  }
-
-  return lines.join('\n');
+  return buildAlphaAlert({
+    title: bucket === 'HIGH_BUY' ? 'MARKET RADAR · PRIORITY' : 'MARKET RADAR · WATCHLIST',
+    subtitle: 'Qualified market structure detected',
+    tone: bucket === 'HIGH_BUY' ? 'PREMIUM' : 'POSITIVE',
+    symbol,
+    name,
+    address,
+    score: result.score,
+    confidence: result.score,
+    risk: `${result.marketSafetyLabel} · ${result.marketSafetyScore}/100`,
+    status: bucket === 'HIGH_BUY' ? 'PRIORITY INVESTIGATION' : 'WORTH INVESTIGATING',
+    sections: [
+      {
+        title: 'MARKET SNAPSHOT',
+        icon: '📊',
+        metrics: [
+          { label: 'Market Cap', value: formatUsd(marketCap) },
+          { label: 'Liquidity', value: formatUsd(result.liquidityUsd) },
+          { label: 'Price', value: fmtPrice(result.currentPrice) },
+          { label: 'Age', value: `${Math.floor(result.ageMin)}m` },
+          { label: '5m Volume', value: formatUsd(result.volume5m) },
+          { label: 'Buys / Sells', value: `${result.buys5m}/${result.sells5m}` },
+          { label: 'Order Flow', value: flowLabel(result.buys5m, result.sells5m) },
+        ],
+      },
+      {
+        title: 'OUTCOME TRACKING',
+        icon: '📈',
+        metrics: [
+          { label: 'Alert Price', value: fmtPrice(perf.thenPrice) },
+          { label: 'Current Price', value: fmtPrice(perf.nowPrice) },
+          { label: 'Peak After Alert', value: 'Tracking' },
+        ],
+      },
+      { title: 'WHY ALPHAOS FLAGGED IT', icon: '🔎', items: evidence.slice(0, 4) },
+      { title: 'ACCESS', icon: '🔐', items: [trial, sponsor].filter((x): x is string => Boolean(x)) },
+    ],
+    verdictTitle: bucket === 'HIGH_BUY' ? 'HIGH-PRIORITY INVESTIGATION' : 'WORTH INVESTIGATING',
+    verdict: 'AlphaOS detected qualified evidence. Confirm wallet, creator and holder risk before taking action.',
+    tracking: 'CONTINUOUS OUTCOME TRACKING ACTIVE',
+  });
 }

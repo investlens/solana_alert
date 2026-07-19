@@ -1,50 +1,17 @@
 import type { CreatorProfile } from '../profiles/creatorProfile.js';
+import { buildAlphaAlert, compactAddress, formatUsd } from './alphaAlert/index.js';
 
-function divider() {
-  return '━━━━━━━━━━━━━━━━━━';
+function fmtPct(value?: number | null): string {
+  return value == null || !Number.isFinite(value) ? 'Tracking' : `${value.toFixed(1)}%`;
 }
 
-function shortMint(mint: string) {
-  return `${mint.slice(0, 6)}...${mint.slice(-6)}`;
-}
-
-function shortWallet(wallet?: string | null) {
-  if (!wallet) return 'Tracking';
-  return `${wallet.slice(0, 6)}...${wallet.slice(-6)}`;
-}
-
-function fmtPct(value?: number | null) {
-  if (value == null || !Number.isFinite(value)) return 'Tracking';
-  return `${value.toFixed(1)}%`;
-}
-
-function fmtUsd(value?: number | null) {
-  if (value == null || !Number.isFinite(value) || value <= 0) return 'Tracking';
-  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
-  if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
-  return `$${Math.round(value)}`;
-}
-
-function escapeHtml(value: unknown) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
-
-function getVerdict(score?: number | null) {
-  if (score == null || !Number.isFinite(score)) return '⚪ TRACKING';
-  if (score >= 90) return '🚀 HIGH CONVICTION LAUNCH';
-  if (score >= 80) return '🟢 STRONG EARLY LAUNCH';
-  if (score >= 75) return '🟡 WATCHLIST LAUNCH';
-  if (score >= 60) return '🟠 HIGH RISK WATCH';
-  return '🔴 AVOID';
-}
-
-function convictionBar(score?: number | null) {
-  const value = score == null || !Number.isFinite(score) ? 50 : Math.max(0, Math.min(100, score));
-  const filled = Math.floor(value / 10);
-  return `${'█'.repeat(filled)}${'░'.repeat(10 - filled)}`;
+function launchVerdict(score?: number | null): { status: string; risk: string; title: string } {
+  if (score == null || !Number.isFinite(score)) return { status: 'SCANNING', risk: 'UNKNOWN', title: 'EARLY DATA COLLECTION' };
+  if (score >= 90) return { status: 'HIGH CONVICTION', risk: 'REVIEW REQUIRED', title: 'PRIORITY LAUNCH INVESTIGATION' };
+  if (score >= 80) return { status: 'STRONG EARLY SIGNAL', risk: 'ELEVATED', title: 'WORTH INVESTIGATING' };
+  if (score >= 75) return { status: 'WATCHLIST', risk: 'ELEVATED', title: 'MONITOR CLOSELY' };
+  if (score >= 60) return { status: 'HIGH-RISK WATCH', risk: 'HIGH', title: 'WAIT FOR CONFIRMATION' };
+  return { status: 'LOW QUALITY', risk: 'HIGH', title: 'AVOID UNTIL RISK CLEARS' };
 }
 
 export function buildPumpfunEarlyMessage(args: {
@@ -62,72 +29,60 @@ export function buildPumpfunEarlyMessage(args: {
   isMutable?: boolean | null;
 }) {
   const creator = args.creatorProfile;
-  const symbol = args.symbol || 'Unknown';
+  const symbol = args.symbol || 'UNKNOWN';
   const name = args.name || symbol;
   const buys = args.buyCount ?? 0;
   const sells = args.sellCount ?? 0;
+  const assessment = launchVerdict(args.launchScore);
 
-  const lines: string[] = [];
-
-  lines.push('🧠 <b>ALPHAOS AI</b>');
-  lines.push('🧪 <b>PUMP.FUN LAUNCH BRIEF</b>');
-  lines.push(divider());
-  lines.push('');
-  lines.push(`🪙 <b>${escapeHtml(symbol)}</b>`);
-  lines.push(`<i>${escapeHtml(name)}</i>`);
-  lines.push(`<code>${shortMint(args.mint)}</code>`);
-  lines.push('');
-  lines.push(`Verdict: <b>${getVerdict(args.launchScore)}</b>`);
-  lines.push(`Launch Score: <b>${args.launchScore ?? 'Tracking'}/100</b>`);
-  lines.push(`AI Conviction: <b>${convictionBar(args.launchScore)}</b>`);
-  lines.push('');
-  lines.push(divider());
-
-  lines.push('📊 <b>Launch Snapshot</b>');
-  lines.push(`Market Cap: <b>${fmtUsd(args.marketCapUsd)}</b>`);
-  lines.push(`Volume: <b>${fmtUsd(args.volumeUsd)}</b>`);
-  lines.push(`Curve Progress: <b>${fmtPct(args.progressPct)}</b>`);
-  lines.push(`Buys/Sells: <b>${buys}/${sells}</b>`);
-  lines.push(`Mutable Metadata: <b>${args.isMutable === false ? 'No' : args.isMutable === true ? 'Yes' : 'Tracking'}</b>`);
-  lines.push('');
-
-  lines.push('👤 <b>Creator Intelligence</b>');
-  lines.push(`Wallet: <code>${shortWallet(args.creator)}</code>`);
-  lines.push(`Rating: <b>${creator?.rating ?? 'UNKNOWN'}</b>`);
-  lines.push(`Trust Score: <b>${creator?.trustScore ?? 50}/100</b>`);
-  lines.push(`Launches: <b>${creator?.launches ?? 0}</b>`);
-  lines.push(`Successful: <b>${creator?.successfulLaunches ?? 0}</b>`);
-  lines.push(`Highest MC: <b>${fmtUsd(creator?.highestMarketCap ?? 0)}</b>`);
-  lines.push('');
-
-  lines.push('🤖 <b>AlphaOS Verdict</b>');
-
-  if (creator?.hasData) {
-    lines.push(
-      `Creator history detected. Rating is <b>${escapeHtml(creator.rating)}</b> with trust score <b>${creator.trustScore}/100</b>.`
-    );
-  } else {
-    lines.push('Fresh launch detected. Creator history is still being learned by AlphaOS.');
-  }
-
-  lines.push('');
-
-  lines.push('<b>Why AlphaOS is watching</b>');
-  lines.push(`${(args.launchScore ?? 0) >= 75 ? '✅' : '⚠️'} Launch quality: ${args.launchScore ?? 'Tracking'}/100`);
-  lines.push(`${args.isMutable === false ? '✅' : '⚠️'} Metadata safety: ${args.isMutable === false ? 'Immutable' : 'Needs monitoring'}`);
-  lines.push(`${buys > sells ? '✅' : '⚠️'} Buy pressure: ${buys}/${sells}`);
-  lines.push('');
-
-  lines.push('<b>Risks / Watch</b>');
-  lines.push('⚠️ Very early and volatile');
-  lines.push('⚠️ Liquidity may not exist before migration');
-  lines.push('⚠️ Creator profile may be incomplete');
-  lines.push('');
-
-  lines.push(divider());
-  lines.push('📚 <b>Alpha Memory</b>');
-  lines.push('This launch is being tracked.');
-  lines.push('Future updates will improve creator scoring.');
-
-  return lines.join('\n');
+  return buildAlphaAlert({
+    title: 'PUMP.FUN RADAR · FRESH LAUNCH',
+    subtitle: 'Early lifecycle intelligence',
+    tone: (args.launchScore ?? 0) >= 80 ? 'PREMIUM' : 'WATCH',
+    symbol,
+    name,
+    address: args.mint,
+    score: args.launchScore,
+    confidence: args.launchScore,
+    risk: assessment.risk,
+    status: assessment.status,
+    sections: [
+      {
+        title: 'LAUNCH SNAPSHOT',
+        icon: '📊',
+        metrics: [
+          { label: 'Market Cap', value: formatUsd(args.marketCapUsd) },
+          { label: 'Volume', value: formatUsd(args.volumeUsd) },
+          { label: 'Curve Progress', value: fmtPct(args.progressPct) },
+          { label: 'Buys / Sells', value: `${buys}/${sells}` },
+          { label: 'Metadata', value: args.isMutable === false ? 'Immutable' : args.isMutable === true ? 'Mutable' : 'Tracking' },
+        ],
+      },
+      {
+        title: 'CREATOR INTELLIGENCE',
+        icon: '👤',
+        metrics: [
+          { label: 'Wallet', value: compactAddress(args.creator) },
+          { label: 'Rating', value: creator?.rating ?? 'UNKNOWN' },
+          { label: 'Trust Score', value: `${creator?.trustScore ?? 50}/100` },
+          { label: 'Launches', value: creator?.launches ?? 0 },
+          { label: 'Successful', value: creator?.successfulLaunches ?? 0 },
+          { label: 'Best Market Cap', value: formatUsd(creator?.highestMarketCap ?? 0) },
+        ],
+      },
+      {
+        title: 'EVIDENCE CHECK',
+        icon: '🔎',
+        items: [
+          `${(args.launchScore ?? 0) >= 75 ? '✅' : '⚠️'} Launch quality: ${args.launchScore ?? 'Tracking'}/100`,
+          `${args.isMutable === false ? '✅' : '⚠️'} Metadata: ${args.isMutable === false ? 'Immutable' : 'Needs monitoring'}`,
+          `${buys > sells ? '✅' : '⚠️'} Buy pressure: ${buys}/${sells}`,
+          '⚠️ Very early launches remain highly volatile',
+        ],
+      },
+    ],
+    verdictTitle: assessment.title,
+    verdict: creator?.hasData ? `Creator history is available with a ${creator.rating} rating and ${creator.trustScore}/100 trust score.` : 'Creator history is incomplete. AlphaOS is learning this wallet while monitoring the launch.',
+    tracking: 'LAUNCH & CREATOR TRACKING ACTIVE',
+  });
 }

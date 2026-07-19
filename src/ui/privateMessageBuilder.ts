@@ -1,9 +1,15 @@
-function shortWallet(wallet: string) {
-  return `${wallet.slice(0, 4)}...${wallet.slice(-4)}`;
+import { buildAlphaAlert, compactAddress } from './alphaAlert/index.js';
+
+function formatSol(amountSol?: number | null): string | null {
+  if (amountSol == null || !Number.isFinite(amountSol) || amountSol < 0.001) return null;
+  return `${amountSol.toFixed(3)} SOL`;
 }
 
-function divider() {
-  return '━━━━━━━━━━━━━━━';
+function tokenIdentity(args: { tokenName?: string | null; tokenMint?: string | null }) {
+  return {
+    symbol: args.tokenName?.trim() || compactAddress(args.tokenMint, 6, 5),
+    address: args.tokenMint ?? null,
+  };
 }
 
 export function buildPrivateWalletBuyMessage(args: {
@@ -14,38 +20,40 @@ export function buildPrivateWalletBuyMessage(args: {
   amountSol?: number | null;
   chartUrl?: string | null;
   buyUrl?: string | null;
-}) {
-  const lines: string[] = [];
-
-  lines.push('🕵️ <b>WALLET BUY</b>');
-  lines.push(divider());
-  lines.push(`Wallet  <code>${shortWallet(args.wallet)}</code>`);
-
-  if (args.tokenName) {
-    lines.push(`Token  <b>${args.tokenName}</b>`);
-  }
-
-  if (args.marketCap) {
-    lines.push(`MCap  <b>${args.marketCap}</b>`);
-  }
-
-  if (args.amountSol != null && args.amountSol >= 0.001) {
-    lines.push(`Spent  <b>${args.amountSol.toFixed(3)} SOL</b>`);
-  }
-
-  lines.push('');
-  lines.push('🟢 Early wallet accumulation detected');
-
-  if (args.chartUrl) {
-    lines.push('');
-    lines.push(`📈 ${args.chartUrl}`);
-  }
-
-  if (args.buyUrl) {
-    lines.push(`🟢 ${args.buyUrl}`);
-  }
-
-  return lines.join('\n');
+}): string {
+  const token = tokenIdentity(args);
+  return buildAlphaAlert({
+    title: 'SMART WALLET RADAR · ENTRY',
+    subtitle: 'A watched wallet opened a position',
+    tone: 'POSITIVE',
+    symbol: token.symbol,
+    address: token.address,
+    risk: 'REVIEW REQUIRED',
+    status: 'EARLY ACTIVITY DETECTED',
+    sections: [
+      {
+        title: 'POSITION SNAPSHOT',
+        icon: '📊',
+        metrics: [
+          { label: 'Wallet', value: compactAddress(args.wallet, 5, 4) },
+          { label: 'Market Cap', value: args.marketCap || 'Enrichment pending' },
+          { label: 'Position Size', value: formatSol(args.amountSol) || 'Tracking' },
+        ],
+      },
+      {
+        title: 'WHY IT MATTERS',
+        icon: '🔎',
+        items: [
+          '✅ Watched-wallet entry detected',
+          '✅ Activity recorded in Alpha Memory',
+          '✅ Outcome monitoring activated',
+        ],
+      },
+    ],
+    verdictTitle: 'WORTH INVESTIGATING',
+    verdict: 'Review market structure, wallet history and holder risk before taking action.',
+    tracking: 'CONTINUOUS TRACKING ACTIVE',
+  });
 }
 
 export function buildPrivateWalletSellMessage(args: {
@@ -55,42 +63,40 @@ export function buildPrivateWalletSellMessage(args: {
   marketCap?: string | null;
   amountSol?: number | null;
   chartUrl?: string | null;
-}) {
-  const lines: string[] = [];
-
-  const pumpfunUrl = args.tokenMint
-  ? `https://pump.fun/${args.tokenMint}`
-  : null;
-
-  lines.push('📤 <b>WALLET SELL</b>');
-  lines.push(divider());
-  lines.push(`Wallet  <code>${shortWallet(args.wallet)}</code>`);
-
-  if (args.tokenName) {
-    lines.push(`Token  <b>${args.tokenName}</b>`);
-  }
-
-  if (args.marketCap) {
-    lines.push(`MCap  <b>${args.marketCap}</b>`);
-  }
-
-  if (args.amountSol != null && args.amountSol >= 0.001) {
-    lines.push(`Received  <b>${args.amountSol.toFixed(3)} SOL</b>`);
-  }
-
-  lines.push('');
-  lines.push('⚠️ Wallet reduced position');
-
-  if (args.chartUrl) {
-  lines.push('');
-  lines.push(`📈 Chart: ${args.chartUrl}`);
-}
-
-if (pumpfunUrl) {
-  lines.push(`🚀 Pump.fun: ${pumpfunUrl}`);
-}
-
-  return lines.join('\n');
+}): string {
+  const token = tokenIdentity(args);
+  return buildAlphaAlert({
+    title: 'SMART WALLET RADAR · EXIT',
+    subtitle: 'A watched wallet reduced its position',
+    tone: 'RISK',
+    symbol: token.symbol,
+    address: token.address,
+    risk: 'SELL-SIDE ACTIVITY',
+    status: 'POSITION REDUCED',
+    sections: [
+      {
+        title: 'POSITION UPDATE',
+        icon: '📤',
+        metrics: [
+          { label: 'Wallet', value: compactAddress(args.wallet, 5, 4) },
+          { label: 'Market Cap', value: args.marketCap || 'Enrichment pending' },
+          { label: 'Estimated Value', value: formatSol(args.amountSol) || 'Tracking' },
+        ],
+      },
+      {
+        title: 'WHAT CHANGED',
+        icon: '🔎',
+        items: [
+          '⚠️ Exit or reduction detected',
+          '✅ Event recorded in Alpha Memory',
+          '✅ Token remains under outcome monitoring',
+        ],
+      },
+    ],
+    verdictTitle: 'RISK HAS INCREASED',
+    verdict: 'Review liquidity and broader holder behaviour before interpreting this wallet move.',
+    tracking: 'OUTCOME MONITORING ACTIVE',
+  });
 }
 
 export function buildPrivateWalletLaunchMessage(args: {
@@ -99,35 +105,34 @@ export function buildPrivateWalletLaunchMessage(args: {
   tokenMint?: string | null;
   chartUrl?: string | null;
   buyUrl?: string | null;
-}) {
-  const lines: string[] = [];
-  const pumpfunUrl = args.tokenMint
-  ? `https://pump.fun/${args.tokenMint}`
-  : null;
-
-  lines.push('🚨 <b>WATCHED WALLET LAUNCH</b>');
-  lines.push(divider());
-  lines.push(`Wallet  <code>${shortWallet(args.wallet)}</code>`);
-
-  if (args.tokenName) {
-    lines.push(`Token  <b>${args.tokenName}</b>`);
-  }
-
-  lines.push('');
-  lines.push('🔥 Watched wallet launched a fresh token');
-
-  if (args.chartUrl) {
-  lines.push('');
-  lines.push(`📈 Chart: ${args.chartUrl}`);
-}
-
-if (pumpfunUrl) {
-  lines.push(`🚀 Pump.fun: ${pumpfunUrl}`);
-}
-
-  if (args.buyUrl) {
-    lines.push(`🟢 ${args.buyUrl}`);
-  }
-
-  return lines.join('\n');
+}): string {
+  const token = tokenIdentity(args);
+  return buildAlphaAlert({
+    title: 'CREATOR & WALLET RADAR · LAUNCH',
+    subtitle: 'A watched wallet launched a fresh token',
+    tone: 'PREMIUM',
+    symbol: token.symbol,
+    address: token.address,
+    risk: 'ELEVATED',
+    status: 'FRESH LAUNCH DETECTED',
+    sections: [
+      {
+        title: 'LAUNCH IDENTITY',
+        icon: '🚀',
+        metrics: [{ label: 'Wallet', value: compactAddress(args.wallet, 5, 4) }],
+      },
+      {
+        title: 'WHY IT MATTERS',
+        icon: '🔎',
+        items: [
+          '✅ Contract captured during the early lifecycle',
+          '✅ Creator event added to Alpha Memory',
+          '⚠️ Liquidity and holder evidence may still be incomplete',
+        ],
+      },
+    ],
+    verdictTitle: 'EARLY-STAGE INVESTIGATION',
+    verdict: 'Fresh launches carry elevated creator, liquidity and holder risk. Wait for evidence before acting.',
+    tracking: 'CREATOR TRACKING ACTIVE',
+  });
 }
