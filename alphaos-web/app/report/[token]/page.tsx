@@ -7,8 +7,11 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 type PageProps = {
-  params: Promise<{
-    token: string;
+  params: Promise<{ token: string }>;
+  searchParams?: Promise<{
+    source?: string;
+    engine?: string;
+    event?: string;
   }>;
 };
 
@@ -448,8 +451,13 @@ export async function generateMetadata({
 
 export default async function TokenReportPage({
   params,
+  searchParams,
 }: PageProps) {
   const { token } = await params;
+  const origin = (await searchParams) ?? {};
+  const sourceLabel = origin.source?.trim() || null;
+  const engineLabel = origin.engine?.trim() || null;
+  const eventLabel = origin.event?.trim() || null;
   const decodedToken = decodeURIComponent(token);
 
   const { memory, signal, alert, creator } =
@@ -457,12 +465,12 @@ export default async function TokenReportPage({
 
   if (!memory && !signal && !alert) {
     return (
-      <main className="min-h-screen bg-[#050609] text-white">
+      <main className="alpha-grid min-h-screen bg-[#050609] text-white">
         <div className="mx-auto max-w-[1450px] px-4 py-5 md:px-7 md:py-7">
           <AlphaHeader />
 
           <section className="flex min-h-[70vh] items-center justify-center py-12">
-            <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-white/[0.025] p-7 text-center md:p-10">
+            <div className="w-full max-w-xl alpha-panel p-7 text-center md:p-10">
               <p className="text-xs font-medium uppercase tracking-[0.32em] text-emerald-400">
                 AI Research Report
               </p>
@@ -712,7 +720,7 @@ export default async function TokenReportPage({
   ].filter((item) => item.marketCap !== null);
 
   return (
-    <main className="min-h-screen bg-[#050609] text-white">
+    <main className="alpha-grid min-h-screen bg-[#050609] text-white">
       <div className="mx-auto max-w-[1450px] px-4 py-5 md:px-7 md:py-7">
         <AlphaHeader />
 
@@ -724,9 +732,16 @@ export default async function TokenReportPage({
               </p>
 
               <p className="mt-2 text-sm text-zinc-600">
-                Alpha Memory investigation and tracked market
-                outcome
+                Alpha Memory investigation and tracked market outcome
               </p>
+
+              {sourceLabel || engineLabel || eventLabel ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {sourceLabel ? <OriginBadge label={`Source · ${sourceLabel}`} /> : null}
+                  {engineLabel ? <OriginBadge label={`Engine · ${engineLabel}`} /> : null}
+                  {eventLabel ? <OriginBadge label={`Event · ${eventLabel}`} /> : null}
+                </div>
+              ) : null}
             </div>
 
             <Link
@@ -738,7 +753,7 @@ export default async function TokenReportPage({
           </div>
 
           <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_330px]">
-            <article className="rounded-3xl border border-white/10 bg-white/[0.025] p-6 md:p-8">
+            <article className="alpha-panel p-6 md:p-8">
               <div className="flex flex-wrap items-center gap-2">
                 <StatusBadge
                   label={`${risk} Risk`}
@@ -801,7 +816,7 @@ export default async function TokenReportPage({
               </div>
             </article>
 
-            <article className="rounded-3xl border border-white/10 bg-white/[0.025] p-6 md:p-8">
+            <article className="alpha-panel p-6 md:p-8">
               <p className="text-xs font-medium uppercase tracking-[0.28em] text-zinc-600">
                 AlphaOS AI Score
               </p>
@@ -1169,6 +1184,14 @@ function AlphaFooter() {
   );
 }
 
+function OriginBadge({ label }: { label: string }) {
+  return (
+    <span className="rounded-full border border-cyan-400/15 bg-cyan-400/[0.06] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-cyan-300">
+      {label}
+    </span>
+  );
+}
+
 function StatusBadge({
   label,
   className,
@@ -1195,7 +1218,7 @@ function MetricCard({
   detail: string;
 }) {
   return (
-    <article className="rounded-2xl border border-white/10 bg-white/[0.025] p-5">
+    <article className="alpha-panel rounded-2xl p-5">
       <p className="text-xs uppercase tracking-wider text-zinc-600">
         {label}
       </p>
@@ -1226,7 +1249,7 @@ function ReportPanel({
 }) {
   return (
     <article
-      className={`rounded-3xl border border-white/10 bg-white/[0.025] p-6 md:p-7 ${className}`}
+      className={`alpha-panel p-6 md:p-7 ${className}`}
     >
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
