@@ -140,6 +140,32 @@ export async function hasAlertDelivery(args: {
   return !!data;
 }
 
+export async function getAlertDeliveries(
+  alertId: string,
+): Promise<Array<{
+  telegram_id: string;
+  tier_at_delivery: 'admin' | 'paid' | 'free';
+}>> {
+  const { data, error } = await supabase
+    .from('alert_deliveries')
+    .select('telegram_id, tier_at_delivery')
+    .eq('alert_id', alertId);
+
+  if (error) {
+    console.error('getAlertDeliveries failed:', {
+      alertId,
+      error,
+    });
+
+    throw error;
+  }
+
+  return (data ?? []) as Array<{
+    telegram_id: string;
+    tier_at_delivery: 'admin' | 'paid' | 'free';
+  }>;
+}
+
 export async function markTelegramUserBlocked(
   telegramId: string
 ): Promise<void> {

@@ -1,6 +1,8 @@
 import { supabase } from '../services/supabase.js';
 import { enrichTokenByMintAddress } from '../services/dexscreener.js';
 import { recordTokenMemoryEvent } from '../memory/tokenMemoryEvents.js';
+import { sendTelegram } from '../services/telegram.js';
+import { getAlertDeliveries } from '../core/delivery.js';
 
 type CheckpointKey = '5M' | '15M' | '30M' | '1H' | '6H' | '24H';
 
@@ -108,6 +110,42 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function formatPct(value: number): string {
+  const sign = value > 0 ? '+' : '';
+
+  return `${sign}${value.toFixed(1)}%`;
+}
+
+function buildOutcomeMessage(args: {
+  symbol: string;
+  checkpoint: string;
+  returnPct: number;
+  maxReturnPct: number;
+  outcome: string;
+}) {
+  const {
+    symbol,
+    checkpoint,
+    returnPct,
+    maxReturnPct,
+    outcome,
+  } = args;
+
+  return [
+    '🧠 <b>ALPHAOS OUTCOME REPORT</b>',
+    '',
+    `<b>${symbol}</b>`,
+    '',
+    `⏱ Checkpoint: ${checkpoint}`,
+    `📈 Current: ${formatPct(returnPct)}`,
+    `🚀 Peak: ${formatPct(maxReturnPct)}`,
+    '',
+    `🎯 Outcome: <b>${outcome}</b>`,
+    '',
+    'AlphaOS has recorded this result and updated its learning model.',
+  ].join('\n');
+}
+
 function numberOrNull(value: unknown) {
   const parsed = Number(value);
 
@@ -212,6 +250,29 @@ async function fetchRows(): Promise<MemoryRow[]> {
   return (data ?? []) as MemoryRow[];
 }
 
+async function getLatestAlertId(
+  tokenAddress: string
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('alerts')
+    .select('id')
+    .eq('token_address', tokenAddress)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.log('outcome alert lookup failed:', {
+      tokenAddress,
+      error: error.message,
+    });
+
+    return null;
+  }
+
+  return data?.id ?? null;
+}
+
 async function processCheckpoint(
   row: MemoryRow,
   checkpoint: CheckpointDefinition
@@ -290,6 +351,8 @@ async function processCheckpoint(
           maxReturn: maxReturnPct,
         })
       : null;
+  
+  const alertId = await getLatestAlertId(row.token);
 
   const now = new Date().toISOString();
 
@@ -381,6 +444,33 @@ async function processCheckpoint(
       finalOutcome,
     },
   });
+
+  if (alertId) {
+  const deliveries = await getAlertDeliveries(alertId);
+
+  const outcomeText = finalOutcome ?? interimOutcome;
+
+  for (const delivery of deliveries) {
+    const message = buildOutcomeMessage({
+      symbol: pair.baseToken?.symbol ?? row.symbol ?? 'Unknown',
+      checkpoint: checkpoint.key,
+      returnPct,
+      maxReturnPct,
+      outcome: outcomeText,
+    });
+
+    try {
+  await sendTelegram(delivery.telegram_id, message);
+} catch (error) {
+  console.log('outcome Telegram delivery failed:', {
+    alertId,
+    telegramId: delivery.telegram_id,
+    checkpoint: checkpoint.key,
+    error: error instanceof Error ? error.message : String(error),
+  });
+}
+  }
+}
 
   console.log('outcome checkpoint completed:', {
     token: row.token,
