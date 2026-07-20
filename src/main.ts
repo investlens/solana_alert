@@ -2,8 +2,8 @@
 import { config } from './config.js';
 import { createBot } from './bot/index.js';
 import { buildMessage } from './ui/messageBuilder.js';
-import { buildAlphaInvestigation } from './agents/alphaInvestigationBuilder.js';
-import { buildAlphaInvestigationTelegramMessage } from './ui/alphaInvestigationMessageBuilder.js';
+
+
 import { buildEarlyAdminMessage } from './ui/earlyAdminMessageBuilder.js';
 import { captureAlertSnapshot } from './core/tracker.js';
 import { pollPumpfunEarlyFeed } from './core/pumpfunWatcher.js';
@@ -48,6 +48,7 @@ import {
   fetchTakeoverSet,
 } from './services/dexscreener.js';
 import { sendTelegram } from './services/telegram.js';
+import { confirmMomentum } from './services/momentumConfirmation.js';
 import type { DexProfile, RiskResult, TokenState } from './types.js';
 import { pollWatchedWallets } from './core/walletWatcher.js';
 import { enrichTokenByMintAddress } from './services/dexscreener.js';
@@ -344,6 +345,9 @@ console.log('Candidate check:', {
         lastPairAddress: pair.pairAddress ?? undefined,
         adminDelivered: false,
         adminEarlyDelivered: false,
+        snapshot: scoredResult,
+        confirmationDueAt: now + 12_000,
+        momentumRetries: 0,
       };
 
       captureAlertSnapshot(state, result);
@@ -562,19 +566,67 @@ async function processTierDispatch() {
       const buttons = getAlertButtons(pair);
       const bucket = getActionBucket(result);
 
-      const investigation = await buildAlphaInvestigation({
-        tokenAddress,
-        pair,
-        result,
-        creatorWallet: null,
-      });
+      if (
+        state.confirmationDueAt &&
+        Date.now() < state.confirmationDueAt
+      ) {
+        continue;
+      }
 
-      const alphaMessage = buildProAlertMessage({
-        pair,
-        result,
-        state,
-        bucket,
-      });
+      const previous = state.snapshot;
+
+      if (previous) {
+        const momentum = confirmMomentum(previous, result);
+
+        if (momentum.decision === 'DOWNTREND') {
+          console.log('Momentum rejected:', {
+            token: tokenAddress,
+            symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
+            reason: momentum.reason,
+            metrics: momentum.metrics,
+          });
+
+          tokenStates.delete(tokenAddress);
+          continue;
+        }
+
+        if (momentum.decision === 'WATCH') {
+          const retries = state.momentumRetries ?? 0;
+
+          console.log('Momentum watch:', {
+            token: tokenAddress,
+            symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
+            reason: momentum.reason,
+            retry: retries + 1,
+            metrics: momentum.metrics,
+          });
+
+          if (retries >= 2) {
+            console.log('Momentum rejected after retry limit:', {
+              token: tokenAddress,
+              symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
+              metrics: momentum.metrics,
+            });
+
+            tokenStates.delete(tokenAddress);
+            continue;
+          }
+
+          state.momentumRetries = retries + 1;
+          state.confirmationDueAt = Date.now() + 20_000;
+
+          continue;
+        }
+
+        console.log('Momentum confirmed:', {
+          token: tokenAddress,
+          symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
+          metrics: momentum.metrics,
+        });
+      }
+
+
+      let alphaMessage: string | null = null;
 
       state.lastScore = result.score;
       state.lastPairAddress = pair.pairAddress ?? undefined;
@@ -592,6 +644,14 @@ async function processTierDispatch() {
 
             for (const user of users) {
           const telegramId = user.telegram_id;
+
+          const alreadyDelivered =
+          state.alertId
+            ? await hasAlertDelivery({
+                alertId: state.alertId,
+                telegramId,
+              })
+            : false;
 
         if (user.tier === 'admin' && !state.adminEarlyDelivered) {
           console.log('early admin check:', {
@@ -617,11 +677,25 @@ async function processTierDispatch() {
           }
         }
 
-        if (user.tier === 'admin' && !state.adminDelivered && shouldSendToAdmin(result)) {
+        if (
+          user.tier === 'admin' &&
+          !state.adminDelivered &&
+          !alreadyDelivered &&
+          shouldSendToAdmin(result)
+        ) {
+          if (!alphaMessage) {
+            alphaMessage = buildProAlertMessage({
+              pair,
+              result,
+              state,
+              bucket,
+            });
+          }
+
           await safeSendTelegram(
             telegramId,
             alphaMessage,
-            buttons
+            buttons,
           );
 
           if (state.alertId) {
@@ -638,15 +712,24 @@ async function processTierDispatch() {
         if (
           user.tier === 'paid' &&
           user.subscription_status === 'active' &&
+          !alreadyDelivered &&
           now >= state.paidDueAt &&
           shouldSendToPaid(result)
         ) {
-          await safeSendTelegram(
-            telegramId,
-            alphaMessage,
-            buttons
-          );
+          if (!alphaMessage) {
+          alphaMessage = buildProAlertMessage({
+            pair,
+            result,
+            state,
+            bucket,
+          });
+        }
 
+        await safeSendTelegram(
+          telegramId,
+          alphaMessage,
+          buttons,
+        );
           if (state.alertId) {
             await createAlertDelivery({
               alertId: state.alertId,
@@ -666,11 +749,12 @@ async function processTierDispatch() {
           const freeDueAt = state.firstSeenAt + freeDelaySec * 1000;
 
           if (
-            now >= freeDueAt &&
-            shouldSendToFree(result) &&
-            result.liquidityUsd >= config.minLiqUsd &&
-            result.buys5m >= result.sells5m
-          ) {
+              !alreadyDelivered &&
+              now >= freeDueAt &&
+              shouldSendToFree(result) &&
+              result.liquidityUsd >= config.minLiqUsd &&
+              result.buys5m >= result.sells5m
+            ) {
             const freeTrialInfo = {
               used: freeTrialUsed,
               limit: freeTrialLimit,
@@ -702,8 +786,6 @@ async function processTierDispatch() {
       }
 
       state.adminDelivered = true;
-      state.paidSent = true;
-      state.freeSent = true;
 
       if (result.ageMin > config.maxAgeMin + 300 || bucket === 'IGNORE') {
         console.log(`Removing tracked token: ${tokenAddress}`);

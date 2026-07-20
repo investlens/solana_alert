@@ -121,6 +121,10 @@ export type TokenState = {
   adminDelivered?: boolean;
   adminEarlyDelivered?: boolean;
 
+  snapshot?: RiskResult;
+  confirmationDueAt?: number;
+  momentumRetries?: number;
+
   alertPrice?: number | null;
   alertLiquidity?: number;
   alertScore?: number;
