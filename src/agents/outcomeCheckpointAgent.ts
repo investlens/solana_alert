@@ -131,18 +131,34 @@ function buildOutcomeMessage(args: {
     outcome,
   } = args;
 
+  const predictionStatus =
+  returnPct >= 0 ? 'Prediction Confirmed ✅' : 'Prediction Missed ⚠️';
+
   return [
-    '🧠 <b>ALPHAOS OUTCOME REPORT</b>',
+    '🧠 <b>ALPHAOS VERIFIED</b>',
     '',
-    `<b>${symbol}</b>`,
+    `💎 <b>$${symbol.replace(/^\$/, '')}</b>`,
+    '━━━━━━━━━━━━━━━━━━',
     '',
-    `⏱ Checkpoint: ${checkpoint}`,
-    `📈 Current: ${formatPct(returnPct)}`,
-    `🚀 Peak: ${formatPct(maxReturnPct)}`,
-    '',
-    `🎯 Outcome: <b>${outcome}</b>`,
-    '',
-    'AlphaOS has recorded this result and updated its learning model.',
+    `⏱ <b>${checkpoint} Checkpoint</b>`,
+      '',
+      `📈 <b>Current Return</b>`,
+      `${formatPct(returnPct)}`,
+      '',
+      `🚀 <b>Peak Return</b>`,
+      `${formatPct(maxReturnPct)}`,
+      '',
+      `🎯 <b>AI Verdict</b>`,
+      `${outcome}`,
+      '',
+      '📊 <b>AI Accuracy</b>',
+      predictionStatus,
+      '',
+      '🧠 <b>Learning Status</b>',
+      'Pattern stored and added to AlphaOS Intelligence.',
+      '',
+      '━━━━━━━━━━━━━━━━━━',
+      '<i>Every outcome improves future AlphaOS decisions.</i>',
   ].join('\n');
 }
 
