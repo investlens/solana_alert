@@ -27,13 +27,21 @@ type TokenMemoryRow = {
 
 type BucketStats = {
   label: string;
+
   sampleSize: number;
+
   winners: number;
   strongWinners: number;
   failures: number;
+
   winnerRate: number;
+  failureRate: number;
+
   averageMaxReturn: number;
+  medianMaxReturn: number;
   average24hReturn: number;
+
+  confidence: 'LOW' | 'MEDIUM' | 'HIGH';
 };
 
 function numberOrNull(value: unknown): number | null {
@@ -50,6 +58,30 @@ function average(values: number[]): number {
     values.reduce((total, value) => total + value, 0) /
     values.length
   );
+}
+
+function median(values: number[]): number {
+  if (!values.length) return 0;
+
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+
+  if (sorted.length % 2 === 0) {
+    return (
+      sorted[middle - 1] + sorted[middle]
+    ) / 2;
+  }
+
+  return sorted[middle];
+}
+
+function confidenceLabel(
+  sampleSize: number
+): 'LOW' | 'MEDIUM' | 'HIGH' {
+  if (sampleSize >= 100) return 'HIGH';
+  if (sampleSize >= 30) return 'MEDIUM';
+
+  return 'LOW';
 }
 
 function round(value: number, decimals = 2): number {
@@ -122,18 +154,31 @@ function makeBucketStats(
     .map((row) => numberOrNull(row.return_24h_pct))
     .filter((value): value is number => value !== null);
 
+  const sampleSize = rows.length;
+
   return {
     label,
-    sampleSize: rows.length,
+    sampleSize,
+
     winners,
     strongWinners,
     failures,
+
     winnerRate:
-      rows.length > 0
-        ? round((winners / rows.length) * 100)
+      sampleSize > 0
+        ? round((winners / sampleSize) * 100)
         : 0,
+
+    failureRate:
+      sampleSize > 0
+        ? round((failures / sampleSize) * 100)
+        : 0,
+
     averageMaxReturn: round(average(maxReturns)),
+    medianMaxReturn: round(median(maxReturns)),
     average24hReturn: round(average(returns24h)),
+
+    confidence: confidenceLabel(sampleSize),
   };
 }
 

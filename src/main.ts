@@ -3,7 +3,7 @@ import { config } from './config.js';
 import { createBot } from './bot/index.js';
 import { buildMessage } from './ui/messageBuilder.js';
 
-
+import { startAnalyticsSummary } from "./services/analyticsSummary.js";
 import { buildEarlyAdminMessage } from './ui/earlyAdminMessageBuilder.js';
 import { captureAlertSnapshot } from './core/tracker.js';
 import { pollPumpfunEarlyFeed } from './core/pumpfunWatcher.js';
@@ -23,6 +23,7 @@ import { getCreatorProfile } from './profiles/creatorProfile.js';
 import { startMemoryTracker } from './agents/memoryTrackerAgent.js';
 import { buildProAlertMessage } from './ui/proAlertMessageBuilder.js';
 import { startOutcomeCheckpointAgent } from './agents/outcomeCheckpointAgent.js';
+import { startOutcomeTracker } from "./services/outcomeTracker.js";
 import {
   hasTokenAlertCreated,
   upsertTokenMemory,
@@ -358,9 +359,9 @@ console.log('Candidate check:', {
         pairAddress: pair.pairAddress ?? null,
         symbol: pair.baseToken?.symbol ?? null,
         name: pair.baseToken?.name ?? null,
-        scoreAtAlert: result.score,
+        scoreAtAlert: scoredResult.score,
         riskAtAlert: result.risk,
-        actionAtAlert: getActionBucket(result),
+        actionAtAlert: getActionBucket(scoredResult),
         alertPrice: result.currentPrice,
         liquidityAtAlert: result.liquidityUsd,
         buys5mAtAlert: result.buys5m,
@@ -886,6 +887,9 @@ async function startBot() {
 
 async function main() {
   console.log('main() started');
+
+  startOutcomeTracker();
+  startAnalyticsSummary();
 
   const tasks = [
     startScanner(),

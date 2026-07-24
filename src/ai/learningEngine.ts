@@ -5,10 +5,17 @@ type LearningBucket = {
   winners: number;
   failures: number;
   sampleSize: number;
+
   winnerRate: number;
+  failureRate: number;
+
   strongWinners: number;
+
   average24hReturn: number;
   averageMaxReturn: number;
+  medianMaxReturn: number;
+
+  confidence: 'LOW' | 'MEDIUM' | 'HIGH';
 };
 
 type OverallLearning = {
@@ -16,10 +23,17 @@ type OverallLearning = {
   winners: number;
   failures: number;
   sampleSize: number;
+
   winnerRate: number;
+  failureRate: number;
+
   strongWinners: number;
+
   average24hReturn: number;
   averageMaxReturn: number;
+  medianMaxReturn: number;
+
+  confidence: 'LOW' | 'MEDIUM' | 'HIGH';
 };
 
 type LearningCache = {
@@ -50,6 +64,23 @@ export type AdaptiveLearningResult = {
   totalAdjustment: number;
   reasons: LearningReason[];
   dataAvailable: boolean;
+};
+
+export type AIConvictionResult = {
+  conviction: number;
+
+  confidence:
+    | 'LOW'
+    | 'MEDIUM'
+    | 'HIGH';
+
+  recommendation:
+    | 'IGNORE'
+    | 'WATCH'
+    | 'GOOD'
+    | 'STRONG_BUY';
+
+  reasons: string[];
 };
 
 const CACHE_MS = 10 * 60 * 1000;
@@ -124,13 +155,25 @@ function parseBucketArray(value: unknown): LearningBucket[] {
 
       return {
         label: String(row.label ?? 'UNKNOWN'),
+
         winners: Number(row.winners ?? 0),
         failures: Number(row.failures ?? 0),
         sampleSize: Number(row.sampleSize ?? 0),
+
         winnerRate: Number(row.winnerRate ?? 0),
+        failureRate: Number(row.failureRate ?? 0),
+
         strongWinners: Number(row.strongWinners ?? 0),
+
         average24hReturn: Number(row.average24hReturn ?? 0),
         averageMaxReturn: Number(row.averageMaxReturn ?? 0),
+        medianMaxReturn: Number(row.medianMaxReturn ?? 0),
+
+        confidence:
+          row.confidence === 'HIGH' ||
+          row.confidence === 'MEDIUM'
+            ? row.confidence
+            : 'LOW',
       } satisfies LearningBucket;
     })
     .filter((item): item is LearningBucket => item !== null);
@@ -145,13 +188,25 @@ function parseOverall(value: unknown): OverallLearning | null {
 
   return {
     label: String(row.label ?? 'ALL_COMPLETED'),
+
     winners: Number(row.winners ?? 0),
     failures: Number(row.failures ?? 0),
     sampleSize: Number(row.sampleSize ?? 0),
+
     winnerRate: Number(row.winnerRate ?? 0),
+    failureRate: Number(row.failureRate ?? 0),
+
     strongWinners: Number(row.strongWinners ?? 0),
+
     average24hReturn: Number(row.average24hReturn ?? 0),
     averageMaxReturn: Number(row.averageMaxReturn ?? 0),
+    medianMaxReturn: Number(row.medianMaxReturn ?? 0),
+
+    confidence:
+      row.confidence === 'HIGH' ||
+      row.confidence === 'MEDIUM'
+        ? row.confidence
+        : 'LOW',
   };
 }
 
@@ -346,5 +401,71 @@ export async function getAdaptiveLearningAdjustment(
     totalAdjustment: clamp(rawTotal, -12, 12),
     reasons,
     dataAvailable: true,
+  };
+}
+
+export function buildAIConviction(
+  baseScore: number,
+  adaptive: AdaptiveLearningResult
+): AIConvictionResult {
+  const conviction = clamp(
+    baseScore + adaptive.totalAdjustment,
+    0,
+    100
+  );
+
+  let confidence: 'LOW' | 'MEDIUM' | 'HIGH' = 'LOW';
+
+  const largestSampleSize = adaptive.reasons.reduce(
+    (largest, reason) =>
+      Math.max(largest, reason.sampleSize),
+    0
+  );
+
+  if (
+    adaptive.reasons.length >= 3 &&
+    largestSampleSize >= 100
+  ) {
+    confidence = 'HIGH';
+  } else if (
+    adaptive.reasons.length >= 2 &&
+    largestSampleSize >= 30
+  ) {
+    confidence = 'MEDIUM';
+  }
+
+  let recommendation:
+    | 'IGNORE'
+    | 'WATCH'
+    | 'GOOD'
+    | 'STRONG_BUY';
+
+  if (conviction >= 85) {
+    recommendation = 'STRONG_BUY';
+  } else if (conviction >= 75) {
+    recommendation = 'GOOD';
+  } else if (conviction >= 60) {
+    recommendation = 'WATCH';
+  } else {
+    recommendation = 'IGNORE';
+  }
+
+  const reasons = adaptive.reasons.map((reason) => {
+    const sign =
+      reason.adjustment > 0 ? '+' : '';
+
+    return (
+      `${reason.metric} ${reason.bucket}: ` +
+      `${sign}${reason.adjustment} ` +
+      `(${reason.winnerRate}% win rate, ` +
+      `${reason.sampleSize} samples)`
+    );
+  });
+
+  return {
+    conviction,
+    confidence,
+    recommendation,
+    reasons,
   };
 }

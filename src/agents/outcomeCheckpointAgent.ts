@@ -270,10 +270,10 @@ async function getLatestAlertId(
   tokenAddress: string
 ): Promise<string | null> {
   const { data, error } = await supabase
-    .from('alerts')
-    .select('id')
-    .eq('token_address', tokenAddress)
-    .order('created_at', { ascending: false })
+    .from("alerts")
+    .select("id")
+    .eq("token_address", tokenAddress)
+    .order("alerted_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 

@@ -8,5 +8,8 @@ if (!supabaseUrl) throw new Error('Missing SUPABASE_URL');
 if (!supabaseKey) throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY');
 
 export const supabase = createClient(supabaseUrl, supabaseKey, {
-  auth: { persistSession: false },
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+  },
 });

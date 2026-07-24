@@ -68,6 +68,77 @@ export async function incrementFreeTrialUsed(telegramId: string) {
   if (updateError) throw updateError;
 }
 
+async function createAlertOutcome(args: {
+  alertId: string;
+  chain: string;
+  tokenAddress: string;
+  pairAddress?: string | null;
+  symbol?: string | null;
+  name?: string | null;
+  entryPrice?: number | null;
+  scoreAtAlert: number;
+  riskAtAlert: string;
+  actionAtAlert: string;
+}) {
+  const now = new Date().toISOString();
+
+  console.log(
+      "[createAlertOutcome] Creating outcome for",
+      args.symbol,
+      args.alertId
+    );
+
+  const { error } = await supabase
+    .from("alert_outcomes")
+    .insert({
+      alert_id: args.alertId,
+      chain: args.chain,
+      token_address: args.tokenAddress,
+      pair_address: args.pairAddress ?? null,
+      symbol: args.symbol ?? null,
+      name: args.name ?? null,
+
+      entry_price: args.entryPrice ?? 0,
+      current_price: args.entryPrice ?? 0,
+      highest_price: args.entryPrice ?? 0,
+      lowest_price: args.entryPrice ?? 0,
+
+      roi_current: 0,
+      roi_peak: 0,
+      roi_low: 0,
+      max_drawdown: 0,
+
+      alert_score: args.scoreAtAlert,
+      alert_risk: args.riskAtAlert,
+      alert_action: args.actionAtAlert,
+
+      status: "ACTIVE",
+
+      alerted_at: now,
+      created_at: now,
+      updated_at: now,
+      last_checked_at: now,
+    });
+
+  if (error) {
+    console.error("========== ALERT OUTCOME INSERT FAILED ==========");
+    console.error(error);
+    console.error("Payload:", {
+      alertId: args.alertId,
+      chain: args.chain,
+      tokenAddress: args.tokenAddress,
+      pairAddress: args.pairAddress,
+      symbol: args.symbol,
+      name: args.name,
+      entryPrice: args.entryPrice,
+      score: args.scoreAtAlert,
+      risk: args.riskAtAlert,
+      action: args.actionAtAlert,
+    });
+    console.error("===============================================");
+  }
+}
+
 export async function createAlertRecord(args: {
   chain: string;
   tokenAddress: string;
@@ -104,6 +175,20 @@ export async function createAlertRecord(args: {
     .single();
 
   if (error) throw error;
+
+  await createAlertOutcome({
+    alertId: data.id,
+    chain: args.chain,
+    tokenAddress: args.tokenAddress,
+    pairAddress: args.pairAddress,
+    symbol: args.symbol,
+    name: args.name,
+    entryPrice: args.alertPrice,
+    scoreAtAlert: args.scoreAtAlert,
+    riskAtAlert: args.riskAtAlert,
+    actionAtAlert: args.actionAtAlert,
+  });
+
   return data;
 }
 
