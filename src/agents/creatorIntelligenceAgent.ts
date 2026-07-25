@@ -1,5 +1,5 @@
 import { supabase } from '../services/supabase.js';
-import { recordOpportunity } from '../core/opportunityRegistry.js';
+import { recordOpportunityAndEmit } from '../services/opportunityService.js';
 
 export async function recordCreatorLaunch(args: {
   creatorWallet: string | null;
@@ -68,7 +68,7 @@ export async function recordCreatorLaunch(args: {
   });
 
   if (trustScore >= 70 || bestMarketCap >= 500_000) {
-    await recordOpportunity({
+    await recordOpportunityAndEmit({
       opportunityType: 'TOKEN_CREATOR',
       assetId: args.token,
       chain: 'solana',

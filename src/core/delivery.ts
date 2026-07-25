@@ -1,4 +1,7 @@
 import { supabase } from '../services/supabase.js';
+import {
+  eventEngine,
+} from '../services/eventEngine.js';
 
 export type DeliverableUser = {
   telegram_id: string;
@@ -189,14 +192,70 @@ export async function createAlertRecord(args: {
     actionAtAlert: args.actionAtAlert,
   });
 
+  try {
+    await eventEngine.emit({
+      eventType: 'ALERT_GENERATED',
+
+      token: {
+        chain: args.chain,
+        tokenAddress: args.tokenAddress,
+      },
+
+      source: 'ALERT_PIPELINE',
+
+      severity:
+        args.actionAtAlert.toUpperCase() === 'BUY'
+          ? 'NOTICE'
+          : 'INFO',
+
+      deduplicationKey: [
+        'alert',
+        data.id,
+        args.actionAtAlert.toUpperCase(),
+      ].join(':'),
+
+      deduplicationWindowSeconds: 24 * 60 * 60,
+
+      payload: {
+        alertId: data.id,
+
+        pairAddress: args.pairAddress ?? null,
+
+        symbol: args.symbol ?? null,
+        name: args.name ?? null,
+
+        score: args.scoreAtAlert,
+        risk: args.riskAtAlert,
+        action: args.actionAtAlert,
+
+        alertPrice: args.alertPrice ?? null,
+        liquidity: args.liquidityAtAlert ?? null,
+        buys5m: args.buys5mAtAlert ?? null,
+        sells5m: args.sells5mAtAlert ?? null,
+        volume5m: args.volume5mAtAlert ?? null,
+      },
+    });
+  } catch (error) {
+    console.warn(
+      '[Delivery] ALERT_GENERATED event failed:',
+      error,
+    );
+  }
+
   return data;
 }
 
 export async function createAlertDelivery(args: {
   alertId: string;
+  chain: string;
+  tokenAddress: string;
   telegramId: string;
   tierAtDelivery: 'admin' | 'paid' | 'free';
-  deliveryType: 'instant' | 'paid_delay' | 'free_trial_fast' | 'free_delayed';
+  deliveryType:
+    | 'instant'
+    | 'paid_delay'
+    | 'free_trial_fast'
+    | 'free_delayed';
   delaySeconds: number;
 }) {
   const { error } = await supabase.from('alert_deliveries').insert({
@@ -208,6 +267,47 @@ export async function createAlertDelivery(args: {
   });
 
   if (error) throw error;
+
+  try {
+    await eventEngine.emit({
+      eventType: 'ALERT_SENT',
+
+      token: {
+        chain: args.chain,
+        tokenAddress: args.tokenAddress,
+      },
+
+      source: 'TELEGRAM',
+
+      severity: 'INFO',
+
+      deduplicationKey: [
+        'delivery',
+        args.alertId,
+        args.telegramId,
+        args.deliveryType,
+      ].join(':'),
+
+      deduplicationWindowSeconds: 24 * 60 * 60,
+
+      payload: {
+        alertId: args.alertId,
+        telegramId: args.telegramId,
+
+        tier: args.tierAtDelivery,
+
+        deliveryType: args.deliveryType,
+
+        delaySeconds: args.delaySeconds,
+      },
+    });
+  } catch (error) {
+    console.warn(
+      '[Delivery] ALERT_SENT event failed:',
+      error,
+    );
+  }
+
 }
 
 export async function hasAlertDelivery(args: {

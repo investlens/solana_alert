@@ -1,4 +1,8 @@
 import { supabase } from "./supabase.js";
+import {
+  publishOutcomeStatus,
+  type OutcomeStatus,
+} from "./outcomeService.js";
 
 const TRACK_INTERVAL_MS = 60_000;
 const REQUEST_DELAY_MS = 150;
@@ -163,6 +167,20 @@ async function completeOutcome(
       `Failed to complete ${outcome.symbol ?? outcome.id}: ${error.message}`
     );
   }
+
+  await publishOutcomeStatus({
+    alertId: outcome.alert_id,
+    chain: outcome.chain ?? "solana",
+    tokenAddress: outcome.token_address,
+    symbol: outcome.symbol,
+
+    previousStatus: outcome.status as OutcomeStatus,
+    nextStatus: status,
+
+    roiCurrent: toNumber(outcome.roi_current),
+    roiPeak: toNumber(outcome.roi_peak),
+    maxDrawdown: toNumber(outcome.max_drawdown),
+  });
 }
 
 async function updateOutcome(outcome: OutcomeRow): Promise<void> {
@@ -298,6 +316,22 @@ async function updateOutcome(outcome: OutcomeRow): Promise<void> {
       `Failed to update ${symbol}: ${error.message}`
     );
   }
+
+  if (nextStatus === "RUGGED") {
+  await publishOutcomeStatus({
+    alertId: outcome.alert_id,
+    chain,
+    tokenAddress: outcome.token_address,
+    symbol: outcome.symbol,
+
+    previousStatus: outcome.status as OutcomeStatus,
+    nextStatus,
+
+    roiCurrent,
+    roiPeak,
+    maxDrawdown,
+  });
+}
 
   console.log(
     `[OutcomeTracker] ${symbol} | ` +

@@ -9,6 +9,7 @@ import { captureAlertSnapshot } from './core/tracker.js';
 import { pollPumpfunEarlyFeed } from './core/pumpfunWatcher.js';
 import { runDexPaidEngine } from './engines/dexPaidEngine.js';
 import { getCreatorWalletForToken } from './profiles/tokenCreatorLookup.js';
+import { recordDecision } from './services/decisionService.js';
 import { runWhaleClusterEngine } from './engines/whaleClusterEngine.js';
 import { runPumpEarlyEngine } from './engines/pumpEarlyEngine.js';
 import { runSignalPerformanceEngine } from './engines/signalPerformanceEngine.js';
@@ -24,6 +25,7 @@ import { startMemoryTracker } from './agents/memoryTrackerAgent.js';
 import { buildProAlertMessage } from './ui/proAlertMessageBuilder.js';
 import { startOutcomeCheckpointAgent } from './agents/outcomeCheckpointAgent.js';
 import { startOutcomeTracker } from "./services/outcomeTracker.js";
+import { startNotificationService } from "./services/notificationService.js";
 import {
   hasTokenAlertCreated,
   upsertTokenMemory,
@@ -287,6 +289,46 @@ console.log('Candidate check:', {
       }
 
       seenTokens.add(tokenAddress);
+
+      const actionBucket = getActionBucket(scoredResult);
+
+      await recordDecision({
+        tokenAddress,
+        chain: config.discoveryChain,
+        source: 'MAIN_SCANNER',
+
+        symbol: pair.baseToken?.symbol ?? null,
+        name: pair.baseToken?.name ?? null,
+        creatorWallet,
+
+        baseScore: result.score,
+        adjustedScore: scoredResult.score,
+
+        learningAdjustment:
+          learningAdjustment.totalAdjustment,
+
+        learningReasons:
+          learningAdjustment.reasons,
+
+        actionBucket,
+        riskLevel: result.risk,
+
+        marketCap: result.marketCap,
+        liquidity: result.liquidityUsd,
+        price: result.currentPrice,
+        buys5m: result.buys5m,
+        sells5m: result.sells5m,
+        volume5m: result.volume5m,
+
+        marketSafetyScore:
+          result.marketSafetyScore,
+
+        authoritySafetyScore:
+          result.authoritySafetyScore,
+
+        paidApproved:
+          result.paidApproved,
+      });
 
       if (result.ageMin > config.maxAgeMin) {
         console.log(`Skip age: ${tokenAddress} age=${Math.floor(result.ageMin)} min`);
@@ -702,6 +744,8 @@ async function processTierDispatch() {
           if (state.alertId) {
             await createAlertDelivery({
               alertId: state.alertId,
+              chain: config.discoveryChain,
+              tokenAddress,
               telegramId,
               tierAtDelivery: 'admin',
               deliveryType: 'instant',
@@ -734,6 +778,8 @@ async function processTierDispatch() {
           if (state.alertId) {
             await createAlertDelivery({
               alertId: state.alertId,
+              chain: config.discoveryChain,
+              tokenAddress,
               telegramId,
               tierAtDelivery: 'paid',
               deliveryType: 'paid_delay',
@@ -772,9 +818,14 @@ async function processTierDispatch() {
             if (state.alertId) {
               await createAlertDelivery({
                 alertId: state.alertId,
+                chain: config.discoveryChain,
+                tokenAddress,
                 telegramId,
                 tierAtDelivery: 'free',
-                deliveryType: fastDelayActive ? 'free_trial_fast' : 'free_delayed',
+                deliveryType:
+                  fastDelayActive
+                    ? 'free_trial_fast'
+                    : 'free_delayed',
                 delaySeconds: freeDelaySec,
               });
             }
@@ -890,6 +941,7 @@ async function main() {
 
   startOutcomeTracker();
   startAnalyticsSummary();
+  startNotificationService();
 
   const tasks = [
     startScanner(),
