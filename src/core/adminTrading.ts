@@ -138,6 +138,47 @@ async function getAdminTokenRawBalance(inputMint: string): Promise<bigint> {
   return total;
 }
 
+async function waitForTokenBalanceIncrease(args: {
+  mint: string;
+  beforeBalance: bigint;
+  attempts?: number;
+  delayMs?: number;
+}): Promise<bigint | null> {
+  const attempts = args.attempts ?? 6;
+  const delayMs = args.delayMs ?? 1_500;
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    await sleep(delayMs);
+
+    try {
+      const currentBalance = await getAdminTokenRawBalance(args.mint);
+
+      console.log('[AdminTrading] Buy balance verification:', {
+        mint: args.mint,
+        attempt,
+        beforeBalance: args.beforeBalance.toString(),
+        currentBalance: currentBalance.toString(),
+      });
+
+      if (currentBalance > args.beforeBalance) {
+        return currentBalance;
+      }
+    } catch (error) {
+      console.log('[AdminTrading] Buy balance check failed:', {
+        mint: args.mint,
+        attempt,
+        error:
+          error instanceof Error
+            ? error.message
+            : String(error),
+      });
+    }
+  }
+
+  return null;
+}
+
+
 export async function adminBuyToken(args: {
   outputMint: string;
   amountSol: number;
@@ -148,28 +189,44 @@ export async function adminBuyToken(args: {
   }
 
   const signer = getAdminKeypair();
-
   const connection = getConnection();
-  const balance = await connection.getBalance(signer.publicKey);
+
+  const solBalanceBefore = await connection.getBalance(
+    signer.publicKey,
+  );
+
+  const requestedLamports = Math.floor(
+    args.amountSol * 1_000_000_000,
+  );
 
   const safeLamports = Math.floor(
-  Math.min(
-    balance * 0.8,
-    Math.floor(args.amountSol * 1_000_000_000)
-  )
-);
+    Math.min(
+      solBalanceBefore * 0.8,
+      requestedLamports,
+    ),
+  );
 
   if (safeLamports < 10_000_000) {
-    throw new Error('Not enough SOL to safely execute trade');
+    throw new Error(
+      'Not enough SOL to safely execute trade',
+    );
   }
 
-  const lamports = safeLamports;
+  /*
+   * Capture the token balance before submitting the swap.
+   * This allows AlphaOS to calculate the actual number of
+   * tokens received rather than relying only on the quote.
+   */
+  const tokenBalanceBefore =
+    await getAdminTokenRawBalance(args.outputMint);
 
   const quote = await getQuote({
     inputMint: SOL_MINT,
     outputMint: args.outputMint,
-    amount: String(lamports),
-    slippageBps: args.slippageBps ?? config.adminMaxSlippageBps,
+    amount: safeLamports.toString(),
+    slippageBps:
+      args.slippageBps ??
+      config.adminMaxSlippageBps,
   });
 
   const built = await buildSwapTransaction({
@@ -177,11 +234,85 @@ export async function adminBuyToken(args: {
     userPublicKey: signer.publicKey.toBase58(),
   });
 
-  const signature = await signAndSendSerializedSwap(built.swapTransaction);
+  const signature = await signAndSendSerializedSwap(
+    built.swapTransaction,
+  );
+
+  /*
+   * The transaction is already confirmed at this point.
+   * Never submit another buy merely because the RPC has
+   * not indexed the new token balance yet.
+   */
+  const tokenBalanceAfter =
+    await waitForTokenBalanceIncrease({
+      mint: args.outputMint,
+      beforeBalance: tokenBalanceBefore,
+    });
+
+  if (tokenBalanceAfter === null) {
+    console.warn(
+      '[AdminTrading] Buy confirmed but balance requires reconciliation:',
+      {
+        mint: args.outputMint,
+        signature,
+        tokenBalanceBefore:
+          tokenBalanceBefore.toString(),
+      },
+    );
+
+    return {
+      signature,
+      quote,
+      walletAddress: signer.publicKey.toBase58(),
+
+      requestedSolAmount: args.amountSol,
+      submittedLamports: safeLamports.toString(),
+
+      tokenBalanceBefore:
+        tokenBalanceBefore.toString(),
+      tokenBalanceAfter: 'unknown',
+      tokensReceivedRaw: 'unknown',
+
+      verified: false,
+      balanceCheckFailed: true,
+      reconciliationRequired: true,
+    };
+  }
+
+  const tokensReceivedRaw =
+    tokenBalanceAfter - tokenBalanceBefore;
+
+  console.log('[AdminTrading] Buy verified:', {
+    mint: args.outputMint,
+    signature,
+    walletAddress: signer.publicKey.toBase58(),
+    submittedLamports: safeLamports.toString(),
+    tokenBalanceBefore:
+      tokenBalanceBefore.toString(),
+    tokenBalanceAfter:
+      tokenBalanceAfter.toString(),
+    tokensReceivedRaw:
+      tokensReceivedRaw.toString(),
+  });
 
   return {
     signature,
     quote,
+    walletAddress: signer.publicKey.toBase58(),
+
+    requestedSolAmount: args.amountSol,
+    submittedLamports: safeLamports.toString(),
+
+    tokenBalanceBefore:
+      tokenBalanceBefore.toString(),
+    tokenBalanceAfter:
+      tokenBalanceAfter.toString(),
+    tokensReceivedRaw:
+      tokensReceivedRaw.toString(),
+
+    verified: true,
+    balanceCheckFailed: false,
+    reconciliationRequired: false,
   };
 }
 

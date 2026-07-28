@@ -2,6 +2,7 @@ import { supabase } from '../services/supabase.js';
 import { enrichTokenByMintAddress } from '../services/dexscreener.js';
 import { upsertTokenMemory } from '../memory/tokenMemory.js';
 import { recordTokenMemoryEvent } from '../memory/tokenMemoryEvents.js';
+import { getCreatorWalletForToken } from '../profiles/tokenCreatorLookup.js';
 
 type MemoryRow = {
   token: string;
@@ -68,12 +69,15 @@ async function updateToken(row: MemoryRow) {
   const liquidity = num(result.liquidityUsd);
   const price = num(result.currentPrice);
   const outcome = classifyOutcome(marketCap, liquidity);
+  const creatorWallet =
+    await getCreatorWalletForToken(row.token);
 
   await upsertTokenMemory({
     token: row.token,
     symbol: pair.baseToken?.symbol ?? row.symbol,
     name: pair.baseToken?.name ?? null,
     chain: row.chain ?? 'solana',
+    creatorWallet,
     marketCap,
     liquidity,
     price,

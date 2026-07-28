@@ -60,6 +60,49 @@ export async function recordCreatorLaunch(args: {
     return null;
   }
 
+  const { data: existingLaunchEvent, error: launchEventLookupError } =
+  await supabase
+    .from('creator_wallet_events')
+    .select('id')
+    .eq('creator_wallet', args.creatorWallet)
+    .eq('token', args.token)
+    .eq('event_type', 'LAUNCH')
+    .maybeSingle();
+
+if (launchEventLookupError) {
+  console.log('creator launch event lookup error:', {
+    creatorWallet: args.creatorWallet,
+    token: args.token,
+    error: launchEventLookupError.message,
+  });
+} else if (!existingLaunchEvent) {
+  const { error: launchEventInsertError } = await supabase
+    .from('creator_wallet_events')
+    .insert({
+      creator_wallet: args.creatorWallet,
+      event_type: 'LAUNCH',
+      token: args.token,
+      symbol: args.symbol ?? null,
+      market_cap: marketCap || null,
+      source: args.sourceAgent ?? 'CreatorIntelligenceAgent',
+      raw_data: args.rawData ?? {},
+    });
+
+  if (launchEventInsertError) {
+    console.log('creator launch event insert error:', {
+      creatorWallet: args.creatorWallet,
+      token: args.token,
+      error: launchEventInsertError.message,
+    });
+  } else {
+    console.log('creator launch event recorded:', {
+      creatorWallet: args.creatorWallet,
+      token: args.token,
+      symbol: args.symbol ?? null,
+    });
+  }
+}
+
   console.log('creator launch recorded:', {
     creator: args.creatorWallet,
     token: args.token,

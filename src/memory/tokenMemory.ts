@@ -40,6 +40,11 @@ type ExistingTokenMemory = {
   alert_liquidity?: number | null;
   alert_created_at?: string | null;
 
+  first_market_cap?: number | null;
+  first_liquidity?: number | null;
+  first_price?: number | null;
+  first_seen?: string | null;
+
   raw?: Record<string, unknown> | null;
 };
 
@@ -276,22 +281,63 @@ export async function upsertTokenMemory(
   /*
    * Preserve the first observation separately from the alert.
    */
-  if (!existing) {
-    payload.first_market_cap = marketCap;
+  /*
+ * Create OR repair the first observation.
+ * If the token was first discovered before market cap existed,
+ * populate the baseline later when market data becomes available.
+ */
+if (
+  marketCap != null &&
+  (
+    !existing ||
+    (existing as any).first_market_cap == null
+  )
+) {
+  payload.first_market_cap = marketCap;
+
+  if (liquidity != null) {
     payload.first_liquidity = liquidity;
+  }
+
+  if (price != null) {
     payload.first_price = price;
+  }
+
+  if (!existing) {
     payload.first_seen = now;
   }
+}
 
   /*
    * Create official alert values exactly once.
    */
-  if (shouldCreateAlertSnapshot) {
-    payload.alert_market_cap = marketCap;
+  /*
+ * Create OR repair the alert baseline.
+ */
+if (
+  marketCap != null &&
+  (
+    shouldCreateAlertSnapshot ||
+    (
+      incomingIsMainAlert &&
+      existing?.alert_market_cap == null
+    )
+  )
+) {
+  payload.alert_market_cap = marketCap;
+
+  if (price != null) {
     payload.alert_price = price;
+  }
+
+  if (liquidity != null) {
     payload.alert_liquidity = liquidity;
+  }
+
+  if (!existing?.alert_created_at) {
     payload.alert_created_at = now;
   }
+}
 
   const cleanPayload = Object.fromEntries(
     Object.entries(payload).filter(

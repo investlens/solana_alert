@@ -1,9 +1,30 @@
-import { config } from '../config.js';
-import { adminBuyToken, adminSellTokenPercentWithRetry } from './adminTrading.js';
-import { chooseBestPair, fetchPairs } from '../services/dexscreener.js';
-import { saveClosedAutoTrade } from './autoTradeStore.js';
-import { sendTelegram } from '../services/telegram.js';
-import { recordTradeOpen, recordTradeClose } from './tradeAnalytics.js';
+import { config } from "../config.js";
+import {
+  adminBuyToken,
+  adminSellTokenPercentWithRetry,
+} from "./adminTrading.js";
+import {
+  chooseBestPair,
+  fetchPairs,
+} from "../services/dexscreener.js";
+import { saveClosedAutoTrade } from "./autoTradeStore.js";
+import { sendTelegram } from "../services/telegram.js";
+import {
+  recordTradeOpen,
+  recordTradeClose,
+} from "./tradeAnalytics.js";
+import { getAlphaSettings } from "../services/settingsService.js";
+import {
+  createPendingPosition,
+  markBuyFailed,
+  markBuyReconciliationRequired,
+  markPositionOpen,
+  updatePositionMarket,
+  markSellRequested,
+  markSellPending,
+  closePosition,
+  restoreActivePositions,
+} from "./positionManager.js";
 
 let autoTradePaused = false;
 
@@ -23,6 +44,7 @@ export function isAutoTradePaused() {
 }
 
 type AutoTrade = {
+  positionId: string;
   token: string;
   symbol: string;
   entryPrice: number;
@@ -44,18 +66,41 @@ type ClosedAutoTrade = AutoTrade & {
 const activeTrades = new Map<string, AutoTrade>();
 const closedTrades: ClosedAutoTrade[] = [];
 
-const PAPER_MODE = false;
-const CONFIRMATION_DELAY_MS = 25_000;
-const MIN_CONFIRM_PRICE_RATIO = 0.97;
-const MAX_CONFIRM_PRICE_RATIO = 1.12;
+const PAPER_MODE = config.autoTradeMode === 'paper';
+console.log('════════════════════════════════════');
+console.log('🤖 AlphaOS Trading Engine');
+console.log(`Execution Mode : ${PAPER_MODE ? '🧪 PAPER' : '🔴 LIVE'}`);
+console.log(`Admin Trading : ${config.adminTradingEnabled ? 'Enabled' : 'Disabled'}`);
+console.log(
+  `Private Key   : ${
+    config.adminTradingPrivateKey ? 'Loaded ✅' : 'Missing ❌'
+  }`
+);
+console.log('════════════════════════════════════');
+
 const MIN_CHECK_INTERVAL_MS = 20_000;
 
 let lastRunAt = 0;
 
-export function canStartNewTrade(token: string) {
+export async function canStartNewTrade(
+  token: string,
+): Promise<boolean> {
   if (autoTradePaused) return false;
   if (activeTrades.has(token)) return false;
-  if (activeTrades.size >= 3) return false;
+
+  const settings = await getAlphaSettings();
+
+  if (!settings.adminAutoBuyEnabled) {
+    return false;
+  }
+
+  if (
+    activeTrades.size >=
+    Math.max(1, settings.maxOpenPositions)
+  ) {
+    return false;
+  }
+
   return true;
 }
 
@@ -146,6 +191,17 @@ export async function startAdminAutoTrade(args: {
   entryPrice: number;
   amountSol?: number;
 }) {
+  const settings = await getAlphaSettings();
+
+  if (!settings.adminAutoBuyEnabled) {
+    console.log("[AutoTrade] Auto-buy disabled. Alert only.", {
+      token: args.token,
+      symbol: args.symbol,
+    });
+
+    return;
+  }
+
   if (autoTradePaused) {
   await sendTelegram(
     config.ownerChatId,
@@ -154,7 +210,28 @@ export async function startAdminAutoTrade(args: {
   return;
 }
 
-  if (activeTrades.has(args.token)) return;
+    if (activeTrades.has(args.token)) {
+    return;
+  }
+
+  const maxOpenPositions = Math.max(
+    1,
+    Math.round(settings.maxOpenPositions),
+  );
+
+  if (activeTrades.size >= maxOpenPositions) {
+    console.log(
+      '[AutoTrade] Maximum open positions reached.',
+      {
+        token: args.token,
+        symbol: args.symbol,
+        openPositions: activeTrades.size,
+        maxOpenPositions,
+      },
+    );
+
+    return;
+  }
 
   const rejectedAt = recentlyRejected.get(args.token);
 
@@ -167,94 +244,224 @@ export async function startAdminAutoTrade(args: {
     if (!config.adminTradingPrivateKey) return;
   }
 
+    const confirmationSeconds = Math.max(
+    5,
+    Math.round(settings.entryConfirmationSeconds),
+  );
+
+  const confirmationDelayMs =
+    confirmationSeconds * 1_000;
+
+  const maxEntryDipPercent = Math.max(
+    0,
+    settings.maxEntryDipPercent,
+  );
+
+  const maxEntryPumpPercent = Math.max(
+    0,
+    settings.maxEntryPumpPercent,
+  );
+
   await sendTelegram(
     config.ownerChatId,
     [
-      '⏳ <b>AUTO BUY CONFIRMATION CHECK</b>',
+      '⏳ <b>ENTRY STUDY ACTIVE</b>',
       '',
       `<b>${args.symbol}</b>`,
       `Signal Price: <b>$${fmtPrice(args.entryPrice)}</b>`,
-      'Waiting 25 seconds before entry...',
+      `Study Window: <b>${confirmationSeconds} seconds</b>`,
       '',
-      'Will skip if price drops more than 3% or pumps more than 12%.',
-    ].join('\n')
+      'AlphaOS is checking whether the entry remains healthy.',
+    ].join('\n'),
   );
 
-  await sleep(CONFIRMATION_DELAY_MS);
+  await sleep(confirmationDelayMs);
 
-  const confirmedPrice = await fetchCurrentPrice(args.token);
+  /*
+   * Re-check the setting after the study window.
+   * This allows admin to disable auto-buy while a token
+   * is being analysed.
+   */
+  const latestSettings = await getAlphaSettings(true);
+
+  if (!latestSettings.adminAutoBuyEnabled) {
+    console.log(
+      '[AutoTrade] Auto-buy disabled during entry study.',
+      {
+        token: args.token,
+        symbol: args.symbol,
+      },
+    );
+
+    return;
+  }
+
+  if (autoTradePaused) {
+    console.log(
+      '[AutoTrade] Auto-buy paused during entry study.',
+      {
+        token: args.token,
+        symbol: args.symbol,
+      },
+    );
+
+    return;
+  }
+
+  const confirmedPrice =
+    await fetchCurrentPrice(args.token);
 
   if (!confirmedPrice) {
     await sendTelegram(
       config.ownerChatId,
       [
-        '⚠️ <b>AUTO BUY SKIPPED</b>',
+        '⚠️ <b>ENTRY CANCELLED</b>',
         '',
         `<b>${args.symbol}</b>`,
-        'Could not fetch confirmation price.',
-      ].join('\n')
+        'AlphaOS could not confirm the current price.',
+        '',
+        'No trade was opened.',
+      ].join('\n'),
     );
 
-    recentlyRejected.set(args.token, Date.now());
+    recentlyRejected.set(
+      args.token,
+      Date.now(),
+    );
 
     return;
   }
 
-  if (confirmedPrice < args.entryPrice * MIN_CONFIRM_PRICE_RATIO) {
-  const dropPct = ((confirmedPrice - args.entryPrice) / args.entryPrice) * 100;
+  const priceMovePercent =
+    ((confirmedPrice - args.entryPrice) /
+      args.entryPrice) *
+    100;
 
-  await sendTelegram(
-    config.ownerChatId,
-    [
-      '🧊 <b>AUTO BUY SKIPPED</b>',
-      '',
-      `<b>${args.symbol}</b>`,
-      `Signal Price: <b>$${fmtPrice(args.entryPrice)}</b>`,
-      `Confirm Price: <b>$${fmtPrice(confirmedPrice)}</b>`,
-      `Move: <b>${dropPct.toFixed(1)}%</b>`,
-      '',
-      'Reason: price dropped during confirmation window.',
-    ].join('\n')
-  );
+  const minimumConfirmPrice =
+    args.entryPrice *
+    (1 - maxEntryDipPercent / 100);
 
-  recentlyRejected.set(args.token, Date.now());
-  return;
-}
+  const maximumConfirmPrice =
+    args.entryPrice *
+    (1 + maxEntryPumpPercent / 100);
 
-if (confirmedPrice > args.entryPrice * MAX_CONFIRM_PRICE_RATIO) {
-  const pumpPct = ((confirmedPrice - args.entryPrice) / args.entryPrice) * 100;
+  if (confirmedPrice < minimumConfirmPrice) {
+    await sendTelegram(
+      config.ownerChatId,
+      [
+        '❌ <b>ENTRY CANCELLED</b>',
+        '',
+        `<b>${args.symbol}</b>`,
+        `Signal Price: <b>$${fmtPrice(args.entryPrice)}</b>`,
+        `Current Price: <b>$${fmtPrice(confirmedPrice)}</b>`,
+        `Move: <b>${priceMovePercent.toFixed(1)}%</b>`,
+        '',
+        'Reason: trend weakened during the entry study.',
+        'No trade was opened.',
+      ].join('\n'),
+    );
 
-  await sendTelegram(
-    config.ownerChatId,
-    [
-      '🚫 <b>AUTO BUY SKIPPED</b>',
-      '',
-      `<b>${args.symbol}</b>`,
-      `Signal Price: <b>$${fmtPrice(args.entryPrice)}</b>`,
-      `Confirm Price: <b>$${fmtPrice(confirmedPrice)}</b>`,
-      `Move: <b>+${pumpPct.toFixed(1)}%</b>`,
-      '',
-      'Reason: price moved too fast before entry. Avoiding top-buy.',
-    ].join('\n')
-  );
+    recentlyRejected.set(
+      args.token,
+      Date.now(),
+    );
 
-  recentlyRejected.set(args.token, Date.now());
-  return;
-}
+    return;
+  }
 
-  const amountSol = args.amountSol ?? config.adminBuyAmountDefaultSol;
+  if (confirmedPrice > maximumConfirmPrice) {
+    await sendTelegram(
+      config.ownerChatId,
+      [
+        '❌ <b>ENTRY CANCELLED</b>',
+        '',
+        `<b>${args.symbol}</b>`,
+        `Signal Price: <b>$${fmtPrice(args.entryPrice)}</b>`,
+        `Current Price: <b>$${fmtPrice(confirmedPrice)}</b>`,
+        `Move: <b>+${priceMovePercent.toFixed(1)}%</b>`,
+        '',
+        'Reason: price moved too quickly before entry.',
+        'AlphaOS avoided chasing the pump.',
+      ].join('\n'),
+    );
 
-  let trade: { signature: string };
+    recentlyRejected.set(
+      args.token,
+      Date.now(),
+    );
+
+    return;
+  }
+
+    const amountSol =
+    args.amountSol ??
+    latestSettings.adminTradeAmountSol;
+
+  let pendingPosition;
 
 try {
-  trade = PAPER_MODE
-    ? { signature: 'paper-trade-simulation' }
-    : await adminBuyToken({
-        outputMint: args.token,
-        amountSol,
-      });
+  pendingPosition = await createPendingPosition({
+    token: args.token,
+    symbol: args.symbol,
+    mode: PAPER_MODE ? 'paper' : 'live',
+    signalPrice: confirmedPrice,
+    entrySolAmount: amountSol,
+    aiRecommendation: 'BUY',
+    aiCommentary:
+      'AI entry approved and confirmation completed.',
+  });
+} catch (err) {
+  console.error(
+    '[PositionManager] Could not create pending position:',
+    err,
+  );
+
+  await sendTelegram(
+    config.ownerChatId,
+    [
+      '❌ <b>POSITION CREATION FAILED</b>',
+      '',
+      `<b>${args.symbol}</b>`,
+      `Token: <code>${args.token}</code>`,
+      '',
+      err instanceof Error ? err.message : String(err),
+    ].join('\n'),
+  );
+
+  return;
+}
+
+let trade: Awaited<ReturnType<typeof adminBuyToken>>;
+
+try {
+trade = PAPER_MODE
+  ? {
+      signature: 'paper-trade-simulation',
+      quote: null,
+      walletAddress: 'paper-wallet',
+      requestedSolAmount: amountSol,
+      submittedLamports: String(
+        Math.floor(amountSol * 1_000_000_000),
+      ),
+      tokenBalanceBefore: '0',
+      tokenBalanceAfter: '0',
+      tokensReceivedRaw: '0',
+      verified: true,
+      balanceCheckFailed: false,
+      reconciliationRequired: false,
+    }
+  : await adminBuyToken({
+      outputMint: args.token,
+      amountSol,
+    });
 } catch (err) {
   console.error('AUTO BUY FAILED FULL:', err);
+
+  await markBuyFailed({
+    positionId: pendingPosition.id,
+    errorMessage:
+      err instanceof Error ? err.message : String(err),
+  });
 
   await sendTelegram(
     config.ownerChatId,
@@ -265,27 +472,109 @@ try {
       `Token: <code>${args.token}</code>`,
       '',
       err instanceof Error ? err.message : String(err),
-    ].join('\n')
+    ].join('\n'),
   );
 
   return;
 }
 
+if (!trade.verified) {
+  await markBuyReconciliationRequired({
+    positionId: pendingPosition.id,
+    buySignature: trade.signature,
+    buyBeforeBalanceRaw: trade.tokenBalanceBefore,
+    errorMessage:
+      'Buy transaction was confirmed, but the received token balance could not be verified. Manual reconciliation is required.',
+  });
+
+  await sendTelegram(
+    config.ownerChatId,
+    [
+      '⚠️ <b>BUY RECONCILIATION REQUIRED</b>',
+      '',
+      `<b>${args.symbol}</b>`,
+      `Token: <code>${args.token}</code>`,
+      '',
+      'The transaction was submitted successfully, but AlphaOS could not verify the received token balance.',
+      '',
+      'The bot will not attempt another buy.',
+      `Tx: <code>${trade.signature}</code>`,
+    ].join('\n'),
+  );
+
+  return;
+}
+
+    const initialStopLossPercent = Math.max(
+    0,
+    latestSettings.initialStopLossPercent,
+  );
+
   const position: AutoTrade = {
+    positionId: pendingPosition.id,
     token: args.token,
     symbol: args.symbol,
     entryPrice: confirmedPrice,
     highestPrice: confirmedPrice,
-    stopPrice: confirmedPrice * 0.92,
+    stopPrice:
+      confirmedPrice *
+      (1 - initialStopLossPercent / 100),
     amountSol,
     status: 'open',
     openedAt: Date.now(),
     mode: PAPER_MODE ? 'paper' : 'live',
   };
 
-  activeTrades.set(args.token, position);
+  const initialTokenAmount = Number(
+  trade.tokensReceivedRaw,
+);
 
-  await recordTradeOpen({
+if (
+  !Number.isFinite(initialTokenAmount) ||
+  initialTokenAmount < 0
+) {
+  await markBuyReconciliationRequired({
+    positionId: pendingPosition.id,
+    buySignature: trade.signature,
+    buyBeforeBalanceRaw: trade.tokenBalanceBefore,
+    errorMessage:
+      `Invalid received token balance returned after buy: ${trade.tokensReceivedRaw}`,
+  });
+
+  await sendTelegram(
+    config.ownerChatId,
+    [
+      '⚠️ <b>BUY RECONCILIATION REQUIRED</b>',
+      '',
+      `<b>${args.symbol}</b>`,
+      `Token: <code>${args.token}</code>`,
+      '',
+      'The transaction succeeded, but the received token amount was invalid.',
+      `Tx: <code>${trade.signature}</code>`,
+    ].join('\n'),
+  );
+
+  return;
+}
+
+await markPositionOpen({
+  positionId: pendingPosition.id,
+  entryPrice: confirmedPrice,
+  initialTokenAmount,
+  stopPrice: position.stopPrice,
+  trailingStopPercent:
+    initialStopLossPercent / 100,
+
+  buySignature: trade.signature,
+  buyBeforeBalanceRaw:
+    trade.tokenBalanceBefore,
+  buyAfterBalanceRaw:
+    trade.tokenBalanceAfter,
+});
+
+activeTrades.set(args.token, position);
+
+await recordTradeOpen({
   token: args.token,
   symbol: args.symbol,
   entryPrice: confirmedPrice,
@@ -301,9 +590,9 @@ try {
       `Amount: <b>${amountSol.toFixed(4)} SOL</b>`,
       `Entry Price: <b>$${fmtPrice(confirmedPrice)}</b>`,
       `Initial Stop: <b>$${fmtPrice(position.stopPrice)}</b>`,
-      `Initial Stop Width: <b>8%</b>`,
+      `Initial Stop Width: <b>${initialStopLossPercent}%</b>`,
       '',
-      'Admin override available below.',
+      'AlphaOS is now protecting this position.',
       `Tx: <code>${trade.signature}</code>`,
     ].join('\n'),
     sellButtons(args.token)
@@ -333,12 +622,14 @@ export async function manualCloseAutoTrade(token: string, percent: 25 | 50 | 100
   const pnlSol = calcPnlSol(trade.amountSol, roiNow);
   const valueSol = trade.amountSol + pnlSol;
 
-  const sell = PAPER_MODE
-  ? { signature: `paper-manual-sell-${percent}` }
-  : await adminSellTokenPercentWithRetry({
-      inputMint: token,
-      percent,
-    });
+  const isPaperPosition = trade.mode === 'paper';
+
+  const sell = isPaperPosition
+    ? { signature: `paper-manual-sell-${percent}` }
+    : await adminSellTokenPercentWithRetry({
+        inputMint: token,
+        percent,
+      });
 
   if (percent === 100) {
     trade.status = 'closed';
@@ -363,7 +654,9 @@ export async function manualCloseAutoTrade(token: string, percent: 25 | 50 | 100
   await sendTelegram(
     config.ownerChatId,
     [
-      PAPER_MODE ? '🧪 <b>PAPER MANUAL SELL</b>' : '✅ <b>MANUAL SELL EXECUTED</b>',
+      isPaperPosition
+      ? '🧪 <b>PAPER MANUAL SELL</b>'
+      : '✅ <b>MANUAL SELL EXECUTED</b>',
       '',
       `<b>${trade.symbol}</b>`,
       `Sold: <b>${percent}%</b>`,
@@ -377,13 +670,14 @@ export async function manualCloseAutoTrade(token: string, percent: 25 | 50 | 100
 
   return {
     ok: true,
-    message: `${PAPER_MODE ? 'Paper' : 'Live'} manual sell ${percent}% complete.`,
+    message: `${isPaperPosition ? 'Paper' : 'Live'} manual sell ${percent}% complete.`,
   };
 }
 
 export async function runAutoTradeManager() {
   if (Date.now() - lastRunAt < MIN_CHECK_INTERVAL_MS) return;
   lastRunAt = Date.now();
+    const settings = await getAlphaSettings();
 
   for (const [token, trade] of activeTrades.entries()) {
     if (trade.status !== 'open') continue;
@@ -396,14 +690,49 @@ export async function runAutoTradeManager() {
       const pnlSol = calcPnlSol(trade.amountSol, roiNow);
       const valueSol = trade.amountSol + pnlSol;
 
-      if (currentPrice > trade.highestPrice) {
+      if (
+        settings.trailingStopEnabled &&
+        currentPrice > trade.highestPrice
+      ) {
         trade.highestPrice = currentPrice;
 
-        const highRoi = ((trade.highestPrice - trade.entryPrice) / trade.entryPrice) * 100;
-        const trailPercent = trailPercentForRoi(highRoi);
-        trade.stopPrice = trade.highestPrice * (1 - trailPercent);
+        const highRoi =
+  ((trade.highestPrice - trade.entryPrice) /
+    trade.entryPrice) *
+  100;
 
-        await sendTelegram(
+const trailPercent =
+  trailPercentForRoi(highRoi);
+
+trade.stopPrice =
+  trade.highestPrice * (1 - trailPercent);
+
+const protectedRoiPercent =
+  ((trade.stopPrice - trade.entryPrice) /
+    trade.entryPrice) *
+  100;
+
+await updatePositionMarket({
+  positionId: trade.positionId,
+
+  currentPrice,
+  highestPrice: trade.highestPrice,
+  stopPrice: trade.stopPrice,
+  trailingStopPercent: trailPercent,
+
+  currentRoiPercent: roiNow,
+  peakRoiPercent: highRoi,
+  protectedRoiPercent,
+
+  unrealizedPnlSol: pnlSol,
+  estimatedValueSol: valueSol,
+
+  aiRecommendation: 'HOLD',
+  aiCommentary:
+    'Position reached a new high and the trailing stop was moved upward.',
+});
+
+await sendTelegram(
           config.ownerChatId,
           [
             '📈 <b>TRAILING STOP MOVED UP</b>',
@@ -422,6 +751,7 @@ export async function runAutoTradeManager() {
       }
 
       if (currentPrice <= trade.stopPrice) {
+        const isPaperPosition = trade.mode === 'paper';
         await sendTelegram(
           config.ownerChatId,
           [
@@ -435,16 +765,36 @@ export async function runAutoTradeManager() {
             `Paper PnL: <b>${fmtSol(pnlSol)}</b>`,
             `Paper Exit Value: <b>${valueSol.toFixed(4)} SOL</b>`,
             '',
-            PAPER_MODE ? 'Paper selling 100%...' : 'Selling 100%...',
+            isPaperPosition ? 'Paper selling 100%...' : 'Selling 100%...',
           ].join('\n')
         );
 
-        const sell = PAPER_MODE
+        await markSellRequested({
+          positionId: trade.positionId,
+          percent: 100,
+        });
+
+        await markSellPending(trade.positionId);
+
+        const sell = isPaperPosition
         ? { signature: 'paper-sell-simulation' }
         : await adminSellTokenPercentWithRetry({
             inputMint: token,
             percent: 100,
           });
+
+        await closePosition({
+          positionId: trade.positionId,
+
+          exitPrice: currentPrice,
+          finalRoiPercent: roiNow,
+          realisedPnlSol: pnlSol,
+
+          sellSignature: sell.signature,
+
+          beforeBalanceRaw: 'unknown',
+          afterBalanceRaw: '0',
+        });
 
         trade.status = 'closed';
         activeTrades.delete(token);
@@ -467,7 +817,9 @@ export async function runAutoTradeManager() {
         await sendTelegram(
           config.ownerChatId,
           [
-            PAPER_MODE ? '🧪 <b>PAPER AUTO SELL COMPLETE</b>' : '✅ <b>AUTO SELL EXECUTED</b>',
+            isPaperPosition
+      ? '🧪 <b>PAPER AUTO SELL COMPLETE</b>'
+      : '✅ <b>AUTO SELL EXECUTED</b>',
             '',
             `<b>${trade.symbol}</b>`,
             `Final ROI: <b>${roiNow.toFixed(1)}%</b>`,
@@ -489,6 +841,44 @@ export async function runAutoTradeManager() {
       );
     }
   }
+}
+
+export async function restoreOpenTrades() {
+  const positions = await restoreActivePositions();
+
+  for (const position of positions) {
+    if (
+      position.status !== "OPEN" &&
+      position.status !== "PARTIAL_EXIT"
+    ) {
+      continue;
+    }
+
+    if (
+      position.entryPrice == null ||
+      position.highestPrice == null ||
+      position.stopPrice == null
+    ) {
+      continue;
+    }
+
+    activeTrades.set(position.token, {
+      positionId: position.id,
+      token: position.token,
+      symbol: position.symbol,
+      entryPrice: position.entryPrice,
+      highestPrice: position.highestPrice,
+      stopPrice: position.stopPrice,
+      amountSol: position.entrySolAmount,
+      status: "open",
+      openedAt: new Date(position.openedAt ?? position.createdAt).getTime(),
+      mode: position.mode,
+    });
+  }
+
+  console.log(
+    `[AutoTrade] Restored ${activeTrades.size} active trade(s).`,
+  );
 }
 
 export function getAutoTradeStats() {

@@ -35,6 +35,10 @@ export const config = {
   adminBuyAmountSmallSol: num('ADMIN_BUY_AMOUNT_SMALL_SOL', 0.03),
   adminBuyAmountDefaultSol: num('ADMIN_BUY_AMOUNT_DEFAULT_SOL', 0.05),
   adminMaxSlippageBps: num('ADMIN_MAX_SLIPPAGE_BPS', 1000),
+
+  autoTradeMode: (process.env.AUTO_TRADE_MODE ?? 'paper').toLowerCase(),
+  autoTradeMaxOpenPositions: num('AUTO_TRADE_MAX_OPEN_POSITIONS', 3),
+
   solanaRpcUrl: process.env.SOLANA_RPC_URL ?? 'https://api.mainnet-beta.solana.com',
   jupiterApiKey: process.env.JUPITER_API_KEY ?? '',
 
@@ -57,6 +61,7 @@ export const config = {
   minFreeScore: num('MIN_FREE_SCORE', 78),
   maxFdvToLiq: num('MAX_FDV_TO_LIQ', 40),
   min5mVolume: num('MIN_5M_VOLUME', 3000),
+
 
   dryRun: bool('DRY_RUN', false),
 

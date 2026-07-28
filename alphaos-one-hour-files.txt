@@ -1,4 +1,1017 @@
-/// <reference types="node" />
+import { supabase } from '../services/supabase.js';
+import { enrichTokenByMintAddress } from '../services/dexscreener.js';
+import { recordTokenMemoryEvent } from '../memory/tokenMemoryEvents.js';
+import { sendTelegram } from '../services/telegram.js';
+import { getAlertDeliveries } from '../core/delivery.js';
+
+type CheckpointKey = '5M' | '15M' | '30M' | '1H' | '6H' | '24H';
+
+type MemoryRow = {
+  token: string;
+  chain: string | null;
+  symbol: string | null;
+
+  alert_created_at: string | null;
+  first_seen: string | null;
+
+  alert_market_cap: number | null;
+  first_market_cap: number | null;
+
+  peak_market_cap: number | null;
+
+  checked_5m_at: string | null;
+  checked_15m_at: string | null;
+  checked_30m_at: string | null;
+  checked_1h_at: string | null;
+  checked_6h_at: string | null;
+  checked_24h_at: string | null;
+};
+
+type CheckpointDefinition = {
+  key: CheckpointKey;
+  minutes: number;
+  checkedColumn:
+    | 'checked_5m_at'
+    | 'checked_15m_at'
+    | 'checked_30m_at'
+    | 'checked_1h_at'
+    | 'checked_6h_at'
+    | 'checked_24h_at';
+  marketCapColumn:
+    | 'market_cap_5m'
+    | 'market_cap_15m'
+    | 'market_cap_30m'
+    | 'market_cap_1h'
+    | 'market_cap_6h'
+    | 'market_cap_24h';
+  returnColumn:
+    | 'return_5m_pct'
+    | 'return_15m_pct'
+    | 'return_30m_pct'
+    | 'return_1h_pct'
+    | 'return_6h_pct'
+    | 'return_24h_pct';
+};
+
+const CHECKPOINTS: CheckpointDefinition[] = [
+  {
+    key: '5M',
+    minutes: 5,
+    checkedColumn: 'checked_5m_at',
+    marketCapColumn: 'market_cap_5m',
+    returnColumn: 'return_5m_pct',
+  },
+  {
+    key: '15M',
+    minutes: 15,
+    checkedColumn: 'checked_15m_at',
+    marketCapColumn: 'market_cap_15m',
+    returnColumn: 'return_15m_pct',
+  },
+  {
+    key: '30M',
+    minutes: 30,
+    checkedColumn: 'checked_30m_at',
+    marketCapColumn: 'market_cap_30m',
+    returnColumn: 'return_30m_pct',
+  },
+  {
+    key: '1H',
+    minutes: 60,
+    checkedColumn: 'checked_1h_at',
+    marketCapColumn: 'market_cap_1h',
+    returnColumn: 'return_1h_pct',
+  },
+  {
+    key: '6H',
+    minutes: 360,
+    checkedColumn: 'checked_6h_at',
+    marketCapColumn: 'market_cap_6h',
+    returnColumn: 'return_6h_pct',
+  },
+  {
+    key: '24H',
+    minutes: 1440,
+    checkedColumn: 'checked_24h_at',
+    marketCapColumn: 'market_cap_24h',
+    returnColumn: 'return_24h_pct',
+  },
+];
+
+const POLL_MS = Number(
+  process.env.OUTCOME_CHECKPOINT_POLL_MS ?? 60_000
+);
+
+const BATCH_SIZE = Number(
+  process.env.OUTCOME_CHECKPOINT_BATCH_SIZE ?? 100
+);
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatPct(value: number): string {
+  const sign = value > 0 ? '+' : '';
+
+  return `${sign}${value.toFixed(1)}%`;
+}
+
+function buildOutcomeMessage(args: {
+  symbol: string;
+  checkpoint: string;
+  returnPct: number;
+  maxReturnPct: number;
+  outcome: string;
+}) {
+  const {
+    symbol,
+    checkpoint,
+    returnPct,
+    maxReturnPct,
+    outcome,
+  } = args;
+
+  const predictionStatus =
+  returnPct >= 0 ? 'Prediction Confirmed ✅' : 'Prediction Missed ⚠️';
+
+  return [
+    '🧠 <b>ALPHAOS VERIFIED</b>',
+    '',
+    `💎 <b>$${symbol.replace(/^\$/, '')}</b>`,
+    '━━━━━━━━━━━━━━━━━━',
+    '',
+    `⏱ <b>${checkpoint} Checkpoint</b>`,
+      '',
+      `📈 <b>Current Return</b>`,
+      `${formatPct(returnPct)}`,
+      '',
+      `🚀 <b>Peak Return</b>`,
+      `${formatPct(maxReturnPct)}`,
+      '',
+      `🎯 <b>AI Verdict</b>`,
+      `${outcome}`,
+      '',
+      '📊 <b>AI Accuracy</b>',
+      predictionStatus,
+      '',
+      '🧠 <b>Learning Status</b>',
+      'Pattern stored and added to AlphaOS Intelligence.',
+      '',
+      '━━━━━━━━━━━━━━━━━━',
+      '<i>Every outcome improves future AlphaOS decisions.</i>',
+  ].join('\n');
+}
+
+function numberOrNull(value: unknown) {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function calculateReturn(
+  alertMarketCap: number,
+  currentMarketCap: number
+) {
+  if (alertMarketCap <= 0) return null;
+
+  return ((currentMarketCap - alertMarketCap) / alertMarketCap) * 100;
+}
+
+function getNextDueCheckpoint(
+  row: MemoryRow
+): CheckpointDefinition | null {
+  const startedAt = row.alert_created_at ?? row.first_seen;
+
+  if (!startedAt) return null;
+
+  const startedMs = new Date(startedAt).getTime();
+
+  if (!Number.isFinite(startedMs)) return null;
+
+  const elapsedMinutes = (Date.now() - startedMs) / 60_000;
+
+  for (const checkpoint of CHECKPOINTS) {
+    if (
+      elapsedMinutes >= checkpoint.minutes &&
+      !row[checkpoint.checkedColumn]
+    ) {
+      return checkpoint;
+    }
+  }
+
+  return null;
+}
+
+function classifyInterimOutcome(returnPct: number) {
+  if (returnPct >= 200) return 'MOONSHOT';
+  if (returnPct >= 100) return 'STRONG_WINNER';
+  if (returnPct >= 30) return 'WINNER';
+  if (returnPct >= 0) return 'POSITIVE';
+  if (returnPct > -20) return 'WEAK';
+  if (returnPct > -50) return 'DRAWDOWN';
+  return 'FAILED';
+}
+
+function classifyFinalOutcome(args: {
+  currentReturn: number;
+  maxReturn: number;
+}) {
+  const { currentReturn, maxReturn } = args;
+
+  if (maxReturn >= 300) return 'MOONSHOT';
+  if (maxReturn >= 100 && currentReturn >= 25) return 'STRONG_WINNER';
+  if (maxReturn >= 50 && currentReturn <= -30) return 'SPIKE_AND_DUMP';
+  if (currentReturn >= 25) return 'WINNER';
+  if (currentReturn >= 0) return 'POSITIVE';
+  if (currentReturn > -20) return 'FLAT';
+  if (currentReturn > -50) return 'WEAK';
+  return 'FAILED';
+}
+
+async function fetchRows(): Promise<MemoryRow[]> {
+  const selectColumns = `
+    token,
+    chain,
+    symbol,
+    alert_created_at,
+    first_seen,
+    alert_market_cap,
+    first_market_cap,
+    peak_market_cap,
+    checked_5m_at,
+    checked_15m_at,
+    checked_30m_at,
+    checked_1h_at,
+    checked_6h_at,
+    checked_24h_at
+  `;
+
+  /*
+   * Fetch two groups:
+   *
+   * 1. Recent unfinished tokens
+   *    This ensures newly discovered tokens such as Muu are processed.
+   *
+   * 2. Old unfinished tokens
+   *    This ensures overdue 24H checkpoints are not starved.
+   */
+
+  const [recentResult, oldestResult] = await Promise.all([
+    supabase
+      .from('token_memory')
+      .select(selectColumns)
+      .eq('tracking_complete', false)
+      .or('alert_market_cap.not.is.null,first_market_cap.not.is.null')
+      .order('first_seen', {
+        ascending: false,
+        nullsFirst: false,
+      })
+      .limit(BATCH_SIZE),
+
+    supabase
+      .from('token_memory')
+      .select(selectColumns)
+      .eq('tracking_complete', false)
+      .or('alert_market_cap.not.is.null,first_market_cap.not.is.null')
+      .order('first_seen', {
+        ascending: true,
+        nullsFirst: false,
+      })
+      .limit(BATCH_SIZE),
+  ]);
+
+  if (recentResult.error) {
+    console.log(
+      'outcome recent checkpoint fetch error:',
+      recentResult.error.message
+    );
+  }
+
+  if (oldestResult.error) {
+    console.log(
+      'outcome oldest checkpoint fetch error:',
+      oldestResult.error.message
+    );
+  }
+
+  const combinedRows = [
+    ...(recentResult.data ?? []),
+    ...(oldestResult.data ?? []),
+  ] as MemoryRow[];
+
+  // Remove duplicate tokens that appeared in both batches.
+  const uniqueRows = new Map<string, MemoryRow>();
+
+  for (const row of combinedRows) {
+    uniqueRows.set(row.token, row);
+  }
+
+  return Array.from(uniqueRows.values());
+}
+
+async function getLatestAlertId(
+  tokenAddress: string
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("alerts")
+    .select("id")
+    .eq("token_address", tokenAddress)
+    .order("alerted_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.log('outcome alert lookup failed:', {
+      tokenAddress,
+      error: error.message,
+    });
+
+    return null;
+  }
+
+  return data?.id ?? null;
+}
+
+async function processCheckpoint(
+  row: MemoryRow,
+  checkpoint: CheckpointDefinition
+) {
+  const alertMarketCap = numberOrNull(
+    row.alert_market_cap ?? row.first_market_cap
+  );
+
+  if (!alertMarketCap) {
+    console.log('checkpoint skipped: missing alert market cap', {
+      token: row.token,
+      checkpoint: checkpoint.key,
+    });
+
+    return;
+  }
+
+  const enriched = await enrichTokenByMintAddress(row.token);
+  const pair = enriched?.pair;
+  const result = enriched?.result;
+
+  if (!pair || !result) {
+    await recordTokenMemoryEvent({
+      token: row.token,
+      chain: row.chain ?? 'solana',
+      eventType: `OUTCOME_${checkpoint.key}_FAILED`,
+      eventSource: 'OUTCOME_CHECKPOINT',
+      note: `Unable to fetch market data at ${checkpoint.key}`,
+    });
+
+    return;
+  }
+
+  const currentMarketCap = numberOrNull(result.marketCap);
+  const currentLiquidity = numberOrNull(result.liquidityUsd);
+  const currentPrice = numberOrNull(result.currentPrice);
+
+  if (!currentMarketCap) {
+    await recordTokenMemoryEvent({
+      token: row.token,
+      chain: row.chain ?? 'solana',
+      eventType: `OUTCOME_${checkpoint.key}_FAILED`,
+      eventSource: 'OUTCOME_CHECKPOINT',
+      liquidity: currentLiquidity,
+      price: currentPrice,
+      note: `Market cap unavailable at ${checkpoint.key}`,
+    });
+
+    return;
+  }
+
+  const returnPct = calculateReturn(
+    alertMarketCap,
+    currentMarketCap
+  );
+
+  if (returnPct == null) return;
+
+  const previousPeak = numberOrNull(row.peak_market_cap) ?? alertMarketCap;
+  const peakMarketCap = Math.max(previousPeak, currentMarketCap);
+
+  const maxReturnPct =
+    calculateReturn(alertMarketCap, peakMarketCap) ?? returnPct;
+
+  const drawdownFromPeakPct =
+    peakMarketCap > 0
+      ? ((currentMarketCap - peakMarketCap) / peakMarketCap) * 100
+      : 0;
+
+  const interimOutcome = classifyInterimOutcome(returnPct);
+
+  const finalOutcome =
+    checkpoint.key === '24H'
+      ? classifyFinalOutcome({
+          currentReturn: returnPct,
+          maxReturn: maxReturnPct,
+        })
+      : null;
+  
+  const alertId = await getLatestAlertId(row.token);
+
+  const now = new Date().toISOString();
+
+  const updatePayload: Record<string, unknown> = {
+    [checkpoint.marketCapColumn]: currentMarketCap,
+    [checkpoint.returnColumn]: returnPct,
+    [checkpoint.checkedColumn]: now,
+
+    current_market_cap: currentMarketCap,
+    current_liquidity: currentLiquidity,
+    current_price: currentPrice,
+
+    peak_market_cap: peakMarketCap,
+    max_return_pct: maxReturnPct,
+    drawdown_from_peak_pct: drawdownFromPeakPct,
+
+    last_checkpoint: checkpoint.key,
+    outcome: finalOutcome ?? interimOutcome,
+    last_updated: now,
+  };
+
+  if (checkpoint.key === '24H') {
+    updatePayload.tracking_complete = true;
+    updatePayload.final_outcome = finalOutcome;
+    updatePayload.status = finalOutcome;
+  }
+
+  const { error } = await supabase
+    .from('token_memory')
+    .update(updatePayload)
+    .eq('token', row.token);
+
+  if (error) {
+    console.log('outcome checkpoint update error:', {
+      token: row.token,
+      checkpoint: checkpoint.key,
+      error: error.message,
+    });
+
+    return;
+  }
+
+  await supabase
+  .from('creator_launches')
+  .update({
+    peak_market_cap: peakMarketCap,
+
+    crossed_50k: peakMarketCap >= 50_000,
+    crossed_100k: peakMarketCap >= 100_000,
+    crossed_250k: peakMarketCap >= 250_000,
+    crossed_500k: peakMarketCap >= 500_000,
+    crossed_1m: peakMarketCap >= 1_000_000,
+
+    last_updated: now,
+  })
+  .eq('token', row.token);
+
+  await recordTokenMemoryEvent({
+    token: row.token,
+    chain: row.chain ?? 'solana',
+    eventType: `OUTCOME_${checkpoint.key}`,
+    eventSource: 'OUTCOME_CHECKPOINT',
+
+    marketCap: currentMarketCap,
+    liquidity: currentLiquidity,
+    price: currentPrice,
+
+    buys: result.buys5m,
+    sells: result.sells5m,
+
+    alphaScore: result.score,
+    aiConfidence: result.score,
+    riskLevel: result.risk,
+
+    note:
+      `${pair.baseToken?.symbol ?? row.symbol ?? row.token} ` +
+      `${checkpoint.key} return ${returnPct.toFixed(1)}% → ` +
+      `${finalOutcome ?? interimOutcome}`,
+
+    raw: {
+      checkpoint: checkpoint.key,
+      alertMarketCap,
+      currentMarketCap,
+      returnPct,
+      peakMarketCap,
+      maxReturnPct,
+      drawdownFromPeakPct,
+      interimOutcome,
+      finalOutcome,
+    },
+  });
+
+  if (alertId) {
+  const deliveries = await getAlertDeliveries(alertId);
+
+  const outcomeText = finalOutcome ?? interimOutcome;
+
+  for (const delivery of deliveries) {
+    const message = buildOutcomeMessage({
+      symbol: pair.baseToken?.symbol ?? row.symbol ?? 'Unknown',
+      checkpoint: checkpoint.key,
+      returnPct,
+      maxReturnPct,
+      outcome: outcomeText,
+    });
+
+    try {
+  await sendTelegram(delivery.telegram_id, message);
+} catch (error) {
+  console.log('outcome Telegram delivery failed:', {
+    alertId,
+    telegramId: delivery.telegram_id,
+    checkpoint: checkpoint.key,
+    error: error instanceof Error ? error.message : String(error),
+  });
+}
+  }
+}
+
+  console.log('outcome checkpoint completed:', {
+    token: row.token,
+    symbol: pair.baseToken?.symbol ?? row.symbol,
+    checkpoint: checkpoint.key,
+    alertMarketCap,
+    currentMarketCap,
+    returnPct: Number(returnPct.toFixed(2)),
+    maxReturnPct: Number(maxReturnPct.toFixed(2)),
+    outcome: finalOutcome ?? interimOutcome,
+  });
+}
+
+export async function startOutcomeCheckpointAgent() {
+  console.log('Starting AlphaOS outcome checkpoint agent...');
+
+  while (true) {
+    try {
+      const rows = await fetchRows();
+
+      console.log("Outcome agent fetched rows:", rows.length);
+
+      for (const row of rows) {
+
+        console.log("Evaluating token:", {
+          token: row.token,
+          firstSeen: row.first_seen,
+          alertCreatedAt: row.alert_created_at,
+        });
+
+        if (row.token === "57Lk2dr44bVbdC8A3UJUBsDX2zPVeTD5UkSAAy9Vpump") {
+            console.log("FOUND TOKEN 57", row);
+        }
+
+        const checkpoint = getNextDueCheckpoint(row);
+
+        console.log("Checkpoint result:", {
+          token: row.token,
+          checkpoint: checkpoint?.key ?? null,
+        });
+
+        if (!checkpoint) continue;
+
+        try {
+
+          console.log("Processing checkpoint:", {
+            token: row.token,
+            checkpoint: checkpoint.key,
+          });
+          await processCheckpoint(row, checkpoint);
+        } catch (error) {
+          console.log('outcome checkpoint token error:', {
+            token: row.token,
+            checkpoint: checkpoint.key,
+            error:
+              error instanceof Error
+                ? error.message
+                : String(error),
+          });
+        }
+
+        await sleep(700);
+      }
+    } catch (error) {
+      console.log('outcome checkpoint loop error:', error);
+    }
+
+    await sleep(POLL_MS);
+  }
+}import { eventEngine } from './eventEngine.js';
+
+function payloadString(
+  payload: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = payload[key];
+
+  if (typeof value !== 'string') return null;
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function payloadNumber(
+  payload: Record<string, unknown>,
+  key: string,
+): number | null {
+  const value = payload[key];
+
+  return typeof value === 'number' && Number.isFinite(value)
+    ? value
+    : null;
+}
+
+function formatNumber(value: number | null): string {
+  return value === null ? '-' : value.toFixed(2);
+}
+
+export function startNotificationService() {
+  console.log('[NotificationService] Started.');
+
+  eventEngine.subscribe('*', async (event, result) => {
+    const payload = event.payload ?? {};
+
+    const symbol =
+      payloadString(payload, 'symbol')
+      ?? event.token.tokenAddress;
+
+    const action =
+        payloadString(payload, 'actionBucket')
+        ?? payloadString(payload, 'decision')
+        ?? payloadString(payload, 'action')
+        ?? payloadString(payload, 'nextStatus')
+        ?? '-';
+
+        const score =
+        payloadNumber(payload, 'finalScore')
+        ?? payloadNumber(payload, 'adjustedScore')
+        ?? payloadNumber(payload, 'baseScore')
+        ?? payloadNumber(payload, 'score');
+
+    const persistenceStatus = result.error
+      ? 'FAILED'
+      : result.duplicate
+        ? 'DUPLICATE'
+        : result.persisted
+          ? 'SAVED'
+          : 'NOT_SAVED';
+
+    console.log('[EventMonitor]', {
+      time: event.occurredAt,
+      eventType: event.eventType,
+
+      chain: event.token.chain,
+      token: symbol,
+
+      source: event.source,
+      severity: event.severity,
+
+      action,
+      score: formatNumber(score),
+
+      persistence: persistenceStatus,
+      eventId: result.eventId,
+    });
+  });
+}import { supabase } from "./supabase.js";
+
+export type AlphaSettings = {
+  // Alert strategy
+  minScore: number;
+  maxAgeMin: number;
+  minLiquidity: number;
+  maxLiquidity: number;
+  minVolume5m: number;
+  minBuyRatio: number;
+
+  alertMode: "strict" | "balanced" | "aggressive";
+  strategyProfile: "strict" | "balanced" | "aggressive";
+
+  // Platform controls
+  alertsPaused: boolean;
+  terminalEnabled: boolean;
+  telegramPremiumEnabled: boolean;
+  scannerEnabled: boolean;
+  aiDecisionEnabled: boolean;
+  restartRequested: boolean;
+
+  // Admin trading controls
+  adminAutoBuyEnabled: boolean;
+  adminTradeAmountSol: number;
+  entryConfirmationSeconds: number;
+  maxEntryDipPercent: number;
+  maxEntryPumpPercent: number;
+  maxOpenPositions: number;
+
+  // Position protection
+  initialStopLossPercent: number;
+  trailingStopEnabled: boolean;
+
+  // Dump-risk protection
+  dumpRiskExitEnabled: boolean;
+  dumpRiskWarningScore: number;
+  dumpRiskExitScore: number;
+
+  creatorSellExitEnabled: boolean;
+  bundleSellExitEnabled: boolean;
+  liquidityDropExitEnabled: boolean;
+};
+
+const DEFAULT_SETTINGS: AlphaSettings = {
+  // Alert strategy
+  minScore: 72,
+  maxAgeMin: 75,
+  minLiquidity: 6000,
+  maxLiquidity: 65000,
+  minVolume5m: 3000,
+  minBuyRatio: 1.4,
+
+  alertMode: "balanced",
+  strategyProfile: "balanced",
+
+  // Platform controls
+  alertsPaused: false,
+  terminalEnabled: true,
+  telegramPremiumEnabled: true,
+  scannerEnabled: true,
+  aiDecisionEnabled: true,
+  restartRequested: false,
+
+  // Admin trading controls
+  adminAutoBuyEnabled: false,
+  adminTradeAmountSol: 0.01,
+  entryConfirmationSeconds: 30,
+  maxEntryDipPercent: 3,
+  maxEntryPumpPercent: 12,
+  maxOpenPositions: 1,
+
+  // Position protection
+  initialStopLossPercent: 8,
+  trailingStopEnabled: true,
+
+  // Dump-risk protection
+  dumpRiskExitEnabled: true,
+  dumpRiskWarningScore: 40,
+  dumpRiskExitScore: 65,
+
+  creatorSellExitEnabled: true,
+  bundleSellExitEnabled: true,
+  liquidityDropExitEnabled: true,
+};
+
+let cachedSettings: AlphaSettings = DEFAULT_SETTINGS;
+let lastLoadedAt = 0;
+
+const CACHE_MS = 15_000;
+
+function asNumber(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function asBoolean(value: unknown, fallback: boolean): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    if (value === "true") return true;
+    if (value === "false") return false;
+  }
+
+  return fallback;
+}
+
+function asMode(
+  value: unknown,
+  fallback: "strict" | "balanced" | "aggressive",
+): "strict" | "balanced" | "aggressive" {
+  if (
+    value === "strict" ||
+    value === "balanced" ||
+    value === "aggressive"
+  ) {
+    return value;
+  }
+
+  return fallback;
+}
+
+export async function getAlphaSettings(
+  forceRefresh = false,
+): Promise<AlphaSettings> {
+  const now = Date.now();
+
+  if (!forceRefresh && now - lastLoadedAt < CACHE_MS) {
+    return cachedSettings;
+  }
+
+  const { data, error } = await supabase
+    .from("strategy_settings")
+    .select("key,value");
+
+  if (error) {
+    console.error(
+      "⚠️ Failed to load strategy settings:",
+      error.message,
+    );
+
+    return cachedSettings;
+  }
+
+  const map = new Map<string, unknown>();
+
+  for (const row of data ?? []) {
+    map.set(row.key, row.value);
+  }
+
+  cachedSettings = {
+    // Alert strategy
+    minScore: asNumber(
+      map.get("min_score"),
+      DEFAULT_SETTINGS.minScore,
+    ),
+
+    maxAgeMin: asNumber(
+      map.get("max_age_min"),
+      DEFAULT_SETTINGS.maxAgeMin,
+    ),
+
+    minLiquidity: asNumber(
+      map.get("min_liquidity"),
+      DEFAULT_SETTINGS.minLiquidity,
+    ),
+
+    maxLiquidity: asNumber(
+      map.get("max_liquidity"),
+      DEFAULT_SETTINGS.maxLiquidity,
+    ),
+
+    minVolume5m: asNumber(
+      map.get("min_volume_5m"),
+      DEFAULT_SETTINGS.minVolume5m,
+    ),
+
+    minBuyRatio: asNumber(
+      map.get("min_buy_ratio"),
+      DEFAULT_SETTINGS.minBuyRatio,
+    ),
+
+    alertMode: asMode(
+      map.get("alert_mode"),
+      DEFAULT_SETTINGS.alertMode,
+    ),
+
+    strategyProfile: asMode(
+      map.get("strategy_profile"),
+      DEFAULT_SETTINGS.strategyProfile,
+    ),
+
+    // Platform controls
+    alertsPaused: asBoolean(
+      map.get("alerts_paused"),
+      DEFAULT_SETTINGS.alertsPaused,
+    ),
+
+    terminalEnabled: asBoolean(
+      map.get("terminal_enabled"),
+      DEFAULT_SETTINGS.terminalEnabled,
+    ),
+
+    telegramPremiumEnabled: asBoolean(
+      map.get("telegram_premium_enabled"),
+      DEFAULT_SETTINGS.telegramPremiumEnabled,
+    ),
+
+    scannerEnabled: asBoolean(
+      map.get("scanner_enabled"),
+      DEFAULT_SETTINGS.scannerEnabled,
+    ),
+
+    aiDecisionEnabled: asBoolean(
+      map.get("ai_decision_enabled"),
+      DEFAULT_SETTINGS.aiDecisionEnabled,
+    ),
+
+    restartRequested: asBoolean(
+      map.get("restart_requested"),
+      DEFAULT_SETTINGS.restartRequested,
+    ),
+
+    // Admin trading
+    adminAutoBuyEnabled: asBoolean(
+      map.get("admin_auto_buy_enabled"),
+      DEFAULT_SETTINGS.adminAutoBuyEnabled,
+    ),
+
+    adminTradeAmountSol: asNumber(
+      map.get("admin_trade_amount_sol"),
+      DEFAULT_SETTINGS.adminTradeAmountSol,
+    ),
+
+    entryConfirmationSeconds: asNumber(
+      map.get("entry_confirmation_seconds"),
+      DEFAULT_SETTINGS.entryConfirmationSeconds,
+    ),
+
+    maxEntryDipPercent: asNumber(
+      map.get("max_entry_dip_percent"),
+      DEFAULT_SETTINGS.maxEntryDipPercent,
+    ),
+
+    maxEntryPumpPercent: asNumber(
+      map.get("max_entry_pump_percent"),
+      DEFAULT_SETTINGS.maxEntryPumpPercent,
+    ),
+
+    maxOpenPositions: asNumber(
+      map.get("max_open_positions"),
+      DEFAULT_SETTINGS.maxOpenPositions,
+    ),
+
+    // Position protection
+    initialStopLossPercent: asNumber(
+      map.get("initial_stop_loss_percent"),
+      DEFAULT_SETTINGS.initialStopLossPercent,
+    ),
+
+    trailingStopEnabled: asBoolean(
+      map.get("trailing_stop_enabled"),
+      DEFAULT_SETTINGS.trailingStopEnabled,
+    ),
+
+    // Dump-risk protection
+    dumpRiskExitEnabled: asBoolean(
+      map.get("dump_risk_exit_enabled"),
+      DEFAULT_SETTINGS.dumpRiskExitEnabled,
+    ),
+
+    dumpRiskWarningScore: asNumber(
+      map.get("dump_risk_warning_score"),
+      DEFAULT_SETTINGS.dumpRiskWarningScore,
+    ),
+
+    dumpRiskExitScore: asNumber(
+      map.get("dump_risk_exit_score"),
+      DEFAULT_SETTINGS.dumpRiskExitScore,
+    ),
+
+    creatorSellExitEnabled: asBoolean(
+      map.get("creator_sell_exit_enabled"),
+      DEFAULT_SETTINGS.creatorSellExitEnabled,
+    ),
+
+    bundleSellExitEnabled: asBoolean(
+      map.get("bundle_sell_exit_enabled"),
+      DEFAULT_SETTINGS.bundleSellExitEnabled,
+    ),
+
+    liquidityDropExitEnabled: asBoolean(
+      map.get("liquidity_drop_exit_enabled"),
+      DEFAULT_SETTINGS.liquidityDropExitEnabled,
+    ),
+  };
+
+  lastLoadedAt = now;
+
+  return cachedSettings;
+}
+
+export async function updateAlphaSetting(
+  key: string,
+  value: unknown,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from("strategy_settings")
+    .update({
+      value,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("key", key)
+    .select("key");
+
+  if (error) {
+    throw new Error(
+      `Failed to update setting ${key}: ${error.message}`,
+    );
+  }
+
+  if (!data || data.length === 0) {
+    throw new Error(
+      `Setting "${key}" does not exist in strategy_settings.`,
+    );
+  }
+
+  await getAlphaSettings(true);
+}/// <reference types="node" />
 import { config } from './config.js';
 import { createBot } from './bot/index.js';
 import { buildMessage } from './ui/messageBuilder.js';
@@ -14,11 +1027,7 @@ import { runWhaleClusterEngine } from './engines/whaleClusterEngine.js';
 import { runPumpEarlyEngine } from './engines/pumpEarlyEngine.js';
 import { runSignalPerformanceEngine } from './engines/signalPerformanceEngine.js';
 import { buildPumpfunEarlyMessage } from './ui/pumpfunMessageBuilder.js';
-import {
-  runAutoTradeManager,
-  restoreOpenTrades,
-  startAdminAutoTrade,
-} from './core/autoTradeManager.js';
+import { runAutoTradeManager } from './core/autoTradeManager.js';
 import { runCreatorMarketTracker } from './agents/creatorMarketTrackerAgent.js';
 import { recordTokenMemoryEvent } from './memory/tokenMemoryEvents.js';
 import { getAdaptiveLearningAdjustment } from './ai/learningEngine.js';
@@ -30,7 +1039,6 @@ import { buildProAlertMessage } from './ui/proAlertMessageBuilder.js';
 import { startOutcomeCheckpointAgent } from './agents/outcomeCheckpointAgent.js';
 import { startOutcomeTracker } from "./services/outcomeTracker.js";
 import { startNotificationService } from "./services/notificationService.js";
-import { getAlphaSettings } from './services/settingsService.js';
 import {
   hasTokenAlertCreated,
   upsertTokenMemory,
@@ -381,20 +1389,6 @@ console.log('Candidate check:', {
 
       const now = Date.now();
 
-      const alphaSettings = await getAlphaSettings();
-
-      console.log('Entry policy loaded:', {
-        token: tokenAddress,
-        confirmationSeconds:
-          alphaSettings.entryConfirmationSeconds,
-        maxEntryDipPercent:
-          alphaSettings.maxEntryDipPercent,
-        maxEntryPumpPercent:
-          alphaSettings.maxEntryPumpPercent,
-        minimumBuyRatio:
-          alphaSettings.minBuyRatio,
-      });
-
       const state: TokenState = {
         tokenAddress,
         firstSeenAt: now,
@@ -408,13 +1402,7 @@ console.log('Candidate check:', {
         adminDelivered: false,
         adminEarlyDelivered: false,
         snapshot: scoredResult,
-        confirmationDueAt:
-          now +
-          Math.max(
-            15,
-            alphaSettings.entryConfirmationSeconds,
-          ) *
-            1000,
+        confirmationDueAt: now + 12_000,
         momentumRetries: 0,
       };
 
@@ -438,18 +1426,6 @@ console.log('Candidate check:', {
 
       state.alertId = alertRecord.id;
       tokenStates.set(tokenAddress, state);
-
-      console.log('Candidate queued for confirmation:', {
-        token: tokenAddress,
-        symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
-        confirmationDueAt:
-          new Date(
-            state.confirmationDueAt ?? Date.now(),
-          ).toISOString(),
-        initialMarketCap: result.marketCap,
-        initialLiquidity: result.liquidityUsd,
-        initialScore: scoredResult.score,
-      });
 
       await upsertTokenMemory({
         token: tokenAddress,
@@ -656,77 +1632,7 @@ async function processTierDispatch() {
       const previous = state.snapshot;
 
       if (previous) {
-        const alphaSettings = await getAlphaSettings();
-
-        const momentum = confirmMomentum(
-          previous,
-          result,
-          {
-            maxEntryDipPercent:
-              alphaSettings.maxEntryDipPercent,
-
-            maxEntryPumpPercent:
-              alphaSettings.maxEntryPumpPercent,
-
-            /*
-            * These remain initial defaults today.
-            * We will move them into strategy_settings next.
-            */
-            maxLiquidityDropPercent: 12,
-            minimumBuyRatio: Math.max(
-              1.2,
-              alphaSettings.minBuyRatio,
-            ),
-            maximumBuyRatioDropPercent: 35,
-            maximumScoreDrop: 6,
-          },
-        );
-
-        if (momentum.decision === 'EXTENDED') {
-  console.log('Momentum rejected: extended entry', {
-    token: tokenAddress,
-    symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
-    reason: momentum.reason,
-    reasons: momentum.reasons,
-    metrics: momentum.metrics,
-  });
-
-  await recordTokenMemoryEvent({
-    token: tokenAddress,
-    chain: config.discoveryChain,
-    eventType: 'ENTRY_REJECTED_EXTENDED',
-    eventSource: 'ENTRY_CONFIRMATION',
-    marketCap: result.marketCap,
-    liquidity: result.liquidityUsd,
-    price: result.currentPrice,
-    buys: result.buys5m,
-    sells: result.sells5m,
-    alphaScore: result.score,
-    aiConfidence: result.score,
-    riskLevel: result.risk,
-    note:
-      `${pair.baseToken?.symbol ?? tokenAddress} ` +
-      `rejected because entry became extended`,
-    raw: {
-      reason: momentum.reason,
-      reasons: momentum.reasons,
-      metrics: momentum.metrics,
-      policy: {
-        maxEntryDipPercent:
-          alphaSettings.maxEntryDipPercent,
-        maxEntryPumpPercent:
-          alphaSettings.maxEntryPumpPercent,
-        minimumBuyRatio: Math.max(
-          1.2,
-          alphaSettings.minBuyRatio,
-        ),
-      },
-    },
-  });
-
-  tokenStates.delete(tokenAddress);
-  continue;
-}
+        const momentum = confirmMomentum(previous, result);
 
         if (momentum.decision === 'DOWNTREND') {
           console.log('Momentum rejected:', {
@@ -762,30 +1668,8 @@ async function processTierDispatch() {
             continue;
           }
 
-         state.momentumRetries = retries + 1;
-
-          /*
-          * Compare the next check against the latest snapshot,
-          * not permanently against the original candidate snapshot.
-          */
-          state.snapshot = result;
-
-          state.confirmationDueAt =
-            Date.now() +
-            Math.max(
-              15,
-              alphaSettings.entryConfirmationSeconds,
-            ) *
-              1000;
-
-          console.log('Momentum snapshot updated for retry:', {
-            token: tokenAddress,
-            retry: state.momentumRetries,
-            nextCheckSeconds: Math.max(
-              15,
-              alphaSettings.entryConfirmationSeconds,
-            ),
-          });
+          state.momentumRetries = retries + 1;
+          state.confirmationDueAt = Date.now() + 20_000;
 
           continue;
         }
@@ -793,36 +1677,9 @@ async function processTierDispatch() {
         console.log('Momentum confirmed:', {
           token: tokenAddress,
           symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
-          reason: momentum.reason,
-          reasons: momentum.reasons,
           metrics: momentum.metrics,
         });
       }
-
-      try {
-  console.log(
-    `🤖 AUTO TRADE CANDIDATE: ${
-      pair.baseToken?.symbol ?? tokenAddress
-    }`,
-  );
-
-  await startAdminAutoTrade({
-    token: tokenAddress,
-    symbol:
-      pair.baseToken?.symbol ??
-      pair.baseToken?.name ??
-      'UNKNOWN',
-    entryPrice: result.currentPrice,
-    amountSol: 0.05,
-  });
-} catch (error) {
-  console.error(
-    '❌ START AUTO TRADE FAILED:',
-    error instanceof Error
-      ? error.message
-      : String(error),
-  );
-}
 
 
       let alphaMessage: string | null = null;
@@ -1119,9 +1976,6 @@ async function main() {
   startOutcomeTracker();
   startAnalyticsSummary();
   startNotificationService();
-
-  // Restore active trades from Supabase BEFORE starting scanners
-  await restoreOpenTrades();
 
   const tasks = [
     startScanner(),

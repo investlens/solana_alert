@@ -1,4 +1,5 @@
 import { supabase } from '../services/supabase.js';
+import { getTradingStatus } from '../services/tradingStatus.js';
 
 export type TerminalStats = {
   version: string;
@@ -47,37 +48,39 @@ export async function getTerminalStats(): Promise<TerminalStats> {
   startOfDay.setUTCHours(0, 0, 0, 0);
 
   const [
-    tokensTracked,
-    timelineEvents,
-    alertsTodayResult,
-    buysTodayResult,
-    latestBuyResult,
-  ] = await Promise.all([
-    countRows('token_memory'),
-    countRows('token_memory_events'),
+  tradingStatus,
+  tokensTracked,
+  timelineEvents,
+  alertsTodayResult,
+  buysTodayResult,
+  latestBuyResult,
+] = await Promise.all([
+  getTradingStatus(),
+  countRows('token_memory'),
+  countRows('token_memory_events'),
 
-    supabase
-      .from('token_memory_events')
-      .select('*', { count: 'exact', head: true })
-      .eq('event_type', 'ALERT_CREATED')
-      .gte('created_at', startOfDay.toISOString()),
+  supabase
+    .from('token_memory_events')
+    .select('*', { count: 'exact', head: true })
+    .eq('event_type', 'ALERT_CREATED')
+    .gte('created_at', startOfDay.toISOString()),
 
-    supabase
-      .from('token_memory_events')
-      .select('*', { count: 'exact', head: true })
-      .eq('event_type', 'ALERT_CREATED')
-      .ilike('note', '%BUY%')
-      .gte('created_at', startOfDay.toISOString()),
+  supabase
+    .from('token_memory_events')
+    .select('*', { count: 'exact', head: true })
+    .eq('event_type', 'ALERT_CREATED')
+    .ilike('note', '%BUY%')
+    .gte('created_at', startOfDay.toISOString()),
 
-    supabase
-      .from('token_memory_events')
-      .select('token, market_cap, alpha_score, note, created_at')
-      .eq('event_type', 'ALERT_CREATED')
-      .ilike('note', '%BUY%')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-  ]);
+  supabase
+    .from('token_memory_events')
+    .select('token, market_cap, alpha_score, note, created_at')
+    .eq('event_type', 'ALERT_CREATED')
+    .ilike('note', '%BUY%')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle(),
+]);
 
   const latestBuyData = latestBuyResult.data;
 

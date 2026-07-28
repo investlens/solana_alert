@@ -1,0 +1,278 @@
+src/ui/messageBuilder.ts:57:    evidence.push('✅ Liquidity threshold cleared');
+src/ui/messageBuilder.ts:65:    evidence.push('✅ Priority setup threshold reached');
+src/core/marketSafety.ts:9:  paidApproved: boolean;
+src/core/marketSafety.ts:70:  // 5) Paid approval / profile presence / boosts
+src/core/marketSafety.ts:71:  if (input.paidApproved) {
+src/core/marketSafety.ts:73:    reasonsGood.push('Paid listing approval present');
+src/core/subscriptions.ts:91:export async function approveLatestPendingPayment(args: {
+src/core/subscriptions.ts:94:  approvedBy: string;
+src/core/subscriptions.ts:96:  const { telegramId, planDays, approvedBy } = args;
+src/core/subscriptions.ts:120:      status: 'approved',
+src/core/subscriptions.ts:121:      approved_at: now.toISOString(),
+src/core/subscriptions.ts:122:      approved_by: approvedBy,
+src/core/subscriptions.ts:151:  approvedBy: string;
+src/core/subscriptions.ts:154:  const { telegramId, approvedBy, notes } = args;
+src/core/subscriptions.ts:173:      approved_by: approvedBy,
+src/core/scoring.ts:9:  paidApproved: boolean;
+src/core/scoring.ts:13:  const { pair, profile, paidApproved, boostAmount, hasTakeover } = args;
+src/core/scoring.ts:34:    paidApproved,
+src/core/scoring.ts:107:  if (paidApproved) {
+src/core/scoring.ts:109:    checksGood.push('Paid order approved');
+src/core/scoring.ts:111:    checksWarn.push('No approved paid order');
+src/core/scoring.ts:159:    paidApproved,
+src/core/opportunityRegistry.ts:17:  | 'APPROVED'
+src/core/walletWatcher.ts:313: * This connects the wallet trade to the token outcome checkpoints.
+src/main.ts:20:import { getAdaptiveLearningAdjustment } from './ai/learningEngine.js';
+src/main.ts:26:import { startOutcomeCheckpointAgent } from './agents/outcomeCheckpointAgent.js';
+src/main.ts:27:import { startOutcomeTracker } from "./services/outcomeTracker.js";
+src/main.ts:232:  await getAdaptiveLearningAdjustment({
+src/main.ts:252:console.log('main adaptive learning adjustment:', {
+src/main.ts:271:        paidApproved: result.paidApproved,
+src/main.ts:329:        paidApproved:
+src/main.ts:330:          result.paidApproved,
+src/main.ts:963:  startOutcomeTracker();
+src/main.ts:972:    startOutcomeCheckpointAgent(),
+src/builders/investigationBuilder.ts:227:      checkpoints: ['5m', '15m', '30m', '1h', '6h', '24h'],
+src/agents/creatorMarketTrackerAgent.ts:16:const REPUTED_CREATOR_THRESHOLD = 500_000;
+src/agents/creatorMarketTrackerAgent.ts:17:const ELITE_CREATOR_THRESHOLD = 1_000_000;
+src/agents/creatorMarketTrackerAgent.ts:47:  if (peakMarketCap >= ELITE_CREATOR_THRESHOLD) return 'S';
+src/agents/creatorMarketTrackerAgent.ts:48:  if (peakMarketCap >= REPUTED_CREATOR_THRESHOLD) return 'A';
+src/agents/creatorMarketTrackerAgent.ts:172:        peakMarketCap >= REPUTED_CREATOR_THRESHOLD;
+src/agents/creatorMarketTrackerAgent.ts:174:        peakMarketCap >= ELITE_CREATOR_THRESHOLD;
+src/agents/creatorMarketTrackerAgent.ts:245:            qualificationThreshold:
+src/agents/creatorMarketTrackerAgent.ts:246:              REPUTED_CREATOR_THRESHOLD,
+src/agents/creatorMarketTrackerAgent.ts:266:          milestone: ELITE_CREATOR_THRESHOLD,
+src/agents/outcomeCheckpointAgent.ts:7:type CheckpointKey = '5M' | '15M' | '30M' | '1H' | '6H' | '24H';
+src/agents/outcomeCheckpointAgent.ts:30:type CheckpointDefinition = {
+src/agents/outcomeCheckpointAgent.ts:31:  key: CheckpointKey;
+src/agents/outcomeCheckpointAgent.ts:56:const CHECKPOINTS: CheckpointDefinition[] = [
+src/agents/outcomeCheckpointAgent.ts:102:  process.env.OUTCOME_CHECKPOINT_POLL_MS ?? 60_000
+src/agents/outcomeCheckpointAgent.ts:106:  process.env.OUTCOME_CHECKPOINT_BATCH_SIZE ?? 100
+src/agents/outcomeCheckpointAgent.ts:121:  checkpoint: string;
+src/agents/outcomeCheckpointAgent.ts:128:    checkpoint,
+src/agents/outcomeCheckpointAgent.ts:143:    `⏱ <b>${checkpoint} Checkpoint</b>`,
+src/agents/outcomeCheckpointAgent.ts:184:function getNextDueCheckpoint(
+src/agents/outcomeCheckpointAgent.ts:186:): CheckpointDefinition | null {
+src/agents/outcomeCheckpointAgent.ts:197:  for (const checkpoint of CHECKPOINTS) {
+src/agents/outcomeCheckpointAgent.ts:199:      elapsedMinutes >= checkpoint.minutes &&
+src/agents/outcomeCheckpointAgent.ts:200:      !row[checkpoint.checkedColumn]
+src/agents/outcomeCheckpointAgent.ts:202:      return checkpoint;
+src/agents/outcomeCheckpointAgent.ts:260:   *    This ensures overdue 24H checkpoints are not starved.
+src/agents/outcomeCheckpointAgent.ts:289:      'outcome recent checkpoint fetch error:',
+src/agents/outcomeCheckpointAgent.ts:296:      'outcome oldest checkpoint fetch error:',
+src/agents/outcomeCheckpointAgent.ts:339:async function processCheckpoint(
+src/agents/outcomeCheckpointAgent.ts:341:  checkpoint: CheckpointDefinition
+src/agents/outcomeCheckpointAgent.ts:348:    console.log('checkpoint skipped: missing alert market cap', {
+src/agents/outcomeCheckpointAgent.ts:350:      checkpoint: checkpoint.key,
+src/agents/outcomeCheckpointAgent.ts:364:      eventType: `OUTCOME_${checkpoint.key}_FAILED`,
+src/agents/outcomeCheckpointAgent.ts:365:      eventSource: 'OUTCOME_CHECKPOINT',
+src/agents/outcomeCheckpointAgent.ts:366:      note: `Unable to fetch market data at ${checkpoint.key}`,
+src/agents/outcomeCheckpointAgent.ts:380:      eventType: `OUTCOME_${checkpoint.key}_FAILED`,
+src/agents/outcomeCheckpointAgent.ts:381:      eventSource: 'OUTCOME_CHECKPOINT',
+src/agents/outcomeCheckpointAgent.ts:384:      note: `Market cap unavailable at ${checkpoint.key}`,
+src/agents/outcomeCheckpointAgent.ts:411:    checkpoint.key === '24H'
+src/agents/outcomeCheckpointAgent.ts:423:    [checkpoint.marketCapColumn]: currentMarketCap,
+src/agents/outcomeCheckpointAgent.ts:424:    [checkpoint.returnColumn]: returnPct,
+src/agents/outcomeCheckpointAgent.ts:425:    [checkpoint.checkedColumn]: now,
+src/agents/outcomeCheckpointAgent.ts:435:    last_checkpoint: checkpoint.key,
+src/agents/outcomeCheckpointAgent.ts:440:  if (checkpoint.key === '24H') {
+src/agents/outcomeCheckpointAgent.ts:452:    console.log('outcome checkpoint update error:', {
+src/agents/outcomeCheckpointAgent.ts:454:      checkpoint: checkpoint.key,
+src/agents/outcomeCheckpointAgent.ts:479:    eventType: `OUTCOME_${checkpoint.key}`,
+src/agents/outcomeCheckpointAgent.ts:480:    eventSource: 'OUTCOME_CHECKPOINT',
+src/agents/outcomeCheckpointAgent.ts:495:      `${checkpoint.key} return ${returnPct.toFixed(1)}% → ` +
+src/agents/outcomeCheckpointAgent.ts:499:      checkpoint: checkpoint.key,
+src/agents/outcomeCheckpointAgent.ts:519:      checkpoint: checkpoint.key,
+src/agents/outcomeCheckpointAgent.ts:531:    checkpoint: checkpoint.key,
+src/agents/outcomeCheckpointAgent.ts:538:  console.log('outcome checkpoint completed:', {
+src/agents/outcomeCheckpointAgent.ts:541:    checkpoint: checkpoint.key,
+src/agents/outcomeCheckpointAgent.ts:550:export async function startOutcomeCheckpointAgent() {
+src/agents/outcomeCheckpointAgent.ts:551:  console.log('Starting AlphaOS outcome checkpoint agent...');
+src/agents/outcomeCheckpointAgent.ts:571:        const checkpoint = getNextDueCheckpoint(row);
+src/agents/outcomeCheckpointAgent.ts:573:        console.log("Checkpoint result:", {
+src/agents/outcomeCheckpointAgent.ts:575:          checkpoint: checkpoint?.key ?? null,
+src/agents/outcomeCheckpointAgent.ts:578:        if (!checkpoint) continue;
+src/agents/outcomeCheckpointAgent.ts:582:          console.log("Processing checkpoint:", {
+src/agents/outcomeCheckpointAgent.ts:584:            checkpoint: checkpoint.key,
+src/agents/outcomeCheckpointAgent.ts:586:          await processCheckpoint(row, checkpoint);
+src/agents/outcomeCheckpointAgent.ts:588:          console.log('outcome checkpoint token error:', {
+src/agents/outcomeCheckpointAgent.ts:590:            checkpoint: checkpoint.key,
+src/agents/outcomeCheckpointAgent.ts:601:      console.log('outcome checkpoint loop error:', error);
+src/models/investigation.ts:101:    checkpoints: Array<'5m' | '15m' | '30m' | '1h' | '6h' | '24h'>;
+src/types.ts:92:  paidApproved: boolean;
+src/engines/dexPaidEngine.ts:877:console.log('alert approved by final intelligence gate:', {
+src/ai/learningEngine.ts:47:export type AdaptiveLearningInput = {
+src/ai/learningEngine.ts:63:export type AdaptiveLearningResult = {
+src/ai/learningEngine.ts:77:  recommendation:
+src/ai/learningEngine.ts:226:    console.log('adaptive learning fetch error:', error.message);
+src/ai/learningEngine.ts:255:  console.log('adaptive learning cache loaded:', {
+src/ai/learningEngine.ts:319:export async function getAdaptiveLearningAdjustment(
+src/ai/learningEngine.ts:320:  input: AdaptiveLearningInput
+src/ai/learningEngine.ts:321:): Promise<AdaptiveLearningResult> {
+src/ai/learningEngine.ts:409:  adaptive: AdaptiveLearningResult
+src/ai/learningEngine.ts:412:    baseScore + adaptive.totalAdjustment,
+src/ai/learningEngine.ts:419:  const largestSampleSize = adaptive.reasons.reduce(
+src/ai/learningEngine.ts:426:    adaptive.reasons.length >= 3 &&
+src/ai/learningEngine.ts:431:    adaptive.reasons.length >= 2 &&
+src/ai/learningEngine.ts:437:  let recommendation:
+src/ai/learningEngine.ts:444:    recommendation = 'STRONG_BUY';
+src/ai/learningEngine.ts:446:    recommendation = 'GOOD';
+src/ai/learningEngine.ts:448:    recommendation = 'WATCH';
+src/ai/learningEngine.ts:450:    recommendation = 'IGNORE';
+src/ai/learningEngine.ts:453:  const reasons = adaptive.reasons.map((reason) => {
+src/ai/learningEngine.ts:468:    recommendation,
+src/bot/commands.ts:23:  approveLatestPendingPayment,
+src/bot/commands.ts:525:        '• Approved wallet/creator contributions',
+src/bot/commands.ts:713:        '_Your membership starts when payment is approved._',
+src/bot/commands.ts:808:  bot.command('approve', async (ctx) => {
+src/bot/commands.ts:820:      await ctx.reply('Usage: /approve <telegram_id> <15|30>');
+src/bot/commands.ts:825:      const result = await approveLatestPendingPayment({
+src/bot/commands.ts:828:        approvedBy: telegramId,
+src/bot/commands.ts:832:        `✅ Approved ${targetTelegramId} for ${planDays} days.\nActive until: ${formatDate(result.paidActiveUntil)}`
+src/bot/commands.ts:847:      await ctx.reply(`Approve failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+src/bot/commands.ts:869:        approvedBy: telegramId,
+src/bot/commands.ts:1067:        'Your transaction hash has been recorded and is awaiting approval.',
+src/bot/commands.ts:1083:        `Approve with: /approve ${telegramId} ${session.planDays}`,
+src/domain/alertDecision.ts:52:   * after adaptive learning.
+src/domain/alertDecision.ts:143:  paidApproved: boolean;
+src/domain/alertDecision.ts:146:export interface AlertOrchestratorThresholdInput {
+src/domain/alertDecision.ts:166:  thresholds: AlertOrchestratorThresholdInput;
+src/services/dexscreener.ts:202:  const paidApproved = Array.isArray(orders) && orders.some((o) => o.status === 'approved');
+src/services/dexscreener.ts:205:  const result = await scoreToken({ pair, profile, paidApproved, boostAmount, hasTakeover });
+src/services/alertOrchestrator.ts:13:      confidence >= input.thresholds.minimumAlertConfidence,
+src/services/outcomeTracker.ts:10:const RUG_THRESHOLD_PERCENT = -90;
+src/services/outcomeTracker.ts:193:      `[OutcomeTracker] ${symbol}: no pair address. Marking DEAD.`
+src/services/outcomeTracker.ts:206:      `[OutcomeTracker] ${symbol}: completed after ` +
+src/services/outcomeTracker.ts:220:      `[OutcomeTracker] ${symbol}: no valid DexScreener price returned.`
+src/services/outcomeTracker.ts:246:      `[OutcomeTracker] ${symbol}: invalid entry price ${entryPrice}.`
+src/services/outcomeTracker.ts:278:    roiCurrent <= RUG_THRESHOLD_PERCENT
+src/services/outcomeTracker.ts:337:    `[OutcomeTracker] ${symbol} | ` +
+src/services/outcomeTracker.ts:348:      "[OutcomeTracker] Previous cycle still running. Skipping."
+src/services/outcomeTracker.ts:396:      `[OutcomeTracker] Starting cycle for ${outcomes.length} active outcomes.`
+src/services/outcomeTracker.ts:415:          `[OutcomeTracker] Failed: ${message}`
+src/services/outcomeTracker.ts:426:      `[OutcomeTracker] Cycle finished | ` +
+src/services/outcomeTracker.ts:438:      `[OutcomeTracker] Cycle crashed: ${message}`
+src/services/outcomeTracker.ts:445:export function startOutcomeTracker(): void {
+src/services/outcomeTracker.ts:448:      "[OutcomeTracker] Tracker already started."
+src/services/outcomeTracker.ts:456:    `[OutcomeTracker] Started. Interval: ` +
+src/services/decisionService.ts:32:  paidApproved?: boolean | null;
+src/services/decisionService.ts:125:        paidApproved:
+src/services/decisionService.ts:126:          input.paidApproved ?? null,
+src/services/analytics/aiOptimizer.ts:17:const SCORE_THRESHOLDS = [
+src/services/analytics/aiOptimizer.ts:31: * This should match the current production threshold.
+src/services/analytics/aiOptimizer.ts:32: * Later we will read it directly from strategy_settings.
+src/services/analytics/aiOptimizer.ts:34:const CURRENT_PRODUCTION_THRESHOLD = 72;
+src/services/analytics/aiOptimizer.ts:37: * Avoid recommendations based on tiny samples.
+src/services/analytics/aiOptimizer.ts:40:const MIN_RECOMMENDATION_SAMPLE = 100;
+src/services/analytics/aiOptimizer.ts:46:function rowsAtOrAboveThreshold(
+src/services/analytics/aiOptimizer.ts:48:  threshold: number,
+src/services/analytics/aiOptimizer.ts:53:    return score !== null && score >= threshold;
+src/services/analytics/aiOptimizer.ts:77:   * This discourages selecting an extremely narrow threshold.
+src/services/analytics/aiOptimizer.ts:133:  threshold: number,
+src/services/analytics/aiOptimizer.ts:136:  const candidateRows = rowsAtOrAboveThreshold(
+src/services/analytics/aiOptimizer.ts:138:    threshold,
+src/services/analytics/aiOptimizer.ts:213:    optimizerType: "SCORE_THRESHOLD",
+src/services/analytics/aiOptimizer.ts:214:    candidateKey: `SCORE_GTE_${threshold}`,
+src/services/analytics/aiOptimizer.ts:215:    scoreThreshold: threshold,
+src/services/analytics/aiOptimizer.ts:249:    isRecommended: false,
+src/services/analytics/aiOptimizer.ts:250:    recommendationReason: "",
+src/services/analytics/aiOptimizer.ts:263:        first.sampleSize >= MIN_RECOMMENDATION_SAMPLE;
+src/services/analytics/aiOptimizer.ts:266:        second.sampleSize >= MIN_RECOMMENDATION_SAMPLE;
+src/services/analytics/aiOptimizer.ts:285:function chooseRecommendation(
+src/services/analytics/aiOptimizer.ts:290:      candidate.sampleSize >= MIN_RECOMMENDATION_SAMPLE &&
+src/services/analytics/aiOptimizer.ts:304:        candidate.scoreThreshold ===
+src/services/analytics/aiOptimizer.ts:305:        CURRENT_PRODUCTION_THRESHOLD,
+src/services/analytics/aiOptimizer.ts:310:function buildRecommendationReason(
+src/services/analytics/aiOptimizer.ts:311:  recommended: OptimizerCandidateResult,
+src/services/analytics/aiOptimizer.ts:316:      `Score >= ${recommended.scoreThreshold}`,
+src/services/analytics/aiOptimizer.ts:317:      `produced a ${recommended.winRate25}% +25% win rate`,
+src/services/analytics/aiOptimizer.ts:318:      `across ${recommended.sampleSize} historical outcomes`,
+src/services/analytics/aiOptimizer.ts:319:      `with ${recommended.confidenceLabel.toLowerCase()} confidence.`,
+src/services/analytics/aiOptimizer.ts:324:    `Raise the shadow score threshold from`,
+src/services/analytics/aiOptimizer.ts:325:    `${current.scoreThreshold} to`,
+src/services/analytics/aiOptimizer.ts:326:    `${recommended.scoreThreshold}.`,
+src/services/analytics/aiOptimizer.ts:329:    `${recommended.winRate25}%,`,
+src/services/analytics/aiOptimizer.ts:331:    `${recommended.alertReductionRate}%.`,
+src/services/analytics/aiOptimizer.ts:332:    `This recommendation is analysis-only and does not alter production settings.`,
+src/services/analytics/aiOptimizer.ts:345:    score_threshold: candidate.scoreThreshold,
+src/services/analytics/aiOptimizer.ts:379:    is_recommended: candidate.isRecommended,
+src/services/analytics/aiOptimizer.ts:380:    recommendation_reason:
+src/services/analytics/aiOptimizer.ts:381:      candidate.recommendationReason,
+src/services/analytics/aiOptimizer.ts:399:async function saveRecommendation(
+src/services/analytics/aiOptimizer.ts:400:  recommended: OptimizerCandidateResult | null,
+src/services/analytics/aiOptimizer.ts:403:  const recommendationReason = recommended
+src/services/analytics/aiOptimizer.ts:404:    ? buildRecommendationReason(recommended, current)
+src/services/analytics/aiOptimizer.ts:407:  const recommendationRow = {
+src/services/analytics/aiOptimizer.ts:410:    optimizer_type: "SCORE_THRESHOLD",
+src/services/analytics/aiOptimizer.ts:412:    current_threshold:
+src/services/analytics/aiOptimizer.ts:413:      current?.scoreThreshold ??
+src/services/analytics/aiOptimizer.ts:414:      CURRENT_PRODUCTION_THRESHOLD,
+src/services/analytics/aiOptimizer.ts:416:    recommended_threshold:
+src/services/analytics/aiOptimizer.ts:417:      recommended?.scoreThreshold ?? null,
+src/services/analytics/aiOptimizer.ts:422:    recommended_win_rate_25:
+src/services/analytics/aiOptimizer.ts:423:      recommended?.winRate25 ?? 0,
+src/services/analytics/aiOptimizer.ts:426:      recommended && current
+src/services/analytics/aiOptimizer.ts:428:            recommended.winRate25 -
+src/services/analytics/aiOptimizer.ts:434:      recommended && current && current.winRate25 > 0
+src/services/analytics/aiOptimizer.ts:436:            ((recommended.winRate25 -
+src/services/analytics/aiOptimizer.ts:446:    recommended_sample_size:
+src/services/analytics/aiOptimizer.ts:447:      recommended?.sampleSize ?? 0,
+src/services/analytics/aiOptimizer.ts:450:      recommended?.alertReductionRate ?? 0,
+src/services/analytics/aiOptimizer.ts:455:    recommended_average_peak_roi:
+src/services/analytics/aiOptimizer.ts:456:      recommended?.averagePeakRoi ?? 0,
+src/services/analytics/aiOptimizer.ts:461:    recommended_rug_rate:
+src/services/analytics/aiOptimizer.ts:462:      recommended?.rugRate ?? 0,
+src/services/analytics/aiOptimizer.ts:465:      recommended?.confidenceScore ?? 0,
+src/services/analytics/aiOptimizer.ts:468:      recommended?.confidenceLabel ?? "LOW",
+src/services/analytics/aiOptimizer.ts:470:    recommendation_status: "SHADOW",
+src/services/analytics/aiOptimizer.ts:472:    recommendation_reason: recommendationReason,
+src/services/analytics/aiOptimizer.ts:478:    .from("analytics_optimizer_recommendation")
+src/services/analytics/aiOptimizer.ts:479:    .upsert(recommendationRow, {
+src/services/analytics/aiOptimizer.ts:485:      `[AIOptimizer] Failed to save recommendation: ${error.message}`,
+src/services/analytics/aiOptimizer.ts:518:  const unrankedCandidates = SCORE_THRESHOLDS.map(
+src/services/analytics/aiOptimizer.ts:519:    (threshold) =>
+src/services/analytics/aiOptimizer.ts:523:        threshold,
+src/services/analytics/aiOptimizer.ts:532:  const recommendation = chooseRecommendation(
+src/services/analytics/aiOptimizer.ts:542:      const isRecommended =
+src/services/analytics/aiOptimizer.ts:543:        recommendation?.candidateKey ===
+src/services/analytics/aiOptimizer.ts:548:        isRecommended,
+src/services/analytics/aiOptimizer.ts:549:        recommendationReason: isRecommended
+src/services/analytics/aiOptimizer.ts:550:          ? buildRecommendationReason(
+src/services/analytics/aiOptimizer.ts:561:  await saveRecommendation(
+src/services/analytics/aiOptimizer.ts:562:    recommendation,
+src/services/analytics/aiOptimizer.ts:568:    currentThreshold:
+src/services/analytics/aiOptimizer.ts:569:      currentCandidate?.scoreThreshold ??
+src/services/analytics/aiOptimizer.ts:570:      CURRENT_PRODUCTION_THRESHOLD,
+src/services/analytics/aiOptimizer.ts:573:    recommendedThreshold:
+src/services/analytics/aiOptimizer.ts:574:      recommendation?.scoreThreshold ?? null,
+src/services/analytics/aiOptimizer.ts:575:    recommendedWinRate25:
+src/services/analytics/aiOptimizer.ts:576:      recommendation?.winRate25 ?? null,
+src/services/analytics/aiOptimizer.ts:577:    recommendedSampleSize:
+src/services/analytics/aiOptimizer.ts:578:      recommendation?.sampleSize ?? 0,
+src/services/analytics/aiOptimizer.ts:580:      recommendation?.confidenceLabel ?? "LOW",
+src/services/analytics/aiOptimizer.ts:581:    status: "SHADOW",
+src/services/analytics/aiOptimizer.ts:587:      threshold: candidate.scoreThreshold,
+src/services/analytics/aiOptimizer.ts:596:      recommended: candidate.isRecommended,
+src/services/analytics/types.ts:23:  optimizerType: "SCORE_THRESHOLD";
+src/services/analytics/types.ts:25:  scoreThreshold: number;
+src/services/analytics/types.ts:59:  isRecommended: boolean;
+src/services/analytics/types.ts:60:  recommendationReason: string;
+src/services/analytics/analyticsEngine.ts:14:export async function refreshAnalyticsEngine(): Promise<void> {
+src/services/analytics/analyticsEngine.ts:17:      "[AnalyticsEngine] Previous cycle is still running. Skipping.",
+src/services/analytics/analyticsEngine.ts:28:    console.log("[AnalyticsEngine] Starting refresh...");
+src/services/analytics/analyticsEngine.ts:46:      `[AnalyticsEngine] Refresh completed in ${durationSeconds}s.`,
+src/services/analytics/analyticsEngine.ts:50:      "[AnalyticsEngine] Refresh failed:",
+src/services/analytics/analyticsEngine.ts:58:export function startAnalyticsEngine(): void {
+src/services/analytics/analyticsEngine.ts:61:      "[AnalyticsEngine] Already started. Ignoring duplicate start.",
+src/services/analytics/analyticsEngine.ts:68:    `[AnalyticsEngine] Started. Interval: ${
+src/services/analytics/analyticsEngine.ts:73:  void refreshAnalyticsEngine();
+src/services/analytics/analyticsEngine.ts:76:    void refreshAnalyticsEngine();
+src/services/analytics/scoreBands.ts:125:      min_score: band.minScore,
+src/services/settingsService.ts:75:    .from("strategy_settings")
+src/services/settingsService.ts:90:    minScore: asNumber(map.get("min_score"), DEFAULT_SETTINGS.minScore),
+src/services/settingsService.ts:132:    .from("strategy_settings")
+src/services/analyticsSummary.ts:2:  refreshAnalyticsEngine,
+src/services/analyticsSummary.ts:3:  startAnalyticsEngine,
+src/services/analyticsSummary.ts:4:} from "./analytics/analyticsEngine.js";
+src/services/analyticsSummary.ts:14:  await refreshAnalyticsEngine();
+src/services/analyticsSummary.ts:18:  startAnalyticsEngine();

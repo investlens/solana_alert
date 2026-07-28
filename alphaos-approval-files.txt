@@ -1,0 +1,1853 @@
+import { supabase } from "../supabase.js";
+import type {
+  AlertOutcomeRow,
+  AnalyticsDataset,
+  OptimizerCandidateResult,
+} from "./types.js";
+import {
+  average,
+  calculateRate,
+  median,
+  normalizeStatus,
+  nullableNumber,
+  round,
+  toNumber,
+} from "./utils.js";
+
+const SCORE_THRESHOLDS = [
+  60,
+  65,
+  70,
+  72,
+  75,
+  78,
+  80,
+  82,
+  85,
+  90,
+] as const;
+
+/*
+ * This should match the current production threshold.
+ * Later we will read it directly from strategy_settings.
+ */
+const CURRENT_PRODUCTION_THRESHOLD = 72;
+
+/*
+ * Avoid recommendations based on tiny samples.
+ * We can make this dynamic later.
+ */
+const MIN_RECOMMENDATION_SAMPLE = 100;
+
+function hasValidScore(row: AlertOutcomeRow): boolean {
+  return nullableNumber(row.alert_score) !== null;
+}
+
+function rowsAtOrAboveThreshold(
+  outcomes: AlertOutcomeRow[],
+  threshold: number,
+): AlertOutcomeRow[] {
+  return outcomes.filter((row) => {
+    const score = nullableNumber(row.alert_score);
+
+    return score !== null && score >= threshold;
+  });
+}
+
+function calculateConfidenceScore(
+  sampleSize: number,
+  totalDatasetSize: number,
+): number {
+  if (sampleSize <= 0 || totalDatasetSize <= 0) {
+    return 0;
+  }
+
+  /*
+   * Sample confidence:
+   * 100 samples produces 50 points.
+   * 300 samples produces the full 70 points.
+   */
+  const sampleComponent = Math.min(
+    70,
+    (sampleSize / 300) * 70,
+  );
+
+  /*
+   * Coverage contributes up to 30 points.
+   * This discourages selecting an extremely narrow threshold.
+   */
+  const coverageRate = sampleSize / totalDatasetSize;
+
+  const coverageComponent = Math.min(
+    30,
+    coverageRate * 60,
+  );
+
+  return round(sampleComponent + coverageComponent);
+}
+
+function getConfidenceLabel(
+  confidenceScore: number,
+): "LOW" | "MEDIUM" | "HIGH" {
+  if (confidenceScore >= 75) {
+    return "HIGH";
+  }
+
+  if (confidenceScore >= 50) {
+    return "MEDIUM";
+  }
+
+  return "LOW";
+}
+
+function calculateOptimizerScore(input: {
+  winRate25: number;
+  winRate50: number;
+  averagePeakRoi: number;
+  medianPeakRoi: number;
+  rugRate: number;
+  confidenceScore: number;
+}): number {
+  /*
+   * Main objective: improve repeatable +25% outcomes.
+   *
+   * Median receives meaningful weight because one huge winner
+   * should not make a weak strategy look strong.
+   *
+   * Rug rate is penalized heavily.
+   */
+  const rawScore =
+    input.winRate25 * 0.4 +
+    input.winRate50 * 0.15 +
+    Math.max(input.averagePeakRoi, 0) * 0.1 +
+    Math.max(input.medianPeakRoi, 0) * 0.15 +
+    input.confidenceScore * 0.2 -
+    input.rugRate * 0.75;
+
+  return round(Math.max(rawScore, 0));
+}
+
+function buildCandidateResult(
+  outcomes: AlertOutcomeRow[],
+  allScoredOutcomes: AlertOutcomeRow[],
+  threshold: number,
+  overallWinRate25: number,
+): OptimizerCandidateResult {
+  const candidateRows = rowsAtOrAboveThreshold(
+    outcomes,
+    threshold,
+  );
+
+  const sampleSize = candidateRows.length;
+  const totalDatasetSize = allScoredOutcomes.length;
+
+  const peakRois = candidateRows.map((row) =>
+    toNumber(row.roi_peak),
+  );
+
+  const drawdowns = candidateRows.map((row) =>
+    toNumber(row.max_drawdown),
+  );
+
+  const win10 = peakRois.filter((roi) => roi >= 10).length;
+  const win25 = peakRois.filter((roi) => roi >= 25).length;
+  const win50 = peakRois.filter((roi) => roi >= 50).length;
+  const win100 = peakRois.filter((roi) => roi >= 100).length;
+
+  const winRate10 = calculateRate(win10, sampleSize);
+  const winRate25 = calculateRate(win25, sampleSize);
+  const winRate50 = calculateRate(win50, sampleSize);
+  const winRate100 = calculateRate(win100, sampleSize);
+
+  const averagePeakRoi = round(average(peakRois));
+  const medianPeakRoi = round(median(peakRois));
+  const averageDrawdown = round(average(drawdowns));
+
+  const ruggedAlerts = candidateRows.filter(
+    (row) => normalizeStatus(row.status) === "RUGGED",
+  ).length;
+
+  const rugRate = calculateRate(
+    ruggedAlerts,
+    sampleSize,
+  );
+
+  const winRateImprovement = round(
+    winRate25 - overallWinRate25,
+  );
+
+  const relativeImprovement =
+    overallWinRate25 > 0
+      ? round(
+          (winRateImprovement / overallWinRate25) * 100,
+        )
+      : 0;
+
+  const datasetCoverage = calculateRate(
+    sampleSize,
+    totalDatasetSize,
+  );
+
+  const alertReductionRate = round(
+    100 - datasetCoverage,
+  );
+
+  const confidenceScore = calculateConfidenceScore(
+    sampleSize,
+    totalDatasetSize,
+  );
+
+  const confidenceLabel =
+    getConfidenceLabel(confidenceScore);
+
+  const optimizerScore = calculateOptimizerScore({
+    winRate25,
+    winRate50,
+    averagePeakRoi,
+    medianPeakRoi,
+    rugRate,
+    confidenceScore,
+  });
+
+  return {
+    optimizerType: "SCORE_THRESHOLD",
+    candidateKey: `SCORE_GTE_${threshold}`,
+    scoreThreshold: threshold,
+
+    sampleSize,
+
+    win10,
+    win25,
+    win50,
+    win100,
+
+    winRate10,
+    winRate25,
+    winRate50,
+    winRate100,
+
+    averagePeakRoi,
+    medianPeakRoi,
+    averageDrawdown,
+
+    ruggedAlerts,
+    rugRate,
+
+    overallWinRate25,
+    winRateImprovement,
+    relativeImprovement,
+
+    alertReductionRate,
+    datasetCoverage,
+
+    confidenceScore,
+    confidenceLabel,
+
+    optimizerScore,
+
+    rank: 0,
+    isRecommended: false,
+    recommendationReason: "",
+  };
+}
+
+function rankCandidates(
+  candidates: OptimizerCandidateResult[],
+): OptimizerCandidateResult[] {
+  const sortedCandidates = [...candidates].sort(
+    (first, second) => {
+      /*
+       * Qualified samples rank before undersized samples.
+       */
+      const firstQualified =
+        first.sampleSize >= MIN_RECOMMENDATION_SAMPLE;
+
+      const secondQualified =
+        second.sampleSize >= MIN_RECOMMENDATION_SAMPLE;
+
+      if (firstQualified !== secondQualified) {
+        return firstQualified ? -1 : 1;
+      }
+
+      return (
+        second.optimizerScore -
+        first.optimizerScore
+      );
+    },
+  );
+
+  return sortedCandidates.map((candidate, index) => ({
+    ...candidate,
+    rank: index + 1,
+  }));
+}
+
+function chooseRecommendation(
+  candidates: OptimizerCandidateResult[],
+): OptimizerCandidateResult | null {
+  const qualifiedCandidates = candidates.filter(
+    (candidate) =>
+      candidate.sampleSize >= MIN_RECOMMENDATION_SAMPLE &&
+      candidate.winRateImprovement > 0 &&
+      candidate.confidenceLabel !== "LOW",
+  );
+
+  return qualifiedCandidates[0] ?? null;
+}
+
+function getCurrentCandidate(
+  candidates: OptimizerCandidateResult[],
+): OptimizerCandidateResult | null {
+  return (
+    candidates.find(
+      (candidate) =>
+        candidate.scoreThreshold ===
+        CURRENT_PRODUCTION_THRESHOLD,
+    ) ?? null
+  );
+}
+
+function buildRecommendationReason(
+  recommended: OptimizerCandidateResult,
+  current: OptimizerCandidateResult | null,
+): string {
+  if (!current) {
+    return [
+      `Score >= ${recommended.scoreThreshold}`,
+      `produced a ${recommended.winRate25}% +25% win rate`,
+      `across ${recommended.sampleSize} historical outcomes`,
+      `with ${recommended.confidenceLabel.toLowerCase()} confidence.`,
+    ].join(" ");
+  }
+
+  return [
+    `Raise the shadow score threshold from`,
+    `${current.scoreThreshold} to`,
+    `${recommended.scoreThreshold}.`,
+    `Historical +25% win rate changes from`,
+    `${current.winRate25}% to`,
+    `${recommended.winRate25}%,`,
+    `while reducing alert volume by`,
+    `${recommended.alertReductionRate}%.`,
+    `This recommendation is analysis-only and does not alter production settings.`,
+  ].join(" ");
+}
+
+async function saveCandidateResults(
+  candidates: OptimizerCandidateResult[],
+): Promise<void> {
+  const updatedAt = new Date().toISOString();
+
+  const databaseRows = candidates.map((candidate) => ({
+    optimizer_type: candidate.optimizerType,
+    candidate_key: candidate.candidateKey,
+
+    score_threshold: candidate.scoreThreshold,
+
+    sample_size: candidate.sampleSize,
+
+    win_10: candidate.win10,
+    win_25: candidate.win25,
+    win_50: candidate.win50,
+    win_100: candidate.win100,
+
+    win_rate_10: candidate.winRate10,
+    win_rate_25: candidate.winRate25,
+    win_rate_50: candidate.winRate50,
+    win_rate_100: candidate.winRate100,
+
+    average_peak_roi: candidate.averagePeakRoi,
+    median_peak_roi: candidate.medianPeakRoi,
+    average_drawdown: candidate.averageDrawdown,
+
+    rugged_alerts: candidate.ruggedAlerts,
+    rug_rate: candidate.rugRate,
+
+    overall_win_rate_25: candidate.overallWinRate25,
+    win_rate_improvement: candidate.winRateImprovement,
+    relative_improvement: candidate.relativeImprovement,
+
+    alert_reduction_rate: candidate.alertReductionRate,
+    dataset_coverage: candidate.datasetCoverage,
+
+    confidence_score: candidate.confidenceScore,
+    confidence_label: candidate.confidenceLabel,
+
+    optimizer_score: candidate.optimizerScore,
+    rank: candidate.rank,
+
+    is_recommended: candidate.isRecommended,
+    recommendation_reason:
+      candidate.recommendationReason,
+
+    updated_at: updatedAt,
+  }));
+
+  const { error } = await supabase
+    .from("analytics_optimizer_results")
+    .upsert(databaseRows, {
+      onConflict: "optimizer_type,candidate_key",
+    });
+
+  if (error) {
+    throw new Error(
+      `[AIOptimizer] Failed to save candidate results: ${error.message}`,
+    );
+  }
+}
+
+async function saveRecommendation(
+  recommended: OptimizerCandidateResult | null,
+  current: OptimizerCandidateResult | null,
+): Promise<void> {
+  const recommendationReason = recommended
+    ? buildRecommendationReason(recommended, current)
+    : "No candidate currently meets the minimum sample, improvement, and confidence requirements.";
+
+  const recommendationRow = {
+    id: 1,
+
+    optimizer_type: "SCORE_THRESHOLD",
+
+    current_threshold:
+      current?.scoreThreshold ??
+      CURRENT_PRODUCTION_THRESHOLD,
+
+    recommended_threshold:
+      recommended?.scoreThreshold ?? null,
+
+    current_win_rate_25:
+      current?.winRate25 ?? 0,
+
+    recommended_win_rate_25:
+      recommended?.winRate25 ?? 0,
+
+    absolute_improvement:
+      recommended && current
+        ? round(
+            recommended.winRate25 -
+              current.winRate25,
+          )
+        : 0,
+
+    relative_improvement:
+      recommended && current && current.winRate25 > 0
+        ? round(
+            ((recommended.winRate25 -
+              current.winRate25) /
+              current.winRate25) *
+              100,
+          )
+        : 0,
+
+    current_sample_size:
+      current?.sampleSize ?? 0,
+
+    recommended_sample_size:
+      recommended?.sampleSize ?? 0,
+
+    alert_reduction_rate:
+      recommended?.alertReductionRate ?? 0,
+
+    current_average_peak_roi:
+      current?.averagePeakRoi ?? 0,
+
+    recommended_average_peak_roi:
+      recommended?.averagePeakRoi ?? 0,
+
+    current_rug_rate:
+      current?.rugRate ?? 0,
+
+    recommended_rug_rate:
+      recommended?.rugRate ?? 0,
+
+    confidence_score:
+      recommended?.confidenceScore ?? 0,
+
+    confidence_label:
+      recommended?.confidenceLabel ?? "LOW",
+
+    recommendation_status: "SHADOW",
+
+    recommendation_reason: recommendationReason,
+
+    generated_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabase
+    .from("analytics_optimizer_recommendation")
+    .upsert(recommendationRow, {
+      onConflict: "id",
+    });
+
+  if (error) {
+    throw new Error(
+      `[AIOptimizer] Failed to save recommendation: ${error.message}`,
+    );
+  }
+}
+
+export async function refreshAiOptimizer(
+  dataset: AnalyticsDataset,
+): Promise<void> {
+  const allScoredOutcomes = dataset.outcomes.filter(
+    hasValidScore,
+  );
+
+  if (allScoredOutcomes.length === 0) {
+    console.log(
+      "[AIOptimizer] No scored outcomes available.",
+    );
+
+    return;
+  }
+
+  const allPeakRois = allScoredOutcomes.map((row) =>
+    toNumber(row.roi_peak),
+  );
+
+  const overallWin25 = allPeakRois.filter(
+    (roi) => roi >= 25,
+  ).length;
+
+  const overallWinRate25 = calculateRate(
+    overallWin25,
+    allScoredOutcomes.length,
+  );
+
+  const unrankedCandidates = SCORE_THRESHOLDS.map(
+    (threshold) =>
+      buildCandidateResult(
+        allScoredOutcomes,
+        allScoredOutcomes,
+        threshold,
+        overallWinRate25,
+      ),
+  );
+
+  const rankedCandidates = rankCandidates(
+    unrankedCandidates,
+  );
+
+  const recommendation = chooseRecommendation(
+    rankedCandidates,
+  );
+
+  const currentCandidate = getCurrentCandidate(
+    rankedCandidates,
+  );
+
+  const finalCandidates = rankedCandidates.map(
+    (candidate) => {
+      const isRecommended =
+        recommendation?.candidateKey ===
+        candidate.candidateKey;
+
+      return {
+        ...candidate,
+        isRecommended,
+        recommendationReason: isRecommended
+          ? buildRecommendationReason(
+              candidate,
+              currentCandidate,
+            )
+          : "",
+      };
+    },
+  );
+
+  await saveCandidateResults(finalCandidates);
+
+  await saveRecommendation(
+    recommendation,
+    currentCandidate,
+  );
+
+  console.log("[AIOptimizer] Updated:", {
+    overallWinRate25,
+    currentThreshold:
+      currentCandidate?.scoreThreshold ??
+      CURRENT_PRODUCTION_THRESHOLD,
+    currentWinRate25:
+      currentCandidate?.winRate25 ?? 0,
+    recommendedThreshold:
+      recommendation?.scoreThreshold ?? null,
+    recommendedWinRate25:
+      recommendation?.winRate25 ?? null,
+    recommendedSampleSize:
+      recommendation?.sampleSize ?? 0,
+    confidence:
+      recommendation?.confidenceLabel ?? "LOW",
+    status: "SHADOW",
+  });
+
+  console.table(
+    finalCandidates.map((candidate) => ({
+      rank: candidate.rank,
+      threshold: candidate.scoreThreshold,
+      sample: candidate.sampleSize,
+      winRate25: candidate.winRate25,
+      avgPeak: candidate.averagePeakRoi,
+      medianPeak: candidate.medianPeakRoi,
+      rugRate: candidate.rugRate,
+      reduction: candidate.alertReductionRate,
+      confidence: candidate.confidenceLabel,
+      score: candidate.optimizerScore,
+      recommended: candidate.isRecommended,
+    })),
+  );
+}export type AlertOutcomeRow = {
+  symbol: string | null;
+  roi_current: number | string | null;
+  roi_peak: number | string | null;
+  max_drawdown: number | string | null;
+  alert_score: number | string | null;
+  status: string | null;
+};
+
+export type AnalyticsDataset = {
+  outcomes: AlertOutcomeRow[];
+  totalAlerts: number;
+  alertsToday: number;
+};
+
+export type ScoreBandDefinition = {
+  scoreBand: string;
+  minScore: number;
+  maxScore: number;
+};
+
+export type OptimizerCandidateResult = {
+  optimizerType: "SCORE_THRESHOLD";
+  candidateKey: string;
+  scoreThreshold: number;
+
+  sampleSize: number;
+
+  win10: number;
+  win25: number;
+  win50: number;
+  win100: number;
+
+  winRate10: number;
+  winRate25: number;
+  winRate50: number;
+  winRate100: number;
+
+  averagePeakRoi: number;
+  medianPeakRoi: number;
+  averageDrawdown: number;
+
+  ruggedAlerts: number;
+  rugRate: number;
+
+  overallWinRate25: number;
+  winRateImprovement: number;
+  relativeImprovement: number;
+
+  alertReductionRate: number;
+  datasetCoverage: number;
+
+  confidenceScore: number;
+  confidenceLabel: "LOW" | "MEDIUM" | "HIGH";
+
+  optimizerScore: number;
+
+  rank: number;
+  isRecommended: boolean;
+  recommendationReason: string;
+};import { supabase } from "./supabase.js";
+
+export type AlphaSettings = {
+  minScore: number;
+  maxAgeMin: number;
+  minLiquidity: number;
+  maxLiquidity: number;
+  minVolume5m: number;
+  minBuyRatio: number;
+
+  alertMode: "strict" | "balanced" | "aggressive";
+  strategyProfile: "strict" | "balanced" | "aggressive";
+
+  alertsPaused: boolean;
+  terminalEnabled: boolean;
+  telegramPremiumEnabled: boolean;
+  scannerEnabled: boolean;
+  aiDecisionEnabled: boolean;
+  restartRequested: boolean;
+};
+
+const DEFAULT_SETTINGS: AlphaSettings = {
+  minScore: 72,
+  maxAgeMin: 75,
+  minLiquidity: 6000,
+  maxLiquidity: 65000,
+  minVolume5m: 3000,
+  minBuyRatio: 1.4,
+
+  alertMode: "balanced",
+  strategyProfile: "balanced",
+
+  alertsPaused: false,
+  terminalEnabled: true,
+  telegramPremiumEnabled: true,
+  scannerEnabled: true,
+  aiDecisionEnabled: true,
+  restartRequested: false,
+};
+
+let cachedSettings: AlphaSettings = DEFAULT_SETTINGS;
+let lastLoadedAt = 0;
+
+const CACHE_MS = 15_000;
+
+function asNumber(value: unknown, fallback: number): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function asBoolean(value: unknown, fallback: boolean): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return value === "true";
+  return fallback;
+}
+
+function asMode(
+  value: unknown,
+  fallback: "strict" | "balanced" | "aggressive"
+): "strict" | "balanced" | "aggressive" {
+  if (value === "strict" || value === "balanced" || value === "aggressive") {
+    return value;
+  }
+  return fallback;
+}
+
+export async function getAlphaSettings(forceRefresh = false): Promise<AlphaSettings> {
+  const now = Date.now();
+
+  if (!forceRefresh && now - lastLoadedAt < CACHE_MS) {
+    return cachedSettings;
+  }
+
+  const { data, error } = await supabase
+    .from("strategy_settings")
+    .select("key,value");
+
+  if (error) {
+    console.error("⚠️ Failed to load strategy settings:", error.message);
+    return cachedSettings;
+  }
+
+  const map = new Map<string, unknown>();
+
+  for (const row of data || []) {
+    map.set(row.key, row.value);
+  }
+
+  cachedSettings = {
+    minScore: asNumber(map.get("min_score"), DEFAULT_SETTINGS.minScore),
+    maxAgeMin: asNumber(map.get("max_age_min"), DEFAULT_SETTINGS.maxAgeMin),
+    minLiquidity: asNumber(map.get("min_liquidity"), DEFAULT_SETTINGS.minLiquidity),
+    maxLiquidity: asNumber(map.get("max_liquidity"), DEFAULT_SETTINGS.maxLiquidity),
+    minVolume5m: asNumber(map.get("min_volume_5m"), DEFAULT_SETTINGS.minVolume5m),
+    minBuyRatio: asNumber(map.get("min_buy_ratio"), DEFAULT_SETTINGS.minBuyRatio),
+
+    alertMode: asMode(map.get("alert_mode"), DEFAULT_SETTINGS.alertMode),
+    strategyProfile: asMode(
+      map.get("strategy_profile"),
+      DEFAULT_SETTINGS.strategyProfile
+    ),
+
+    alertsPaused: asBoolean(map.get("alerts_paused"), DEFAULT_SETTINGS.alertsPaused),
+    terminalEnabled: asBoolean(
+      map.get("terminal_enabled"),
+      DEFAULT_SETTINGS.terminalEnabled
+    ),
+    telegramPremiumEnabled: asBoolean(
+      map.get("telegram_premium_enabled"),
+      DEFAULT_SETTINGS.telegramPremiumEnabled
+    ),
+    scannerEnabled: asBoolean(
+      map.get("scanner_enabled"),
+      DEFAULT_SETTINGS.scannerEnabled
+    ),
+    aiDecisionEnabled: asBoolean(
+      map.get("ai_decision_enabled"),
+      DEFAULT_SETTINGS.aiDecisionEnabled
+    ),
+    restartRequested: asBoolean(
+      map.get("restart_requested"),
+      DEFAULT_SETTINGS.restartRequested
+    ),
+  };
+
+  lastLoadedAt = now;
+  return cachedSettings;
+}
+
+export async function updateAlphaSetting(key: string, value: unknown) {
+  const { error } = await supabase
+    .from("strategy_settings")
+    .update({
+      value,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("key", key);
+
+  if (error) {
+    throw new Error(`Failed to update setting ${key}: ${error.message}`);
+  }
+
+  await getAlphaSettings(true);
+}import { eventEngine } from './eventEngine.js';
+
+function payloadString(
+  payload: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = payload[key];
+
+  if (typeof value !== 'string') return null;
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function payloadNumber(
+  payload: Record<string, unknown>,
+  key: string,
+): number | null {
+  const value = payload[key];
+
+  return typeof value === 'number' && Number.isFinite(value)
+    ? value
+    : null;
+}
+
+function formatNumber(value: number | null): string {
+  return value === null ? '-' : value.toFixed(2);
+}
+
+export function startNotificationService() {
+  console.log('[NotificationService] Started.');
+
+  eventEngine.subscribe('*', async (event, result) => {
+    const payload = event.payload ?? {};
+
+    const symbol =
+      payloadString(payload, 'symbol')
+      ?? event.token.tokenAddress;
+
+    const action =
+        payloadString(payload, 'actionBucket')
+        ?? payloadString(payload, 'decision')
+        ?? payloadString(payload, 'action')
+        ?? payloadString(payload, 'nextStatus')
+        ?? '-';
+
+        const score =
+        payloadNumber(payload, 'finalScore')
+        ?? payloadNumber(payload, 'adjustedScore')
+        ?? payloadNumber(payload, 'baseScore')
+        ?? payloadNumber(payload, 'score');
+
+    const persistenceStatus = result.error
+      ? 'FAILED'
+      : result.duplicate
+        ? 'DUPLICATE'
+        : result.persisted
+          ? 'SAVED'
+          : 'NOT_SAVED';
+
+    console.log('[EventMonitor]', {
+      time: event.occurredAt,
+      eventType: event.eventType,
+
+      chain: event.token.chain,
+      token: symbol,
+
+      source: event.source,
+      severity: event.severity,
+
+      action,
+      score: formatNumber(score),
+
+      persistence: persistenceStatus,
+      eventId: result.eventId,
+    });
+  });
+}import type { Investigation } from '../models/investigation.js';
+
+type TelegramButton = {
+  text: string;
+  url?: string;
+  callback_data?: string;
+};
+
+type BuildTelegramButtonsOptions = {
+  isAdmin: boolean;
+};
+
+function validUrl(value?: string): value is string {
+  if (!value) return false;
+
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+export function buildTelegramButtons(
+  investigation: Investigation,
+  options: BuildTelegramButtonsOptions
+): TelegramButton[][] {
+  const rows: TelegramButton[][] = [];
+
+  const primaryRow: TelegramButton[] = [];
+
+  if (validUrl(investigation.links.reportUrl)) {
+    primaryRow.push({
+      text: '🧠 AI Report',
+      url: investigation.links.reportUrl,
+    });
+  }
+
+  primaryRow.push({
+    text: '📈 Chart',
+    url: investigation.links.chartUrl,
+  });
+
+  rows.push(primaryRow);
+
+  rows.push([
+    {
+      text: '🟢 Buy',
+      url: investigation.links.buyUrl,
+    },
+  ]);
+
+  const socialButtons: TelegramButton[] = [];
+
+  if (validUrl(investigation.links.websiteUrl)) {
+    socialButtons.push({
+      text: '🌐 Website',
+      url: investigation.links.websiteUrl,
+    });
+  }
+
+  if (validUrl(investigation.links.xUrl)) {
+    socialButtons.push({
+      text: '𝕏 X',
+      url: investigation.links.xUrl,
+    });
+  }
+
+  if (validUrl(investigation.links.telegramUrl)) {
+    socialButtons.push({
+      text: '💬 Telegram',
+      url: investigation.links.telegramUrl,
+    });
+  }
+
+  for (let i = 0; i < socialButtons.length; i += 2) {
+    rows.push(socialButtons.slice(i, i + 2));
+  }
+
+  if (options.isAdmin) {
+    rows.push([
+      {
+        text: '⚡ Buy 0.03 SOL',
+        callback_data: `ADMIN_BUY_SMALL_${investigation.token.address}`,
+      },
+      {
+        text: '🔥 Buy 0.05 SOL',
+        callback_data: `ADMIN_BUY_DEFAULT_${investigation.token.address}`,
+      },
+    ]);
+
+    rows.push([
+      {
+        text: '⏸ Pause Auto',
+        callback_data: 'PAUSE_AUTO_TRADE',
+      },
+      {
+        text: '📊 Auto Status',
+        callback_data: 'AUTO_TRADE_STATUS',
+      },
+    ]);
+  }
+
+  return rows;
+}
+import { Telegraf } from 'telegraf';
+import { config } from '../config.js';
+import { registerBotCommands } from './commands.js';
+
+export function createBot() {
+  const bot = new Telegraf(config.botToken);
+  registerBotCommands(bot);
+  return bot;
+}import bs58 from 'bs58';
+import { Connection, Keypair, PublicKey, VersionedTransaction } from '@solana/web3.js';
+import { config } from '../config.js';
+
+const SOL_MINT = 'So11111111111111111111111111111111111111112';
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getConnection() {
+  return new Connection(config.solanaRpcUrl, 'confirmed');
+}
+
+function getAdminKeypair() {
+  if (!config.adminTradingPrivateKey) {
+    throw new Error('Missing ADMIN_TRADING_PRIVATE_KEY');
+  }
+
+  const secret = bs58.decode(config.adminTradingPrivateKey);
+  return Keypair.fromSecretKey(secret);
+}
+
+function getJupiterHeaders() {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  if (config.jupiterApiKey) {
+    headers['x-api-key'] = config.jupiterApiKey;
+  }
+
+  return headers;
+}
+
+async function getQuote(args: {
+  inputMint: string;
+  outputMint: string;
+  amount: string;
+  slippageBps: number;
+}) {
+  const params = new URLSearchParams({
+    inputMint: args.inputMint,
+    outputMint: args.outputMint,
+    amount: args.amount,
+    slippageBps: String(args.slippageBps),
+    restrictIntermediateTokens: 'true',
+  });
+
+  const res = await fetch(`https://api.jup.ag/swap/v1/quote?${params.toString()}`, {
+    headers: config.jupiterApiKey ? { 'x-api-key': config.jupiterApiKey } : undefined,
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Jupiter quote failed: ${res.status} ${text}`);
+  }
+
+  return res.json();
+}
+
+async function buildSwapTransaction(args: {
+  quoteResponse: any;
+  userPublicKey: string;
+  priorityFeeLamports?: number | 'auto';
+}) {
+  const res = await fetch('https://api.jup.ag/swap/v1/swap', {
+    method: 'POST',
+    headers: getJupiterHeaders(),
+    body: JSON.stringify({
+      quoteResponse: args.quoteResponse,
+      userPublicKey: args.userPublicKey,
+      wrapAndUnwrapSol: true,
+      dynamicComputeUnitLimit: true,
+      prioritizationFeeLamports: args.priorityFeeLamports ?? 'auto',
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Jupiter swap build failed: ${res.status} ${text}`);
+  }
+
+  return res.json();
+}
+
+async function signAndSendSerializedSwap(swapTransactionB64: string) {
+  const connection = getConnection();
+  const signer = getAdminKeypair();
+
+  const txBuf = Buffer.from(swapTransactionB64, 'base64');
+  const tx = VersionedTransaction.deserialize(txBuf);
+
+  tx.sign([signer]);
+
+  const signature = await connection.sendTransaction(tx, {
+    skipPreflight: false,
+    maxRetries: 5,
+  });
+
+  const latest = await connection.getLatestBlockhash();
+
+  const confirmation = await connection.confirmTransaction(
+    {
+      signature,
+      blockhash: latest.blockhash,
+      lastValidBlockHeight: latest.lastValidBlockHeight,
+    },
+    'confirmed'
+  );
+
+  if (confirmation.value.err) {
+    throw new Error(`Transaction failed on-chain: ${JSON.stringify(confirmation.value.err)}`);
+  }
+
+  return signature;
+}
+
+async function getAdminTokenRawBalance(inputMint: string): Promise<bigint> {
+  const connection = getConnection();
+  const owner = getAdminKeypair().publicKey;
+
+  const accounts = await connection.getParsedTokenAccountsByOwner(owner, {
+    mint: new PublicKey(inputMint),
+  });
+
+  if (!accounts.value.length) {
+    return 0n;
+  }
+
+  let total = 0n;
+
+  for (const account of accounts.value) {
+    const amount = account.account.data.parsed.info.tokenAmount.amount as string;
+    total += BigInt(amount);
+  }
+
+  return total;
+}
+
+export async function adminBuyToken(args: {
+  outputMint: string;
+  amountSol: number;
+  slippageBps?: number;
+}) {
+  if (!config.adminTradingEnabled) {
+    throw new Error('Admin trading is disabled');
+  }
+
+  const signer = getAdminKeypair();
+
+  const connection = getConnection();
+  const balance = await connection.getBalance(signer.publicKey);
+
+  const safeLamports = Math.floor(
+  Math.min(
+    balance * 0.8,
+    Math.floor(args.amountSol * 1_000_000_000)
+  )
+);
+
+  if (safeLamports < 10_000_000) {
+    throw new Error('Not enough SOL to safely execute trade');
+  }
+
+  const lamports = safeLamports;
+
+  const quote = await getQuote({
+    inputMint: SOL_MINT,
+    outputMint: args.outputMint,
+    amount: String(lamports),
+    slippageBps: args.slippageBps ?? config.adminMaxSlippageBps,
+  });
+
+  const built = await buildSwapTransaction({
+    quoteResponse: quote,
+    userPublicKey: signer.publicKey.toBase58(),
+  });
+
+  const signature = await signAndSendSerializedSwap(built.swapTransaction);
+
+  return {
+    signature,
+    quote,
+  };
+}
+
+export async function adminSellTokenPercent(args: {
+  inputMint: string;
+  percent: 25 | 50 | 100;
+  slippageBps?: number;
+  priorityFeeLamports?: number | 'auto';
+}) {
+  if (!config.adminTradingEnabled) {
+    throw new Error('Admin trading is disabled');
+  }
+
+  const connection = getConnection();
+  const signer = getAdminKeypair();
+  const owner = signer.publicKey;
+
+  const accounts = await connection.getParsedTokenAccountsByOwner(owner, {
+    mint: new PublicKey(args.inputMint),
+  });
+
+  const tokenAccount = accounts.value[0];
+  if (!tokenAccount) {
+    throw new Error('No token balance found for this mint');
+  }
+
+  const rawAmount = BigInt(
+    tokenAccount.account.data.parsed.info.tokenAmount.amount as string
+  );
+
+  if (rawAmount <= 0n) {
+    throw new Error('Token balance is zero');
+  }
+
+  const sellRaw =
+    args.percent === 100
+      ? rawAmount
+      : (rawAmount * BigInt(args.percent)) / 100n;
+
+  if (sellRaw <= 0n) {
+    throw new Error('Calculated sell amount is zero');
+  }
+
+  const quote = await getQuote({
+    inputMint: args.inputMint,
+    outputMint: SOL_MINT,
+    amount: sellRaw.toString(),
+    slippageBps: args.slippageBps ?? config.adminMaxSlippageBps,
+  });
+
+  const built = await buildSwapTransaction({
+    quoteResponse: quote,
+    userPublicKey: owner.toBase58(),
+    priorityFeeLamports: args.priorityFeeLamports ?? 'auto',
+  });
+
+  const signature = await signAndSendSerializedSwap(built.swapTransaction);
+
+  return {
+    signature,
+    quote,
+  };
+}
+
+export async function adminSellTokenPercentWithRetry(args: {
+  inputMint: string;
+  percent: 25 | 50 | 100;
+}) {
+  const attempts = [
+    { slippageBps: config.adminMaxSlippageBps, priorityFeeLamports: 'auto' as const },
+    { slippageBps: 2500, priorityFeeLamports: 250_000 },
+    { slippageBps: 4000, priorityFeeLamports: 500_000 },
+    { slippageBps: 6500, priorityFeeLamports: 900_000 },
+    { slippageBps: 9000, priorityFeeLamports: 1_500_000 },
+  ];
+
+  let lastError: unknown = null;
+
+  for (let i = 0; i < attempts.length; i++) {
+    try {
+      console.log('SELL ATTEMPT:', {
+        mint: args.inputMint,
+        percent: args.percent,
+        attempt: i + 1,
+        ...attempts[i],
+      });
+
+      const beforeBalance = await getAdminTokenRawBalance(args.inputMint);
+
+      const result = await adminSellTokenPercent({
+        inputMint: args.inputMint,
+        percent: args.percent,
+        slippageBps: attempts[i].slippageBps,
+        priorityFeeLamports: attempts[i].priorityFeeLamports,
+      });
+
+      await sleep(2500);
+
+      let afterBalance: bigint | null = null;
+
+      try {
+        afterBalance = await getAdminTokenRawBalance(args.inputMint);
+      } catch (balanceError) {
+        console.log('SELL BALANCE CHECK FAILED AFTER CONFIRMED TX:', {
+          mint: args.inputMint,
+          signature: result.signature,
+          error: balanceError instanceof Error ? balanceError.message : String(balanceError),
+        });
+
+        // Important: tx already confirmed, so do NOT retry and accidentally double-sell.
+        return {
+          ...result,
+          beforeBalance: beforeBalance.toString(),
+          afterBalance: 'unknown',
+          balanceCheckFailed: true,
+        };
+      }
+
+      if (args.percent === 100 && afterBalance > 0n && afterBalance >= beforeBalance) {
+        throw new Error('Sell tx confirmed but token balance did not decrease');
+      }
+
+      console.log('SELL SUCCESS:', {
+        mint: args.inputMint,
+        signature: result.signature,
+        beforeBalance: beforeBalance.toString(),
+        afterBalance: afterBalance.toString(),
+      });
+
+      return {
+        ...result,
+        beforeBalance: beforeBalance.toString(),
+        afterBalance: afterBalance.toString(),
+      };
+    } catch (error) {
+      lastError = error;
+
+      console.log('SELL ATTEMPT FAILED:', {
+        mint: args.inputMint,
+        attempt: i + 1,
+        error: error instanceof Error ? error.message : String(error),
+      });
+
+      await sleep(2500);
+    }
+  }
+
+  throw new Error(
+    `Sell failed after retries: ${
+      lastError instanceof Error ? lastError.message : String(lastError)
+    }`
+  );
+}
+
+export function getAdminTradingWalletAddress() {
+  return getAdminKeypair().publicKey.toBase58();
+}import { config } from '../config.js';
+import { adminBuyToken, adminSellTokenPercentWithRetry } from './adminTrading.js';
+import { chooseBestPair, fetchPairs } from '../services/dexscreener.js';
+import { saveClosedAutoTrade } from './autoTradeStore.js';
+import { sendTelegram } from '../services/telegram.js';
+import { recordTradeOpen, recordTradeClose } from './tradeAnalytics.js';
+
+let autoTradePaused = false;
+
+const recentlyRejected = new Map<string, number>();
+const REJECT_COOLDOWN_MS = 15 * 60 * 1000;
+
+export function pauseAutoTrade() {
+  autoTradePaused = true;
+}
+
+export function resumeAutoTrade() {
+  autoTradePaused = false;
+}
+
+export function isAutoTradePaused() {
+  return autoTradePaused;
+}
+
+type AutoTrade = {
+  token: string;
+  symbol: string;
+  entryPrice: number;
+  highestPrice: number;
+  stopPrice: number;
+  amountSol: number;
+  status: 'open' | 'closed';
+  openedAt: number;
+  mode: 'paper' | 'live';
+};
+
+type ClosedAutoTrade = AutoTrade & {
+  closedAt: number;
+  finalRoi: number;
+  pnlSol: number;
+  exitValueSol: number;
+};
+
+const activeTrades = new Map<string, AutoTrade>();
+const closedTrades: ClosedAutoTrade[] = [];
+
+const PAPER_MODE = false;
+const CONFIRMATION_DELAY_MS = 25_000;
+const MIN_CONFIRM_PRICE_RATIO = 0.97;
+const MAX_CONFIRM_PRICE_RATIO = 1.12;
+const MIN_CHECK_INTERVAL_MS = 20_000;
+
+let lastRunAt = 0;
+
+export function canStartNewTrade(token: string) {
+  if (autoTradePaused) return false;
+  if (activeTrades.has(token)) return false;
+  if (activeTrades.size >= 3) return false;
+  return true;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function fmtPrice(value: number) {
+  if (value < 0.000001) return value.toExponential(2);
+  if (value < 0.01) return value.toFixed(8);
+  return value.toFixed(6);
+}
+
+function fmtSol(value: number) {
+  return `${value >= 0 ? '+' : ''}${value.toFixed(4)} SOL`;
+}
+
+function calcPnlSol(amountSol: number, roiPct: number) {
+  return amountSol * (roiPct / 100);
+}
+
+function trailPercentForRoi(roiPct: number) {
+  if (roiPct >= 100) return 0.1;
+  if (roiPct >= 60) return 0.12;
+  if (roiPct >= 30) return 0.15;
+  return 0.2;
+}
+
+async function fetchCurrentPrice(token: string) {
+  const pairs = await fetchPairs(token);
+  const pair: any = chooseBestPair(pairs);
+  const price = Number(pair?.priceUsd ?? 0);
+
+  if (!Number.isFinite(price) || price <= 0) return null;
+  return price;
+}
+
+async function saveClosedTrade(args: {
+  trade: AutoTrade;
+  exitPrice: number;
+  finalRoi: number;
+  pnlSol: number;
+  exitValueSol: number;
+}) {
+  const closedAt = Date.now();
+
+  closedTrades.unshift({
+    ...args.trade,
+    closedAt,
+    finalRoi: args.finalRoi,
+    pnlSol: args.pnlSol,
+    exitValueSol: args.exitValueSol,
+  });
+
+  if (closedTrades.length > 100) {
+    closedTrades.length = 100;
+  }
+
+  await saveClosedAutoTrade({
+    token: args.trade.token,
+    symbol: args.trade.symbol,
+    mode: args.trade.mode,
+    amountSol: args.trade.amountSol,
+    entryPrice: args.trade.entryPrice,
+    highestPrice: args.trade.highestPrice,
+    exitPrice: args.exitPrice,
+    finalRoi: args.finalRoi,
+    pnlSol: args.pnlSol,
+    exitValueSol: args.exitValueSol,
+    openedAt: args.trade.openedAt,
+    closedAt,
+  });
+}
+
+function sellButtons(token: string) {
+  return [
+    [
+      { text: 'Sell 25%', callback_data: `AUTO_SELL_25_${token}` },
+      { text: 'Sell 50%', callback_data: `AUTO_SELL_50_${token}` },
+      { text: 'Sell 100%', callback_data: `AUTO_SELL_100_${token}` },
+    ],
+  ];
+}
+
+export async function startAdminAutoTrade(args: {
+  token: string;
+  symbol: string;
+  entryPrice: number;
+  amountSol?: number;
+}) {
+  if (autoTradePaused) {
+  await sendTelegram(
+    config.ownerChatId,
+    '⏸️ <b>AUTO TRADE PAUSED</b>\n\nSignal skipped because auto trading is paused.'
+  );
+  return;
+}
+
+  if (activeTrades.has(args.token)) return;
+
+  const rejectedAt = recentlyRejected.get(args.token);
+
+  if (rejectedAt && Date.now() - rejectedAt < REJECT_COOLDOWN_MS) {
+    return;
+  }
+
+  if (!PAPER_MODE) {
+    if (!config.adminTradingEnabled) return;
+    if (!config.adminTradingPrivateKey) return;
+  }
+
+  await sendTelegram(
+    config.ownerChatId,
+    [
+      '⏳ <b>AUTO BUY CONFIRMATION CHECK</b>',
+      '',
+      `<b>${args.symbol}</b>`,
+      `Signal Price: <b>$${fmtPrice(args.entryPrice)}</b>`,
+      'Waiting 25 seconds before entry...',
+      '',
+      'Will skip if price drops more than 3% or pumps more than 12%.',
+    ].join('\n')
+  );
+
+  await sleep(CONFIRMATION_DELAY_MS);
+
+  const confirmedPrice = await fetchCurrentPrice(args.token);
+
+  if (!confirmedPrice) {
+    await sendTelegram(
+      config.ownerChatId,
+      [
+        '⚠️ <b>AUTO BUY SKIPPED</b>',
+        '',
+        `<b>${args.symbol}</b>`,
+        'Could not fetch confirmation price.',
+      ].join('\n')
+    );
+
+    recentlyRejected.set(args.token, Date.now());
+
+    return;
+  }
+
+  if (confirmedPrice < args.entryPrice * MIN_CONFIRM_PRICE_RATIO) {
+  const dropPct = ((confirmedPrice - args.entryPrice) / args.entryPrice) * 100;
+
+  await sendTelegram(
+    config.ownerChatId,
+    [
+      '🧊 <b>AUTO BUY SKIPPED</b>',
+      '',
+      `<b>${args.symbol}</b>`,
+      `Signal Price: <b>$${fmtPrice(args.entryPrice)}</b>`,
+      `Confirm Price: <b>$${fmtPrice(confirmedPrice)}</b>`,
+      `Move: <b>${dropPct.toFixed(1)}%</b>`,
+      '',
+      'Reason: price dropped during confirmation window.',
+    ].join('\n')
+  );
+
+  recentlyRejected.set(args.token, Date.now());
+  return;
+}
+
+if (confirmedPrice > args.entryPrice * MAX_CONFIRM_PRICE_RATIO) {
+  const pumpPct = ((confirmedPrice - args.entryPrice) / args.entryPrice) * 100;
+
+  await sendTelegram(
+    config.ownerChatId,
+    [
+      '🚫 <b>AUTO BUY SKIPPED</b>',
+      '',
+      `<b>${args.symbol}</b>`,
+      `Signal Price: <b>$${fmtPrice(args.entryPrice)}</b>`,
+      `Confirm Price: <b>$${fmtPrice(confirmedPrice)}</b>`,
+      `Move: <b>+${pumpPct.toFixed(1)}%</b>`,
+      '',
+      'Reason: price moved too fast before entry. Avoiding top-buy.',
+    ].join('\n')
+  );
+
+  recentlyRejected.set(args.token, Date.now());
+  return;
+}
+
+  const amountSol = args.amountSol ?? config.adminBuyAmountDefaultSol;
+
+  let trade: { signature: string };
+
+try {
+  trade = PAPER_MODE
+    ? { signature: 'paper-trade-simulation' }
+    : await adminBuyToken({
+        outputMint: args.token,
+        amountSol,
+      });
+} catch (err) {
+  console.error('AUTO BUY FAILED FULL:', err);
+
+  await sendTelegram(
+    config.ownerChatId,
+    [
+      '❌ <b>AUTO BUY FAILED</b>',
+      '',
+      `<b>${args.symbol}</b>`,
+      `Token: <code>${args.token}</code>`,
+      '',
+      err instanceof Error ? err.message : String(err),
+    ].join('\n')
+  );
+
+  return;
+}
+
+  const position: AutoTrade = {
+    token: args.token,
+    symbol: args.symbol,
+    entryPrice: confirmedPrice,
+    highestPrice: confirmedPrice,
+    stopPrice: confirmedPrice * 0.92,
+    amountSol,
+    status: 'open',
+    openedAt: Date.now(),
+    mode: PAPER_MODE ? 'paper' : 'live',
+  };
+
+  activeTrades.set(args.token, position);
+
+  await recordTradeOpen({
+  token: args.token,
+  symbol: args.symbol,
+  entryPrice: confirmedPrice,
+  highestPrice: confirmedPrice,
+});
+
+  await sendTelegram(
+    config.ownerChatId,
+    [
+      PAPER_MODE ? '🧪 <b>PAPER AUTO BUY STARTED</b>' : '🤖 <b>AUTO BUY EXECUTED</b>',
+      '',
+      `<b>${args.symbol}</b>`,
+      `Amount: <b>${amountSol.toFixed(4)} SOL</b>`,
+      `Entry Price: <b>$${fmtPrice(confirmedPrice)}</b>`,
+      `Initial Stop: <b>$${fmtPrice(position.stopPrice)}</b>`,
+      `Initial Stop Width: <b>8%</b>`,
+      '',
+      'Admin override available below.',
+      `Tx: <code>${trade.signature}</code>`,
+    ].join('\n'),
+    sellButtons(args.token)
+  );
+}
+
+export async function manualCloseAutoTrade(token: string, percent: 25 | 50 | 100) {
+  const trade = activeTrades.get(token);
+
+  if (!trade || trade.status !== 'open') {
+    return {
+      ok: false,
+      message: 'No active auto trade found for this token.',
+    };
+  }
+
+  const currentPrice = await fetchCurrentPrice(token);
+
+  if (!currentPrice) {
+    return {
+      ok: false,
+      message: 'Could not fetch current price.',
+    };
+  }
+
+  const roiNow = ((currentPrice - trade.entryPrice) / trade.entryPrice) * 100;
+  const pnlSol = calcPnlSol(trade.amountSol, roiNow);
+  const valueSol = trade.amountSol + pnlSol;
+
+  const sell = PAPER_MODE
+  ? { signature: `paper-manual-sell-${percent}` }
+  : await adminSellTokenPercentWithRetry({
+      inputMint: token,
+      percent,
+    });
+
+  if (percent === 100) {
+    trade.status = 'closed';
+    activeTrades.delete(token);
+
+    await saveClosedTrade({
+      trade,
+      exitPrice: currentPrice,
+      finalRoi: roiNow,
+      pnlSol,
+      exitValueSol: valueSol,
+    });
+
+    await recordTradeClose({
+      token,
+      exitPrice: currentPrice,
+      highestPrice: trade.highestPrice,
+      pnlPercent: roiNow,
+    });
+  }
+
+  await sendTelegram(
+    config.ownerChatId,
+    [
+      PAPER_MODE ? '🧪 <b>PAPER MANUAL SELL</b>' : '✅ <b>MANUAL SELL EXECUTED</b>',
+      '',
+      `<b>${trade.symbol}</b>`,
+      `Sold: <b>${percent}%</b>`,
+      `Current Price: <b>$${fmtPrice(currentPrice)}</b>`,
+      `ROI Now: <b>${roiNow.toFixed(1)}%</b>`,
+      `Paper PnL: <b>${fmtSol(pnlSol)}</b>`,
+      `Paper Value: <b>${valueSol.toFixed(4)} SOL</b>`,
+      `Tx: <code>${sell.signature}</code>`,
+    ].join('\n')
+  );
+
+  return {
+    ok: true,
+    message: `${PAPER_MODE ? 'Paper' : 'Live'} manual sell ${percent}% complete.`,
+  };
+}
+
+export async function runAutoTradeManager() {
+  if (Date.now() - lastRunAt < MIN_CHECK_INTERVAL_MS) return;
+  lastRunAt = Date.now();
+
+  for (const [token, trade] of activeTrades.entries()) {
+    if (trade.status !== 'open') continue;
+
+    try {
+      const currentPrice = await fetchCurrentPrice(token);
+      if (!currentPrice) continue;
+
+      const roiNow = ((currentPrice - trade.entryPrice) / trade.entryPrice) * 100;
+      const pnlSol = calcPnlSol(trade.amountSol, roiNow);
+      const valueSol = trade.amountSol + pnlSol;
+
+      if (currentPrice > trade.highestPrice) {
+        trade.highestPrice = currentPrice;
+
+        const highRoi = ((trade.highestPrice - trade.entryPrice) / trade.entryPrice) * 100;
+        const trailPercent = trailPercentForRoi(highRoi);
+        trade.stopPrice = trade.highestPrice * (1 - trailPercent);
+
+        await sendTelegram(
+          config.ownerChatId,
+          [
+            '📈 <b>TRAILING STOP MOVED UP</b>',
+            '',
+            `<b>${trade.symbol}</b>`,
+            `Current Price: <b>$${fmtPrice(currentPrice)}</b>`,
+            `Highest Price: <b>$${fmtPrice(trade.highestPrice)}</b>`,
+            `New Stop: <b>$${fmtPrice(trade.stopPrice)}</b>`,
+            `Trail: <b>${Math.round(trailPercent * 100)}%</b>`,
+            `ROI Now: <b>${roiNow.toFixed(1)}%</b>`,
+            `Paper PnL: <b>${fmtSol(pnlSol)}</b>`,
+            `Paper Value: <b>${valueSol.toFixed(4)} SOL</b>`,
+          ].join('\n'),
+          sellButtons(token)
+        );
+      }
+
+      if (currentPrice <= trade.stopPrice) {
+        await sendTelegram(
+          config.ownerChatId,
+          [
+            '🛑 <b>TRAILING STOP HIT</b>',
+            '',
+            `<b>${trade.symbol}</b>`,
+            `Current Price: <b>$${fmtPrice(currentPrice)}</b>`,
+            `Stop Price: <b>$${fmtPrice(trade.stopPrice)}</b>`,
+            `Entry Price: <b>$${fmtPrice(trade.entryPrice)}</b>`,
+            `Final ROI: <b>${roiNow.toFixed(1)}%</b>`,
+            `Paper PnL: <b>${fmtSol(pnlSol)}</b>`,
+            `Paper Exit Value: <b>${valueSol.toFixed(4)} SOL</b>`,
+            '',
+            PAPER_MODE ? 'Paper selling 100%...' : 'Selling 100%...',
+          ].join('\n')
+        );
+
+        const sell = PAPER_MODE
+        ? { signature: 'paper-sell-simulation' }
+        : await adminSellTokenPercentWithRetry({
+            inputMint: token,
+            percent: 100,
+          });
+
+        trade.status = 'closed';
+        activeTrades.delete(token);
+
+        await saveClosedTrade({
+          trade,
+          exitPrice: currentPrice,
+          finalRoi: roiNow,
+          pnlSol,
+          exitValueSol: valueSol,
+        });
+
+        await recordTradeClose({
+          token,
+          exitPrice: currentPrice,
+          highestPrice: trade.highestPrice,
+          pnlPercent: roiNow,
+        });
+
+        await sendTelegram(
+          config.ownerChatId,
+          [
+            PAPER_MODE ? '🧪 <b>PAPER AUTO SELL COMPLETE</b>' : '✅ <b>AUTO SELL EXECUTED</b>',
+            '',
+            `<b>${trade.symbol}</b>`,
+            `Final ROI: <b>${roiNow.toFixed(1)}%</b>`,
+            `Paper PnL: <b>${fmtSol(pnlSol)}</b>`,
+            `Paper Exit Value: <b>${valueSol.toFixed(4)} SOL</b>`,
+            `Tx: <code>${sell.signature}</code>`,
+          ].join('\n')
+        );
+      }
+    } catch (error) {
+      await sendTelegram(
+        config.ownerChatId,
+        [
+          '⚠️ <b>AUTO TRADE CHECK FAILED</b>',
+          '',
+          `<b>${trade.symbol}</b>`,
+          error instanceof Error ? error.message : String(error),
+        ].join('\n')
+      );
+    }
+  }
+}
+
+export function getAutoTradeStats() {
+  const total = closedTrades.length;
+  const wins = closedTrades.filter((t) => t.finalRoi > 0).length;
+  const losses = closedTrades.filter((t) => t.finalRoi <= 0).length;
+
+  const totalRoi = closedTrades.reduce((sum, t) => sum + t.finalRoi, 0);
+  const totalPnlSol = closedTrades.reduce((sum, t) => sum + t.pnlSol, 0);
+
+  const avgRoi = total > 0 ? totalRoi / total : 0;
+  const winRate = total > 0 ? (wins / total) * 100 : 0;
+
+  const best = closedTrades.reduce<ClosedAutoTrade | null>(
+    (bestTrade, trade) =>
+      !bestTrade || trade.finalRoi > bestTrade.finalRoi ? trade : bestTrade,
+    null
+  );
+
+  return {
+    total,
+    wins,
+    losses,
+    winRate,
+    avgRoi,
+    totalPnlSol,
+    best,
+    openTrades: [...activeTrades.values()],
+    recentClosed: closedTrades.slice(0, 5),
+  };
+}

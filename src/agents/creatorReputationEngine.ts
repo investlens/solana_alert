@@ -39,6 +39,29 @@ function clamp(value: number, min = 0, max = 100) {
   return Math.max(min, Math.min(max, value));
 }
 
+function strongestCreatorStatus(
+  calculatedStatus: string,
+  existingStatus?: string | null
+) {
+  const priority: Record<string, number> = {
+    NEW: 1,
+    WATCH: 2,
+    RISKY: 2,
+    PROMISING: 3,
+    PROVEN: 4,
+  };
+
+  const calculatedPriority =
+    priority[calculatedStatus] ?? 0;
+
+  const existingPriority =
+    priority[String(existingStatus ?? '').toUpperCase()] ?? 0;
+
+  return existingPriority > calculatedPriority
+    ? String(existingStatus).toUpperCase()
+    : calculatedStatus;
+}
+
 function calculateCreatorStatus(args: {
   trustScore: number;
   trackedLaunches: number;
@@ -211,7 +234,13 @@ async function loadTokenOutcomes(tokens: string[]): Promise<TokenOutcome[]> {
       continue;
     }
 
-    outcomes.push(...((data ?? []) as TokenOutcome[]));
+    const sortedData = (data ?? []).sort((a, b) => {
+      return Number(Boolean(b.tracking_complete))
+          - Number(Boolean(a.tracking_complete));
+    });
+
+    outcomes.push(...(sortedData as TokenOutcome[]));
+
   }
 
   return outcomes;
@@ -259,6 +288,33 @@ export async function runCreatorReputationEngine() {
   console.log('creator reputation engine checking:', creators.length);
 
   for (const creator of creators) {
+    const { data: existingCreator, error: existingCreatorError } =
+      await supabase
+        .from('proven_creators')
+        .select(
+          `
+          status,
+          trust_score,
+          best_market_cap,
+          reputation_summary
+          `
+        )
+        .eq('creator_wallet', creator.creatorWallet)
+        .maybeSingle();
+
+    if (existingCreatorError) {
+      console.log(
+        'existing creator lookup failed:',
+        existingCreatorError.message
+      );
+    }
+
+    console.log("Creator lookup:", {
+      creatorWallet: creator.creatorWallet,
+      existingCreator,
+    });
+
+
     const tracked = creator.launches
       .map((launch) => ({
         launch,
@@ -273,12 +329,34 @@ export async function runCreatorReputationEngine() {
         } => Boolean(item.outcome)
       );
 
+    const muu = tracked.find(
+      ({ launch }) =>
+        launch.token === "T4jnL2TRXLfD7KUXxyLLrgGBpCauX1cMHVMpHSXpump"
+    );
+
+    if (muu) {
+      console.log("===== FOUND MUU =====");
+      console.log(muu.outcome);
+    }
+
     const completed = tracked.filter(
       ({ outcome }) =>
         outcome.tracking_complete ||
         Boolean(outcome.final_outcome) ||
         Boolean(outcome.outcome)
     );
+
+    console.log("DEBUG Completed:", {
+      creator: creator.creatorWallet,
+      tracked: tracked.length,
+      completed: completed.length,
+      completedTokens: completed.map(x => ({
+        token: x.launch.token,
+        outcome: x.outcome.outcome,
+        final: x.outcome.final_outcome,
+        tracking: x.outcome.tracking_complete
+      }))
+    });
 
     const winningLaunches = completed.filter(({ outcome }) =>
       isWinningOutcome(outcome.final_outcome ?? outcome.outcome)
@@ -316,7 +394,7 @@ export async function runCreatorReputationEngine() {
         ? (winningLaunches / completed.length) * 100
         : 0;
 
-    const trustScore = calculateTrustScore({
+    const calculatedTrustScore = calculateTrustScore({
       totalLaunches,
       trackedLaunches,
       winningLaunches,
@@ -327,7 +405,12 @@ export async function runCreatorReputationEngine() {
       bestReturnPct,
     });
 
-    const status = calculateCreatorStatus({
+    const trustScore = Math.max(
+      calculatedTrustScore,
+      Number(existingCreator?.trust_score ?? 0)
+    );
+
+    const calculatedStatus = calculateCreatorStatus({
       trustScore,
       trackedLaunches,
       winningLaunches,
@@ -335,13 +418,10 @@ export async function runCreatorReputationEngine() {
       bestReturnPct,
     });
 
-    const bestTracked = tracked
-      .slice()
-      .sort(
-        (a, b) =>
-          num(b.outcome.max_return_pct) -
-          num(a.outcome.max_return_pct)
-      )[0];
+    const status = strongestCreatorStatus(
+      calculatedStatus,
+      existingCreator?.status
+    );
 
     const latestLaunch = creator.launches
       .slice()
@@ -351,16 +431,35 @@ export async function runCreatorReputationEngine() {
           new Date(a.launched_at ?? 0).getTime()
       )[0];
 
-    const summary =
-      status === 'PROVEN'
-        ? `${winningLaunches}/${completed.length} completed launches were winners.`
-        : status === 'PROMISING'
-          ? `At least one strong historical launch detected.`
-          : status === 'RISKY'
-            ? `${failedLaunches}/${completed.length} completed launches failed.`
-            : trackedLaunches > 0
-              ? `AlphaOS is tracking ${trackedLaunches} historical launch outcomes.`
-              : `Creator history is still being collected.`;
+    const bestMarketCap = Number(
+  existingCreator?.best_market_cap ?? 0
+);
+
+const marketCapSummary =
+  bestMarketCap >= 1_000_000
+    ? ` Verified elite creator. Best launch reached £${Math.round(
+        bestMarketCap
+      ).toLocaleString('en-GB')}.`
+    : bestMarketCap >= 500_000
+      ? ` Verified reputed creator. Best launch reached £${Math.round(
+          bestMarketCap
+        ).toLocaleString('en-GB')}.`
+      : '';
+
+const outcomeSummary =
+  status === 'PROVEN'
+    ? completed.length > 0
+      ? `${winningLaunches}/${completed.length} completed launches were winners.`
+      : `Creator has a verified successful launch history.`
+    : status === 'PROMISING'
+      ? `At least one strong historical launch detected.`
+      : status === 'RISKY'
+        ? `${failedLaunches}/${completed.length} completed launches failed.`
+        : trackedLaunches > 0
+          ? `AlphaOS is tracking ${trackedLaunches} historical launch outcomes.`
+          : `Creator outcome history is still being collected.`;
+
+const summary = `${outcomeSummary}${marketCapSummary}`;
 
     const { error } = await supabase
       .from('proven_creators')
@@ -380,11 +479,6 @@ export async function runCreatorReputationEngine() {
           success_rate: successRate,
           average_max_return: averageMaxReturn,
           best_return_pct: bestReturnPct,
-
-          best_token: bestTracked?.launch.token ?? null,
-          best_symbol: bestTracked?.launch.symbol ?? null,
-          best_market_cap:
-            bestTracked?.outcome.peak_market_cap ?? 0,
 
           last_token: latestLaunch?.token ?? null,
           last_symbol: latestLaunch?.symbol ?? null,

@@ -543,38 +543,7 @@ export async function runDexPaidEngine() {
     );
     const creatorLabel = creatorTrustLabel(creatorScore);
 
-    let confidenceResult = calculateConfidence({
-      score,
-      creatorScore,
-      smartWalletCount: c.earlyBuyers.length,
-      liquidity: c.liquidity,
-      volume5m: c.volume5m,
-      buys5m: c.buys5m,
-      sells5m: c.sells5m,
-      socialScore: c.socialScore,
-      holderRiskScore: holderRisk.score,
-      bundleRiskScore: consolidationRisk.score,
-      marketCap: c.marketCap,
-      ageMin: c.ageMin,
-    });
-
-    const aiDecision = await recordDecisionForToken({
-      token: c.token,
-      symbol: c.symbol,
-      input: {
-        score,
-        marketSafetyScore: score,
-        authoritySafetyScore: 40,
-        liquidityUsd: c.liquidity,
-        volume5m: c.volume5m,
-        buys5m: c.buys5m,
-        sells5m: c.sells5m,
-        holderRiskScore: holderRisk.score,
-        bundleRiskScore: consolidationRisk.score,
-        smartWalletCount: c.earlyBuyers.length,
-      },
-    });
-
+    
     const shouldRunHolderRisk =
       score >= 70 &&
       c.liquidity >= 6_000 &&
@@ -640,20 +609,53 @@ export async function runDexPaidEngine() {
       console.log('consolidation error:', err);
     }
 
-    confidenceResult = calculateConfidence({
-      score,
-      creatorScore,
-      smartWalletCount: c.earlyBuyers.length,
-      liquidity: c.liquidity,
-      volume5m: c.volume5m,
-      buys5m: c.buys5m,
-      sells5m: c.sells5m,
-      socialScore: c.socialScore,
-      holderRiskScore: holderRisk.score,
-      bundleRiskScore: consolidationRisk.score,
-      marketCap: c.marketCap,
-      ageMin: c.ageMin,
-    });
+    const confidenceResult = calculateConfidence({
+  score,
+  creatorScore,
+  smartWalletCount: c.earlyBuyers.length,
+  liquidity: c.liquidity,
+  volume5m: c.volume5m,
+  buys5m: c.buys5m,
+  sells5m: c.sells5m,
+  socialScore: c.socialScore,
+  holderRiskScore: holderRisk.score,
+  bundleRiskScore: consolidationRisk.score,
+  marketCap: c.marketCap,
+  ageMin: c.ageMin,
+});
+
+const aiDecision = await recordDecisionForToken({
+  token: c.token,
+  symbol: c.symbol,
+  input: {
+    score,
+    marketSafetyScore: score,
+    authoritySafetyScore: 40,
+    liquidityUsd: c.liquidity,
+    volume5m: c.volume5m,
+    buys5m: c.buys5m,
+    sells5m: c.sells5m,
+
+    // These now contain the completed risk checks.
+    holderRiskScore: holderRisk.score,
+    bundleRiskScore: consolidationRisk.score,
+
+    smartWalletCount: c.earlyBuyers.length,
+  },
+});
+
+console.log('final intelligence decision:', {
+  token: c.token,
+  symbol: c.symbol,
+  score,
+  creatorScore,
+  holderRiskScore: holderRisk.score,
+  bundleRiskScore: consolidationRisk.score,
+  confidence: confidenceResult.confidence,
+  riskLevel: confidenceResult.riskLevel,
+  aiVerdict: aiDecision.verdict,
+  aiDecisionConfidence: aiDecision.confidence,
+});
 
    if (score < 60) {
     console.log('alpha candidate rejected before tier:', {
@@ -843,11 +845,46 @@ const investigation = buildInvestigation({
 });
 
     if (!canSendTokenAlert(c.token, 'DEX_PAID')) {
-      continue;
-    }
+  continue;
+}
 
-    if (tier === 'P0' || tier === 'P1' || tier === 'P2') {
-      await sendAlphaAlertToUsers(investigation);
-    }
+const minimumConfidenceByTier: Record<'P0' | 'P1' | 'P2', number> = {
+  P0: 72,
+  P1: 66,
+  P2: 60,
+};
+
+const minimumRequiredConfidence =
+  minimumConfidenceByTier[tier as 'P0' | 'P1' | 'P2'];
+
+if (confidenceResult.confidence < minimumRequiredConfidence) {
+  console.log('alert blocked by final confidence gate:', {
+    token: c.token,
+    symbol: c.symbol,
+    tier,
+    score,
+    confidence: confidenceResult.confidence,
+    minimumRequiredConfidence,
+    riskLevel: confidenceResult.riskLevel,
+    creatorScore,
+    holderRiskScore: holderRisk.score,
+    bundleRiskScore: consolidationRisk.score,
+  });
+
+  continue;
+}
+
+console.log('alert approved by final intelligence gate:', {
+  token: c.token,
+  symbol: c.symbol,
+  tier,
+  score,
+  confidence: confidenceResult.confidence,
+  minimumRequiredConfidence,
+});
+
+await sendAlphaAlertToUsers(investigation);
   }
+
+  console.log("runDexPaidEngine finished");
 }
