@@ -54,6 +54,7 @@ type AutoTrade = {
   status: 'open' | 'closed';
   openedAt: number;
   mode: 'paper' | 'live';
+  sellInProgress: boolean;
 };
 
 type ClosedAutoTrade = AutoTrade & {
@@ -66,19 +67,24 @@ type ClosedAutoTrade = AutoTrade & {
 const activeTrades = new Map<string, AutoTrade>();
 const closedTrades: ClosedAutoTrade[] = [];
 
-const PAPER_MODE = config.autoTradeMode === 'paper';
-console.log('════════════════════════════════════');
-console.log('🤖 AlphaOS Trading Engine');
-console.log(`Execution Mode : ${PAPER_MODE ? '🧪 PAPER' : '🔴 LIVE'}`);
-console.log(`Admin Trading : ${config.adminTradingEnabled ? 'Enabled' : 'Disabled'}`);
+console.log("════════════════════════════════════");
+console.log("🤖 AlphaOS Trading Engine");
+console.log("Execution Mode : Supabase runtime setting");
+console.log(
+  `Admin Trading : ${
+    config.adminTradingEnabled ? "Enabled" : "Disabled"
+  }`,
+);
 console.log(
   `Private Key   : ${
-    config.adminTradingPrivateKey ? 'Loaded ✅' : 'Missing ❌'
-  }`
+    config.adminTradingPrivateKey
+      ? "Loaded ✅"
+      : "Missing ❌"
+  }`,
 );
-console.log('════════════════════════════════════');
+console.log("════════════════════════════════════");
 
-const MIN_CHECK_INTERVAL_MS = 20_000;
+const POSITION_CHECK_INTERVAL_MS = 5_000;
 
 let lastRunAt = 0;
 
@@ -239,10 +245,6 @@ export async function startAdminAutoTrade(args: {
     return;
   }
 
-  if (!PAPER_MODE) {
-    if (!config.adminTradingEnabled) return;
-    if (!config.adminTradingPrivateKey) return;
-  }
 
     const confirmationSeconds = Math.max(
     5,
@@ -282,34 +284,63 @@ export async function startAdminAutoTrade(args: {
    * This allows admin to disable auto-buy while a token
    * is being analysed.
    */
+
   const latestSettings = await getAlphaSettings(true);
 
-  if (!latestSettings.adminAutoBuyEnabled) {
-    console.log(
-      '[AutoTrade] Auto-buy disabled during entry study.',
-      {
-        token: args.token,
-        symbol: args.symbol,
-      },
+if (!latestSettings.adminAutoBuyEnabled) {
+  console.log(
+    "[AutoTrade] Auto-buy disabled during entry study.",
+    {
+      token: args.token,
+      symbol: args.symbol,
+    },
+  );
+
+  return;
+}
+
+if (autoTradePaused) {
+  console.log(
+    "[AutoTrade] Auto-buy paused during entry study.",
+    {
+      token: args.token,
+      symbol: args.symbol,
+    },
+  );
+
+  return;
+}
+
+const executionMode = latestSettings.executionMode;
+const isPaperMode = executionMode === "paper";
+
+console.log("[AutoTrade] Runtime execution mode resolved.", {
+  token: args.token,
+  symbol: args.symbol,
+  executionMode,
+});
+
+if (executionMode === "live") {
+  if (!config.adminTradingEnabled) {
+    await sendTelegram(
+      config.ownerChatId,
+      "❌ Live trading blocked.\n\nADMIN_TRADING_ENABLED is false.",
     );
 
     return;
   }
 
-  if (autoTradePaused) {
-    console.log(
-      '[AutoTrade] Auto-buy paused during entry study.',
-      {
-        token: args.token,
-        symbol: args.symbol,
-      },
+  if (!config.adminTradingPrivateKey) {
+    await sendTelegram(
+      config.ownerChatId,
+      "❌ Live trading blocked.\n\nAdmin private key is missing.",
     );
 
     return;
   }
+}
 
-  const confirmedPrice =
-    await fetchCurrentPrice(args.token);
+const confirmedPrice = await fetchCurrentPrice(args.token);
 
   if (!confirmedPrice) {
     await sendTelegram(
@@ -403,7 +434,7 @@ try {
   pendingPosition = await createPendingPosition({
     token: args.token,
     symbol: args.symbol,
-    mode: PAPER_MODE ? 'paper' : 'live',
+    mode: executionMode,
     signalPrice: confirmedPrice,
     entrySolAmount: amountSol,
     aiRecommendation: 'BUY',
@@ -434,7 +465,7 @@ try {
 let trade: Awaited<ReturnType<typeof adminBuyToken>>;
 
 try {
-trade = PAPER_MODE
+trade = isPaperMode
   ? {
       signature: 'paper-trade-simulation',
       quote: null,
@@ -522,7 +553,8 @@ if (!trade.verified) {
     amountSol,
     status: 'open',
     openedAt: Date.now(),
-    mode: PAPER_MODE ? 'paper' : 'live',
+    mode: executionMode,
+    sellInProgress: false,
   };
 
   const initialTokenAmount = Number(
@@ -584,7 +616,9 @@ await recordTradeOpen({
   await sendTelegram(
     config.ownerChatId,
     [
-      PAPER_MODE ? '🧪 <b>PAPER AUTO BUY STARTED</b>' : '🤖 <b>AUTO BUY EXECUTED</b>',
+      isPaperMode
+        ? "🧪 <b>PAPER AUTO BUY STARTED</b>"
+        : "🤖 <b>AUTO BUY EXECUTED</b>",
       '',
       `<b>${args.symbol}</b>`,
       `Amount: <b>${amountSol.toFixed(4)} SOL</b>`,
@@ -675,7 +709,7 @@ export async function manualCloseAutoTrade(token: string, percent: 25 | 50 | 100
 }
 
 export async function runAutoTradeManager() {
-  if (Date.now() - lastRunAt < MIN_CHECK_INTERVAL_MS) return;
+  if (Date.now() - lastRunAt < POSITION_CHECK_INTERVAL_MS) return;
   lastRunAt = Date.now();
     const settings = await getAlphaSettings();
 
@@ -750,7 +784,10 @@ await sendTelegram(
         );
       }
 
-      if (currentPrice <= trade.stopPrice) {
+      if (
+          currentPrice <= trade.stopPrice &&
+          !trade.sellInProgress
+        ) {
         const isPaperPosition = trade.mode === 'paper';
         await sendTelegram(
           config.ownerChatId,
@@ -830,14 +867,27 @@ await sendTelegram(
         );
       }
     } catch (error) {
+      trade.sellInProgress = false;
+
+      console.error("[AutoTrade] Position check failed.", {
+        token,
+        symbol: trade.symbol,
+        error:
+          error instanceof Error
+            ? error.message
+            : String(error),
+      });
+
       await sendTelegram(
         config.ownerChatId,
         [
-          '⚠️ <b>AUTO TRADE CHECK FAILED</b>',
-          '',
+          "⚠️ <b>AUTO TRADE CHECK FAILED</b>",
+          "",
           `<b>${trade.symbol}</b>`,
-          error instanceof Error ? error.message : String(error),
-        ].join('\n')
+          error instanceof Error
+            ? error.message
+            : String(error),
+        ].join("\n"),
       );
     }
   }
@@ -873,6 +923,7 @@ export async function restoreOpenTrades() {
       status: "open",
       openedAt: new Date(position.openedAt ?? position.createdAt).getTime(),
       mode: position.mode,
+      sellInProgress: false,
     });
   }
 

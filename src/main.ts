@@ -1031,6 +1031,28 @@ function shouldRunCreatorMarketTracker() {
   return Date.now() - lastCreatorMarketTrackerRun >= intervalMs;
 }
 
+async function startPositionProtectionLoop() {
+  console.log(
+    "[PositionProtection] Independent 5-second protection loop started.",
+  );
+
+  while (true) {
+    try {
+      await runAutoTradeManager();
+    } catch (error) {
+      console.error(
+        "[PositionProtection] Protection cycle failed.",
+        error,
+      );
+    }
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 5_000);
+    });
+  }
+}
+
+
 async function startScanner() {
   console.log('Starting momentum risk bot...');
 
@@ -1051,9 +1073,6 @@ async function startScanner() {
 
       await runWhaleClusterEngine();
       console.log("5");
-
-      await runAutoTradeManager();
-      console.log("6");
 
       console.log("Reached creator scheduler");
 
@@ -1129,6 +1148,7 @@ async function main() {
     startPumpfunWatch(),
     startMemoryTracker(),
     startOutcomeCheckpointAgent(),
+    startPositionProtectionLoop(),
   ];
 
   if (process.env.RUN_TELEGRAM_BOT === 'true') {
