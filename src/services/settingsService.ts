@@ -21,6 +21,7 @@ export type AlphaSettings = {
   restartRequested: boolean;
 
   // Admin trading controls
+  executionMode: "paper" | "live";
   adminAutoBuyEnabled: boolean;
   adminTradeAmountSol: number;
   entryConfirmationSeconds: number;
@@ -43,6 +44,7 @@ export type AlphaSettings = {
 };
 
 const DEFAULT_SETTINGS: AlphaSettings = {
+
   // Alert strategy
   minScore: 72,
   maxAgeMin: 75,
@@ -63,6 +65,7 @@ const DEFAULT_SETTINGS: AlphaSettings = {
   restartRequested: false,
 
   // Admin trading controls
+  executionMode: "paper",
   adminAutoBuyEnabled: false,
   adminTradeAmountSol: 0.01,
   entryConfirmationSeconds: 30,
@@ -118,6 +121,24 @@ function asMode(
     value === "aggressive"
   ) {
     return value;
+  }
+
+  return fallback;
+}
+
+function asExecutionMode(
+  value: unknown,
+  fallback: "paper" | "live",
+): "paper" | "live" {
+  if (typeof value === "string") {
+    const normalised = value
+      .replace(/^"+|"+$/g, "")
+      .trim()
+      .toLowerCase();
+
+    if (normalised === "paper" || normalised === "live") {
+      return normalised;
+    }
   }
 
   return fallback;
@@ -225,6 +246,12 @@ export async function getAlphaSettings(
     ),
 
     // Admin trading
+
+    executionMode: asExecutionMode(
+      map.get("execution_mode"),
+      DEFAULT_SETTINGS.executionMode,
+    ),
+
     adminAutoBuyEnabled: asBoolean(
       map.get("admin_auto_buy_enabled"),
       DEFAULT_SETTINGS.adminAutoBuyEnabled,
