@@ -199,6 +199,26 @@ export async function startAdminAutoTrade(args: {
 }) {
   const settings = await getAlphaSettings();
 
+  console.log("========================================");
+  console.log("[AutoTrade] START");
+
+  console.log({
+      token: args.token,
+      symbol: args.symbol,
+
+      adminAutoBuyEnabled: settings.adminAutoBuyEnabled,
+      executionMode: settings.executionMode,
+      maxOpenPositions: settings.maxOpenPositions,
+      activeTrades: activeTrades.size,
+
+      paused: autoTradePaused,
+
+      adminTradingEnabled: config.adminTradingEnabled,
+      privateKeyLoaded: !!config.adminTradingPrivateKey,
+  });
+
+  console.log("========================================");
+
   if (!settings.adminAutoBuyEnabled) {
     console.log("[AutoTrade] Auto-buy disabled. Alert only.", {
       token: args.token,

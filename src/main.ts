@@ -806,14 +806,13 @@ async function processTierDispatch() {
     }`,
   );
 
-  await startAdminAutoTrade({
+ await startAdminAutoTrade({
     token: tokenAddress,
     symbol:
       pair.baseToken?.symbol ??
       pair.baseToken?.name ??
       'UNKNOWN',
     entryPrice: result.currentPrice,
-    amountSol: 0.05,
   });
 } catch (error) {
   console.error(
