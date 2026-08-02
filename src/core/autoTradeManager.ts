@@ -22,9 +22,14 @@ import {
   updatePositionMarket,
   markSellRequested,
   markSellPending,
+  markSellFailed,
   closePosition,
   restoreActivePositions,
 } from "./positionManager.js";
+import {
+  evaluateEmergencyExit,
+  type EmergencyExitReason,
+} from "../services/emergencyExitManager.js";
 
 let autoTradePaused = false;
 
@@ -51,9 +56,12 @@ type AutoTrade = {
   highestPrice: number;
   stopPrice: number;
   amountSol: number;
-  status: 'open' | 'closed';
+
+  initialLiquidityUsd: number | null;
+
+  status: "open" | "closed";
   openedAt: number;
-  mode: 'paper' | 'live';
+  mode: "paper" | "live";
   sellInProgress: boolean;
 };
 
@@ -135,13 +143,46 @@ function trailPercentForRoi(roiPct: number) {
   return 0.2;
 }
 
-async function fetchCurrentPrice(token: string) {
+async function fetchCurrentMarket(token: string) {
   const pairs = await fetchPairs(token);
   const pair: any = chooseBestPair(pairs);
-  const price = Number(pair?.priceUsd ?? 0);
 
-  if (!Number.isFinite(price) || price <= 0) return null;
-  return price;
+  const price = Number(pair?.priceUsd ?? 0);
+  const liquidityUsd = Number(pair?.liquidity?.usd ?? 0);
+
+  const buys5m = Number(
+    pair?.txns?.m5?.buys ?? 0,
+  );
+
+  const sells5m = Number(
+    pair?.txns?.m5?.sells ?? 0,
+  );
+
+  if (!Number.isFinite(price) || price <= 0) {
+    return null;
+  }
+
+  return {
+    price,
+    liquidityUsd:
+      Number.isFinite(liquidityUsd)
+        ? liquidityUsd
+        : 0,
+    buys5m:
+      Number.isFinite(buys5m)
+        ? buys5m
+        : 0,
+    sells5m:
+      Number.isFinite(sells5m)
+        ? sells5m
+        : 0,
+  };
+}
+
+async function fetchCurrentPrice(token: string) {
+  const market = await fetchCurrentMarket(token);
+
+  return market?.price ?? null;
 }
 
 async function saveClosedTrade(args: {
@@ -196,6 +237,7 @@ export async function startAdminAutoTrade(args: {
   symbol: string;
   entryPrice: number;
   amountSol?: number;
+  initialLiquidityUsd?: number | null;
 }) {
   const settings = await getAlphaSettings();
 
@@ -571,7 +613,11 @@ if (!trade.verified) {
       confirmedPrice *
       (1 - initialStopLossPercent / 100),
     amountSol,
-    status: 'open',
+
+    initialLiquidityUsd:
+      args.initialLiquidityUsd ?? null,
+
+    status: "open",
     openedAt: Date.now(),
     mode: executionMode,
     sellInProgress: false,
@@ -737,12 +783,61 @@ export async function runAutoTradeManager() {
     if (trade.status !== 'open') continue;
 
     try {
-      const currentPrice = await fetchCurrentPrice(token);
-      if (!currentPrice) continue;
+const market = await fetchCurrentMarket(token);
 
-      const roiNow = ((currentPrice - trade.entryPrice) / trade.entryPrice) * 100;
-      const pnlSol = calcPnlSol(trade.amountSol, roiNow);
-      const valueSol = trade.amountSol + pnlSol;
+if (!market) {
+  continue;
+}
+
+const currentPrice = market.price;
+
+const roiNow =
+  ((currentPrice - trade.entryPrice) /
+    trade.entryPrice) *
+  100;
+
+const pnlSol =
+  calcPnlSol(trade.amountSol, roiNow);
+
+const valueSol =
+  trade.amountSol + pnlSol;
+
+const emergencyDecision = evaluateEmergencyExit({
+  token,
+  symbol: trade.symbol,
+
+  entryPrice: trade.entryPrice,
+  currentPrice,
+  highestPrice: trade.highestPrice,
+  stopPrice: trade.stopPrice,
+
+  initialLiquidityUsd:
+    trade.initialLiquidityUsd,
+
+  currentLiquidityUsd:
+    market.liquidityUsd,
+
+  buys5m:
+    market.buys5m,
+
+  sells5m:
+    market.sells5m,
+
+  // These remain off until their data is reliable.
+  holderProtectionEnabled: false,
+  holderDataAvailable: false,
+  bundleProtectionEnabled: false,
+});
+
+console.log("[EmergencyExit] Position evaluated.", {
+  token,
+  symbol: trade.symbol,
+  shouldExit: emergencyDecision.shouldExit,
+  severity: emergencyDecision.severity,
+  reason: emergencyDecision.reason,
+  message: emergencyDecision.message,
+  metrics: emergencyDecision.metrics,
+});
 
       if (
         settings.trailingStopEnabled &&
@@ -786,106 +881,180 @@ await updatePositionMarket({
     'Position reached a new high and the trailing stop was moved upward.',
 });
 
-await sendTelegram(
-          config.ownerChatId,
-          [
-            '📈 <b>TRAILING STOP MOVED UP</b>',
-            '',
-            `<b>${trade.symbol}</b>`,
-            `Current Price: <b>$${fmtPrice(currentPrice)}</b>`,
-            `Highest Price: <b>$${fmtPrice(trade.highestPrice)}</b>`,
-            `New Stop: <b>$${fmtPrice(trade.stopPrice)}</b>`,
-            `Trail: <b>${Math.round(trailPercent * 100)}%</b>`,
-            `ROI Now: <b>${roiNow.toFixed(1)}%</b>`,
-            `Paper PnL: <b>${fmtSol(pnlSol)}</b>`,
-            `Paper Value: <b>${valueSol.toFixed(4)} SOL</b>`,
-          ].join('\n'),
-          sellButtons(token)
-        );
+console.log("[AutoTrade] Trailing stop updated.", {
+  positionId: trade.positionId,
+  token,
+  symbol: trade.symbol,
+  currentPrice,
+  highestPrice: trade.highestPrice,
+  stopPrice: trade.stopPrice,
+  trailPercent,
+  roiNow,
+});
       }
 
       if (
-          currentPrice <= trade.stopPrice &&
-          !trade.sellInProgress
-        ) {
-        const isPaperPosition = trade.mode === 'paper';
-        await sendTelegram(
-          config.ownerChatId,
-          [
-            '🛑 <b>TRAILING STOP HIT</b>',
-            '',
-            `<b>${trade.symbol}</b>`,
-            `Current Price: <b>$${fmtPrice(currentPrice)}</b>`,
-            `Stop Price: <b>$${fmtPrice(trade.stopPrice)}</b>`,
-            `Entry Price: <b>$${fmtPrice(trade.entryPrice)}</b>`,
-            `Final ROI: <b>${roiNow.toFixed(1)}%</b>`,
-            `Paper PnL: <b>${fmtSol(pnlSol)}</b>`,
-            `Paper Exit Value: <b>${valueSol.toFixed(4)} SOL</b>`,
-            '',
-            isPaperPosition ? 'Paper selling 100%...' : 'Selling 100%...',
-          ].join('\n')
-        );
+  currentPrice <= trade.stopPrice &&
+  !trade.sellInProgress
+) {
+  trade.sellInProgress = true;
 
-        await markSellRequested({
-          positionId: trade.positionId,
+  const isPaperPosition = trade.mode === "paper";
+
+  console.log("[AutoTrade] Exit triggered.", {
+    positionId: trade.positionId,
+    token,
+    symbol: trade.symbol,
+    reason: "TRAILING_STOP",
+    currentPrice,
+    stopPrice: trade.stopPrice,
+    entryPrice: trade.entryPrice,
+    roiNow,
+  });
+
+  try {
+    /*
+     * Mark the database first so another process or restored
+     * manager can see that an exit is already underway.
+     */
+    await markSellRequested({
+      positionId: trade.positionId,
+      percent: 100,
+    });
+
+    await markSellPending(trade.positionId);
+
+    /*
+     * Execute immediately.
+     * Telegram is intentionally not called before this point.
+     */
+    const sell = isPaperPosition
+      ? {
+          signature: "paper-sell-simulation",
+        }
+      : await adminSellTokenPercentWithRetry({
+          inputMint: token,
           percent: 100,
         });
 
-        await markSellPending(trade.positionId);
+    /*
+     * The current implementation records the latest observed
+     * market price as the exit price.
+     *
+     * Later, we will improve this by storing the actual execution
+     * proceeds and immutable exit-price information.
+     */
+    await closePosition({
+      positionId: trade.positionId,
 
-        const sell = isPaperPosition
-        ? { signature: 'paper-sell-simulation' }
-        : await adminSellTokenPercentWithRetry({
-            inputMint: token,
-            percent: 100,
-          });
+      exitPrice: currentPrice,
+      finalRoiPercent: roiNow,
+      realisedPnlSol: pnlSol,
 
-        await closePosition({
-          positionId: trade.positionId,
+      sellSignature: sell.signature,
 
-          exitPrice: currentPrice,
-          finalRoiPercent: roiNow,
-          realisedPnlSol: pnlSol,
+      beforeBalanceRaw: "unknown",
+      afterBalanceRaw: "0",
+    });
 
-          sellSignature: sell.signature,
+    trade.status = "closed";
+    activeTrades.delete(token);
 
-          beforeBalanceRaw: 'unknown',
-          afterBalanceRaw: '0',
-        });
+    await saveClosedTrade({
+      trade,
+      exitPrice: currentPrice,
+      finalRoi: roiNow,
+      pnlSol,
+      exitValueSol: valueSol,
+    });
 
-        trade.status = 'closed';
-        activeTrades.delete(token);
+    await recordTradeClose({
+      token,
+      exitPrice: currentPrice,
+      highestPrice: trade.highestPrice,
+      pnlPercent: roiNow,
+    });
 
-        await saveClosedTrade({
-          trade,
-          exitPrice: currentPrice,
-          finalRoi: roiNow,
-          pnlSol,
-          exitValueSol: valueSol,
-        });
+    console.log("[AutoTrade] Exit completed.", {
+      positionId: trade.positionId,
+      token,
+      symbol: trade.symbol,
+      reason: "TRAILING_STOP",
+      signature: sell.signature,
+      finalRoi: roiNow,
+    });
 
-        await recordTradeClose({
-          token,
-          exitPrice: currentPrice,
-          highestPrice: trade.highestPrice,
-          pnlPercent: roiNow,
-        });
+    /*
+     * Notify only after execution and database closure complete.
+     */
+    await sendTelegram(
+      config.ownerChatId,
+      [
+        isPaperPosition
+          ? "🧪 <b>PAPER AUTO SELL COMPLETE</b>"
+          : "✅ <b>AUTO SELL EXECUTED</b>",
+        "",
+        `<b>${trade.symbol}</b>`,
+        `Reason: <b>Trailing Stop</b>`,
+        `Entry Price: <b>$${fmtPrice(trade.entryPrice)}</b>`,
+        `Highest Price: <b>$${fmtPrice(trade.highestPrice)}</b>`,
+        `Stop Price: <b>$${fmtPrice(trade.stopPrice)}</b>`,
+        `Exit Price: <b>$${fmtPrice(currentPrice)}</b>`,
+        `Final ROI: <b>${roiNow.toFixed(1)}%</b>`,
+        `Estimated PnL: <b>${fmtSol(pnlSol)}</b>`,
+        `Estimated Exit Value: <b>${valueSol.toFixed(4)} SOL</b>`,
+        `Tx: <code>${sell.signature}</code>`,
+      ].join("\n"),
+    );
+  } catch (sellError) {
+    const errorMessage =
+      sellError instanceof Error
+        ? sellError.message
+        : String(sellError);
 
-        await sendTelegram(
-          config.ownerChatId,
-          [
-            isPaperPosition
-      ? '🧪 <b>PAPER AUTO SELL COMPLETE</b>'
-      : '✅ <b>AUTO SELL EXECUTED</b>',
-            '',
-            `<b>${trade.symbol}</b>`,
-            `Final ROI: <b>${roiNow.toFixed(1)}%</b>`,
-            `Paper PnL: <b>${fmtSol(pnlSol)}</b>`,
-            `Paper Exit Value: <b>${valueSol.toFixed(4)} SOL</b>`,
-            `Tx: <code>${sell.signature}</code>`,
-          ].join('\n')
-        );
-      }
+    console.error("[AutoTrade] Exit failed.", {
+      positionId: trade.positionId,
+      token,
+      symbol: trade.symbol,
+      reason: "TRAILING_STOP",
+      error: errorMessage,
+    });
+
+    try {
+      await markSellFailed({
+        positionId: trade.positionId,
+        errorMessage,
+      });
+    } catch (positionError) {
+      console.error(
+        "[AutoTrade] Could not record failed sell:",
+        positionError,
+      );
+    }
+
+    /*
+     * Allow the next monitoring cycle to retry.
+     */
+    trade.sellInProgress = false;
+
+    await sendTelegram(
+      config.ownerChatId,
+      [
+        "❌ <b>AUTO SELL FAILED</b>",
+        "",
+        `<b>${trade.symbol}</b>`,
+        `Reason: <b>Trailing Stop</b>`,
+        `Token: <code>${token}</code>`,
+        `Current Price: <b>$${fmtPrice(currentPrice)}</b>`,
+        `Stop Price: <b>$${fmtPrice(trade.stopPrice)}</b>`,
+        "",
+        "AlphaOS will retry during the next position check.",
+        "",
+        `<code>${errorMessage}</code>`,
+      ].join("\n"),
+    );
+  }
+}
     } catch (error) {
       trade.sellInProgress = false;
 
@@ -940,8 +1109,14 @@ export async function restoreOpenTrades() {
       highestPrice: position.highestPrice,
       stopPrice: position.stopPrice,
       amountSol: position.entrySolAmount,
+
+      initialLiquidityUsd:
+        position.liquidity ?? null,
+
       status: "open",
-      openedAt: new Date(position.openedAt ?? position.createdAt).getTime(),
+      openedAt: new Date(
+        position.openedAt ?? position.createdAt,
+      ).getTime(),
       mode: position.mode,
       sellInProgress: false,
     });

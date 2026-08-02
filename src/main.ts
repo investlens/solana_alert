@@ -123,7 +123,7 @@ function getActionBucket(result: RiskResult): 'BUY' | 'HIGH_BUY' | 'IGNORE' {
   }
 
   if (
-    result.score >= 72 &&
+    result.score >= 78 &&
     result.marketSafetyScore >= 60 &&
     result.liquidityUsd >= 6_000 &&
     result.liquidityUsd <= 65_000 &&
@@ -612,8 +612,20 @@ async function startWalletWatch() {
   }
 }
 
+let tierDispatchRunning = false;
+
 async function processTierDispatch() {
-  if (!tokenStates.size) return;
+  if (tierDispatchRunning) {
+    return;
+  }
+
+  if (!tokenStates.size) {
+    return;
+  }
+
+  tierDispatchRunning = true;
+
+  try {
 
   await expireDueSubscriptions();
 
@@ -807,13 +819,14 @@ async function processTierDispatch() {
   );
 
  await startAdminAutoTrade({
-    token: tokenAddress,
-    symbol:
-      pair.baseToken?.symbol ??
-      pair.baseToken?.name ??
-      'UNKNOWN',
-    entryPrice: result.currentPrice,
-  });
+  token: tokenAddress,
+  symbol:
+    pair.baseToken?.symbol ??
+    pair.baseToken?.name ??
+    'UNKNOWN',
+  entryPrice: result.currentPrice,
+  initialLiquidityUsd: result.liquidityUsd,
+});
 } catch (error) {
   console.error(
     '❌ START AUTO TRADE FAILED:',
@@ -1031,9 +1044,16 @@ async function processTierDispatch() {
         console.log(`Removing tracked token: ${tokenAddress}`);
         tokenStates.delete(tokenAddress);
       }
-    } catch (error) {
-      console.error('processTierDispatch error', tokenAddress, error);
+        } catch (error) {
+      console.error(
+        "processTierDispatch error",
+        tokenAddress,
+        error,
+      );
     }
+  }
+  } finally {
+    tierDispatchRunning = false;
   }
 }
 
@@ -1061,6 +1081,25 @@ function shouldRunOutcomeLearningAgent() {
 function shouldRunCreatorMarketTracker() {
   const intervalMs = Number(process.env.CREATOR_MARKET_TRACKER_MS ?? 10 * 60 * 1000);
   return Date.now() - lastCreatorMarketTrackerRun >= intervalMs;
+}
+
+async function startTierDispatchLoop() {
+  console.log(
+    "[TierDispatch] Independent 5-second alert dispatch loop started.",
+  );
+
+  while (true) {
+    try {
+      await processTierDispatch();
+    } catch (error) {
+      console.error(
+        "[TierDispatch] Dispatch cycle failed.",
+        error,
+      );
+    }
+
+    await sleep(5_000);
+  }
 }
 
 async function startPositionProtectionLoop() {
@@ -1136,7 +1175,6 @@ if (shouldRunCreatorReputationEngine()) {
         lastOutcomeLearningRun = Date.now();
         await runOutcomeLearning();
       }
-      await processTierDispatch();
     } catch (error) {
       console.error('main loop error', error);
     }
@@ -1175,13 +1213,14 @@ async function main() {
   await restoreOpenTrades();
 
   const tasks = [
-    startScanner(),
-    startWalletWatch(),
-    startPumpfunWatch(),
-    startMemoryTracker(),
-    startOutcomeCheckpointAgent(),
-    startPositionProtectionLoop(),
-  ];
+  startScanner(),
+  startWalletWatch(),
+  startPumpfunWatch(),
+  startMemoryTracker(),
+  startOutcomeCheckpointAgent(),
+  startPositionProtectionLoop(),
+  startTierDispatchLoop(),
+];
 
   if (process.env.RUN_TELEGRAM_BOT === 'true') {
     tasks.unshift(startBot());
