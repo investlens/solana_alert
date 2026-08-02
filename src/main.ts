@@ -865,49 +865,83 @@ async function processTierDispatch() {
           });
 
           if (isEarlyAdminWatch(result)) {
-            await safeSendTelegram(
+            const earlyDelivered = await safeSendTelegram(
               telegramId,
-              buildEarlyAdminMessage({ pair, result, state }),
-              getAdminOnlyButtons(pair)
+              buildEarlyAdminMessage({
+                pair,
+                result,
+                state,
+              }),
+              getAdminOnlyButtons(pair),
             );
 
-            state.adminEarlyDelivered = true;
+            if (earlyDelivered) {
+              state.adminEarlyDelivered = true;
+
+              console.log('Early admin alert delivered:', {
+                token: tokenAddress,
+                symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
+                telegramId,
+              });
+            } else {
+              console.error('Early admin alert delivery failed:', {
+                token: tokenAddress,
+                symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
+                telegramId,
+              });
+            }
           }
         }
 
         if (
-          user.tier === 'admin' &&
-          !state.adminDelivered &&
-          !alreadyDelivered &&
-          shouldSendToAdmin(result)
-        ) {
-          if (!alphaMessage) {
-            alphaMessage = buildProAlertMessage({
-              pair,
-              result,
-              state,
-              bucket,
-            });
-          }
+  user.tier === 'admin' &&
+      !state.adminDelivered &&
+      !alreadyDelivered
+    ) {
+      if (!alphaMessage) {
+        alphaMessage = buildProAlertMessage({
+          pair,
+          result,
+          state,
+          bucket,
+        });
+      }
 
-          await safeSendTelegram(
+      const delivered = await safeSendTelegram(
+        telegramId,
+        alphaMessage,
+        buttons,
+      );
+
+      if (delivered) {
+        state.adminDelivered = true;
+
+        if (state.alertId) {
+          await createAlertDelivery({
+            alertId: state.alertId,
+            chain: config.discoveryChain,
+            tokenAddress,
             telegramId,
-            alphaMessage,
-            buttons,
-          );
-
-          if (state.alertId) {
-            await createAlertDelivery({
-              alertId: state.alertId,
-              chain: config.discoveryChain,
-              tokenAddress,
-              telegramId,
-              tierAtDelivery: 'admin',
-              deliveryType: 'instant',
-              delaySeconds: 0,
-            });
-          }
+            tierAtDelivery: 'admin',
+            deliveryType: 'instant',
+            delaySeconds: 0,
+          });
         }
+
+        console.log('Admin alert delivered:', {
+          token: tokenAddress,
+          symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
+          telegramId,
+          bucket,
+        });
+      } else {
+        console.error('Admin alert delivery failed:', {
+          token: tokenAddress,
+          symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
+          telegramId,
+        });
+      }
+    }
 
         if (
           user.tier === 'paid' &&
@@ -992,7 +1026,6 @@ async function processTierDispatch() {
         }
       }
 
-      state.adminDelivered = true;
 
       if (result.ageMin > config.maxAgeMin + 300 || bucket === 'IGNORE') {
         console.log(`Removing tracked token: ${tokenAddress}`);
