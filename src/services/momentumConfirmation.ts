@@ -36,6 +36,12 @@ export interface MomentumCheckResult {
 
     buyChangePct: number;
     sellChangePct: number;
+
+    intervalBuys: number;
+    intervalSells: number;
+    intervalTransactions: number;
+    intervalBuyRatio: number;
+
     scoreChange: number;
   };
 }
@@ -144,6 +150,29 @@ export function confirmMomentum(
     currentSells,
   );
 
+  /*
+  * Activity that occurred specifically during the
+  * confirmation window.
+  */
+  const intervalBuys = Math.max(
+    0,
+    currentBuys - previousBuys,
+  );
+
+  const intervalSells = Math.max(
+    0,
+    currentSells - previousSells,
+  );
+
+  const intervalTransactions =
+    intervalBuys + intervalSells;
+
+  const intervalBuyRatio =
+    calculateBuyRatio(
+      intervalBuys,
+      intervalSells,
+    );
+
   const scoreChange =
     finiteNumber(current.score) -
     finiteNumber(previous.score);
@@ -164,6 +193,12 @@ export function confirmMomentum(
 
     buyChangePct,
     sellChangePct,
+
+    intervalBuys,
+    intervalSells,
+    intervalTransactions,
+    intervalBuyRatio,
+
     scoreChange,
   };
 
@@ -265,6 +300,25 @@ export function confirmMomentum(
     );
   }
 
+  /*
+  * Reject when the transactions added during the study
+  * are clearly sell-dominated and price is not improving.
+  *
+  * Require at least 12 new transactions to avoid reacting
+  * to very small samples.
+  */
+  if (
+    intervalTransactions >= 12 &&
+    intervalSells > intervalBuys &&
+    priceChangePct <= 0
+  ) {
+    severeReasons.push(
+      `Confirmation flow turned sell-heavy: ` +
+        `${intervalBuys} new buys vs ` +
+        `${intervalSells} new sells`,
+    );
+  }
+
   if (severeReasons.length > 0) {
     return {
       decision: 'DOWNTREND',
@@ -330,6 +384,16 @@ export function confirmMomentum(
     );
   }
 
+  if (
+    intervalTransactions >= 8 &&
+    intervalBuyRatio < policy.minimumBuyRatio
+  ) {
+    watchReasons.push(
+      `New confirmation flow is weak at ` +
+        `${intervalBuyRatio.toFixed(2)} buy ratio`,
+    );
+  }
+
   if (watchReasons.length > 0) {
     return {
       decision: 'WATCH',
@@ -361,6 +425,33 @@ export function confirmMomentum(
     healthyReasons.push(
       `Buy ratio remains healthy at ${currentBuyRatio.toFixed(2)}`,
     );
+  }
+
+  if (
+    intervalTransactions >= 8 &&
+    intervalBuyRatio >= policy.minimumBuyRatio
+  ) {
+    healthyReasons.push(
+      `Confirmation flow is healthy at ` +
+        `${intervalBuyRatio.toFixed(2)} buy ratio`,
+    );
+  }
+
+  /*
+  * Do not buy merely because no severe warning occurred.
+  * Require at least three pieces of positive evidence.
+  */
+  if (healthyReasons.length < 3) {
+    return {
+      decision: 'WATCH',
+      passed: false,
+      reason:
+        'Entry has insufficient positive confirmation',
+      reasons: [
+        'Fewer than three healthy momentum signals were confirmed',
+      ],
+      metrics,
+    };
   }
 
   return {
