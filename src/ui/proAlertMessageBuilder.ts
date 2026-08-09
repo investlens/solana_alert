@@ -9,7 +9,7 @@ import {
   formatUsd,
 } from './alphaAlert/index.js';
 
-function ratio(
+function formatRatio(
   buys: number,
   sells: number,
 ): string {
@@ -22,58 +22,60 @@ function ratio(
   return `${(buys / sells).toFixed(2)}x`;
 }
 
-function verdict(
+function buildPositiveReasons(
   result: RiskResult,
-): {
-  title: string;
-  text: string;
-} {
-  if (result.score >= 82) {
-    return {
-      title: 'HIGH-PRIORITY INVESTIGATION',
-      text:
-        'Strong momentum and healthy early structure detected. Confirm holder and creator risk before acting.',
-    };
+  bucket: 'BUY' | 'HIGH_BUY' | 'IGNORE',
+): string[] {
+  const reasons: string[] = [];
+
+  if (bucket === 'HIGH_BUY') {
+    reasons.push(
+      '✅ High-priority AlphaOS threshold reached',
+    );
   }
 
-  if (result.score >= 72) {
-    return {
-      title: 'WORTH INVESTIGATING',
-      text:
-        'A qualified opportunity is forming. Entry timing and risk confirmation still matter.',
-    };
+  if (result.score >= 78) {
+    reasons.push(
+      `✅ AI score qualified at ${result.score}/100`,
+    );
   }
 
-  return {
-    title: 'MONITOR FOR CONFIRMATION',
-    text:
-      'The setup needs stronger evidence before it deserves priority.',
-  };
+  if (result.buys5m > result.sells5m) {
+    reasons.push(
+      `✅ Buyer pressure leads ${result.buys5m} to ${result.sells5m}`,
+    );
+  }
+
+  if (result.liquidityUsd >= 10_000) {
+    reasons.push(
+      '✅ Liquidity cleared the quality threshold',
+    );
+  }
+
+  if (result.volume5m >= 5_000) {
+    reasons.push(
+      '✅ Strong five-minute trading activity',
+    );
+  }
+
+  for (const reason of result.checksGood ?? []) {
+    if (
+      reason &&
+      reasons.length < 4
+    ) {
+      reasons.push(`✅ ${reason}`);
+    }
+  }
+
+  return reasons.slice(0, 4);
 }
 
-function buildReasons(
-  result: RiskResult,
-): string[] {
-  const reasons = result.checksGood
-    .filter(Boolean)
-    .slice(0, 3)
-    .map((item) => `✅ ${item}`);
-
-  if (reasons.length > 0) {
-    return reasons;
-  }
-
-  return [
-    '✅ Multi-factor market activity detected',
-  ];
-}
-
-function buildRisks(
+function buildRiskItems(
   result: RiskResult,
 ): string[] {
   return [
-    ...result.checksWarn,
-    ...result.checksBad,
+    ...(result.checksWarn ?? []),
+    ...(result.checksBad ?? []),
   ]
     .filter(Boolean)
     .slice(0, 2)
@@ -104,27 +106,27 @@ export function buildProAlertMessage(args: {
     pair.baseToken?.address ??
     null;
 
-  const assessment =
-    verdict(result);
-
   const isPriority =
     bucket === 'HIGH_BUY';
 
   const reasons =
-    buildReasons(result);
+    buildPositiveReasons(
+      result,
+      bucket,
+    );
 
   const risks =
-    buildRisks(result);
+    buildRiskItems(result);
 
-      return buildAlphaAlert({
+  return buildAlphaAlert({
     access: 'PREMIUM',
 
     title: isPriority
-      ? 'AI DISCOVERY · PRIORITY'
-      : 'AI DISCOVERY',
+      ? 'ALPHAOS HIGH BUY'
+      : 'ALPHAOS BUY',
 
     subtitle:
-      'Multi-factor opportunity detected',
+      'AI momentum confirmation passed',
 
     tone: isPriority
       ? 'PREMIUM'
@@ -137,19 +139,18 @@ export function buildProAlertMessage(args: {
     score: result.score,
     confidence: result.score,
 
-    risk: String(
-      result.risk ??
-      'Tracking',
-    ),
+    risk:
+      `${result.marketSafetyLabel ?? result.risk ?? 'Tracking'} · ` +
+      `${result.marketSafetyScore}/100`,
 
     status: isPriority
-      ? 'PRIORITY REVIEW'
-      : 'INVESTIGATE',
+      ? 'HIGH PRIORITY'
+      : 'QUALIFIED',
 
     sections: [
       {
-        title: 'WHY ALPHAOS FLAGGED IT',
-        icon: '🔎',
+        title: 'WHY ALPHAOS SELECTED IT',
+        icon: '🧠',
         items: reasons,
       },
 
@@ -178,10 +179,23 @@ export function buildProAlertMessage(args: {
           },
           {
             label: 'Buy Ratio',
-            value: ratio(
+            value: formatRatio(
               result.buys5m,
               result.sells5m,
             ),
+          },
+          {
+            label: 'Buys / Sells',
+            value:
+              `${result.buys5m} / ` +
+              `${result.sells5m}`,
+          },
+          {
+            label: 'Token Age',
+            value:
+              `${Math.floor(
+                result.ageMin,
+              )}m`,
           },
         ],
       },
@@ -189,24 +203,26 @@ export function buildProAlertMessage(args: {
       ...(risks.length > 0
         ? [
             {
-              title: 'RISKS TO VERIFY',
-              icon: '⚠️',
+              title: 'RISK NOTES',
+              icon: '🛡',
               items: risks,
             },
           ]
         : []),
     ],
 
-    verdictTitle:
-      assessment.title,
+    verdictTitle: isPriority
+      ? 'HIGH-CONFIDENCE SETUP'
+      : 'QUALIFIED SETUP',
 
-    verdict:
-      assessment.text,
+    verdict: isPriority
+      ? 'AlphaOS found strong score, liquidity, volume and buyer-pressure alignment.'
+      : 'AlphaOS confirmed the setup after evaluating score, liquidity, activity and momentum.',
 
     tracking:
-      'ALPHA MEMORY TRACKING ACTIVE',
+      'ALPHA MEMORY + OUTCOME TRACKING ACTIVE',
 
     disclaimer:
-      'AI-generated intelligence for research purposes only. Always verify creator, holder and liquidity risk before trading.',
+      'AI-generated market intelligence. Always verify token, holder and creator risks before trading.',
   });
 }

@@ -14,3 +14,9 @@ coverage
 *.webp
 *.pdf
 EOF
+# Local review / backup artifacts
+alphaos-core-review.zip
+alphaos-core-review/
+alphaos-review.zip
+review/
+*.backup.ts

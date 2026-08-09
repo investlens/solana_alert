@@ -63,6 +63,9 @@ type AutoTrade = {
   openedAt: number;
   mode: "paper" | "live";
   sellInProgress: boolean;
+
+  stopBreachCount: number;
+  stopFirstBreachedAt: number | null;
 };
 
 type ClosedAutoTrade = AutoTrade & {
@@ -141,6 +144,31 @@ function trailPercentForRoi(roiPct: number) {
   if (roiPct >= 60) return 0.12;
   if (roiPct >= 30) return 0.15;
   return 0.2;
+}
+
+function protectedFloorRoiForPeak(
+  peakRoiPct: number,
+): number | null {
+  /*
+   * Once a trade proves itself, progressively protect
+   * part of the move.
+   *
+   * Before +20%:
+   *   Allow normal meme-token volatility.
+   *
+   * +20%:
+   *   Never intentionally give the entire move back.
+   *
+   * Higher peaks progressively lock more profit.
+   */
+
+  if (peakRoiPct >= 100) return 50;
+  if (peakRoiPct >= 75) return 35;
+  if (peakRoiPct >= 50) return 20;
+  if (peakRoiPct >= 30) return 10;
+  if (peakRoiPct >= 20) return 0;
+
+  return null;
 }
 
 async function fetchCurrentMarket(token: string) {
@@ -308,183 +336,170 @@ export async function startAdminAutoTrade(args: {
   }
 
 
-    const confirmationSeconds = Math.max(
-    5,
-    Math.round(settings.entryConfirmationSeconds),
-  );
+    /*
+      * Entry momentum has already been confirmed by main.ts.
+      *
+      * Do NOT run another timed confirmation here.
+      * We only perform an immediate execution-time sanity check
+      * so AlphaOS can act quickly after the signal is confirmed.
+      */
 
-  const confirmationDelayMs =
-    confirmationSeconds * 1_000;
+      const latestSettings =
+        await getAlphaSettings(true);
 
-  const maxEntryDipPercent = Math.max(
-    0,
-    settings.maxEntryDipPercent,
-  );
+      if (!latestSettings.adminAutoBuyEnabled) {
+        console.log(
+          "[AutoTrade] Auto-buy disabled before execution.",
+          {
+            token: args.token,
+            symbol: args.symbol,
+          },
+        );
 
-  const maxEntryPumpPercent = Math.max(
-    0,
-    settings.maxEntryPumpPercent,
-  );
+        return;
+      }
 
-  await sendTelegram(
-    config.ownerChatId,
-    [
-      '⏳ <b>ENTRY STUDY ACTIVE</b>',
-      '',
-      `<b>${args.symbol}</b>`,
-      `Signal Price: <b>$${fmtPrice(args.entryPrice)}</b>`,
-      `Study Window: <b>${confirmationSeconds} seconds</b>`,
-      '',
-      'AlphaOS is checking whether the entry remains healthy.',
-    ].join('\n'),
-  );
+      if (autoTradePaused) {
+        console.log(
+          "[AutoTrade] Auto-buy paused before execution.",
+          {
+            token: args.token,
+            symbol: args.symbol,
+          },
+        );
 
-  await sleep(confirmationDelayMs);
+        return;
+      }
 
-  /*
-   * Re-check the setting after the study window.
-   * This allows admin to disable auto-buy while a token
-   * is being analysed.
-   */
+      const executionMode =
+        latestSettings.executionMode;
 
-  const latestSettings = await getAlphaSettings(true);
+      const isPaperMode =
+        executionMode === "paper";
 
-if (!latestSettings.adminAutoBuyEnabled) {
-  console.log(
-    "[AutoTrade] Auto-buy disabled during entry study.",
-    {
-      token: args.token,
-      symbol: args.symbol,
-    },
-  );
+      console.log(
+        "[AutoTrade] Runtime execution mode resolved.",
+        {
+          token: args.token,
+          symbol: args.symbol,
+          executionMode,
+        },
+      );
 
-  return;
-}
+      if (executionMode === "live") {
+        if (!config.adminTradingEnabled) {
+          await sendTelegram(
+            config.ownerChatId,
+            "❌ Live trading blocked.\n\nADMIN_TRADING_ENABLED is false.",
+          );
 
-if (autoTradePaused) {
-  console.log(
-    "[AutoTrade] Auto-buy paused during entry study.",
-    {
-      token: args.token,
-      symbol: args.symbol,
-    },
-  );
+          return;
+        }
 
-  return;
-}
+        if (!config.adminTradingPrivateKey) {
+          await sendTelegram(
+            config.ownerChatId,
+            "❌ Live trading blocked.\n\nAdmin private key is missing.",
+          );
 
-const executionMode = latestSettings.executionMode;
-const isPaperMode = executionMode === "paper";
+          return;
+        }
+      }
 
-console.log("[AutoTrade] Runtime execution mode resolved.", {
-  token: args.token,
-  symbol: args.symbol,
-  executionMode,
-});
+      /*
+      * Obtain the freshest executable market price.
+      *
+      * This is NOT another confirmation window.
+      * It happens immediately before execution.
+      */
+      const confirmedPrice =
+        await fetchCurrentPrice(args.token);
 
-if (executionMode === "live") {
-  if (!config.adminTradingEnabled) {
-    await sendTelegram(
-      config.ownerChatId,
-      "❌ Live trading blocked.\n\nADMIN_TRADING_ENABLED is false.",
-    );
+      if (!confirmedPrice) {
+        console.log(
+          "[AutoTrade] Entry cancelled: current price unavailable.",
+          {
+            token: args.token,
+            symbol: args.symbol,
+          },
+        );
 
-    return;
-  }
+        recentlyRejected.set(
+          args.token,
+          Date.now(),
+        );
 
-  if (!config.adminTradingPrivateKey) {
-    await sendTelegram(
-      config.ownerChatId,
-      "❌ Live trading blocked.\n\nAdmin private key is missing.",
-    );
+        return;
+      }
 
-    return;
-  }
-}
+      const maxEntryDipPercent =
+        Math.max(
+          0,
+          latestSettings.maxEntryDipPercent,
+        );
 
-const confirmedPrice = await fetchCurrentPrice(args.token);
+      const maxEntryPumpPercent =
+        Math.max(
+          0,
+          latestSettings.maxEntryPumpPercent,
+        );
 
-  if (!confirmedPrice) {
-    await sendTelegram(
-      config.ownerChatId,
-      [
-        '⚠️ <b>ENTRY CANCELLED</b>',
-        '',
-        `<b>${args.symbol}</b>`,
-        'AlphaOS could not confirm the current price.',
-        '',
-        'No trade was opened.',
-      ].join('\n'),
-    );
+      const priceMovePercent =
+        ((confirmedPrice - args.entryPrice) /
+          args.entryPrice) *
+        100;
 
-    recentlyRejected.set(
-      args.token,
-      Date.now(),
-    );
+      const minimumConfirmPrice =
+        args.entryPrice *
+        (1 - maxEntryDipPercent / 100);
 
-    return;
-  }
+      const maximumConfirmPrice =
+        args.entryPrice *
+        (1 + maxEntryPumpPercent / 100);
 
-  const priceMovePercent =
-    ((confirmedPrice - args.entryPrice) /
-      args.entryPrice) *
-    100;
+      /*
+      * This protects against a sudden price jump/drop occurring
+      * between final momentum confirmation and actual execution.
+      */
+      if (confirmedPrice < minimumConfirmPrice) {
+        console.log(
+          "[AutoTrade] Entry cancelled: price weakened before execution.",
+          {
+            token: args.token,
+            symbol: args.symbol,
+            signalPrice: args.entryPrice,
+            currentPrice: confirmedPrice,
+            movePercent: priceMovePercent,
+          },
+        );
 
-  const minimumConfirmPrice =
-    args.entryPrice *
-    (1 - maxEntryDipPercent / 100);
+        recentlyRejected.set(
+          args.token,
+          Date.now(),
+        );
 
-  const maximumConfirmPrice =
-    args.entryPrice *
-    (1 + maxEntryPumpPercent / 100);
+        return;
+      }
 
-  if (confirmedPrice < minimumConfirmPrice) {
-    await sendTelegram(
-      config.ownerChatId,
-      [
-        '❌ <b>ENTRY CANCELLED</b>',
-        '',
-        `<b>${args.symbol}</b>`,
-        `Signal Price: <b>$${fmtPrice(args.entryPrice)}</b>`,
-        `Current Price: <b>$${fmtPrice(confirmedPrice)}</b>`,
-        `Move: <b>${priceMovePercent.toFixed(1)}%</b>`,
-        '',
-        'Reason: trend weakened during the entry study.',
-        'No trade was opened.',
-      ].join('\n'),
-    );
+      if (confirmedPrice > maximumConfirmPrice) {
+        console.log(
+          "[AutoTrade] Entry cancelled: price extended before execution.",
+          {
+            token: args.token,
+            symbol: args.symbol,
+            signalPrice: args.entryPrice,
+            currentPrice: confirmedPrice,
+            movePercent: priceMovePercent,
+          },
+        );
 
-    recentlyRejected.set(
-      args.token,
-      Date.now(),
-    );
+        recentlyRejected.set(
+          args.token,
+          Date.now(),
+        );
 
-    return;
-  }
-
-  if (confirmedPrice > maximumConfirmPrice) {
-    await sendTelegram(
-      config.ownerChatId,
-      [
-        '❌ <b>ENTRY CANCELLED</b>',
-        '',
-        `<b>${args.symbol}</b>`,
-        `Signal Price: <b>$${fmtPrice(args.entryPrice)}</b>`,
-        `Current Price: <b>$${fmtPrice(confirmedPrice)}</b>`,
-        `Move: <b>+${priceMovePercent.toFixed(1)}%</b>`,
-        '',
-        'Reason: price moved too quickly before entry.',
-        'AlphaOS avoided chasing the pump.',
-      ].join('\n'),
-    );
-
-    recentlyRejected.set(
-      args.token,
-      Date.now(),
-    );
-
-    return;
-  }
+        return;
+      }
 
     const amountSol =
     args.amountSol ??
@@ -621,6 +636,9 @@ if (!trade.verified) {
     openedAt: Date.now(),
     mode: executionMode,
     sellInProgress: false,
+
+    stopBreachCount: 0,
+    stopFirstBreachedAt: null,
   };
 
   const initialTokenAmount = Number(
@@ -829,6 +847,91 @@ const emergencyDecision = evaluateEmergencyExit({
   bundleProtectionEnabled: false,
 });
 
+/*
+ * Intelligent stop validation
+ *
+ * Paper mode:
+ *   Ordinary stop breaches require two consecutive
+ *   five-second readings below the stop.
+ *
+ * Live mode:
+ *   Keep immediate stop execution until paper results
+ *   prove that validation improves outcomes.
+ */
+const stopBreached =
+  currentPrice <= trade.stopPrice;
+
+const hardLossReached =
+  roiNow <= -12;
+
+const structuralEmergency =
+  emergencyDecision.shouldExit &&
+  emergencyDecision.reason !== "TRAILING_STOP";
+
+let confirmedStopExit = false;
+
+const peakRoi =
+  ((trade.highestPrice -
+    trade.entryPrice) /
+    trade.entryPrice) *
+  100;
+
+const profitProtectionActive =
+  peakRoi >= 20;
+
+if (stopBreached) {
+  trade.stopBreachCount += 1;
+
+  if (trade.stopFirstBreachedAt == null) {
+    trade.stopFirstBreachedAt = Date.now();
+  }
+
+  console.log("[RecoveryValidator] Stop breached.", {
+    token,
+    symbol: trade.symbol,
+    mode: trade.mode,
+    currentPrice,
+    stopPrice: trade.stopPrice,
+    roiNow,
+    breachCount: trade.stopBreachCount,
+    hardLossReached,
+    structuralEmergency,
+    emergencyReason: emergencyDecision.reason,
+  });
+
+  /*
+   * Live positions retain the current immediate stop.
+   * Paper positions test the two-reading validator.
+   */
+  confirmedStopExit =
+    trade.mode === "live" ||
+    profitProtectionActive ||
+    trade.stopBreachCount >= 2;
+} else if (trade.stopBreachCount > 0) {
+  console.log("[RecoveryValidator] Price reclaimed stop.", {
+    token,
+    symbol: trade.symbol,
+    currentPrice,
+    stopPrice: trade.stopPrice,
+    previousBreachCount: trade.stopBreachCount,
+  });
+
+  trade.stopBreachCount = 0;
+  trade.stopFirstBreachedAt = null;
+}
+
+const shouldExitNow =
+  hardLossReached ||
+  structuralEmergency ||
+  confirmedStopExit;
+
+const exitReason: EmergencyExitReason =
+  hardLossReached
+    ? "HARD_STOP_LOSS"
+    : structuralEmergency
+      ? emergencyDecision.reason ?? "TRAILING_STOP"
+      : "TRAILING_STOP";
+
 console.log("[EmergencyExit] Position evaluated.", {
   token,
   symbol: trade.symbol,
@@ -853,8 +956,34 @@ console.log("[EmergencyExit] Position evaluated.", {
 const trailPercent =
   trailPercentForRoi(highRoi);
 
+const trailingStopPrice =
+  trade.highestPrice *
+  (1 - trailPercent);
+
+const protectedFloorRoi =
+  protectedFloorRoiForPeak(
+    highRoi,
+  );
+
+const protectedFloorPrice =
+  protectedFloorRoi == null
+    ? null
+    : trade.entryPrice *
+      (1 + protectedFloorRoi / 100);
+
+/*
+ * Use whichever protection is stronger:
+ *
+ * 1. Normal dynamic trailing stop
+ * 2. Profit floor earned by reaching a milestone
+ */
 trade.stopPrice =
-  trade.highestPrice * (1 - trailPercent);
+  protectedFloorPrice == null
+    ? trailingStopPrice
+    : Math.max(
+        trailingStopPrice,
+        protectedFloorPrice,
+      );
 
 const protectedRoiPercent =
   ((trade.stopPrice - trade.entryPrice) /
@@ -894,9 +1023,9 @@ console.log("[AutoTrade] Trailing stop updated.", {
       }
 
       if (
-  currentPrice <= trade.stopPrice &&
-  !trade.sellInProgress
-) {
+        shouldExitNow &&
+        !trade.sellInProgress
+      ) {
   trade.sellInProgress = true;
 
   const isPaperPosition = trade.mode === "paper";
@@ -905,7 +1034,7 @@ console.log("[AutoTrade] Trailing stop updated.", {
     positionId: trade.positionId,
     token,
     symbol: trade.symbol,
-    reason: "TRAILING_STOP",
+    reason: exitReason,
     currentPrice,
     stopPrice: trade.stopPrice,
     entryPrice: trade.entryPrice,
@@ -979,7 +1108,7 @@ console.log("[AutoTrade] Trailing stop updated.", {
       positionId: trade.positionId,
       token,
       symbol: trade.symbol,
-      reason: "TRAILING_STOP",
+      reason: exitReason,
       signature: sell.signature,
       finalRoi: roiNow,
     });
@@ -995,7 +1124,7 @@ console.log("[AutoTrade] Trailing stop updated.", {
           : "✅ <b>AUTO SELL EXECUTED</b>",
         "",
         `<b>${trade.symbol}</b>`,
-        `Reason: <b>Trailing Stop</b>`,
+        `Reason: <b>${exitReason.replace(/_/g, " ")}</b>`,
         `Entry Price: <b>$${fmtPrice(trade.entryPrice)}</b>`,
         `Highest Price: <b>$${fmtPrice(trade.highestPrice)}</b>`,
         `Stop Price: <b>$${fmtPrice(trade.stopPrice)}</b>`,
@@ -1011,12 +1140,13 @@ console.log("[AutoTrade] Trailing stop updated.", {
       sellError instanceof Error
         ? sellError.message
         : String(sellError);
+        trade.sellInProgress = false;
 
     console.error("[AutoTrade] Exit failed.", {
       positionId: trade.positionId,
       token,
       symbol: trade.symbol,
-      reason: "TRAILING_STOP",
+      reason: exitReason,
       error: errorMessage,
     });
 
@@ -1043,7 +1173,7 @@ console.log("[AutoTrade] Trailing stop updated.", {
         "❌ <b>AUTO SELL FAILED</b>",
         "",
         `<b>${trade.symbol}</b>`,
-        `Reason: <b>Trailing Stop</b>`,
+        `Reason: <b>${exitReason.replace(/_/g, " ")}</b>`,
         `Token: <code>${token}</code>`,
         `Current Price: <b>$${fmtPrice(currentPrice)}</b>`,
         `Stop Price: <b>$${fmtPrice(trade.stopPrice)}</b>`,
@@ -1119,6 +1249,8 @@ export async function restoreOpenTrades() {
       ).getTime(),
       mode: position.mode,
       sellInProgress: false,
+      stopBreachCount: 0,
+      stopFirstBreachedAt: null,
     });
   }
 

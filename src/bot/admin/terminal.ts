@@ -111,9 +111,19 @@ function tradingSettingsKeyboard(args: {
   autoBuyEnabled: boolean;
   trailingStopEnabled: boolean;
   paused: boolean;
+  executionMode: 'paper' | 'live';
 }) {
   return {
     inline_keyboard: [
+      [
+        {
+          text:
+            args.executionMode === 'paper'
+              ? '🧪 Mode: PAPER'
+              : '🔴 Mode: LIVE',
+          callback_data: 'ATS_TOGGLE_EXECUTION_MODE',
+        },
+      ],
       [
         {
           text: args.autoBuyEnabled
@@ -185,7 +195,13 @@ function tradingSettingsKeyboard(args: {
 }
 
 function tradeSizeKeyboard(currentValue: number) {
-  const values = [0.01, 0.025, 0.05, 0.1, 0.25];
+  const values = [
+    0.01,
+    0.025,
+    0.03,
+    0.05,
+    0.1,
+  ];
 
   return {
     inline_keyboard: [
@@ -406,6 +422,7 @@ async function renderTradingSettings(ctx: any): Promise<void> {
     `Auto Buy: <b>${enabledLabel(
       settings.adminAutoBuyEnabled,
     )}</b>`,
+    `Trading Mode: <b>${settings.executionMode.toUpperCase()}</b>`,
     `Engine: <b>${paused ? '⏸ PAUSED' : '▶️ RUNNING'}</b>`,
     '',
     `Trade Size: <b>${formatSol(
@@ -434,6 +451,7 @@ async function renderTradingSettings(ctx: any): Promise<void> {
       autoBuyEnabled: settings.adminAutoBuyEnabled,
       trailingStopEnabled: settings.trailingStopEnabled,
       paused,
+      executionMode: settings.executionMode,
     }),
   );
 }
@@ -590,6 +608,104 @@ export function registerAdminTerminal(
   );
 
   bot.action(
+  'ATS_TOGGLE_EXECUTION_MODE',
+  async (ctx) => {
+    if (await rejectNonAdminAction(ctx)) {
+      return;
+    }
+
+    try {
+      const settings =
+        await getAlphaSettings(true);
+
+      if (settings.executionMode === 'live') {
+        await updateSettingAndReturn({
+          ctx,
+          key: 'execution_mode',
+          value: 'paper',
+          confirmation: 'Paper trading enabled',
+        });
+
+        return;
+      }
+
+      await ctx.answerCbQuery();
+
+      await editOrReply(
+        ctx,
+        [
+          '⚠️ <b>ENABLE LIVE TRADING?</b>',
+          '━━━━━━━━━━━━━━━━━━',
+          '',
+          'Future qualified entries will use real SOL.',
+          `Trade Size: <b>${formatSol(
+            settings.adminTradeAmountSol,
+          )}</b>`,
+          '',
+          'Confirm only when the trading wallet is ready.',
+        ].join('\n'),
+        {
+          inline_keyboard: [
+            [
+              {
+                text: '✅ Confirm LIVE',
+                callback_data:
+                  'ATS_CONFIRM_LIVE_MODE',
+              },
+            ],
+            [
+              {
+                text: 'Cancel',
+                callback_data:
+                  'ADMIN_TRADE_SETTINGS',
+              },
+            ],
+          ],
+        },
+      );
+    } catch (error) {
+      console.error(
+        'execution mode toggle error:',
+        error,
+      );
+
+      await ctx.answerCbQuery(
+        'Mode update failed',
+        { show_alert: true },
+      );
+    }
+  },
+);
+
+bot.action(
+  'ATS_CONFIRM_LIVE_MODE',
+  async (ctx) => {
+    if (await rejectNonAdminAction(ctx)) {
+      return;
+    }
+
+    try {
+      await updateSettingAndReturn({
+        ctx,
+        key: 'execution_mode',
+        value: 'live',
+        confirmation: 'Live trading enabled',
+      });
+    } catch (error) {
+      console.error(
+        'live mode confirmation error:',
+        error,
+      );
+
+      await ctx.answerCbQuery(
+        'Live mode update failed',
+        { show_alert: true },
+      );
+    }
+  },
+);
+
+  bot.action(
     'ATS_TOGGLE_TRAILING',
     async (ctx) => {
       if (await rejectNonAdminAction(ctx)) {
@@ -656,7 +772,7 @@ export function registerAdminTerminal(
   );
 
   bot.action(
-    /^ATS_SET_SIZE_(0\.01|0\.025|0\.05|0\.1|0\.25)$/,
+    /^ATS_SET_SIZE_(0\.01|0\.025|0\.03|0\.05|0\.1)$/,
     async (ctx) => {
       if (await rejectNonAdminAction(ctx)) {
         return;

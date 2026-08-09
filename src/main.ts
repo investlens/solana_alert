@@ -1,10 +1,18 @@
 /// <reference types="node" />
 import { config } from './config.js';
+import { supabase } from './services/supabase.js';
 import { createBot } from './bot/index.js';
 import { buildMessage } from './ui/messageBuilder.js';
 
+import {
+  startRobinhoodObserver,
+} from './chains/robinhood/robinhoodObserver.js';
+
+import {
+  startRobinhoodOutcomeTracker,
+} from './chains/robinhood/robinhoodOutcomeTracker.js';
+
 import { startAnalyticsSummary } from "./services/analyticsSummary.js";
-import { buildEarlyAdminMessage } from './ui/earlyAdminMessageBuilder.js';
 import { captureAlertSnapshot } from './core/tracker.js';
 import { pollPumpfunEarlyFeed } from './core/pumpfunWatcher.js';
 import { runDexPaidEngine } from './engines/dexPaidEngine.js';
@@ -105,6 +113,28 @@ async function safeSendTelegram(
   }
 }
 
+async function updateSignalStatus(
+  alertId: string | undefined,
+  status: string,
+): Promise<void> {
+  if (!alertId) return;
+
+  const { error } = await supabase
+    .from('alerts')
+    .update({
+      signal_status: status,
+    })
+    .eq('id', alertId);
+
+  if (error) {
+    console.error('[SignalStatus] Update failed:', {
+      alertId,
+      status,
+      error: error.message,
+    });
+  }
+}
+
 function getActionBucket(result: RiskResult): 'BUY' | 'HIGH_BUY' | 'IGNORE' {
   const buyRatio =
     result.sells5m <= 0 ? result.buys5m : result.buys5m / result.sells5m;
@@ -125,14 +155,14 @@ function getActionBucket(result: RiskResult): 'BUY' | 'HIGH_BUY' | 'IGNORE' {
   if (
     result.score >= 78 &&
     result.marketSafetyScore >= 60 &&
-    result.liquidityUsd >= 6_000 &&
+    result.liquidityUsd >= 10_000 &&
     result.liquidityUsd <= 65_000 &&
-    result.volume5m >= 3_000 &&
-    result.buys5m >= 40 &&
-    buyRatio >= 1.4 &&
+    result.volume5m >= 5_000 &&
+    result.buys5m >= 60 &&
+    buyRatio >= 1.6 &&
     result.ageMin <= 75
   ) {
-    return 'BUY';
+    return "BUY";
   }
 
   return 'IGNORE';
@@ -635,6 +665,8 @@ async function processTierDispatch() {
     getDeliverableUsers(),
   ]);
 
+  console.log('[TierDispatch] Deliverable users:', users.length);
+
   const now = Date.now();
 
   for (const [tokenAddress, state] of tokenStates.entries()) {
@@ -643,7 +675,15 @@ async function processTierDispatch() {
       const enriched = await enrichToken(profile, boostMap, takeoverSet);
 
       if (!enriched) {
-        console.log(`Tier cleanup: no enrichment for ${tokenAddress}`);
+        console.log(
+          `Tier cleanup: no enrichment for ${tokenAddress}`,
+        );
+
+        await updateSignalStatus(
+          state.alertId,
+          'REJECTED_NO_DATA',
+        );
+
         tokenStates.delete(tokenAddress);
         continue;
       }
@@ -736,21 +776,54 @@ async function processTierDispatch() {
     },
   });
 
+  await updateSignalStatus(
+    state.alertId,
+    'REJECTED_EXTENDED',
+  );
+
   tokenStates.delete(tokenAddress);
   continue;
 }
 
         if (momentum.decision === 'DOWNTREND') {
-          console.log('Momentum rejected:', {
-            token: tokenAddress,
-            symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
-            reason: momentum.reason,
-            metrics: momentum.metrics,
-          });
+        console.log('Momentum rejected:', {
+          token: tokenAddress,
+          symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
+          reason: momentum.reason,
+          metrics: momentum.metrics,
+        });
 
-          tokenStates.delete(tokenAddress);
-          continue;
-        }
+        await updateSignalStatus(
+          state.alertId,
+          'REJECTED_DOWNTREND',
+        );
+
+        await recordTokenMemoryEvent({
+          token: tokenAddress,
+          chain: config.discoveryChain,
+          eventType: 'ENTRY_REJECTED_DOWNTREND',
+          eventSource: 'ENTRY_CONFIRMATION',
+          marketCap: result.marketCap,
+          liquidity: result.liquidityUsd,
+          price: result.currentPrice,
+          buys: result.buys5m,
+          sells: result.sells5m,
+          alphaScore: result.score,
+          aiConfidence: result.score,
+          riskLevel: result.risk,
+          note:
+            `${pair.baseToken?.symbol ?? tokenAddress} ` +
+            `rejected because momentum turned down`,
+          raw: {
+            reason: momentum.reason,
+            reasons: momentum.reasons,
+            metrics: momentum.metrics,
+          },
+        });
+
+        tokenStates.delete(tokenAddress);
+        continue;
+      }
 
         if (momentum.decision === 'WATCH') {
           const retries = state.momentumRetries ?? 0;
@@ -764,15 +837,44 @@ async function processTierDispatch() {
           });
 
           if (retries >= 2) {
-            console.log('Momentum rejected after retry limit:', {
-              token: tokenAddress,
-              symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
-              metrics: momentum.metrics,
-            });
+          console.log('Momentum rejected after retry limit:', {
+            token: tokenAddress,
+            symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
+            metrics: momentum.metrics,
+          });
 
-            tokenStates.delete(tokenAddress);
-            continue;
-          }
+          await updateSignalStatus(
+            state.alertId,
+            'REJECTED_WATCH',
+          );
+
+          await recordTokenMemoryEvent({
+            token: tokenAddress,
+            chain: config.discoveryChain,
+            eventType: 'ENTRY_REJECTED_WATCH',
+            eventSource: 'ENTRY_CONFIRMATION',
+            marketCap: result.marketCap,
+            liquidity: result.liquidityUsd,
+            price: result.currentPrice,
+            buys: result.buys5m,
+            sells: result.sells5m,
+            alphaScore: result.score,
+            aiConfidence: result.score,
+            riskLevel: result.risk,
+            note:
+              `${pair.baseToken?.symbol ?? tokenAddress} ` +
+              `rejected after momentum retry limit`,
+            raw: {
+              reason: momentum.reason,
+              reasons: momentum.reasons,
+              metrics: momentum.metrics,
+              retries: retries + 1,
+            },
+          });
+
+          tokenStates.delete(tokenAddress);
+          continue;
+        }
 
          state.momentumRetries = retries + 1;
 
@@ -810,6 +912,62 @@ async function processTierDispatch() {
           metrics: momentum.metrics,
         });
       }
+
+      /*
+      * Momentum may have remained positive while the token
+      * deteriorated enough to fail the latest BUY requirements.
+      *
+      * Never trade or alert a token whose current bucket is IGNORE.
+      */
+      if (bucket === 'IGNORE') {
+        console.log(
+          '[EntryConfirmation] Rejected because latest bucket is IGNORE.',
+          {
+            token: tokenAddress,
+            symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
+            score: result.score,
+            liquidity: result.liquidityUsd,
+            buys5m: result.buys5m,
+            sells5m: result.sells5m,
+          },
+        );
+
+        await updateSignalStatus(
+          state.alertId,
+          'REJECTED_BUCKET',
+        );
+
+        await recordTokenMemoryEvent({
+          token: tokenAddress,
+          chain: config.discoveryChain,
+          eventType: 'ENTRY_REJECTED_BUCKET',
+          eventSource: 'ENTRY_CONFIRMATION',
+          marketCap: result.marketCap,
+          liquidity: result.liquidityUsd,
+          price: result.currentPrice,
+          buys: result.buys5m,
+          sells: result.sells5m,
+          alphaScore: result.score,
+          aiConfidence: result.score,
+          riskLevel: result.risk,
+          note:
+            `${pair.baseToken?.symbol ?? tokenAddress} ` +
+            `passed momentum but no longer qualified for BUY`,
+          raw: {
+            latestBucket: bucket,
+            reason:
+              'Latest market snapshot no longer qualifies for BUY',
+          },
+        });
+
+        tokenStates.delete(tokenAddress);
+        continue;
+      }
+
+      await updateSignalStatus(
+        state.alertId,
+        'CONFIRMED',
+      );
 
       try {
   console.log(
@@ -863,48 +1021,6 @@ async function processTierDispatch() {
                 telegramId,
               })
             : false;
-
-        if (user.tier === 'admin' && !state.adminEarlyDelivered) {
-          console.log('early admin check:', {
-            token: tokenAddress,
-            ageMin: result.ageMin,
-            liquidityUsd: result.liquidityUsd,
-            volume5m: result.volume5m,
-            buys5m: result.buys5m,
-            sells5m: result.sells5m,
-            marketSafetyScore: result.marketSafetyScore,
-            authoritySafetyScore: result.authoritySafetyScore,
-            passes: isEarlyAdminWatch(result),
-          });
-
-          if (isEarlyAdminWatch(result)) {
-            const earlyDelivered = await safeSendTelegram(
-              telegramId,
-              buildEarlyAdminMessage({
-                pair,
-                result,
-                state,
-              }),
-              getAdminOnlyButtons(pair),
-            );
-
-            if (earlyDelivered) {
-              state.adminEarlyDelivered = true;
-
-              console.log('Early admin alert delivered:', {
-                token: tokenAddress,
-                symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
-                telegramId,
-              });
-            } else {
-              console.error('Early admin alert delivery failed:', {
-                token: tokenAddress,
-                symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
-                telegramId,
-              });
-            }
-          }
-        }
 
         if (
   user.tier === 'admin' &&
@@ -1040,10 +1156,15 @@ async function processTierDispatch() {
       }
 
 
-      if (result.ageMin > config.maxAgeMin + 300 || bucket === 'IGNORE') {
-        console.log(`Removing tracked token: ${tokenAddress}`);
-        tokenStates.delete(tokenAddress);
-      }
+      if (
+          result.ageMin > config.maxAgeMin + 300
+        ) {
+          console.log(
+            `Removing tracked token: ${tokenAddress}`,
+          );
+
+          tokenStates.delete(tokenAddress);
+        }
         } catch (error) {
       console.error(
         "processTierDispatch error",
@@ -1213,14 +1334,19 @@ async function main() {
   await restoreOpenTrades();
 
   const tasks = [
-  startScanner(),
-  startWalletWatch(),
-  startPumpfunWatch(),
-  startMemoryTracker(),
-  startOutcomeCheckpointAgent(),
-  startPositionProtectionLoop(),
-  startTierDispatchLoop(),
-];
+    startScanner(),
+    startWalletWatch(),
+    startPumpfunWatch(),
+
+    // Robinhood Chain observer
+    startRobinhoodObserver(),
+    startRobinhoodOutcomeTracker(),
+
+    startMemoryTracker(),
+    startOutcomeCheckpointAgent(),
+    startPositionProtectionLoop(),
+    startTierDispatchLoop(),
+  ];
 
   if (process.env.RUN_TELEGRAM_BOT === 'true') {
     tasks.unshift(startBot());
@@ -1233,33 +1359,3 @@ main().catch((err) => {
   console.error(err);
   process.exit(1);
 });
-
-function isEarlyAdminWatch(result: RiskResult) {
-  return (
-    result.score >= 78 &&
-    result.liquidityUsd >= 8_000 &&
-    result.liquidityUsd <= 45_000 &&
-    result.volume5m >= 5_000 &&
-    result.buys5m >= 80 &&
-    result.buys5m > result.sells5m * 2 &&
-    result.ageMin <= 20 &&
-    result.marketSafetyScore >= 65 &&
-    result.authoritySafetyScore >= 0
-  );
-}
-
-function getAdminOnlyButtons(pair: {
-  url?: string | null;
-  baseToken?: { address?: string } | null;
-}) {
-  const chartUrl = pair.url ?? 'https://dexscreener.com';
-  const mint = pair.baseToken?.address ?? '';
-
-  return [
-    [
-      { text: '📈 Chart', url: chartUrl },
-      { text: 'Buy 0.03 SOL', callback_data: `ADMIN_BUY_SMALL_${mint}` },
-      { text: 'Buy 0.05 SOL', callback_data: `ADMIN_BUY_DEFAULT_${mint}` },
-    ],
-  ];
-}

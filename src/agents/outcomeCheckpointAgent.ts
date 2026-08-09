@@ -126,153 +126,39 @@ function buildOutcomeMessage(args: {
   currentMarketCap: number;
   alertMarketCap: number;
 }) {
-  const {
-    symbol,
-    checkpoint,
-    returnPct,
-    maxReturnPct,
-    drawdownFromPeakPct,
-    outcome,
-    currentMarketCap,
-    alertMarketCap,
-  } = args;
+  const cleanSymbol = args.symbol.replace(/^\$/, '');
 
-  const cleanSymbol =
-    symbol.replace(/^\$/, "");
-
-  const formatUsd = (value: number) =>
-    `$${Math.round(value).toLocaleString(
-      "en-US",
-    )}`;
-
-  let icon = "📈";
-  let title = "ALPHAOS ALERT MOVING";
-  let statusLine =
-    "Momentum remains positive after the alert.";
-
-  if (
-    outcome === "MOONSHOT" &&
-    maxReturnPct >= 300
-  ) {
-    icon = "🌕";
-    title = "ALPHAOS MOONSHOT";
-    statusLine =
-      "The alert delivered an exceptional market move.";
-  } else if (
-    outcome === "STRONG_WINNER" &&
-    maxReturnPct >= 100
-  ) {
-    icon = "🚀";
-    title = "ALPHAOS 2X WINNER";
-    statusLine =
-      "The alert reached more than 2× from the AlphaOS entry.";
-  } else if (
-    outcome === "WINNER" &&
-    maxReturnPct >= 50
-  ) {
-    icon = "🔥";
-    title = "ALPHAOS MAJOR WIN";
-    statusLine =
-      "The alert crossed the +50% performance milestone.";
-  } else if (
-    outcome === "WINNER" &&
-    returnPct >= 25
-  ) {
-    icon = "✅";
-    title = "ALPHAOS TARGET HIT";
-    statusLine =
-      "The alert remains above the +25% success target.";
-  }
+  const recovered =
+    args.drawdownFromPeakPct > -15
+      ? '🟢 Holding gains well'
+      : '🟡 Healthy pullback after strong move';
 
   return [
-    `${icon} <b>${title}</b>`,
-    "",
-    `💎 <b>$${cleanSymbol}</b>`,
-    "━━━━━━━━━━━━━━━━━━",
-    "",
-    `⏱ <b>${checkpoint} checkpoint</b>`,
-    "",
-    `📍 Alert market cap: <b>${formatUsd(
-      alertMarketCap,
-    )}</b>`,
-    `📊 Current market cap: <b>${formatUsd(
-      currentMarketCap,
-    )}</b>`,
-    "",
-    `📈 Current return: <b>${formatPct(
-      returnPct,
-    )}</b>`,
-    `🚀 Maximum return: <b>${formatPct(
-      maxReturnPct,
-    )}</b>`,
-    `📉 Drawdown from peak: <b>${formatPct(
-      drawdownFromPeakPct,
-    )}</b>`,
-    "",
-    `🎯 AI status: <b>${outcome.replace(
-      /_/g,
-      " ",
-    )}</b>`,
-    "",
-    `<i>${statusLine}</i>`,
-    "",
-    "━━━━━━━━━━━━━━━━━━",
-    "<i>Successful outcome stored in AlphaOS Intelligence.</i>",
-  ].join("\n");
+    '🏆 <b>ALPHAOS WINNER</b>',
+    '━━━━━━━━━━━━━━━━━━',
+    '',
+    `<b>$${cleanSymbol}</b>`,
+    '',
+    `🚀 Highest ROI: <b>${formatPct(args.maxReturnPct)}</b>`,
+    `📈 Current ROI: <b>${formatPct(args.returnPct)}</b>`,
+    '',
+    `💰 Alert MC: <b>$${Math.round(args.alertMarketCap).toLocaleString()}</b>`,
+    `💎 Current MC: <b>$${Math.round(args.currentMarketCap).toLocaleString()}</b>`,
+    '',
+    `🧠 Outcome: <b>${args.outcome.replace(/_/g, ' ')}</b>`,
+    recovered,
+    '',
+    '⏱ 1-hour AlphaOS performance review',
+  ].join('\n');
 }
 
 function shouldSendOutcomeNotification(args: {
   checkpoint: CheckpointKey;
-  returnPct: number;
   maxReturnPct: number;
-  outcome: string;
 }) {
-  const {
-    checkpoint,
-    returnPct,
-    maxReturnPct,
-    outcome,
-  } = args;
-
-  const successfulOutcomes = new Set([
-    "POSITIVE",
-    "WINNER",
-    "STRONG_WINNER",
-    "MOONSHOT",
-  ]);
-
-  if (!successfulOutcomes.has(outcome)) {
-    return false;
-  }
-
-  /*
-   * Only send genuinely successful results.
-   *
-   * 5M:
-   * Early positive momentum must be at least +10%.
-   */
-  if (checkpoint === "5M") {
-    return returnPct >= 10;
-  }
-
-  /*
-   * 15M:
-   * Require stronger confirmation.
-   */
-  if (checkpoint === "15M") {
-    return returnPct >= 15;
-  }
-
-  /*
-   * 30M, 1H, 6H and 24H:
-   * Send only meaningful current winners.
-   */
   return (
-    returnPct >= 20 ||
-    (
-      maxReturnPct >= 50 &&
-      returnPct >= 10
-    )
+    args.checkpoint === '1H' &&
+    args.maxReturnPct >= 50
   );
 }
 
@@ -693,9 +579,7 @@ async function processCheckpoint(
   const shouldNotify =
     shouldSendOutcomeNotification({
       checkpoint: checkpoint.key,
-      returnPct,
       maxReturnPct,
-      outcome: outcomeText,
     });
 
   console.log("outcome notification decision:", {
@@ -814,28 +698,17 @@ export async function startOutcomeCheckpointAgent() {
 
       for (const row of rows) {
 
-        console.log("Evaluating token:", {
-          token: row.token,
-          firstSeen: row.first_seen,
-          alertCreatedAt: row.alert_created_at,
-        });
 
 
         const checkpoint = getNextDueCheckpoint(row);
 
-        console.log("Checkpoint result:", {
-          token: row.token,
-          checkpoint: checkpoint?.key ?? null,
-        });
+    
 
         if (!checkpoint) continue;
 
         try {
 
-          console.log("Processing checkpoint:", {
-            token: row.token,
-            checkpoint: checkpoint.key,
-          });
+  
           await processCheckpoint(row, checkpoint);
         } catch (error) {
           console.log('outcome checkpoint token error:', {

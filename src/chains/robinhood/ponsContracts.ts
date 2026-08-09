@@ -1,0 +1,25 @@
+export const PONS_CONTRACTS = {
+  factory:
+    '0xA5aAb3F0c6EeadF30Ef1D3Eb997108E976351feB',
+
+  locker:
+    '0x736D76699C26D0d966744cAe304C000d471f7F35',
+
+  uniswapV3Factory:
+    '0x1f7d7550B1b028f7571E69A784071F0205FD2EfA',
+
+  positionManager:
+    '0x73991a25C818Bf1f1128dEAaB1492D45638DE0D3',
+
+  swapRouter:
+    '0xCaf681a66D020601342297493863E78C959E5cb2',
+
+  quoterV2:
+    '0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7',
+
+  weth:
+    '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73',
+} as const;
+
+export const PONS_POOL_FEE =
+  10_000;
