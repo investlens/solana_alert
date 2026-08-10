@@ -189,8 +189,14 @@ async function fetchRobinhoodProfiles():
   }
 }
 
-async function fetchRobinhoodBoosts():
-  Promise<string[]> {
+export type RobinhoodBoostEntry = {
+  tokenAddress: string;
+  amount: number;
+  totalAmount: number;
+};
+
+export async function fetchRobinhoodBoosts():
+Promise<RobinhoodBoostEntry[]> {
   try {
     const boosts =
       await fetchJson<
@@ -211,8 +217,22 @@ async function fetchRobinhoodBoosts():
           ),
       )
       .map(
-        (boost) =>
-          boost.tokenAddress!,
+        (boost) => ({
+          tokenAddress:
+            boost.tokenAddress!,
+
+          amount:
+            Number(
+              boost.amount ??
+              0,
+            ),
+
+          totalAmount:
+            Number(
+              boost.totalAmount ??
+              0,
+            ),
+        }),
       );
   } catch (error) {
     console.error(
@@ -314,6 +334,12 @@ export async function discoverRobinhoodCandidates(
       fetchRobinhoodBoosts(),
     ]);
 
+    const boostAddresses =
+      boosts.map(
+        (boost) =>
+          boost.tokenAddress,
+      );
+
   console.log(
     '[RobinhoodDiscovery] Sources:',
     {
@@ -327,7 +353,7 @@ export async function discoverRobinhoodCandidates(
   const sourceMap =
     buildSourceMap(
       profiles,
-      boosts,
+      boostAddresses,
     );
 
   console.log(

@@ -7,6 +7,14 @@ import {
 } from '../../services/telegram.js';
 
 import {
+  scanRobinhoodDevHolding,
+} from './security/devHoldingScanner.js';
+
+import {
+  scanRobinhoodDexPaid,
+} from './security/dexPaidScanner.js';
+
+import {
   hasRobinhoodObservation,
   saveRobinhoodObservation,
   saveRobinhoodRejection,
@@ -47,8 +55,36 @@ import {
 const OBSERVER_INTERVAL_MS =
   60_000;
 
-const MIN_LIQUIDITY_USD =
+const ROBINHOOD_OBSERVER_VERSION =
+  'QUALITY_GATE_V2_2026_08_10';
+
+/*
+ * Robinhood Telegram quality gate.
+ *
+ * Tokens can still be discovered/tracked below these
+ * levels, but they should not become Telegram EARLY WATCH
+ * alerts until they have enough market quality.
+ */
+const MIN_TRACK_LIQUIDITY_USD =
   2_500;
+
+const MIN_ALERT_LIQUIDITY_USD =
+  5_000;
+
+const MIN_ALERT_MARKET_CAP_USD =
+  5_000;
+
+const MAX_ALERT_MARKET_CAP_USD =
+  50_000;
+
+const MAX_ALERT_SELL_IMPACT_PERCENT =
+  0.30;
+
+const MAX_ALERT_TOP1_PERCENT =
+  15;
+
+const MAX_ALERT_DEV_HOLDING_PERCENT =
+  20;
 
 const MAX_ALERTS_PER_CYCLE =
   3;
@@ -231,6 +267,18 @@ function buildWatchMessage(args: {
 
   holderCount: number;
 
+  devHoldingPercent:
+  number | null;
+
+    devHoldingStatus:
+    string;
+
+    dexPaid:
+    boolean | null;
+
+    dexPaidStatus:
+    string;
+
   top1Pct:
     number | null;
 
@@ -260,6 +308,8 @@ function buildWatchMessage(args: {
     args.holderCount < 5
       ? 'EARLY / LIMITED DATA'
       : args.holderRisk;
+
+    
 
   const impactText =
     args.sellImpact == null
@@ -310,14 +360,34 @@ function buildWatchMessage(args: {
     `Buys / Sells: ${market.buys5m} / ${market.sells5m}`,
     '',
     '👥 <b>HOLDERS</b>',
-    `Observed circulating wallets: ${args.holderCount}`,
-    `Largest observed wallet: ${
-      args.top1Pct == null
-        ? 'Tracking'
-        : `${args.top1Pct.toFixed(2)}%`
-    }`,
-    '',
-    '⚠️ <b>NOTES</b>',
+`Observed circulating wallets: ${args.holderCount}`,
+`Largest observed wallet: ${
+  args.top1Pct == null
+    ? 'Tracking'
+    : `${args.top1Pct.toFixed(2)}%`
+}`,
+'',
+
+'🧠 <b>TOKEN INTELLIGENCE</b>',
+
+`👨‍💻 Dev Holding: ${
+  args.devHoldingPercent == null
+    ? '⚪ UNKNOWN'
+    : args.devHoldingPercent >= 10
+      ? `⚠️ ${args.devHoldingPercent.toFixed(2)}%`
+      : `✅ ${args.devHoldingPercent.toFixed(4)}%`
+}`,
+
+`💳 DEX Paid: ${
+  args.dexPaid === true
+    ? '✅ YES'
+    : args.dexPaid === false
+      ? '❌ NO'
+      : '⚪ UNKNOWN'
+}`,
+'',
+
+'⚠️ <b>NOTES</b>',
     warningLines,
     '',
     '🧠 AlphaOS is tracking this token.',
@@ -327,6 +397,142 @@ function buildWatchMessage(args: {
     '',
     `<code>${token.tokenAddress}</code>`,
   ].join('\n');
+}
+
+async function saveEvaluatedObservation(args: {
+  token:
+    RobinhoodDiscoveredToken;
+
+  market:
+    NonNullable<
+      Awaited<
+        ReturnType<
+          typeof getRobinhoodMarketSnapshot
+        >
+      >
+    >;
+
+  contractScore: number;
+
+  adminPenalty: number;
+
+  sellStatus: string;
+
+  sellImpactPercent:
+    number | null;
+
+  holderRisk: string;
+
+  holderTop1Percent:
+    number | null;
+
+  circulatingHolderCount: number;
+
+  deployerAddress:
+    string | null;
+
+  devHoldingPercent:
+    number | null;
+
+  devTokenBalance:
+    number | null;
+
+  dexPaid:
+    boolean | null;
+
+  dexPaidStatus:
+    string | null;
+
+  dexPaidTypes:
+    string[];
+
+  decision:
+    'WATCH'
+    | 'TRACK_ONLY';
+
+  alertedAt?:
+    string | null;
+}) {
+  return saveRobinhoodObservation({
+    tokenAddress:
+      args.token.tokenAddress,
+
+    symbol:
+      args.token.symbol ??
+      args.market.symbol ??
+      null,
+
+    name:
+      args.token.name ??
+      args.market.name ??
+      null,
+
+    source:
+      args.token.source,
+
+    pairAddress:
+      args.token.pairAddress ??
+      args.market.pairAddress ??
+      null,
+
+    priceAtAlert:
+      args.market.priceUsd,
+
+    marketCapAtAlert:
+      args.market.marketCapUsd,
+
+    liquidityAtAlert:
+      args.market.liquidityUsd,
+
+    securityScore:
+      args.contractScore,
+
+    adminPenalty:
+      args.adminPenalty,
+
+    deployerAddress:
+      args.deployerAddress,
+
+    devHoldingPercent:
+      args.devHoldingPercent,
+
+    devTokenBalance:
+      args.devTokenBalance,
+
+    dexPaid:
+      args.dexPaid,
+
+    dexPaidStatus:
+      args.dexPaidStatus,
+
+    dexPaidTypes:
+      args.dexPaidTypes,
+
+    dexPaymentTimestamp:
+      null,
+
+    sellStatus:
+      args.sellStatus,
+
+    sellImpactPercent:
+      args.sellImpactPercent,
+
+    holderRisk:
+      args.holderRisk,
+
+    holderTop1Percent:
+      args.holderTop1Percent,
+
+    circulatingHolderCount:
+      args.circulatingHolderCount,
+
+    decision:
+      args.decision,
+
+    alertedAt:
+      args.alertedAt ??
+      null,
+  });
 }
 
 async function evaluateCandidate(
@@ -555,9 +761,9 @@ if (alreadyStored) {
   }
 
   if (
-    market.liquidityUsd <
-    MIN_LIQUIDITY_USD
-  ) {
+  market.liquidityUsd <
+    MIN_TRACK_LIQUIDITY_USD
+    ) {
     console.log(
       '[RobinhoodObserver] Waiting for liquidity:',
       {
@@ -811,12 +1017,483 @@ if (alreadyStored) {
     return false;
   }
 
-  const warnings =
-    [
-      ...poolSecurity.warnings,
-      ...sellability.warnings,
-      ...holderRisk.warnings,
-    ];
+  const [
+  devHolding,
+  dexPaid,
+] =
+  await Promise.all([
+    scanRobinhoodDevHolding(
+      token.tokenAddress,
+    ),
+
+    scanRobinhoodDexPaid(
+      token.tokenAddress,
+    ),
+  ]);
+
+
+/*
+ * TELEGRAM QUALITY FILTERS START HERE
+ */
+
+if (
+  market.liquidityUsd <
+  MIN_ALERT_LIQUIDITY_USD
+) {
+  console.log(
+    '[RobinhoodObserver] Silent - liquidity below alert floor:',
+    {
+      symbol:
+        token.symbol ??
+        market.symbol,
+
+      token:
+        token.tokenAddress,
+
+      liquidity:
+        market.liquidityUsd,
+    },
+  );
+
+  await saveEvaluatedObservation({
+    token,
+    market,
+
+    contractScore:
+      contractGate.security.score,
+
+    adminPenalty:
+      adminRisk.scorePenalty,
+
+    sellStatus:
+      sellability.status,
+
+    sellImpactPercent:
+      sellability.estimatedImpactPercent,
+
+    holderRisk:
+      holderRisk.concentrationRisk,
+
+    holderTop1Percent:
+      holderRisk.top1Pct,
+
+    circulatingHolderCount:
+      holderRisk.circulatingHolderCountObserved,
+
+    deployerAddress:
+      devHolding.deployerAddress,
+
+    devHoldingPercent:
+      devHolding.holdingPercent,
+
+    devTokenBalance:
+      devHolding.balanceTokens,
+
+    dexPaid:
+      dexPaid.dexPaid,
+
+    dexPaidStatus:
+      dexPaid.status,
+
+    dexPaidTypes:
+      dexPaid.orderTypes,
+
+    decision:
+      'TRACK_ONLY',
+  });
+
+  seenTokens.add(
+    tokenKey,
+  );
+
+  return false;
+}
+
+
+/*
+ * Your market-cap filter goes next
+ */
+
+if (
+  market.marketCapUsd <
+  MIN_ALERT_MARKET_CAP_USD
+) {
+  console.log(
+    '[RobinhoodObserver] Silent - market cap below alert floor:',
+    {
+      symbol:
+        token.symbol ??
+        market.symbol,
+
+      token:
+        token.tokenAddress,
+
+      marketCap:
+        market.marketCapUsd,
+    },
+  );
+
+  await saveEvaluatedObservation({
+    token,
+    market,
+
+    contractScore:
+      contractGate.security.score,
+
+    adminPenalty:
+      adminRisk.scorePenalty,
+
+    sellStatus:
+      sellability.status,
+
+    sellImpactPercent:
+      sellability.estimatedImpactPercent,
+
+    holderRisk:
+      holderRisk.concentrationRisk,
+
+    holderTop1Percent:
+      holderRisk.top1Pct,
+
+    circulatingHolderCount:
+      holderRisk.circulatingHolderCountObserved,
+
+    deployerAddress:
+      devHolding.deployerAddress,
+
+    devHoldingPercent:
+      devHolding.holdingPercent,
+
+    devTokenBalance:
+      devHolding.balanceTokens,
+
+    dexPaid:
+      dexPaid.dexPaid,
+
+    dexPaidStatus:
+      dexPaid.status,
+
+    dexPaidTypes:
+      dexPaid.orderTypes,
+
+    decision:
+      'TRACK_ONLY',
+  });
+
+  seenTokens.add(
+    tokenKey,
+  );
+
+  return false;
+}
+
+
+if (
+  market.marketCapUsd >
+  MAX_ALERT_MARKET_CAP_USD
+) {
+  console.log(
+    '[RobinhoodObserver] Silent - market cap above alert ceiling:',
+    {
+      symbol:
+        token.symbol ??
+        market.symbol,
+
+      token:
+        token.tokenAddress,
+
+      marketCap:
+        market.marketCapUsd,
+    },
+  );
+
+  await saveEvaluatedObservation({
+    token,
+    market,
+
+    contractScore:
+      contractGate.security.score,
+
+    adminPenalty:
+      adminRisk.scorePenalty,
+
+    sellStatus:
+      sellability.status,
+
+    sellImpactPercent:
+      sellability.estimatedImpactPercent,
+
+    holderRisk:
+      holderRisk.concentrationRisk,
+
+    holderTop1Percent:
+      holderRisk.top1Pct,
+
+    circulatingHolderCount:
+      holderRisk.circulatingHolderCountObserved,
+
+    deployerAddress:
+      devHolding.deployerAddress,
+
+    devHoldingPercent:
+      devHolding.holdingPercent,
+
+    devTokenBalance:
+      devHolding.balanceTokens,
+
+    dexPaid:
+      dexPaid.dexPaid,
+
+    dexPaidStatus:
+      dexPaid.status,
+
+    dexPaidTypes:
+      dexPaid.orderTypes,
+
+    decision:
+      'TRACK_ONLY',
+  });
+
+  seenTokens.add(
+    tokenKey,
+  );
+
+  return false;
+}
+
+if (
+  sellability.estimatedImpactPercent != null &&
+  sellability.estimatedImpactPercent >
+    MAX_ALERT_SELL_IMPACT_PERCENT
+) {
+  console.log(
+    '[RobinhoodObserver] Silent - exit impact above alert threshold:',
+    {
+      symbol:
+        token.symbol ??
+        market.symbol,
+
+      token:
+        token.tokenAddress,
+
+      sellImpact:
+        sellability.estimatedImpactPercent,
+    },
+  );
+
+  await saveEvaluatedObservation({
+    token,
+    market,
+
+    contractScore:
+      contractGate.security.score,
+
+    adminPenalty:
+      adminRisk.scorePenalty,
+
+    sellStatus:
+      sellability.status,
+
+    sellImpactPercent:
+      sellability.estimatedImpactPercent,
+
+    holderRisk:
+      holderRisk.concentrationRisk,
+
+    holderTop1Percent:
+      holderRisk.top1Pct,
+
+    circulatingHolderCount:
+      holderRisk.circulatingHolderCountObserved,
+
+    deployerAddress:
+      devHolding.deployerAddress,
+
+    devHoldingPercent:
+      devHolding.holdingPercent,
+
+    devTokenBalance:
+      devHolding.balanceTokens,
+
+    dexPaid:
+      dexPaid.dexPaid,
+
+    dexPaidStatus:
+      dexPaid.status,
+
+    dexPaidTypes:
+      dexPaid.orderTypes,
+
+    decision:
+      'TRACK_ONLY',
+  });
+
+  seenTokens.add(
+    tokenKey,
+  );
+
+  return false;
+}
+
+if (
+  holderRisk.top1Pct != null &&
+  holderRisk.top1Pct >
+    MAX_ALERT_TOP1_PERCENT
+) {
+  console.log(
+    '[RobinhoodObserver] Silent - top holder above alert threshold:',
+    {
+      symbol:
+        token.symbol ??
+        market.symbol,
+
+      token:
+        token.tokenAddress,
+
+      top1:
+        holderRisk.top1Pct,
+    },
+  );
+
+  await saveEvaluatedObservation({
+    token,
+    market,
+
+    contractScore:
+      contractGate.security.score,
+
+    adminPenalty:
+      adminRisk.scorePenalty,
+
+    sellStatus:
+      sellability.status,
+
+    sellImpactPercent:
+      sellability.estimatedImpactPercent,
+
+    holderRisk:
+      holderRisk.concentrationRisk,
+
+    holderTop1Percent:
+      holderRisk.top1Pct,
+
+    circulatingHolderCount:
+      holderRisk.circulatingHolderCountObserved,
+
+    deployerAddress:
+      devHolding.deployerAddress,
+
+    devHoldingPercent:
+      devHolding.holdingPercent,
+
+    devTokenBalance:
+      devHolding.balanceTokens,
+
+    dexPaid:
+      dexPaid.dexPaid,
+
+    dexPaidStatus:
+      dexPaid.status,
+
+    dexPaidTypes:
+      dexPaid.orderTypes,
+
+    decision:
+      'TRACK_ONLY',
+  });
+
+  seenTokens.add(
+    tokenKey,
+  );
+
+  return false;
+}
+
+if (
+  devHolding.holdingPercent != null &&
+  devHolding.holdingPercent >
+    MAX_ALERT_DEV_HOLDING_PERCENT
+) {
+  console.log(
+    '[RobinhoodObserver] Silent - dev holding above alert threshold:',
+    {
+      symbol:
+        token.symbol ??
+        market.symbol,
+
+      token:
+        token.tokenAddress,
+
+      devHolding:
+        devHolding.holdingPercent,
+    },
+  );
+
+  await saveEvaluatedObservation({
+    token,
+    market,
+
+    contractScore:
+      contractGate.security.score,
+
+    adminPenalty:
+      adminRisk.scorePenalty,
+
+    sellStatus:
+      sellability.status,
+
+    sellImpactPercent:
+      sellability.estimatedImpactPercent,
+
+    holderRisk:
+      holderRisk.concentrationRisk,
+
+    holderTop1Percent:
+      holderRisk.top1Pct,
+
+    circulatingHolderCount:
+      holderRisk.circulatingHolderCountObserved,
+
+    deployerAddress:
+      devHolding.deployerAddress,
+
+    devHoldingPercent:
+      devHolding.holdingPercent,
+
+    devTokenBalance:
+      devHolding.balanceTokens,
+
+    dexPaid:
+      dexPaid.dexPaid,
+
+    dexPaidStatus:
+      dexPaid.status,
+
+    dexPaidTypes:
+      dexPaid.orderTypes,
+
+    decision:
+      'TRACK_ONLY',
+  });
+
+  seenTokens.add(
+    tokenKey,
+  );
+
+  return false;
+}
+
+/*
+ * TELEGRAM QUALITY FILTERS END HERE
+ */
+
+
+const warnings =
+  [
+    ...poolSecurity.warnings,
+    ...sellability.warnings,
+    ...holderRisk.warnings,
+  ];
 
   const message =
     buildWatchMessage({
@@ -849,6 +1526,18 @@ if (alreadyStored) {
       top1Pct:
         holderRisk.top1Pct,
 
+        devHoldingPercent:
+        devHolding.holdingPercent,
+
+        devHoldingStatus:
+        devHolding.status,
+
+        dexPaid:
+        dexPaid.dexPaid,
+
+        dexPaidStatus:
+        dexPaid.status,
+
       warnings,
     });
 
@@ -878,40 +1567,12 @@ if (alreadyStored) {
   ];
 
   const observationId =
-  await saveRobinhoodObservation({
-    tokenAddress:
-      token.tokenAddress,
+  await saveEvaluatedObservation({
+    token,
+    market,
 
-    symbol:
-      token.symbol ??
-      market.symbol ??
-      null,
-
-    name:
-      token.name ??
-      market.name ??
-      null,
-
-    source:
-      token.source,
-
-    pairAddress:
-      token.pairAddress ??
-      market.pairAddress ??
-      null,
-
-    priceAtAlert:
-      market.priceUsd,
-
-    marketCapAtAlert:
-      market.marketCapUsd,
-
-    liquidityAtAlert:
-      market.liquidityUsd,
-
-    securityScore:
-      contractGate.security
-        .score,
+    contractScore:
+      contractGate.security.score,
 
     adminPenalty:
       adminRisk.scorePenalty,
@@ -933,6 +1594,30 @@ if (alreadyStored) {
     circulatingHolderCount:
       holderRisk
         .circulatingHolderCountObserved,
+
+    deployerAddress:
+      devHolding.deployerAddress,
+
+    devHoldingPercent:
+      devHolding.holdingPercent,
+
+    devTokenBalance:
+      devHolding.balanceTokens,
+
+    dexPaid:
+      dexPaid.dexPaid,
+
+    dexPaidStatus:
+      dexPaid.status,
+
+    dexPaidTypes:
+      dexPaid.orderTypes,
+
+    decision:
+      'WATCH',
+
+    alertedAt:
+      new Date().toISOString(),
   });
 
 if (!observationId) {
@@ -1115,6 +1800,11 @@ export function startRobinhoodObserver():
       1000
     } seconds.`,
   );
+
+  console.log(
+    '[RobinhoodObserver] Version:',
+    ROBINHOOD_OBSERVER_VERSION,
+    );
 
   void refreshRobinhoodObserver();
 

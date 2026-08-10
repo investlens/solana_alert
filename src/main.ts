@@ -12,6 +12,10 @@ import {
   startRobinhoodOutcomeTracker,
 } from './chains/robinhood/robinhoodOutcomeTracker.js';
 
+import {
+  startRobinhoodBoostObserver,
+} from './chains/robinhood/robinhoodBoostObserver.js';
+
 import { startAnalyticsSummary } from "./services/analyticsSummary.js";
 import { captureAlertSnapshot } from './core/tracker.js';
 import { pollPumpfunEarlyFeed } from './core/pumpfunWatcher.js';
@@ -1338,9 +1342,10 @@ async function main() {
     startWalletWatch(),
     startPumpfunWatch(),
 
-    // Robinhood Chain observer
+    // Robinhood Chain
     startRobinhoodObserver(),
     startRobinhoodOutcomeTracker(),
+    startRobinhoodBoostObserver(),
 
     startMemoryTracker(),
     startOutcomeCheckpointAgent(),

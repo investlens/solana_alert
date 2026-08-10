@@ -32,6 +32,19 @@ export type SaveRobinhoodObservationArgs = {
   holderTop1Percent?: number | null;
 
   circulatingHolderCount?: number | null;
+
+  deployerAddress?: string | null;
+  devHoldingPercent?: number | null;
+  devTokenBalance?: number | null;
+
+  dexPaid?: boolean | null;
+  dexPaidStatus?: string | null;
+  dexPaidTypes?: string[] | null;
+  dexPaymentTimestamp?: string | null;
+
+  decision?: 'WATCH' | 'TRACK_ONLY';
+
+  alertedAt?: string | null;
 };
 
 export async function saveRobinhoodObservation(
@@ -75,13 +88,43 @@ export async function saveRobinhoodObservation(
             null,
 
           alerted_at:
-            now,
+          args.alertedAt ??
+          null,
 
-          decision:
-            'WATCH',
+        decision:
+          args.decision ??
+          'WATCH',
 
-          decision_at:
-            now,
+        decision_at:
+          now,
+
+          deployer_address:
+          args.deployerAddress ??
+          null,
+
+        dev_holding_percent:
+          args.devHoldingPercent ??
+          null,
+
+        dev_token_balance:
+          args.devTokenBalance ??
+          null,
+
+        dex_paid:
+          args.dexPaid ??
+          null,
+
+        dex_paid_status:
+          args.dexPaidStatus ??
+          null,
+
+        dex_paid_types:
+          args.dexPaidTypes ??
+          null,
+
+        dex_payment_timestamp:
+          args.dexPaymentTimestamp ??
+          null,
 
           price_at_decision:
             args.priceAtAlert ??
@@ -184,16 +227,20 @@ export async function saveRobinhoodObservation(
   }
 
   console.log(
-    '[RobinhoodObservationStore] Saved:',
-    {
-      token:
-        args.tokenAddress,
+  '[RobinhoodObservationStore] Saved:',
+  {
+    token:
+      args.tokenAddress,
 
-      id:
-        data?.id ??
-        null,
-    },
-  );
+    decision:
+      args.decision ??
+      'WATCH',
+
+    id:
+      data?.id ??
+      null,
+  },
+);
 
   return (
     data?.id ??

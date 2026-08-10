@@ -9,7 +9,55 @@ import {
 const TRACKER_INTERVAL_MS =
   60_000;
 
+const MAX_ROWS_PER_CYCLE =
+  150;
+
+const FRESH_PRIORITY_WINDOW_MS =
+  10 * 60 * 1000;
+
 const CHECKPOINTS = [
+  {
+    key:
+      '1m',
+
+    ageMs:
+      1 * 60 * 1000,
+
+    priceColumn:
+      'price_1m',
+
+    roiColumn:
+      'roi_1m_percent',
+  },
+
+  {
+    key:
+      '2m',
+
+    ageMs:
+      2 * 60 * 1000,
+
+    priceColumn:
+      'price_2m',
+
+    roiColumn:
+      'roi_2m_percent',
+  },
+
+  {
+    key:
+      '3m',
+
+    ageMs:
+      3 * 60 * 1000,
+
+    priceColumn:
+      'price_3m',
+
+    roiColumn:
+      'roi_3m_percent',
+  },
+
   {
     key:
       '5m',
@@ -93,6 +141,24 @@ type ObservationRow = {
   roi_high_percent:
     number | null;
 
+  price_1m:
+  number | null;
+
+  price_2m:
+    number | null;
+
+  price_3m:
+    number | null;
+
+  roi_1m_percent:
+    number | null;
+
+  roi_2m_percent:
+    number | null;
+
+  roi_3m_percent:
+    number | null;
+
   price_5m:
     number | null;
 
@@ -173,10 +239,23 @@ function ageMs(
 }
 
 async function loadObservations():
-  Promise<ObservationRow[]> {
+Promise<ObservationRow[]> {
+  const freshCutoff =
+    new Date(
+      Date.now() -
+      FRESH_PRIORITY_WINDOW_MS,
+    ).toISOString();
+
+  /*
+   * Priority 1:
+   * Fresh observations.
+   *
+   * These are the rows where accurate
+   * 1m / 2m / 3m checkpoints matter most.
+   */
   const {
-    data,
-    error,
+    data: freshData,
+    error: freshError,
   } =
     await supabase
       .from(
@@ -186,43 +265,163 @@ async function loadObservations():
         id,
         token_address,
         symbol,
+
         alerted_at,
+        decision,
+        decision_at,
+
         price_at_alert,
+        price_at_decision,
+
         current_price,
         peak_price,
+
         roi_now_percent,
         roi_high_percent,
+
+        price_1m,
+        price_2m,
+        price_3m,
         price_5m,
         price_15m,
         price_30m,
         price_1h,
+
+        roi_1m_percent,
+        roi_2m_percent,
+        roi_3m_percent,
         roi_5m_percent,
         roi_15m_percent,
         roi_30m_percent,
         roi_1h_percent,
+
         status
       `)
       .eq(
         'status',
         'WATCHING',
       )
+      .gte(
+        'decision_at',
+        freshCutoff,
+      )
       .order(
-        'alerted_at',
+        'decision_at',
         {
           ascending:
-            true,
+            false,
         },
+      )
+      .limit(
+        MAX_ROWS_PER_CYCLE,
       );
 
-  if (error) {
+  if (freshError) {
     throw new Error(
-      `Could not load Robinhood observations: ${error.message}`,
+      `Could not load fresh Robinhood observations: ${freshError.message}`,
     );
   }
 
-  return (
-    (data ?? []) as unknown as ObservationRow[]
-  );
+  const freshRows =
+    (
+      freshData ??
+      []
+    ) as unknown as ObservationRow[];
+
+  if (
+    freshRows.length >=
+    MAX_ROWS_PER_CYCLE
+  ) {
+    return freshRows;
+  }
+
+
+  /*
+   * Priority 2:
+   * Older rows needing longer-term tracking.
+   */
+  const remaining =
+    MAX_ROWS_PER_CYCLE -
+    freshRows.length;
+
+  const {
+    data: olderData,
+    error: olderError,
+  } =
+    await supabase
+      .from(
+        'robinhood_observations',
+      )
+      .select(`
+        id,
+        token_address,
+        symbol,
+
+        alerted_at,
+        decision,
+        decision_at,
+
+        price_at_alert,
+        price_at_decision,
+
+        current_price,
+        peak_price,
+
+        roi_now_percent,
+        roi_high_percent,
+
+        price_1m,
+        price_2m,
+        price_3m,
+        price_5m,
+        price_15m,
+        price_30m,
+        price_1h,
+
+        roi_1m_percent,
+        roi_2m_percent,
+        roi_3m_percent,
+        roi_5m_percent,
+        roi_15m_percent,
+        roi_30m_percent,
+        roi_1h_percent,
+
+        status
+      `)
+      .eq(
+        'status',
+        'WATCHING',
+      )
+      .lt(
+        'decision_at',
+        freshCutoff,
+      )
+      .order(
+        'decision_at',
+        {
+          ascending:
+            false,
+        },
+      )
+      .limit(
+        remaining,
+      );
+
+  if (olderError) {
+    throw new Error(
+      `Could not load older Robinhood observations: ${olderError.message}`,
+    );
+  }
+
+  return [
+    ...freshRows,
+    ...(
+      (
+        olderData ??
+        []
+      ) as unknown as ObservationRow[]
+    ),
+  ];
 }
 
 async function updateObservation(
@@ -329,54 +528,62 @@ if (
     };
 
   for (
-    const checkpoint
-    of CHECKPOINTS
+  const checkpoint
+  of CHECKPOINTS
+) {
+  const existingPrice =
+    row[
+      checkpoint
+        .priceColumn
+    ];
+
+  if (
+    elapsed >=
+      checkpoint.ageMs &&
+    existingPrice == null
   ) {
-    const existingPrice =
-      row[
-        checkpoint
-          .priceColumn
-      ];
+    update[
+      checkpoint
+        .priceColumn
+    ] =
+      currentPrice;
 
-    if (
-      elapsed >=
-        checkpoint.ageMs &&
-      existingPrice == null
-    ) {
-      update[
-        checkpoint
-          .priceColumn
-      ] =
-        currentPrice;
+    update[
+      checkpoint
+        .roiColumn
+    ] =
+      currentRoi;
 
-      update[
-        checkpoint
-          .roiColumn
-      ] =
-        currentRoi;
+    console.log(
+      '[RobinhoodOutcomeTracker] Checkpoint captured:',
+      {
+        symbol:
+          row.symbol,
 
-      console.log(
-        '[RobinhoodOutcomeTracker] Checkpoint captured:',
-        {
-          symbol:
-            row.symbol,
+        checkpoint:
+          checkpoint.key,
 
-          checkpoint:
-            checkpoint.key,
+        price:
+          currentPrice,
 
-          price:
-            currentPrice,
-
-          roi:
-            Number(
-              currentRoi.toFixed(
-                2,
-              ),
+        roi:
+          Number(
+            currentRoi.toFixed(
+              2,
             ),
-        },
-      );
-    }
+          ),
+      },
+    );
+
+    /*
+     * Only one checkpoint per row per cycle.
+     *
+     * Prevents old rows from receiving
+     * identical 1m/2m/3m/5m snapshots.
+     */
+    break;
   }
+}
 
   /*
    * First production observation rule:
