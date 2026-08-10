@@ -7,6 +7,10 @@ import {
 } from '../../services/telegram.js';
 
 import {
+  startPostAlertDevWatch,
+} from './security/devPostAlertWatcher.js';
+
+import {
   scanRobinhoodDevHolding,
 } from './security/devHoldingScanner.js';
 
@@ -19,6 +23,10 @@ import {
   saveRobinhoodObservation,
   saveRobinhoodRejection,
 } from './robinhoodObservationStore.js';
+
+import {
+  scanRobinhoodDevMovement,
+} from './security/devMovementScanner.js';
 
 import {
   discoverRobinhoodEcosystem,
@@ -80,6 +88,9 @@ const MAX_ALERT_MARKET_CAP_USD =
 const MAX_ALERT_SELL_IMPACT_PERCENT =
   0.30;
 
+const DEV_CONFIRMATION_DELAY_MS =
+  10_000;
+
 const MAX_ALERT_TOP1_PERCENT =
   15;
 
@@ -114,6 +125,19 @@ function normalize(
   return value
     .trim()
     .toLowerCase();
+}
+
+function sleep(
+  ms: number,
+): Promise<void> {
+  return new Promise(
+    (resolve) => {
+      setTimeout(
+        resolve,
+        ms,
+      );
+    },
+  );
 }
 
 function escapeHtml(
@@ -1488,6 +1512,245 @@ if (
  */
 
 
+/*
+ * FINAL DEV SAFETY CONFIRMATION
+ *
+ * At this point the token has passed the
+ * normal Telegram quality filters and is
+ * actually about to become an alert.
+ *
+ * Check dev movement once, wait 10 seconds,
+ * then check again before notifying.
+ */
+
+const devMovementBefore =
+  await scanRobinhoodDevMovement(
+    token.tokenAddress,
+  );
+
+
+if (
+  devMovementBefore.moved
+) {
+  console.log(
+    '[RobinhoodObserver] Rejected - dev already moved tokens:',
+    {
+      symbol:
+        token.symbol ??
+        market.symbol,
+
+      token:
+        token.tokenAddress,
+
+      status:
+        devMovementBefore.status,
+
+      transfers:
+        devMovementBefore.transferCount,
+
+      destinations:
+        devMovementBefore.destinations,
+    },
+  );
+
+  await saveRobinhoodRejection({
+    tokenAddress:
+      token.tokenAddress,
+
+    symbol:
+      token.symbol ??
+      market.symbol ??
+      null,
+
+    name:
+      token.name ??
+      market.name ??
+      null,
+
+    source:
+      token.source,
+
+    pairAddress:
+      token.pairAddress ??
+      market.pairAddress ??
+      null,
+
+    rejectionStage:
+      'DEV_MOVEMENT',
+
+    rejectionReason:
+      'DEV_MOVED_BEFORE_ALERT',
+
+    priceAtDecision:
+      market.priceUsd,
+
+    marketCapAtDecision:
+      market.marketCapUsd,
+
+    liquidityAtDecision:
+      market.liquidityUsd,
+
+    securityScore:
+      contractGate.security.score,
+
+    adminPenalty:
+      adminRisk.scorePenalty,
+
+    sellStatus:
+      sellability.status,
+
+    sellImpactPercent:
+      sellability.estimatedImpactPercent,
+
+    holderRisk:
+      holderRisk.concentrationRisk,
+
+    holderTop1Percent:
+      holderRisk.top1Pct,
+
+    circulatingHolderCount:
+      holderRisk.circulatingHolderCountObserved,
+  });
+
+  seenTokens.add(
+    tokenKey,
+  );
+
+  return false;
+}
+
+
+console.log(
+  '[RobinhoodObserver] Final dev confirmation - waiting 10 seconds:',
+  {
+    symbol:
+      token.symbol ??
+      market.symbol,
+
+    token:
+      token.tokenAddress,
+  },
+);
+
+
+await sleep(
+  DEV_CONFIRMATION_DELAY_MS,
+);
+
+
+const devMovementAfter =
+  await scanRobinhoodDevMovement(
+    token.tokenAddress,
+  );
+
+
+if (
+  devMovementAfter.moved
+) {
+  console.log(
+    '[RobinhoodObserver] Rejected - dev moved during confirmation window:',
+    {
+      symbol:
+        token.symbol ??
+        market.symbol,
+
+      token:
+        token.tokenAddress,
+
+      status:
+        devMovementAfter.status,
+
+      transfers:
+        devMovementAfter.transferCount,
+
+      destinations:
+        devMovementAfter.destinations,
+    },
+  );
+
+  await saveRobinhoodRejection({
+    tokenAddress:
+      token.tokenAddress,
+
+    symbol:
+      token.symbol ??
+      market.symbol ??
+      null,
+
+    name:
+      token.name ??
+      market.name ??
+      null,
+
+    source:
+      token.source,
+
+    pairAddress:
+      token.pairAddress ??
+      market.pairAddress ??
+      null,
+
+    rejectionStage:
+      'DEV_MOVEMENT',
+
+    rejectionReason:
+      'DEV_MOVED_DURING_CONFIRMATION',
+
+    priceAtDecision:
+      market.priceUsd,
+
+    marketCapAtDecision:
+      market.marketCapUsd,
+
+    liquidityAtDecision:
+      market.liquidityUsd,
+
+    securityScore:
+      contractGate.security.score,
+
+    adminPenalty:
+      adminRisk.scorePenalty,
+
+    sellStatus:
+      sellability.status,
+
+    sellImpactPercent:
+      sellability.estimatedImpactPercent,
+
+    holderRisk:
+      holderRisk.concentrationRisk,
+
+    holderTop1Percent:
+      holderRisk.top1Pct,
+
+    circulatingHolderCount:
+      holderRisk.circulatingHolderCountObserved,
+  });
+
+  seenTokens.add(
+    tokenKey,
+  );
+
+  return false;
+}
+
+
+console.log(
+  '[RobinhoodObserver] Dev confirmation passed:',
+  {
+    symbol:
+      token.symbol ??
+      market.symbol,
+
+    token:
+      token.tokenAddress,
+
+    devHolding:
+      devHolding.holdingPercent,
+  },
+);
+
+
 const warnings =
   [
     ...poolSecurity.warnings,
@@ -1542,29 +1805,38 @@ const warnings =
     });
 
   const buttons = [
-    [
-      {
-        text:
-          '📊 Chart',
+  [
+    {
+      text:
+        '📊 Chart',
 
-        url:
-          market.chartUrl ??
-          buildChartUrl(
-            token.tokenAddress,
-          ),
-      },
+      url:
+        buildChartUrl(
+          token.tokenAddress,
+        ),
+    },
 
-      {
-        text:
-          '🔎 Explorer',
+    {
+      text:
+        '🔎 Explorer',
 
-        url:
-          buildExplorerUrl(
-            token.tokenAddress,
-          ),
-      },
-    ],
-  ];
+      url:
+        buildExplorerUrl(
+          token.tokenAddress,
+        ),
+    },
+  ],
+
+  [
+    {
+      text:
+        '📋 Copy Contract',
+
+      callback_data:
+        `COPY_CA_${token.tokenAddress}`,
+    },
+  ],
+];
 
   const observationId =
   await saveEvaluatedObservation({
@@ -1634,6 +1906,15 @@ if (!observationId) {
     message,
     buttons,
   );
+
+  startPostAlertDevWatch({
+  tokenAddress:
+    token.tokenAddress,
+
+  symbol:
+    token.symbol ??
+    market.symbol,
+});
 
   seenTokens.add(
     tokenKey,

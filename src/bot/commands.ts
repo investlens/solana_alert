@@ -1029,6 +1029,30 @@ bot.action('AUTO_TRADE_STATUS', async (ctx) => {
     }
   });
 
+  bot.action(
+  /^COPY_CA_(0x[a-fA-F0-9]{40})$/,
+  async (ctx) => {
+    const contract =
+      (ctx.match as RegExpExecArray)[1];
+
+    await ctx.answerCbQuery(
+      'Contract ready to copy',
+    );
+
+    await ctx.reply(
+      [
+        '📋 <b>Contract Address</b>',
+        '',
+        `<code>${contract}</code>`,
+      ].join('\n'),
+      {
+        parse_mode:
+          'HTML',
+      },
+    );
+  },
+);
+
   bot.on('text', async (ctx, next) => {
     const telegramId = String(ctx.from?.id ?? '');
     const session = upgradeSessions.get(telegramId);
