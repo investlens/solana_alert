@@ -16,6 +16,10 @@ import {
   startRobinhoodBoostObserver,
 } from './chains/robinhood/robinhoodBoostObserver.js';
 
+import {
+  syncRobinhoodCreatorIntelligence,
+} from './chains/robinhood/robinhoodCreatorIntelligence.js';
+
 import { startAnalyticsSummary } from "./services/analyticsSummary.js";
 import { captureAlertSnapshot } from './core/tracker.js';
 import { pollPumpfunEarlyFeed } from './core/pumpfunWatcher.js';
@@ -1248,6 +1252,38 @@ async function startPositionProtectionLoop() {
   }
 }
 
+async function startRobinhoodCreatorIntelligenceLoop() {
+  const intervalMs =
+    Number(
+      process.env.ROBINHOOD_CREATOR_INTEL_MS ??
+      5 * 60 * 1000,
+    );
+
+  console.log(
+    '[RobinhoodCreatorIntel] Automatic sync loop started.',
+    {
+      intervalSeconds:
+        intervalMs / 1000,
+    },
+  );
+
+  while (true) {
+    try {
+      await syncRobinhoodCreatorIntelligence();
+    } catch (error) {
+      console.error(
+        '[RobinhoodCreatorIntel] Automatic sync failed:',
+        error instanceof Error
+          ? error.message
+          : String(error),
+      );
+    }
+
+    await sleep(
+      intervalMs,
+    );
+  }
+}
 
 async function startScanner() {
   console.log('Starting momentum risk bot...');
@@ -1343,9 +1379,12 @@ async function main() {
     startPumpfunWatch(),
 
     // Robinhood Chain
-    startRobinhoodObserver(),
-    startRobinhoodOutcomeTracker(),
-    startRobinhoodBoostObserver(),
+      startRobinhoodObserver(),
+      startRobinhoodOutcomeTracker(),
+      startRobinhoodBoostObserver(),
+      startRobinhoodCreatorIntelligenceLoop(),
+
+    
 
     startMemoryTracker(),
     startOutcomeCheckpointAgent(),

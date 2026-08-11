@@ -52,7 +52,8 @@ export async function getCreatorWalletForTokenV2(
 }
 
 export async function getCreatorIntelligenceV2(
-  creatorWallet: string | null | undefined
+  creatorWallet: string | null | undefined,
+  chain = 'solana',
 ): Promise<CreatorIntelligenceV2> {
   if (!creatorWallet) {
     return {
@@ -77,9 +78,16 @@ export async function getCreatorIntelligenceV2(
   const { data, error } = await supabase
     .from('creator_launches')
     .select(
-      'token, symbol, peak_market_cap, crossed_50k, crossed_100k, crossed_250k, crossed_500k, crossed_1m, launched_at'
+      'token, symbol, peak_market_cap, crossed_50k, crossed_100k, crossed_250k, crossed_500k, crossed_1m, severe_crash, catastrophic_crash, launched_at'
     )
-    .eq('creator_wallet', creatorWallet)
+    .eq(
+  'chain',
+  chain,
+)
+.eq(
+  'creator_wallet',
+  creatorWallet,
+)
     .order('launched_at', { ascending: false })
     .limit(100);
 
@@ -94,7 +102,23 @@ export async function getCreatorIntelligenceV2(
   const crossed100k = rows.filter((r: any) => r.crossed_100k).length;
   const crossed250k = rows.filter((r: any) => r.crossed_250k).length;
   const crossed500k = rows.filter((r: any) => r.crossed_500k).length;
-  const crossed1m = rows.filter((r: any) => r.crossed_1m).length;
+  const crossed1m =
+  rows.filter(
+    (r: any) =>
+      r.crossed_1m,
+  ).length;
+
+  const severeCrashes =
+  rows.filter(
+    (r: any) =>
+      r.severe_crash,
+  ).length;
+
+const catastrophicCrashes =
+  rows.filter(
+    (r: any) =>
+      r.catastrophic_crash,
+  ).length;
 
   const peaks = rows.map((r: any) => num(r.peak_market_cap)).filter((x) => x > 0);
   const bestMarketCap = peaks.length ? Math.max(...peaks) : 0;
@@ -141,11 +165,66 @@ export async function getCreatorIntelligenceV2(
   else if (bestMarketCap >= 100_000) score += 3;
 
   if (totalLaunches >= 20 && crossed50k === 0) {
-    score -= 15;
-    risks.push('High launch count with weak tracked outcomes');
-  }
+  score -= 15;
+  risks.push('High launch count with weak tracked outcomes');
+}
 
-  score = Math.max(0, Math.min(100, Math.round(score)));
+
+/*
+ * Reward repeat high-quality creators.
+ */
+if (crossed500k >= 2) {
+  score += 10;
+
+  strengths.push(
+    `${crossed500k} launches crossed $500K`,
+  );
+}
+
+
+if (crossed1m >= 2) {
+  score += 10;
+
+  strengths.push(
+    `${crossed1m} launches crossed $1M`,
+  );
+}
+
+
+/*
+ * Penalize creators with repeated catastrophic outcomes.
+ */
+if (
+  totalLaunches >= 3 &&
+  catastrophicCrashes >= 2
+) {
+  score -= 20;
+
+  risks.push(
+    `${catastrophicCrashes} catastrophic launch crashes`,
+  );
+}
+
+
+if (
+  totalLaunches >= 5 &&
+  severeCrashes / totalLaunches >= 0.6
+) {
+  score -= 20;
+
+  risks.push(
+    'Majority of tracked launches suffered severe crashes',
+  );
+}
+
+
+score = Math.max(
+  0,
+  Math.min(
+    100,
+    Math.round(score),
+  ),
+);
 
   const status = getStatus(score, totalLaunches);
 

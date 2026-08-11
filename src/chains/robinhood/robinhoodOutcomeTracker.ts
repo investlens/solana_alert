@@ -28,6 +28,9 @@ const CHECKPOINTS = [
 
     roiColumn:
       'roi_1m_percent',
+    
+    marketCapColumn:
+      'market_cap_1m',    
   },
 
   {
@@ -42,6 +45,10 @@ const CHECKPOINTS = [
 
     roiColumn:
       'roi_2m_percent',
+    
+    marketCapColumn:
+     'market_cap_2m',    
+
   },
 
   {
@@ -56,6 +63,11 @@ const CHECKPOINTS = [
 
     roiColumn:
       'roi_3m_percent',
+
+
+    marketCapColumn:
+     'market_cap_3m',    
+
   },
 
   {
@@ -70,6 +82,11 @@ const CHECKPOINTS = [
 
     roiColumn:
       'roi_5m_percent',
+
+
+    marketCapColumn:
+     'market_cap_5m',    
+
   },
 
   {
@@ -84,6 +101,11 @@ const CHECKPOINTS = [
 
     roiColumn:
       'roi_15m_percent',
+
+
+    marketCapColumn:
+     'market_cap_15m',    
+
   },
 
   {
@@ -98,6 +120,11 @@ const CHECKPOINTS = [
 
     roiColumn:
       'roi_30m_percent',
+
+
+    marketCapColumn:
+     'market_cap_30m',    
+
   },
 
   {
@@ -112,6 +139,11 @@ const CHECKPOINTS = [
 
     roiColumn:
       'roi_1h_percent',
+
+
+    marketCapColumn:
+     'market_cap_1h',    
+
   },
 ] as const;
 
@@ -194,6 +226,34 @@ type ObservationRow = {
 
   price_at_decision:
     number | null;
+
+    current_market_cap:
+  number | null;
+
+peak_market_cap:
+  number | null;
+
+market_cap_1m:
+  number | null;
+
+market_cap_2m:
+  number | null;
+
+market_cap_3m:
+  number | null;
+
+market_cap_5m:
+  number | null;
+
+market_cap_15m:
+  number | null;
+
+market_cap_30m:
+  number | null;
+
+market_cap_1h:
+  number | null;
+
 };
 
 let trackerStarted =
@@ -275,6 +335,17 @@ Promise<ObservationRow[]> {
 
         current_price,
         peak_price,
+
+        current_market_cap,
+        peak_market_cap,
+
+        market_cap_1m,
+        market_cap_2m,
+        market_cap_3m,
+        market_cap_5m,
+        market_cap_15m,
+        market_cap_30m,
+        market_cap_1h,
 
         roi_now_percent,
         roi_high_percent,
@@ -461,6 +532,9 @@ if (
   const currentPrice =
     market.priceUsd;
 
+  const currentMarketCap =
+    market.marketCapUsd;
+
   if (
     !Number.isFinite(
       currentPrice,
@@ -469,6 +543,15 @@ if (
   ) {
     return;
   }
+
+  if (
+  !Number.isFinite(
+    currentMarketCap,
+  ) ||
+  currentMarketCap <= 0
+) {
+  return;
+}
 
   const currentRoi =
     calculateRoi(
@@ -486,6 +569,16 @@ if (
       currentPrice,
     );
 
+  const previousPeakMarketCap =
+  row.peak_market_cap ??
+  currentMarketCap;
+
+  const peakMarketCap =
+    Math.max(
+      previousPeakMarketCap,
+      currentMarketCap,
+    );
+
   const peakRoi =
     calculateRoi(
       baselinePrice,
@@ -498,34 +591,40 @@ if (
     );
 
   const update:
-    Record<
-      string,
-      unknown
-    > = {
-      current_price:
-        currentPrice,
+  Record<
+    string,
+    unknown
+  > = {
+    current_price:
+      currentPrice,
 
-      peak_price:
-        peakPrice,
+    peak_price:
+      peakPrice,
 
-      roi_now_percent:
-        currentRoi,
+    current_market_cap:
+      currentMarketCap,
 
-      roi_high_percent:
-        Math.max(
-          row.roi_high_percent ??
-          0,
-          peakRoi,
-        ),
+    peak_market_cap:
+      peakMarketCap,
 
-      last_checked_at:
-        new Date()
-          .toISOString(),
+    roi_now_percent:
+      currentRoi,
 
-      updated_at:
-        new Date()
-          .toISOString(),
-    };
+    roi_high_percent:
+      Math.max(
+        row.roi_high_percent ??
+        0,
+        peakRoi,
+      ),
+
+    last_checked_at:
+      new Date()
+        .toISOString(),
+
+    updated_at:
+      new Date()
+        .toISOString(),
+  };
 
   for (
   const checkpoint
@@ -554,26 +653,35 @@ if (
     ] =
       currentRoi;
 
+    update[
+      checkpoint
+        .marketCapColumn
+    ] =
+      currentMarketCap;
+
     console.log(
-      '[RobinhoodOutcomeTracker] Checkpoint captured:',
-      {
-        symbol:
-          row.symbol,
+  '[RobinhoodOutcomeTracker] Checkpoint captured:',
+  {
+    symbol:
+      row.symbol,
 
-        checkpoint:
-          checkpoint.key,
+    checkpoint:
+      checkpoint.key,
 
-        price:
-          currentPrice,
+    price:
+      currentPrice,
 
-        roi:
-          Number(
-            currentRoi.toFixed(
-              2,
-            ),
-          ),
-      },
-    );
+    marketCap:
+      currentMarketCap,
+
+    roi:
+      Number(
+        currentRoi.toFixed(
+          2,
+        ),
+      ),
+  },
+);
 
     /*
      * Only one checkpoint per row per cycle.
@@ -639,8 +747,12 @@ if (
       row.token_address,
     '| ROI',
     `${currentRoi.toFixed(2)}%`,
-    '| Peak',
+    '| Peak ROI',
     `${peakRoi.toFixed(2)}%`,
+    '| MC',
+    `$${Math.round(currentMarketCap)}`,
+    '| Peak MC',
+    `$${Math.round(peakMarketCap)}`,
   );
 }
 

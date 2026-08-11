@@ -29,6 +29,10 @@ import {
 } from './security/devMovementScanner.js';
 
 import {
+  evaluateRobinhoodCreatorRisk,
+} from './robinhoodCreatorRisk.js';
+
+import {
   discoverRobinhoodEcosystem,
 } from './discovery/aggregator.js';
 
@@ -306,8 +310,31 @@ function buildWatchMessage(args: {
   top1Pct:
     number | null;
 
+    creatorStatus:
+  string | null;
+
+creatorScore:
+  number | null;
+
+creatorLaunches:
+  number;
+
+creatorHit100k:
+  number;
+
+creatorHit500k:
+  number;
+
+creatorHit1m:
+  number;
+
+creatorBestPeakMarketCap:
+  number;
+
   warnings:
     string[];
+
+
 }): string {
   const {
     token,
@@ -350,6 +377,75 @@ function buildWatchMessage(args: {
           )
           .join('\n')
       : '• No major warning from completed checks';
+
+    const creatorLines:
+  string[] = [];
+
+
+if (
+  args.creatorStatus &&
+  args.creatorStatus !==
+    'UNKNOWN'
+) {
+  creatorLines.push(
+    '',
+  );
+
+  creatorLines.push(
+    '👤 <b>CREATOR INTELLIGENCE</b>',
+  );
+
+  creatorLines.push(
+    `Status: <b>${escapeHtml(
+      args.creatorStatus,
+    )}</b>`,
+  );
+
+  if (
+    args.creatorScore != null
+  ) {
+    creatorLines.push(
+      `Creator Score: <b>${args.creatorScore}/100</b>`,
+    );
+  }
+
+  creatorLines.push(
+    `Previous launches: <b>${args.creatorLaunches}</b>`,
+  );
+
+
+  if (
+    args.creatorHit1m > 0
+  ) {
+    creatorLines.push(
+      `🔥 $1M+ launches: <b>${args.creatorHit1m}</b>`,
+    );
+  } else if (
+    args.creatorHit500k > 0
+  ) {
+    creatorLines.push(
+      `💎 $500K+ launches: <b>${args.creatorHit500k}</b>`,
+    );
+  } else if (
+    args.creatorHit100k > 0
+  ) {
+    creatorLines.push(
+      `🚀 $100K+ launches: <b>${args.creatorHit100k}</b>`,
+    );
+  }
+
+
+  if (
+    args.creatorBestPeakMarketCap >
+    0
+  ) {
+    creatorLines.push(
+      `Best previous MC: <b>${formatUsd(
+        args.creatorBestPeakMarketCap,
+      )}</b>`,
+    );
+  }
+}
 
   return [
     '🟣 <b>ALPHAOS • ROBINHOOD EARLY WATCH</b>',
@@ -410,6 +506,8 @@ function buildWatchMessage(args: {
       : '⚪ UNKNOWN'
 }`,
 '',
+
+...creatorLines,
 
 '⚠️ <b>NOTES</b>',
     warningLines,
@@ -1054,6 +1152,109 @@ if (alreadyStored) {
       token.tokenAddress,
     ),
   ]);
+
+
+const creatorRisk =
+  await evaluateRobinhoodCreatorRisk(
+    devHolding.deployerAddress,
+  );
+
+
+if (
+  creatorRisk?.status ===
+    'SERIAL_DUMPER' &&
+  creatorRisk.suppressAlert
+) {
+  console.log(
+    '[RobinhoodObserver] Silent - serial dumper creator:',
+    {
+      symbol:
+        token.symbol ??
+        market.symbol,
+
+      token:
+        token.tokenAddress,
+
+      creator:
+        creatorRisk.creatorWallet,
+
+      launches:
+        creatorRisk.launches,
+
+      catastrophicCrashes:
+        creatorRisk.catastrophicCrashes,
+
+      catastrophicRate:
+        Number(
+          creatorRisk
+            .catastrophicRatePercent
+            .toFixed(2),
+        ),
+
+      hit50k:
+        creatorRisk.hit50k,
+
+      status:
+        creatorRisk.status,
+    },
+  );
+
+
+  await saveEvaluatedObservation({
+    token,
+    market,
+
+    contractScore:
+      contractGate.security.score,
+
+    adminPenalty:
+      adminRisk.scorePenalty,
+
+    sellStatus:
+      sellability.status,
+
+    sellImpactPercent:
+      sellability.estimatedImpactPercent,
+
+    holderRisk:
+      holderRisk.concentrationRisk,
+
+    holderTop1Percent:
+      holderRisk.top1Pct,
+
+    circulatingHolderCount:
+      holderRisk
+        .circulatingHolderCountObserved,
+
+    deployerAddress:
+      devHolding.deployerAddress,
+
+    devHoldingPercent:
+      devHolding.holdingPercent,
+
+    devTokenBalance:
+      devHolding.balanceTokens,
+
+    dexPaid:
+      dexPaid.dexPaid,
+
+    dexPaidStatus:
+      dexPaid.status,
+
+    dexPaidTypes:
+      dexPaid.orderTypes,
+
+    decision:
+      'TRACK_ONLY',
+  });
+
+
+  seenTokens.add(
+    tokenKey,
+  );
+
+  return false;
+}
 
 
 /*
@@ -1801,7 +2002,35 @@ const warnings =
         dexPaidStatus:
         dexPaid.status,
 
-      warnings,
+            creatorStatus:
+            creatorRisk?.status ??
+            null,
+
+            creatorScore:
+            creatorRisk?.score ??
+            null,
+
+            creatorLaunches:
+            creatorRisk?.launches ??
+            0,
+
+            creatorHit100k:
+            creatorRisk?.hit100k ??
+            0,
+
+            creatorHit500k:
+            creatorRisk?.hit500k ??
+            0,
+
+            creatorHit1m:
+            creatorRisk?.hit1m ??
+            0,
+
+            creatorBestPeakMarketCap:
+            creatorRisk?.bestPeakMarketCap ??
+            0,
+
+            warnings,
     });
 
   const buttons = [

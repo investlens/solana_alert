@@ -186,11 +186,29 @@ function isFailedOutcome(outcome: string | null) {
 
 async function loadCreatorLaunches(): Promise<CreatorLaunch[]> {
   const { data, error } = await supabase
-    .from('creator_launches')
-    .select('creator_wallet, token, symbol, launched_at')
-    .not('creator_wallet', 'is', null)
-    .order('launched_at', { ascending: false })
-    .limit(5000);
+  .from('creator_launches')
+  .select(
+    'creator_wallet, token, symbol, launched_at',
+  )
+  .eq(
+    'chain',
+    'solana',
+  )
+  .not(
+    'creator_wallet',
+    'is',
+    null,
+  )
+  .order(
+    'launched_at',
+    {
+      ascending:
+        false,
+    },
+  )
+  .limit(
+    5000,
+  );
 
   if (error) {
     console.log('creator reputation launch fetch error:', error.message);
@@ -299,7 +317,14 @@ export async function runCreatorReputationEngine() {
           reputation_summary
           `
         )
-        .eq('creator_wallet', creator.creatorWallet)
+        .eq(
+          'chain',
+          'solana',
+        )
+        .eq(
+          'creator_wallet',
+          creator.creatorWallet,
+        )
         .maybeSingle();
 
     if (existingCreatorError) {
@@ -465,6 +490,8 @@ const summary = `${outcomeSummary}${marketCapSummary}`;
       .from('proven_creators')
       .upsert(
         {
+          chain:
+            'solana',
           creator_wallet: creator.creatorWallet,
 
           status,
@@ -488,7 +515,8 @@ const summary = `${outcomeSummary}${marketCapSummary}`;
           updated_at: new Date().toISOString(),
         },
         {
-          onConflict: 'creator_wallet',
+          onConflict:
+            'chain,creator_wallet',
         }
       );
 

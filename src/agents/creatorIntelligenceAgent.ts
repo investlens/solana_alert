@@ -4,17 +4,30 @@ import { recordOpportunityAndEmit } from '../services/opportunityService.js';
 export async function recordCreatorLaunch(args: {
   creatorWallet: string | null;
   token: string;
+
+  chain?: string;
+
   symbol?: string | null;
   marketCap?: number | null;
   sourceAgent?: string;
   rawData?: Record<string, unknown>;
 }) {
   if (!args.creatorWallet) return null;
+  const chain =
+  args.chain ??
+  'solana';
 
   const { data: existing } = await supabase
     .from('creator_intelligence')
     .select('*')
-    .eq('creator_wallet', args.creatorWallet)
+    .eq(
+      'chain',
+      chain,
+    )
+    .eq(
+      'creator_wallet',
+      args.creatorWallet,
+    )
     .maybeSingle();
 
   const totalLaunches = Number(existing?.total_launches ?? 0) + 1;
@@ -44,6 +57,7 @@ export async function recordCreatorLaunch(args: {
     successful_launches: successfulLaunches,
     failed_launches: failedLaunches,
     best_market_cap: bestMarketCap,
+    chain,
     avg_market_cap: marketCap,
     trust_score: trustScore,
     last_token: args.token,
@@ -53,7 +67,12 @@ export async function recordCreatorLaunch(args: {
       last: args.rawData ?? {},
     },
     updated_at: new Date().toISOString(),
-  });
+        },
+      {
+        onConflict:
+          'chain,creator_wallet',
+      },
+    );
 
   if (error) {
     console.log('recordCreatorLaunch error:', error);
@@ -64,9 +83,22 @@ export async function recordCreatorLaunch(args: {
   await supabase
     .from('creator_wallet_events')
     .select('id')
-    .eq('creator_wallet', args.creatorWallet)
-    .eq('token', args.token)
-    .eq('event_type', 'LAUNCH')
+    .eq(
+      'chain',
+      chain,
+    )
+    .eq(
+      'creator_wallet',
+      args.creatorWallet,
+    )
+    .eq(
+      'token',
+      args.token,
+    )
+    .eq(
+      'event_type',
+      'LAUNCH',
+    )
     .maybeSingle();
 
 if (launchEventLookupError) {
@@ -82,6 +114,7 @@ if (launchEventLookupError) {
       creator_wallet: args.creatorWallet,
       event_type: 'LAUNCH',
       token: args.token,
+      chain,
       symbol: args.symbol ?? null,
       market_cap: marketCap || null,
       source: args.sourceAgent ?? 'CreatorIntelligenceAgent',
@@ -114,7 +147,7 @@ if (launchEventLookupError) {
     await recordOpportunityAndEmit({
       opportunityType: 'TOKEN_CREATOR',
       assetId: args.token,
-      chain: 'solana',
+      chain,
       sourceAgent: args.sourceAgent ?? 'CreatorIntelligenceAgent',
       title: `P0 Proven Creator Launch: ${args.symbol ?? args.token}`,
       entryPrice: null,
@@ -148,7 +181,10 @@ if (launchEventLookupError) {
   };
 }
 
-export async function getCreatorTrust(creatorWallet: string | null) {
+export async function getCreatorTrust(
+  creatorWallet: string | null,
+  chain = 'solana',
+) {
   if (!creatorWallet) {
     return {
       trustScore: 50,
@@ -158,10 +194,22 @@ export async function getCreatorTrust(creatorWallet: string | null) {
     };
   }
 
-  const { data, error } = await supabase
-    .from('creator_intelligence')
-    .select('*')
-    .eq('creator_wallet', creatorWallet)
+  const { data, error } =
+  await supabase
+    .from(
+      'creator_intelligence',
+    )
+    .select(
+      '*',
+    )
+    .eq(
+      'chain',
+      chain,
+    )
+    .eq(
+      'creator_wallet',
+      creatorWallet,
+    )
     .maybeSingle();
 
   if (error || !data) {
