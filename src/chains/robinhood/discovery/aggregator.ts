@@ -3,6 +3,10 @@ import {
 } from './sources/dexscreener.js';
 
 import {
+  discoverFromOnchain,
+} from './sources/onchain.js';
+
+import {
   discoverFromPons,
 } from './launchpads/pons.js';
 
@@ -147,6 +151,8 @@ export async function discoverRobinhoodEcosystem(
     ),
 
     discoverFromPons(),
+
+    discoverFromOnchain(),
   ]);
 
   const batches:

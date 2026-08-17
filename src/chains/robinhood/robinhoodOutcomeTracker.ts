@@ -10,7 +10,7 @@ const TRACKER_INTERVAL_MS =
   60_000;
 
 const MAX_ROWS_PER_CYCLE =
-  150;
+  20;
 
 const FRESH_PRIORITY_WINDOW_MS =
   10 * 60 * 1000;

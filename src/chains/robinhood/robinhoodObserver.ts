@@ -687,15 +687,20 @@ if (alreadyStored) {
    * sell route has already been verified
    * by AlphaOS.
    */
-  const isPons =
-    hasSource(
-      token,
-      'PONS',
-    );
+  const isVerifiedSource =
+  hasSource(
+    token,
+    'PONS',
+  ) ||
+  hasSource(
+    token,
+    'ONCHAIN',
+  );
 
-  if (!isPons) {
-    return false;
-  }
+
+if (!isVerifiedSource) {
+  return false;
+}
 
   
 
