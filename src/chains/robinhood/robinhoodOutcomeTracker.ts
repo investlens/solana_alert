@@ -15,7 +15,7 @@ import {
 } from '../../services/telegram.js';
 
 import {
-  scanPonsSellability,
+  scanRobinhoodSellability,
 } from './security/sellabilityScanner.js';
 
 import {
@@ -205,6 +205,9 @@ type ObservationRow = {
 
   alerted_at:
     string | null;
+
+  pool_fee:
+    number | null;
 
   price_at_alert:
     number | null;
@@ -396,6 +399,7 @@ Promise<ObservationRow[]> {
         symbol,
         source,
         pair_address,
+        pool_fee,
 
         alerted_at,
         decision,
@@ -877,9 +881,16 @@ async function maybeSendMicroBreakout(args: {
     devHolding,
   ] =
     await Promise.all([
-      scanPonsSellability(
-        row.token_address,
-      ),
+      scanRobinhoodSellability({
+        tokenAddress:
+          row.token_address,
+
+        source:
+          row.source,
+
+        poolFee:
+          row.pool_fee,
+      }),
 
       scanRobinhoodHolderRisk(
         row.token_address,

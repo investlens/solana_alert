@@ -165,7 +165,7 @@ async function rawEthCall(args: {
   return payload.result;
 }
 
-async function quoteTokenToWeth(args: {
+export async function quoteTokenToWeth(args: {
   token: Address;
 
   weth: Address;
@@ -320,6 +320,480 @@ function calculateImpactPercent(
   return Math.max(
     0,
     deterioration,
+  );
+}
+
+export async function scanOnchainSellability(args: {
+  tokenAddress: string;
+
+  poolFee: number;
+}): Promise<RobinhoodSellabilityResult> {
+  const token =
+    getAddress(
+      args.tokenAddress,
+    );
+
+  const officialWeth =
+    getAddress(
+      PONS_CONTRACTS.weth,
+    );
+
+  const scannedAt =
+    Date.now();
+
+  const warnings:
+    string[] = [];
+
+  const blockers:
+    string[] = [];
+
+
+  if (
+    !Number.isFinite(
+      args.poolFee,
+    ) ||
+    args.poolFee <= 0
+  ) {
+    blockers.push(
+      'Invalid on-chain pool fee',
+    );
+
+    return {
+      chain:
+        'robinhood',
+
+      tokenAddress:
+        token,
+
+      pairedToken:
+        officialWeth,
+
+      poolFee:
+        null,
+
+      ponsVerified:
+        false,
+
+      status:
+        'UNSUPPORTED',
+
+      sellable:
+        false,
+
+      smallQuote:
+        null,
+
+      largeQuote:
+        null,
+
+      estimatedImpactPercent:
+        null,
+
+      warnings,
+
+      blockers,
+
+      scannedAt,
+    };
+  }
+
+  const metadata =
+    await getRobinhoodTokenMetadata(
+      token,
+    );
+
+
+  if (
+    metadata.decimals == null ||
+    metadata.totalSupplyRaw == null ||
+    metadata.totalSupplyRaw <= 0n
+  ) {
+    blockers.push(
+      'Token supply or decimals unavailable',
+    );
+
+    return {
+      chain:
+        'robinhood',
+
+      tokenAddress:
+        token,
+
+      pairedToken:
+        officialWeth,
+
+      poolFee:
+        args.poolFee,
+
+      ponsVerified:
+        false,
+
+      status:
+        'ERROR',
+
+      sellable:
+        false,
+
+      smallQuote:
+        null,
+
+      largeQuote:
+        null,
+
+      estimatedImpactPercent:
+        null,
+
+      warnings,
+
+      blockers,
+
+      scannedAt,
+    };
+  }
+
+
+  const smallAmount =
+    metadata.totalSupplyRaw /
+    10_000n;
+
+  const largeAmount =
+    metadata.totalSupplyRaw /
+    1_000n;
+
+
+  let smallQuote:
+    SellQuoteResult | null =
+      null;
+
+  let largeQuote:
+    SellQuoteResult | null =
+      null;
+
+
+  try {
+    smallQuote =
+      await quoteTokenToWeth({
+        token,
+
+        weth:
+          officialWeth,
+
+        amountIn:
+          smallAmount,
+
+        fee:
+          args.poolFee,
+
+        decimals:
+          metadata.decimals,
+      });
+  } catch (error) {
+    blockers.push(
+      `Small sell quote failed: ${
+        error instanceof Error
+          ? error.message
+          : String(error)
+      }`,
+    );
+
+    return {
+      chain:
+        'robinhood',
+
+      tokenAddress:
+        token,
+
+      pairedToken:
+        officialWeth,
+
+      poolFee:
+        args.poolFee,
+
+      ponsVerified:
+        false,
+
+      status:
+        'NO_QUOTE',
+
+      sellable:
+        false,
+
+      smallQuote:
+        null,
+
+      largeQuote:
+        null,
+
+      estimatedImpactPercent:
+        null,
+
+      warnings,
+
+      blockers,
+
+      scannedAt,
+    };
+  }
+
+
+  if (
+    smallQuote.amountOutRaw <=
+    0n
+  ) {
+    blockers.push(
+      'Small sell quote returned zero WETH',
+    );
+
+    return {
+      chain:
+        'robinhood',
+
+      tokenAddress:
+        token,
+
+      pairedToken:
+        officialWeth,
+
+      poolFee:
+        args.poolFee,
+
+      ponsVerified:
+        false,
+
+      status:
+        'NO_QUOTE',
+
+      sellable:
+        false,
+
+      smallQuote,
+
+      largeQuote:
+        null,
+
+      estimatedImpactPercent:
+        null,
+
+      warnings,
+
+      blockers,
+
+      scannedAt,
+    };
+  }
+
+
+  try {
+    largeQuote =
+      await quoteTokenToWeth({
+        token,
+
+        weth:
+          officialWeth,
+
+        amountIn:
+          largeAmount,
+
+        fee:
+          args.poolFee,
+
+        decimals:
+          metadata.decimals,
+      });
+  } catch (error) {
+    warnings.push(
+      `Large sell quote failed: ${
+        error instanceof Error
+          ? error.message
+          : String(error)
+      }`,
+    );
+  }
+
+
+  if (
+    !largeQuote
+  ) {
+    return {
+      chain:
+        'robinhood',
+
+      tokenAddress:
+        token,
+
+      pairedToken:
+        officialWeth,
+
+      poolFee:
+        args.poolFee,
+
+      ponsVerified:
+        false,
+
+      status:
+        'HIGH_IMPACT',
+
+      sellable:
+        true,
+
+      smallQuote,
+
+      largeQuote:
+        null,
+
+      estimatedImpactPercent:
+        null,
+
+      warnings,
+
+      blockers,
+
+      scannedAt,
+    };
+  }
+
+
+  const impact =
+    calculateImpactPercent(
+      smallQuote,
+      largeQuote,
+    );
+
+
+  const highImpact =
+    impact != null &&
+    impact >= 20;
+
+
+  if (
+    highImpact
+  ) {
+    warnings.push(
+      `Exit rate deteriorates approximately ${impact.toFixed(
+        1,
+      )}% at the larger test size`,
+    );
+  }
+
+
+  return {
+    chain:
+      'robinhood',
+
+    tokenAddress:
+      token,
+
+    pairedToken:
+      officialWeth,
+
+    poolFee:
+      args.poolFee,
+
+    ponsVerified:
+      false,
+
+    status:
+      highImpact
+        ? 'HIGH_IMPACT'
+        : 'SELLABLE',
+
+    sellable:
+      true,
+
+    smallQuote,
+
+    largeQuote,
+
+    estimatedImpactPercent:
+      impact,
+
+    warnings,
+
+    blockers,
+
+    scannedAt,
+  };
+}
+
+export async function scanRobinhoodSellability(args: {
+  tokenAddress: string;
+
+  source:
+    string | null | undefined;
+
+  poolFee?:
+    number | null;
+}): Promise<RobinhoodSellabilityResult> {
+  if (
+    args.source ===
+    'ONCHAIN'
+  ) {
+    if (
+      args.poolFee == null ||
+      !Number.isFinite(
+        args.poolFee,
+      )
+    ) {
+      return {
+        chain:
+          'robinhood',
+
+        tokenAddress:
+          getAddress(
+            args.tokenAddress,
+          ),
+
+        pairedToken:
+          getAddress(
+            PONS_CONTRACTS.weth,
+          ),
+
+        poolFee:
+          null,
+
+        ponsVerified:
+          false,
+
+        status:
+          'UNSUPPORTED',
+
+        sellable:
+          false,
+
+        smallQuote:
+          null,
+
+        largeQuote:
+          null,
+
+        estimatedImpactPercent:
+          null,
+
+        warnings:
+          [],
+
+        blockers: [
+          'ONCHAIN pool fee unavailable',
+        ],
+
+        scannedAt:
+          Date.now(),
+      };
+    }
+
+
+    return scanOnchainSellability({
+      tokenAddress:
+        args.tokenAddress,
+
+      poolFee:
+        args.poolFee,
+    });
+  }
+
+
+  return scanPonsSellability(
+    args.tokenAddress,
   );
 }
 

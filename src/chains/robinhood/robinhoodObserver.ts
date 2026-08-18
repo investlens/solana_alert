@@ -57,7 +57,7 @@ import {
 } from './security/poolSecurityScanner.js';
 
 import {
-  scanPonsSellability,
+  scanRobinhoodSellability,
 } from './security/sellabilityScanner.js';
 
 import {
@@ -543,6 +543,8 @@ async function saveEvaluatedObservation(args: {
   sellImpactPercent:
     number | null;
 
+
+
   holderRisk: string;
 
   holderTop1Percent:
@@ -567,6 +569,7 @@ async function saveEvaluatedObservation(args: {
 
   dexPaidTypes:
     string[];
+    
 
   decision:
     'WATCH'
@@ -596,6 +599,17 @@ async function saveEvaluatedObservation(args: {
       args.token.pairAddress ??
       args.market.pairAddress ??
       null,
+
+    poolFee:
+        args.token.source ===
+        'ONCHAIN'
+            ? (
+                Number(
+                args.token.metadata?.fee ??
+                0,
+                ) || null
+            )
+            : null,
 
     priceAtAlert:
       args.market.priceUsd,
@@ -905,10 +919,28 @@ if (!isVerifiedSource) {
     return false;
   }
 
-  const sellability =
-    await scanPonsSellability(
-      token.tokenAddress,
-    );
+  const poolFee =
+    token.source ===
+    'ONCHAIN'
+        ? (
+            Number(
+            token.metadata?.fee ??
+            0,
+            ) || null
+        )
+        : null;
+
+
+    const sellability =
+    await scanRobinhoodSellability({
+        tokenAddress:
+        token.tokenAddress,
+
+        source:
+        token.source,
+
+        poolFee,
+    });
 
   if (
     !sellability.sellable ||

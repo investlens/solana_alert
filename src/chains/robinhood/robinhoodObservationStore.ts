@@ -17,6 +17,8 @@ export type SaveRobinhoodObservationArgs = {
 
   marketCapAtAlert?: number | null;
 
+  poolFee?: number | null;
+
   liquidityAtAlert?: number | null;
 
   securityScore?: number | null;
@@ -85,6 +87,10 @@ export async function saveRobinhoodObservation(
 
           pair_address:
             args.pairAddress ??
+            null,
+
+          pool_fee:
+            args.poolFee ??
             null,
 
           alerted_at:
