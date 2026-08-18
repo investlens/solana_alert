@@ -17,6 +17,14 @@ import {
 } from './chains/robinhood/robinhoodBoostObserver.js';
 
 import {
+  startPonsShadowSniper,
+} from './chains/robinhood/ponsShadowSniper.js';
+
+import {
+  startPonsShadowOutcomeTracker,
+} from './chains/robinhood/ponsShadowOutcomeTracker.js';
+
+import {
   syncRobinhoodCreatorIntelligence,
 } from './chains/robinhood/robinhoodCreatorIntelligence.js';
 
@@ -1378,10 +1386,12 @@ async function main() {
     startWalletWatch(),
     startPumpfunWatch(),
 
-    // Robinhood Chain
+      // Robinhood Chain
       startRobinhoodObserver(),
       startRobinhoodOutcomeTracker(),
       startRobinhoodBoostObserver(),
+      startPonsShadowSniper(),
+      startPonsShadowOutcomeTracker(),
       startRobinhoodCreatorIntelligenceLoop(),
 
     
