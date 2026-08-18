@@ -6,6 +6,30 @@ import {
   getRobinhoodMarketSnapshot,
 } from './market.js';
 
+import {
+  config,
+} from '../../config.js';
+
+import {
+  sendTelegram,
+} from '../../services/telegram.js';
+
+import {
+  scanPonsSellability,
+} from './security/sellabilityScanner.js';
+
+import {
+  scanRobinhoodHolderRisk,
+} from './security/holderRiskScanner.js';
+
+import {
+  scanRobinhoodDevHolding,
+} from './security/devHoldingScanner.js';
+
+import {
+  scanRobinhoodDevMovement,
+} from './security/devMovementScanner.js';
+
 const TRACKER_INTERVAL_MS =
   60_000;
 
@@ -14,6 +38,30 @@ const MAX_ROWS_PER_CYCLE =
 
 const FRESH_PRIORITY_WINDOW_MS =
   10 * 60 * 1000;
+
+const MICRO_BREAKOUT_ROI_PERCENT =
+  40;
+
+const MICRO_BREAKOUT_MAX_AGE_MS =
+  6 * 60 * 1000;
+
+const MICRO_MAX_INITIAL_MARKET_CAP_USD =
+  5_000;
+
+const MICRO_MAX_INITIAL_LIQUIDITY_USD =
+  5_000;
+
+const MICRO_MAX_SELL_IMPACT_PERCENT =
+  0.20;
+
+const MICRO_MAX_TOP1_PERCENT =
+  10;
+
+const MICRO_MAX_DEV_HOLDING_PERCENT =
+  10;
+
+const MICRO_DEV_CONFIRMATION_DELAY_MS =
+  10_000;
 
 const CHECKPOINTS = [
   {
@@ -254,6 +302,27 @@ market_cap_30m:
 market_cap_1h:
   number | null;
 
+  source:
+    string | null;
+
+  pair_address:
+    string | null;
+
+  market_cap_at_alert:
+    number | null;
+
+  liquidity_at_alert:
+    number | null;
+
+  sell_impact_percent:
+    number | null;
+
+  holder_top1_percent:
+    number | null;
+
+  dev_holding_percent:
+    number | null;
+
 };
 
 let trackerStarted =
@@ -325,6 +394,8 @@ Promise<ObservationRow[]> {
         id,
         token_address,
         symbol,
+        source,
+        pair_address,
 
         alerted_at,
         decision,
@@ -332,6 +403,11 @@ Promise<ObservationRow[]> {
 
         price_at_alert,
         price_at_decision,
+        market_cap_at_alert,
+        liquidity_at_alert,
+        sell_impact_percent,
+        holder_top1_percent,
+        dev_holding_percent,
 
         current_price,
         peak_price,
@@ -495,6 +571,624 @@ Promise<ObservationRow[]> {
   ];
 }
 
+function sleep(
+  ms: number,
+): Promise<void> {
+  return new Promise(
+    (resolve) => {
+      setTimeout(
+        resolve,
+        ms,
+      );
+    },
+  );
+}
+
+
+function isCleanMicroCandidate(
+  row: ObservationRow,
+): boolean {
+  if (
+    row.decision !==
+    'TRACK_ONLY'
+  ) {
+    return false;
+  }
+
+  if (
+    row.source !== 'PONS' &&
+    row.source !== 'ONCHAIN'
+  ) {
+    return false;
+  }
+
+  const marketCap =
+    Number(
+      row.market_cap_at_alert ??
+      0,
+    );
+
+  const liquidity =
+    Number(
+      row.liquidity_at_alert ??
+      0,
+    );
+
+  const sellImpact =
+    Number(
+      row.sell_impact_percent ??
+      999,
+    );
+
+  if (
+  row.holder_top1_percent == null ||
+  row.dev_holding_percent == null
+) {
+  return false;
+}
+
+
+const top1 =
+  Number(
+    row.holder_top1_percent,
+  );
+
+
+const devHolding =
+  Number(
+    row.dev_holding_percent,
+  );
+
+  return (
+    marketCap > 0 &&
+    marketCap <
+      MICRO_MAX_INITIAL_MARKET_CAP_USD &&
+
+    liquidity > 0 &&
+    liquidity <
+      MICRO_MAX_INITIAL_LIQUIDITY_USD &&
+
+    sellImpact <=
+      MICRO_MAX_SELL_IMPACT_PERCENT &&
+
+    top1 <=
+      MICRO_MAX_TOP1_PERCENT &&
+
+    devHolding <=
+      MICRO_MAX_DEV_HOLDING_PERCENT
+  );
+}
+
+
+function getMicroBreakoutLabel(
+  elapsed: number,
+): string {
+  if (
+    elapsed <=
+    90 * 1000
+  ) {
+    return 'FAST • ~1M';
+  }
+
+  if (
+    elapsed <=
+    150 * 1000
+  ) {
+    return 'BREAKOUT • ~2M';
+  }
+
+  if (
+    elapsed <=
+    210 * 1000
+  ) {
+    return 'BREAKOUT • ~3M';
+  }
+
+  return 'BREAKOUT • ~5M';
+}
+
+function escapeHtml(
+  value: string,
+): string {
+  return value
+    .replace(
+      /&/g,
+      '&amp;',
+    )
+    .replace(
+      /</g,
+      '&lt;',
+    )
+    .replace(
+      />/g,
+      '&gt;',
+    );
+}
+
+
+function buildMicroBreakoutMessage(args: {
+  row: ObservationRow;
+
+  currentRoi: number;
+
+  currentPrice: number;
+
+  currentMarketCap: number;
+
+  currentLiquidity: number;
+
+  elapsed: number;
+
+  sellImpact:
+    number | null;
+
+  top1:
+    number | null;
+
+  devHolding:
+    number | null;
+}): string {
+  const symbol =
+  escapeHtml(
+    args.row.symbol ??
+    'UNKNOWN',
+  );
+
+  const ageSeconds =
+    Math.round(
+      args.elapsed /
+      1000,
+    );
+
+  return [
+    '🔥 <b>ALPHAOS • ROBINHOOD MICRO BREAKOUT</b>',
+    '',
+    `<b>${symbol}</b>`,
+    '',
+    `⚡ Trigger: <b>${getMicroBreakoutLabel(
+      args.elapsed,
+    )}</b>`,
+    `Momentum: <b>+${args.currentRoi.toFixed(
+      2,
+    )}%</b>`,
+    `Age from discovery: <b>${ageSeconds}s</b>`,
+    '',
+    '📊 <b>MARKET</b>',
+    `Current MC: <b>$${Math.round(
+      args.currentMarketCap,
+    ).toLocaleString()}</b>`,
+    `Current Liquidity: <b>$${Math.round(
+      args.currentLiquidity,
+    ).toLocaleString()}</b>`,
+    `Current Price: <code>${args.currentPrice}</code>`,
+    '',
+    '🛡 <b>LIVE SAFETY RECHECK</b>',
+    `Exit impact: <b>${
+      args.sellImpact == null
+        ? 'UNKNOWN'
+        : `${args.sellImpact.toFixed(
+            3,
+          )}%`
+    }</b>`,
+    `Top holder: <b>${
+      args.top1 == null
+        ? 'UNKNOWN'
+        : `${args.top1.toFixed(
+            2,
+          )}%`
+    }</b>`,
+    `Dev holding: <b>${
+      args.devHolding == null
+        ? 'UNKNOWN'
+        : `${args.devHolding.toFixed(
+            2,
+          )}%`
+    }</b>`,
+    '',
+    '🧠 Originally discovered as a clean micro launch.',
+    '<b>No Robinhood trade has been opened.</b>',
+    '',
+    `<code>${args.row.token_address}</code>`,
+  ].join(
+    '\n',
+  );
+}
+
+async function maybeSendMicroBreakout(args: {
+  row: ObservationRow;
+
+  currentRoi: number;
+
+  currentPrice: number;
+
+  currentMarketCap: number;
+
+  currentLiquidity: number;
+
+  elapsed: number;
+}): Promise<boolean> {
+  const {
+    row,
+    currentRoi,
+    currentPrice,
+    currentMarketCap,
+    currentLiquidity,
+    elapsed,
+  } = args;
+
+
+  if (
+    !isCleanMicroCandidate(
+      row,
+    )
+  ) {
+    return false;
+  }
+
+
+  if (
+    elapsed >
+    MICRO_BREAKOUT_MAX_AGE_MS
+  ) {
+    return false;
+  }
+
+
+  if (
+    currentRoi <
+    MICRO_BREAKOUT_ROI_PERCENT
+  ) {
+    return false;
+  }
+
+
+  console.log(
+    '[RobinhoodMicroBreakout] Trigger detected:',
+    {
+      symbol:
+        row.symbol,
+
+      token:
+        row.token_address,
+
+      roi:
+        Number(
+          currentRoi.toFixed(
+            2,
+          ),
+        ),
+
+      elapsedSeconds:
+        Math.round(
+          elapsed /
+          1000,
+        ),
+    },
+  );
+
+
+  /*
+   * LIVE SAFETY RECHECK
+   */
+
+  const [
+    sellability,
+    holderRisk,
+    devHolding,
+  ] =
+    await Promise.all([
+      scanPonsSellability(
+        row.token_address,
+      ),
+
+      scanRobinhoodHolderRisk(
+        row.token_address,
+        {
+          poolAddress:
+            row.pair_address ??
+            undefined,
+        },
+      ),
+
+      scanRobinhoodDevHolding(
+        row.token_address,
+      ),
+    ]);
+
+
+  if (
+    !sellability.sellable ||
+    sellability.status ===
+      'NO_QUOTE' ||
+    sellability.status ===
+      'UNSUPPORTED' ||
+    sellability.status ===
+      'ERROR'
+  ) {
+    console.log(
+      '[RobinhoodMicroBreakout] Blocked - sellability:',
+      {
+        token:
+          row.token_address,
+
+        status:
+          sellability.status,
+      },
+    );
+
+    return false;
+  }
+
+
+  if (
+    sellability
+      .estimatedImpactPercent !=
+      null &&
+    sellability
+      .estimatedImpactPercent >
+      MICRO_MAX_SELL_IMPACT_PERCENT
+  ) {
+    console.log(
+      '[RobinhoodMicroBreakout] Blocked - exit impact:',
+      {
+        token:
+          row.token_address,
+
+        impact:
+          sellability
+            .estimatedImpactPercent,
+      },
+    );
+
+    return false;
+  }
+
+
+  if (
+    holderRisk.top1Pct !=
+      null &&
+    holderRisk.top1Pct >
+      MICRO_MAX_TOP1_PERCENT
+  ) {
+    console.log(
+      '[RobinhoodMicroBreakout] Blocked - top holder:',
+      {
+        token:
+          row.token_address,
+
+        top1:
+          holderRisk.top1Pct,
+      },
+    );
+
+    return false;
+  }
+
+
+  if (
+    devHolding.holdingPercent !=
+      null &&
+    devHolding.holdingPercent >
+      MICRO_MAX_DEV_HOLDING_PERCENT
+  ) {
+    console.log(
+      '[RobinhoodMicroBreakout] Blocked - dev holding:',
+      {
+        token:
+          row.token_address,
+
+        devHolding:
+          devHolding
+            .holdingPercent,
+      },
+    );
+
+    return false;
+  }
+
+
+  /*
+   * FINAL DEV MOVEMENT CONFIRMATION
+   */
+
+  const devBefore =
+    await scanRobinhoodDevMovement(
+      row.token_address,
+    );
+
+
+  if (
+    devBefore.moved
+  ) {
+    console.log(
+      '[RobinhoodMicroBreakout] Blocked - dev already moved:',
+      row.token_address,
+    );
+
+    return false;
+  }
+
+
+  await sleep(
+    MICRO_DEV_CONFIRMATION_DELAY_MS,
+  );
+
+
+  const devAfter =
+    await scanRobinhoodDevMovement(
+      row.token_address,
+    );
+
+
+  if (
+    devAfter.moved
+  ) {
+    console.log(
+      '[RobinhoodMicroBreakout] Blocked - dev moved during confirmation:',
+      row.token_address,
+    );
+
+    return false;
+  }
+
+
+  const message =
+    buildMicroBreakoutMessage({
+      row,
+
+      currentRoi,
+
+      currentPrice,
+
+      currentMarketCap,
+
+      currentLiquidity,
+
+      elapsed,
+
+      sellImpact:
+        sellability
+          .estimatedImpactPercent,
+
+      top1:
+        holderRisk.top1Pct,
+
+      devHolding:
+        devHolding.holdingPercent,
+    });
+
+
+  /*
+   * Save first.
+   *
+   * This changes TRACK_ONLY → WATCH,
+   * preventing another MICRO alert on
+   * later tracker cycles.
+   */
+
+
+  const now =
+  new Date()
+    .toISOString();
+
+
+const {
+  data:
+    promotedRow,
+
+  error:
+    promoteError,
+} =
+  await supabase
+    .from(
+      'robinhood_observations',
+    )
+    .update({
+      decision:
+        'WATCH',
+
+      alerted_at:
+        now,
+
+      updated_at:
+        now,
+    })
+    .eq(
+      'id',
+      row.id,
+    )
+    .eq(
+      'decision',
+      'TRACK_ONLY',
+    )
+    .select(
+      'id',
+    )
+    .maybeSingle();
+
+
+if (
+  promoteError
+) {
+  console.error(
+    '[RobinhoodMicroBreakout] Promotion failed:',
+    {
+      token:
+        row.token_address,
+
+      error:
+        promoteError.message,
+    },
+  );
+
+  return false;
+}
+
+
+if (
+  !promotedRow
+) {
+  console.log(
+    '[RobinhoodMicroBreakout] Already claimed by another cycle:',
+    row.token_address,
+  );
+
+  return false;
+}
+
+
+  await sendTelegram(
+    config.adminTelegramId,
+    message,
+    [
+      [
+        {
+          text:
+            '📊 Chart',
+
+          url:
+            `https://dexscreener.com/robinhood/${row.token_address}`,
+        },
+
+        {
+          text:
+            '🔎 Explorer',
+
+          url:
+            `https://robinhoodchain.blockscout.com/token/${row.token_address}`,
+        },
+      ],
+    ],
+  );
+
+
+  console.log(
+    '[RobinhoodMicroBreakout] ALERT SENT:',
+    {
+      symbol:
+        row.symbol,
+
+      token:
+        row.token_address,
+
+      roi:
+        Number(
+          currentRoi.toFixed(
+            2,
+          ),
+        ),
+
+      trigger:
+        getMicroBreakoutLabel(
+          elapsed,
+        ),
+    },
+  );
+
+
+  return true;
+}
+
 async function updateObservation(
   row: ObservationRow,
 ): Promise<void> {
@@ -589,6 +1283,21 @@ if (
     ageMs(
       baselineTime,
     );
+
+  await maybeSendMicroBreakout({
+  row,
+
+  currentRoi,
+
+  currentPrice,
+
+  currentMarketCap,
+
+  currentLiquidity:
+    market.liquidityUsd,
+
+  elapsed,
+});
 
   const update:
   Record<
