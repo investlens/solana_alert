@@ -625,8 +625,7 @@ function isCleanMicroCandidate(
     );
 
   if (
-  row.holder_top1_percent == null ||
-  row.dev_holding_percent == null
+  row.holder_top1_percent == null
 ) {
   return false;
 }
@@ -639,9 +638,11 @@ const top1 =
 
 
 const devHolding =
-  Number(
-    row.dev_holding_percent,
-  );
+  row.dev_holding_percent == null
+    ? null
+    : Number(
+        row.dev_holding_percent,
+      );
 
   return (
     marketCap > 0 &&
@@ -658,8 +659,11 @@ const devHolding =
     top1 <=
       MICRO_MAX_TOP1_PERCENT &&
 
-    devHolding <=
-      MICRO_MAX_DEV_HOLDING_PERCENT
+    (
+      devHolding == null ||
+      devHolding <=
+        MICRO_MAX_DEV_HOLDING_PERCENT
+    )
   );
 }
 
@@ -977,25 +981,36 @@ async function maybeSendMicroBreakout(args: {
 
 
   if (
-    devHolding.holdingPercent !=
-      null &&
-    devHolding.holdingPercent >
-      MICRO_MAX_DEV_HOLDING_PERCENT
-  ) {
-    console.log(
-      '[RobinhoodMicroBreakout] Blocked - dev holding:',
-      {
-        token:
-          row.token_address,
+  devHolding.holdingPercent ==
+  null
+) {
+  console.log(
+    '[RobinhoodMicroBreakout] Blocked - dev holding unavailable:',
+    row.token_address,
+  );
 
-        devHolding:
-          devHolding
-            .holdingPercent,
-      },
-    );
+  return false;
+}
 
-    return false;
-  }
+
+if (
+  devHolding.holdingPercent >
+  MICRO_MAX_DEV_HOLDING_PERCENT
+) {
+  console.log(
+    '[RobinhoodMicroBreakout] Blocked - dev holding:',
+    {
+      token:
+        row.token_address,
+
+      devHolding:
+        devHolding
+          .holdingPercent,
+    },
+  );
+
+  return false;
+}
 
 
   /*

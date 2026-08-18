@@ -124,14 +124,14 @@ function evaluate(
 
 
   if (
-    c.devHolding == null ||
+    c.devHolding != null &&
     c.devHolding >
-      MAX_DEV
-  ) {
+        MAX_DEV
+    ) {
     reasons.push(
-      'Initial dev holding failed',
+        'Initial dev holding failed',
     );
-  }
+    }
 
 
   if (
@@ -164,6 +164,40 @@ function evaluate(
 
 
 const tests = [
+
+    {
+  name:
+    'Unknown initial dev but valid breakout',
+
+  candidate: {
+    decision:
+      'TRACK_ONLY',
+
+    source:
+      'ONCHAIN',
+
+    marketCap:
+      2534,
+
+    liquidity:
+      4419.49,
+
+    sellImpact:
+      0.118,
+
+    top1:
+      0,
+
+    devHolding:
+      null,
+
+    roi:
+      105.69,
+
+    ageSeconds:
+      60,
+  },
+},
   {
     name:
       'BROODZ-style 2m breakout',
@@ -410,8 +444,10 @@ for (
 
 
   const expectedTrigger =
-    test.name ===
-    'BROODZ-style 2m breakout';
+  test.name ===
+    'BROODZ-style 2m breakout' ||
+  test.name ===
+    'Unknown initial dev but valid breakout';
 
 
   if (
