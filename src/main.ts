@@ -1377,6 +1377,8 @@ async function main() {
   startOutcomeTracker();
   startAnalyticsSummary();
   startNotificationService();
+  startPonsShadowSniper();
+  startPonsShadowOutcomeTracker();
 
   // Restore active trades from Supabase BEFORE starting scanners
   await restoreOpenTrades();
@@ -1390,8 +1392,6 @@ async function main() {
       startRobinhoodObserver(),
       startRobinhoodOutcomeTracker(),
       startRobinhoodBoostObserver(),
-      startPonsShadowSniper(),
-      startPonsShadowOutcomeTracker(),
       startRobinhoodCreatorIntelligenceLoop(),
 
     
