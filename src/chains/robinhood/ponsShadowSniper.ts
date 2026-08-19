@@ -1,10 +1,16 @@
 import {
   parseAbiItem,
+  parseEther,
 } from 'viem';
 
 import {
   supabase,
 } from '../../services/supabase.js';
+
+import {
+  getPonsV2CurveState,
+  quotePonsV2Buy,
+} from './ponsV2CurveQuote.js';
 
 import {
   robinhoodPublicClient,
@@ -29,6 +35,15 @@ import {
 
 const PONS_SHADOW_INTERVAL_MS =
   1_000;
+
+const PONS_V2_SHADOW_BUY_ETH =
+  '0.01';
+
+
+const PONS_V2_SHADOW_BUY_RAW =
+  parseEther(
+    PONS_V2_SHADOW_BUY_ETH,
+  );
 
 
 /*
@@ -184,6 +199,19 @@ type SaveShadowLaunchArgs = {
 
   liquidity:
     number | null;
+
+    shadowInvestmentRaw:
+  bigint | null;
+
+shadowTokensBoughtRaw:
+  bigint | null;
+
+shadowEntryQuoteOutRaw:
+  bigint | null;
+
+shadowQuoteAsset:
+  string | null;
+
 };
 
 
@@ -211,6 +239,30 @@ async function saveShadowLaunch(
             normalize(
               args.tokenAddress,
             ),
+
+            shadow_investment_raw:
+                args.shadowInvestmentRaw ==
+                null
+                    ? null
+                    : args.shadowInvestmentRaw
+                        .toString(),
+
+                shadow_tokens_bought_raw:
+                args.shadowTokensBoughtRaw ==
+                null
+                    ? null
+                    : args.shadowTokensBoughtRaw
+                        .toString(),
+
+                shadow_entry_quote_out_raw:
+                args.shadowEntryQuoteOutRaw ==
+                null
+                    ? null
+                    : args.shadowEntryQuoteOutRaw
+                        .toString(),
+
+                shadow_quote_asset:
+                args.shadowQuoteAsset,
 
           launch_version:
             args.launchVersion,
@@ -668,6 +720,18 @@ async function processPonsV1Launch(args: {
       market
         ?.liquidityUsd ??
       null,
+
+      shadowInvestmentRaw:
+        null, 
+
+        shadowTokensBoughtRaw:
+        null,
+
+        shadowEntryQuoteOutRaw:
+        null,
+
+        shadowQuoteAsset:
+        null,
   });
 }
 
@@ -715,30 +779,223 @@ async function processPonsV2Launch(args: {
     number;
 }): Promise<void> {
   const gateStartedAt =
-
-  
     Date.now();
 
 
   /*
-   * For the first V2 shadow version we
-   * intentionally keep the gate extremely
-   * small.
+   * IMPORTANT:
    *
-   * We already know:
+   * The theoretical entry timestamp is
+   * taken immediately.
    *
-   * 1. the event came from the proven
-   *    PONS V2 live emitter
-   *
-   * 2. the event supplied the real curve
-   *    and deployer
-   *
-   * We therefore record the launch first
-   * and learn from it rather than waiting
-   * for V1-specific scanners.
+   * Nothing below is allowed to delay
+   * wouldBuyAt.
    */
+  const wouldBuyAt =
+    Date.now();
 
 
+  const detectionToGateMs =
+    wouldBuyAt -
+    args.detectedAt;
+
+
+  let shadowInvestmentRaw:
+    bigint | null =
+    null;
+
+
+  let shadowTokensBoughtRaw:
+    bigint | null =
+    null;
+
+
+  let shadowEntryQuoteOutRaw:
+    bigint | null =
+    null;
+
+
+  let shadowQuoteAsset:
+    string | null =
+    args.pairTokenAddress;
+
+
+  /*
+   * ===================================================
+   * PONS V2 DIRECT CURVE SHADOW BUY
+   * ===================================================
+   *
+   * For now AlphaOS only simulates launches
+   * using native ETH as their quote asset.
+   *
+   * ERC-20 quoted curves are still recorded,
+   * but no theoretical buy is assigned yet.
+   */
+  if (
+    args.curveAddress
+  ) {
+    try {
+      const curveState =
+        await getPonsV2CurveState(
+          args.curveAddress,
+        );
+
+
+      shadowQuoteAsset =
+        curveState.pairToken;
+
+
+      /*
+       * Protect against an event/curve mismatch.
+       */
+      if (
+        curveState.tokenAddress
+          .toLowerCase() !==
+        args.tokenAddress
+          .toLowerCase()
+      ) {
+        console.error(
+          '[PonsShadowSniper][V2] Curve token mismatch:',
+          {
+            eventToken:
+              args.tokenAddress,
+
+            curveToken:
+              curveState.tokenAddress,
+
+            curve:
+              args.curveAddress,
+          },
+        );
+      } else if (
+        curveState.nativeQuote &&
+        !curveState.graduated
+      ) {
+        const buyQuote =
+          quotePonsV2Buy({
+            state:
+              curveState,
+
+            quoteInRaw:
+              PONS_V2_SHADOW_BUY_RAW,
+          });
+
+
+        shadowInvestmentRaw =
+          buyQuote.actuallySpentRaw;
+
+
+        shadowTokensBoughtRaw =
+          buyQuote.tokensOutRaw;
+
+
+        /*
+         * We deliberately leave
+         * shadowEntryQuoteOutRaw null here.
+         *
+         * That column can later hold the
+         * immediately executable SELL value
+         * after modelling the post-buy state.
+         *
+         * The important production fields for
+         * checkpoint tracking are:
+         *
+         * investment amount
+         * +
+         * exact tokens theoretically bought
+         */
+        shadowEntryQuoteOutRaw =
+          null;
+
+
+        console.log(
+          '[PonsShadowSniper][V2] 🎯 SHADOW BUY QUOTED:',
+          {
+            token:
+              args.tokenAddress,
+
+            curve:
+              args.curveAddress,
+
+            investmentEth:
+              PONS_V2_SHADOW_BUY_ETH,
+
+            investmentRaw:
+              shadowInvestmentRaw
+                .toString(),
+
+            tokensOutRaw:
+              shadowTokensBoughtRaw
+                .toString(),
+
+            feeBps:
+              curveState.feeBps
+                .toString(),
+
+            creatorTaxBps:
+              curveState.creatorTaxBps
+                .toString(),
+
+            partialFill:
+              buyQuote.partialFill,
+          },
+        );
+      } else {
+        console.log(
+          '[PonsShadowSniper][V2] Shadow buy skipped:',
+          {
+            token:
+              args.tokenAddress,
+
+            curve:
+              args.curveAddress,
+
+            nativeQuote:
+              curveState.nativeQuote,
+
+            pairToken:
+              curveState.pairToken,
+
+            graduated:
+              curveState.graduated,
+          },
+        );
+      }
+    } catch (error) {
+      /*
+       * SHADOW MODE:
+       *
+       * Curve quote failure must NOT cause us
+       * to lose the launch record.
+       */
+      console.error(
+        '[PonsShadowSniper][V2] Curve quote failed:',
+        {
+          token:
+            args.tokenAddress,
+
+          curve:
+            args.curveAddress,
+
+          error:
+            error instanceof Error
+              ? error.message
+              : String(
+                  error,
+                ),
+        },
+      );
+    }
+  }
+
+
+  /*
+   * Market lookup remains secondary.
+   *
+   * It is useful for comparison with
+   * DexScreener/indexed data but is no
+   * longer our PONS V2 entry source.
+   */
   let market:
     Awaited<
       ReturnType<
@@ -746,14 +1003,6 @@ async function processPonsV2Launch(args: {
       >
     > | null =
     null;
-
-const wouldBuyAt =
-  Date.now();
-
-
-const detectionToGateMs =
-  wouldBuyAt -
-  args.detectedAt;
 
 
   const marketStartedAt =
@@ -766,15 +1015,6 @@ const detectionToGateMs =
         args.tokenAddress,
       );
   } catch {
-    /*
-     * Totally acceptable for V2 launch.
-     *
-     * Dex/indexer market data may not exist
-     * yet at the exact launch moment.
-     *
-     * Outcome tracker can establish the
-     * first later entry reference.
-     */
     market =
       null;
   }
@@ -800,6 +1040,20 @@ const detectionToGateMs =
       pairToken:
         args.pairTokenAddress,
 
+      shadowBuyReady:
+        shadowTokensBoughtRaw !=
+        null,
+
+      shadowInvestmentRaw:
+        shadowInvestmentRaw
+          ?.toString() ??
+        null,
+
+      shadowTokensBoughtRaw:
+        shadowTokensBoughtRaw
+          ?.toString() ??
+        null,
+
       marketAvailable:
         Boolean(
           market?.priceUsd,
@@ -821,9 +1075,6 @@ const detectionToGateMs =
     tokenAddress:
       args.tokenAddress,
 
-    /*
-     * V2 has no V1 Uniswap pool at launch.
-     */
     poolAddress:
       null,
 
@@ -861,12 +1112,6 @@ const detectionToGateMs =
 
     detectionToGateMs,
 
-    /*
-     * V2 dev tracking will be added using
-     * the V2-native balance/curve path.
-     *
-     * Do not fake this with the V1 scanner.
-     */
     devHoldingPercent:
       null,
 
@@ -878,14 +1123,20 @@ const detectionToGateMs =
       null,
 
     marketCap:
-      market
-        ?.marketCapUsd ??
+      market?.marketCapUsd ??
       null,
 
     liquidity:
-      market
-        ?.liquidityUsd ??
+      market?.liquidityUsd ??
       null,
+
+    shadowInvestmentRaw,
+
+    shadowTokensBoughtRaw,
+
+    shadowEntryQuoteOutRaw,
+
+    shadowQuoteAsset,
   });
 }
 

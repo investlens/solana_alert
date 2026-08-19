@@ -10,6 +10,11 @@ import {
   scanRobinhoodDevHolding,
 } from './security/devHoldingScanner.js';
 
+import {
+  getPonsV2CurveState,
+  quotePonsV2Sell,
+} from './ponsV2CurveQuote.js';
+
 
 const TRACKER_INTERVAL_MS =
   1_000;
@@ -47,6 +52,21 @@ type ShadowRow = {
   id: string;
 
   token_address: string;
+
+  launch_version:
+    string | null;
+
+  curve_address:
+    string | null;
+
+  shadow_investment_raw:
+    string | null;
+
+  shadow_tokens_bought_raw:
+    string | null;
+
+  shadow_quote_asset:
+    string | null;
 
   deployer_address:
     string | null;
@@ -868,10 +888,264 @@ async function maybeCheckDevMovement(args: {
 }
 
 
+
 async function updateShadowRow(
   row:
     ShadowRow,
 ): Promise<void> {
+
+  if (
+    row.launch_version ===
+      'V2' &&
+    row.curve_address &&
+    row.shadow_investment_raw &&
+    row.shadow_tokens_bought_raw
+  ) {
+    const entryTimestamp =
+      row.would_buy_at ??
+      row.detected_at;
+
+    const entryTime =
+      new Date(
+        entryTimestamp,
+      ).getTime();
+
+    if (
+      !Number.isFinite(
+        entryTime,
+      )
+    ) {
+      return;
+    }
+
+    const elapsedMs =
+      Date.now() -
+      entryTime;
+
+    let investmentRaw:
+      bigint;
+
+    let tokensBoughtRaw:
+      bigint;
+
+    try {
+      investmentRaw =
+        BigInt(
+          row.shadow_investment_raw,
+        );
+
+      tokensBoughtRaw =
+        BigInt(
+          row.shadow_tokens_bought_raw,
+        );
+    } catch {
+      return;
+    }
+
+    if (
+      investmentRaw <=
+        0n ||
+      tokensBoughtRaw <=
+        0n
+    ) {
+      return;
+    }
+
+    try {
+      const curveState =
+        await getPonsV2CurveState(
+          row.curve_address,
+        );
+
+      if (
+        !curveState.nativeQuote
+      ) {
+        return;
+      }
+
+      if (
+        curveState.graduated
+      ) {
+        return;
+      }
+
+      const sellQuote =
+        quotePonsV2Sell({
+          state:
+            curveState,
+
+          tokensInRaw:
+            tokensBoughtRaw,
+        });
+
+      const recoveredRaw =
+        sellQuote.quoteOutRaw;
+
+      const currentRoi =
+        (
+          Number(
+            recoveredRaw,
+          ) /
+          Number(
+            investmentRaw,
+          ) -
+          1
+        ) *
+        100;
+
+      const currentPrice =
+        Number(
+          recoveredRaw,
+        ) /
+        1e18;
+
+      if (
+        !Number.isFinite(
+          currentPrice,
+        ) ||
+        !Number.isFinite(
+          currentRoi,
+        )
+      ) {
+        return;
+      }
+
+      const nowIso =
+        new Date()
+          .toISOString();
+
+      const updates:
+        ShadowUpdate = {
+          updated_at:
+            nowIso,
+        };
+
+      addPeakUpdates({
+        row,
+        currentPrice,
+        currentRoi,
+        updates,
+      });
+
+      addCheckpointUpdates({
+        row,
+        elapsedMs,
+        currentPrice,
+        currentRoi,
+        updates,
+      });
+
+      addTakeProfitUpdates({
+        row,
+        currentRoi,
+        nowIso,
+        updates,
+      });
+
+      try {
+        await maybeCheckDevMovement({
+          row,
+          currentRoi,
+          updates,
+        });
+      } catch {
+        // best effort only
+      }
+
+      if (
+        elapsedMs >=
+        300_000
+      ) {
+        updates.shadow_status =
+          'COMPLETE';
+      }
+
+      const {
+        error,
+      } =
+        await supabase
+          .from(
+            'pons_shadow_trades',
+          )
+          .update(
+            updates,
+          )
+          .eq(
+            'id',
+            row.id,
+          );
+
+      if (
+        error
+      ) {
+        console.error(
+          '[PonsShadowTracker][V2] Update failed:',
+          {
+            token:
+              row.token_address,
+
+            error:
+              error.message,
+          },
+        );
+
+        return;
+      }
+
+      console.log(
+        '[PonsShadowTracker][V2] Curve ROI:',
+        {
+          token:
+            row.token_address,
+
+          elapsedSec:
+            Math.floor(
+              elapsedMs /
+              1000,
+            ),
+
+          exitValueEth:
+            currentPrice,
+
+          roi:
+            Number(
+              currentRoi.toFixed(
+                2,
+              ),
+            ),
+        },
+      );
+
+      if (
+        elapsedMs >=
+        300_000
+      ) {
+        lastDevCheckAt.delete(
+          row.token_address,
+        );
+      }
+
+      return;
+    } catch (error) {
+      console.log(
+        '[PonsShadowTracker][V2] Curve valuation failed:',
+        {
+          token:
+            row.token_address,
+
+          error:
+            error instanceof Error
+              ? error.message
+              : String(
+                  error,
+                ),
+        },
+      );
+
+      return;
+    }
+  }
+
   const entryPrice =
     Number(
       row.entry_price,
@@ -1280,6 +1554,11 @@ Promise<void> {
           `
             id,
             token_address,
+            launch_version,
+            curve_address,
+            shadow_investment_raw,
+            shadow_tokens_bought_raw,
+            shadow_quote_asset,
             deployer_address,
             detected_at,
             would_buy_at,
