@@ -1377,8 +1377,20 @@ async function main() {
   startOutcomeTracker();
   startAnalyticsSummary();
   startNotificationService();
+
+  console.log(
+    '🔥🔥🔥 PONS SHADOW STARTUP ENTERED 🔥🔥🔥',
+  );
+
   startPonsShadowSniper();
   startPonsShadowOutcomeTracker();
+
+  console.log(
+    '🔥🔥🔥 PONS SHADOW STARTUP COMPLETED 🔥🔥🔥',
+  );
+
+  // Restore active trades from Supabase BEFORE starting scanners
+  await restoreOpenTrades();
 
   // Restore active trades from Supabase BEFORE starting scanners
   await restoreOpenTrades();
