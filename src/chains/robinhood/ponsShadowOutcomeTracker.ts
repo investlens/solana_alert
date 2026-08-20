@@ -10,6 +10,11 @@ import {
   scanRobinhoodDevHolding,
 } from './security/devHoldingScanner.js';
 
+
+import {
+  classifyPonsAlpha,
+} from './ponsAlphaClassifier.js';
+
 import {
   getPonsV2CurveState,
   quotePonsV2Sell,
@@ -1091,6 +1096,99 @@ async function updateShadowRow(
 
         return;
       }
+
+      const alphaClassification =
+        classifyPonsAlpha({
+          elapsedSec:
+            elapsedMs /
+            1000,
+
+          currentRoi,
+
+          roi5s:
+            row.roi_5s_percent,
+
+          roi10s:
+            row.roi_10s_percent,
+
+          roi30s:
+            row.roi_30s_percent,
+
+          roi1m:
+            row.roi_1m_percent,
+
+          roi2m:
+            row.roi_2m_percent,
+
+          peakRoi:
+            validNumber(
+              row.peak_roi_percent,
+            )
+              ? row.peak_roi_percent
+              : null,
+        });
+
+
+      console.log(
+        '[PonsAlpha]',
+        {
+          token:
+            row.token_address,
+
+          elapsedSec:
+            Math.floor(
+              elapsedMs /
+              1000,
+            ),
+
+          state:
+            alphaClassification.state,
+
+          strength:
+            alphaClassification.strength,
+
+          actionable:
+            alphaClassification.actionable,
+
+          roi:
+            Number(
+              currentRoi.toFixed(
+                2,
+              ),
+            ),
+
+          change:
+            alphaClassification.roiChange == null
+              ? null
+              : Number(
+                  alphaClassification.roiChange.toFixed(
+                    2,
+                  ),
+                ),
+
+          peak:
+            alphaClassification.recentPeakRoi == null
+              ? null
+              : Number(
+                  alphaClassification.recentPeakRoi.toFixed(
+                    2,
+                  ),
+                ),
+
+          dropFromPeak:
+            alphaClassification.dropFromPeak == null
+              ? null
+              : Number(
+                  alphaClassification.dropFromPeak.toFixed(
+                    2,
+                  ),
+                ),
+
+          reason:
+            alphaClassification.reason,
+        },
+      );
+
 
       console.log(
         '[PonsShadowTracker][V2] Curve ROI:',
