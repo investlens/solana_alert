@@ -21,7 +21,7 @@ const TRACKER_INTERVAL_MS =
 
 
 const MAX_ROWS_PER_CYCLE =
-  100;
+  25;
 
 
 /*
@@ -1595,19 +1595,29 @@ Promise<void> {
           `,
         )
         .eq(
-          'shadow_status',
-          'TRACKING',
-        )
-        .order(
-          'detected_at',
-          {
-            ascending:
-              false,
-          },
-        )
-        .limit(
-          MAX_ROWS_PER_CYCLE,
-        );
+            'shadow_status',
+            'TRACKING',
+            )
+            .not(
+            'shadow_tokens_bought_raw',
+            'is',
+            null,
+            )
+            .not(
+            'curve_address',
+            'is',
+            null,
+            )
+            .order(
+            'detected_at',
+            {
+                ascending:
+                false,
+            },
+            )
+            .limit(
+            MAX_ROWS_PER_CYCLE,
+            );
 
 
     if (
