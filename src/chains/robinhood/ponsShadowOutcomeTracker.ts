@@ -206,6 +206,12 @@ const lastDevCheckAt =
     number
   >();
 
+const lastPonsAlphaState =
+  new Map<
+    string,
+    string
+  >();
+
 
 function calculateRoi(
   entryPrice:
@@ -1129,65 +1135,53 @@ async function updateShadowRow(
         });
 
 
-      console.log(
-        '[PonsAlpha]',
-        {
-          token:
+      const previousAlphaState =
+        lastPonsAlphaState.get(
             row.token_address,
+        );
 
-          elapsedSec:
+        if (
+        previousAlphaState !==
+        alphaClassification.state
+        ) {
+        console.log(
+            `[PonsAlpha] state=${
+            alphaClassification.state
+            } token=${
+            row.token_address
+            } elapsed=${
             Math.floor(
-              elapsedMs /
-              1000,
-            ),
-
-          state:
-            alphaClassification.state,
-
-          strength:
-            alphaClassification.strength,
-
-          actionable:
-            alphaClassification.actionable,
-
-          roi:
-            Number(
-              currentRoi.toFixed(
+                elapsedMs /
+                1000,
+            )
+            }s roi=${
+            currentRoi.toFixed(
                 2,
-              ),
-            ),
-
-          change:
+            )
+            }% change=${
             alphaClassification.roiChange == null
-              ? null
-              : Number(
-                  alphaClassification.roiChange.toFixed(
+                ? 'n/a'
+                : `${alphaClassification.roiChange.toFixed(
                     2,
-                  ),
-                ),
-
-          peak:
+                )}%`
+            } peak=${
             alphaClassification.recentPeakRoi == null
-              ? null
-              : Number(
-                  alphaClassification.recentPeakRoi.toFixed(
+                ? 'n/a'
+                : `${alphaClassification.recentPeakRoi.toFixed(
                     2,
-                  ),
-                ),
+                )}%`
+            } actionable=${
+            alphaClassification.actionable
+            } reason="${
+            alphaClassification.reason
+            }"`,
+        );
 
-          dropFromPeak:
-            alphaClassification.dropFromPeak == null
-              ? null
-              : Number(
-                  alphaClassification.dropFromPeak.toFixed(
-                    2,
-                  ),
-                ),
-
-          reason:
-            alphaClassification.reason,
-        },
-      );
+        lastPonsAlphaState.set(
+            row.token_address,
+            alphaClassification.state,
+        );
+        }
 
 
       console.log(
@@ -1217,11 +1211,15 @@ async function updateShadowRow(
       if (
         elapsedMs >=
         300_000
-      ) {
+        ) {
         lastDevCheckAt.delete(
-          row.token_address,
+            row.token_address,
         );
-      }
+
+        lastPonsAlphaState.delete(
+            row.token_address,
+        );
+        }
 
       return;
     } catch (error) {
