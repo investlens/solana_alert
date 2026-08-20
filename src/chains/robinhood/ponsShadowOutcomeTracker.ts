@@ -171,6 +171,21 @@ type ShadowRow = {
 
   updated_at:
     string | null;
+
+  alpha_state:
+    string | null;
+
+  alpha_state_changed_at:
+    string | null;
+
+  alpha_entry_alert_sent:
+    boolean | null;
+
+  alpha_breakout_alert_sent:
+    boolean | null;
+
+  alpha_exit_alert_sent:
+    boolean | null;
 };
 
 
@@ -205,13 +220,6 @@ const lastDevCheckAt =
     string,
     number
   >();
-
-const lastPonsAlphaState =
-  new Map<
-    string,
-    string
-  >();
-
 
 function calculateRoi(
   entryPrice:
@@ -1135,53 +1143,111 @@ async function updateShadowRow(
         });
 
 
-      const previousAlphaState =
-        lastPonsAlphaState.get(
-            row.token_address,
-        );
+      /*
+       * ==================================================
+       * PERSISTED ALPHA STATE
+       * ==================================================
+       *
+       * Supabase is the source of truth.
+       *
+       * This prevents duplicate state events after:
+       * - Railway restart
+       * - redeploy
+       * - multiple workers evaluating the same token
+       */
+      if (
+        row.alpha_state !==
+        alphaClassification.state
+      ) {
+        const alphaChangedAt =
+          new Date()
+            .toISOString();
+
+        const {
+          data:
+            alphaTransitionRows,
+          error:
+            alphaTransitionError,
+        } =
+          await supabase
+            .from(
+              'pons_shadow_trades',
+            )
+            .update({
+              alpha_state:
+                alphaClassification.state,
+
+              alpha_state_changed_at:
+                alphaChangedAt,
+            })
+            .eq(
+              'id',
+              row.id,
+            )
+            .or(
+              `alpha_state.is.null,alpha_state.neq.${alphaClassification.state}`,
+            )
+            .select(
+              'id',
+            );
 
         if (
-        previousAlphaState !==
-        alphaClassification.state
+          alphaTransitionError
         ) {
-        console.log(
+          console.error(
+            '[PonsAlpha] State persistence failed:',
+            {
+              token:
+                row.token_address,
+
+              state:
+                alphaClassification.state,
+
+              error:
+                alphaTransitionError.message,
+            },
+          );
+        } else if (
+          alphaTransitionRows &&
+          alphaTransitionRows.length >
+            0
+        ) {
+          console.log(
             `[PonsAlpha] state=${
-            alphaClassification.state
+              alphaClassification.state
             } token=${
-            row.token_address
+              row.token_address
             } elapsed=${
-            Math.floor(
+              Math.floor(
                 elapsedMs /
                 1000,
-            )
+              )
             }s roi=${
-            currentRoi.toFixed(
+              currentRoi.toFixed(
                 2,
-            )
+              )
             }% change=${
-            alphaClassification.roiChange == null
+              alphaClassification.roiChange ==
+              null
                 ? 'n/a'
                 : `${alphaClassification.roiChange.toFixed(
                     2,
-                )}%`
+                  )}%`
             } peak=${
-            alphaClassification.recentPeakRoi == null
+              alphaClassification.recentPeakRoi ==
+              null
                 ? 'n/a'
                 : `${alphaClassification.recentPeakRoi.toFixed(
                     2,
-                )}%`
+                  )}%`
             } actionable=${
-            alphaClassification.actionable
+              alphaClassification.actionable
             } reason="${
-            alphaClassification.reason
+              alphaClassification.reason
             }"`,
-        );
-
-        lastPonsAlphaState.set(
-            row.token_address,
-            alphaClassification.state,
-        );
+          );
         }
+      }
 
 
       console.log(
@@ -1216,9 +1282,6 @@ async function updateShadowRow(
             row.token_address,
         );
 
-        lastPonsAlphaState.delete(
-            row.token_address,
-        );
         }
 
       return;
@@ -1687,7 +1750,12 @@ Promise<void> {
             tp_500_hit_at,
             tp_1000_hit_at,
             shadow_status,
-            updated_at
+            updated_at,
+            alpha_state,
+            alpha_state_changed_at,
+            alpha_entry_alert_sent,
+            alpha_breakout_alert_sent,
+            alpha_exit_alert_sent
           `,
         )
         .eq(

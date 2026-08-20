@@ -275,8 +275,8 @@ export function classifyPonsAlpha(
   if (
     dropFromPeak != null &&
     recentPeakRoi != null &&
-    recentPeakRoi >= 10 &&
-    dropFromPeak <= -8
+    recentPeakRoi >= 5 &&
+    dropFromPeak <= -10
   ) {
     return {
       state:
