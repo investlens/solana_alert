@@ -15,6 +15,11 @@ import {
   classifyPonsAlpha,
 } from './ponsAlphaClassifier.js';
 
+
+import {
+  broadcastPonsAlphaAlert,
+} from './ponsAlphaTelegram.js';
+
 import {
   getPonsV2CurveState,
   quotePonsV2Sell,
@@ -1246,6 +1251,88 @@ async function updateShadowRow(
               alphaClassification.reason
             }"`,
           );
+                    /*
+           * USER ALERTS — PHASE 1
+           *
+           * Only actionable states are
+           * broadcast. Everything else stays
+           * internal.
+           */
+          if (
+            alphaClassification.state ===
+              'ENTRY_WINDOW' ||
+            alphaClassification.state ===
+              'FAST_BREAKOUT'
+          ) {
+            const alertFlag =
+              alphaClassification.state ===
+              'ENTRY_WINDOW'
+                ? 'alpha_entry_alert_sent'
+                : 'alpha_breakout_alert_sent';
+
+            const alreadySent =
+              alphaClassification.state ===
+              'ENTRY_WINDOW'
+                ? row.alpha_entry_alert_sent
+                : row.alpha_breakout_alert_sent;
+
+            if (!alreadySent) {
+              const {
+                data:
+                  reservedAlert,
+                error:
+                  reserveError,
+              } =
+                await supabase
+                  .from(
+                    'pons_shadow_trades',
+                  )
+                  .update({
+                    [alertFlag]:
+                      true,
+                  })
+                  .eq(
+                    'id',
+                    row.id,
+                  )
+                  .eq(
+                    alertFlag,
+                    false,
+                  )
+                  .select(
+                    'id',
+                  );
+
+              if (
+                !reserveError &&
+                reservedAlert &&
+                reservedAlert.length > 0
+              ) {
+                await broadcastPonsAlphaAlert({
+                  state:
+                    alphaClassification.state,
+
+                  token:
+                    row.token_address,
+
+                  roi:
+                    currentRoi,
+
+                  change:
+                    alphaClassification.roiChange,
+
+                  elapsedSec:
+                    Math.floor(
+                      elapsedMs /
+                        1000,
+                    ),
+
+                  reason:
+                    alphaClassification.reason,
+                });
+              }
+            }
+          }
         }
       }
 
