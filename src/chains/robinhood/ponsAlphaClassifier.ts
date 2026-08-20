@@ -242,7 +242,12 @@ export function classifyPonsAlpha(
    * +25.55% @ 30s
    */
   if (
-    currentRoi >= 50
+    currentRoi >= 35 ||
+    (
+      recentPeakRoi != null &&
+      recentPeakRoi >= 45 &&
+      currentRoi >= 20
+    )
   ) {
     return {
       state:
@@ -458,6 +463,8 @@ export function classifyPonsAlpha(
    * too early.
    */
   if (
+    input.elapsedSec <= 120 &&
+    currentRoi > -15 &&
     currentRoi <= 0 &&
     roiChange != null &&
     roiChange >= 2
@@ -484,6 +491,49 @@ export function classifyPonsAlpha(
       dropFromPeak,
     };
   }
+
+  /*
+ * ===================================================
+ * FAILED / STALE NEGATIVE SETUP
+ * ===================================================
+ *
+ * Once a token is old and meaningfully underwater,
+ * we no longer keep it in WATCHING.
+ */
+if (
+  (
+    input.elapsedSec >= 120 &&
+    currentRoi <= -10
+  ) ||
+  (
+    input.elapsedSec >= 180 &&
+    currentRoi <= 0
+  )
+) {
+  return {
+    state:
+      'FLAT_DEAD',
+
+    reason:
+      `Setup expired at ${currentRoi.toFixed(
+        2,
+      )}% after ${Math.floor(
+        input.elapsedSec,
+      )}s.`,
+
+    actionable:
+      false,
+
+    strength:
+      'NONE',
+
+    currentRoi,
+    previousRoi,
+    roiChange,
+    recentPeakRoi,
+    dropFromPeak,
+  };
+}
 
   /*
    * ===================================================
