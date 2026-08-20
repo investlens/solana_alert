@@ -21,7 +21,7 @@ const TRACKER_INTERVAL_MS =
 
 
 const MAX_ROWS_PER_CYCLE =
-  50;
+  100;
 
 
 /*
@@ -1602,7 +1602,7 @@ Promise<void> {
           'detected_at',
           {
             ascending:
-              true,
+              false,
           },
         )
         .limit(
