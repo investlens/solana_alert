@@ -95,21 +95,82 @@ import { sleep } from './utils/format.js';
 const tokenStates = new Map<string, TokenState>();
 const seenTokens = new Set<string>();
 
-function getAlertButtons(pair: {
-  url?: string | null;
-  baseToken?: { address?: string } | null;
-}) {
-  const chartUrl = pair.url ?? 'https://dexscreener.com';
-  const buyUrl = pair.baseToken?.address
-    ? `https://jup.ag/swap/SOL-${pair.baseToken.address}`
-    : 'https://jup.ag';
+function getAlertButtons(
+  pair: {
+    url?: string | null;
+    baseToken?: {
+      address?: string;
+    } | null;
+  },
+  options?: {
+    isAdmin?: boolean;
+  },
+) {
+  const token =
+    pair.baseToken?.address ??
+    null;
 
-  return [
-    [
-      { text: '📈 Chart', url: chartUrl },
-      { text: '🟢 Buy on Jupiter', url: buyUrl },
-    ],
-  ];
+  const chartUrl =
+    pair.url ??
+    'https://dexscreener.com';
+
+  const buyUrl =
+    token
+      ? `https://jup.ag/swap/SOL-${token}`
+      : 'https://jup.ag';
+
+  const rows: any[][] = [];
+
+  /*
+   * ADMIN ACTION ROW
+   *
+   * These callback names already exist
+   * in bot/commands.ts.
+   */
+  if (
+    options?.isAdmin &&
+    token
+  ) {
+    rows.push([
+      {
+        text: '⚡ Buy Small',
+        callback_data:
+          `ADMIN_BUY_SMALL_${token}`,
+      },
+      {
+        text: '🔥 Buy Now',
+        callback_data:
+          `ADMIN_BUY_DEFAULT_${token}`,
+      },
+    ]);
+  }
+
+  /*
+   * PUBLIC ACTION ROW
+   *
+   * Until per-user wallets are connected,
+   * BUY opens the external trading route.
+   */
+  rows.push([
+    {
+      text: '📈 Live Chart',
+      url: chartUrl,
+    },
+    {
+      text: '🟢 Trade',
+      url: buyUrl,
+    },
+  ]);
+
+  /*
+   * Fast contract access.
+   *
+   * COPY_CA callback currently only
+   * supports EVM 0x addresses, so do not
+   * use it for Solana yet.
+   */
+
+  return rows;
 }
 
 async function safeSendTelegram(
@@ -711,7 +772,21 @@ async function processTierDispatch() {
             currentPrice: result.currentPrice,
         });
         }
-      const buttons = getAlertButtons(pair);
+      const publicButtons =
+        getAlertButtons(
+          pair,
+          {
+            isAdmin: false,
+          },
+        );
+
+      const adminButtons =
+        getAlertButtons(
+          pair,
+          {
+            isAdmin: true,
+          },
+        );
       const bucket = getActionBucket(result);
 
       if (
@@ -1055,7 +1130,7 @@ async function processTierDispatch() {
       const delivered = await safeSendTelegram(
         telegramId,
         alphaMessage,
-        buttons,
+        adminButtons,
       );
 
       if (delivered) {
@@ -1105,10 +1180,10 @@ async function processTierDispatch() {
         }
 
         await safeSendTelegram(
-          telegramId,
-          alphaMessage,
-          buttons,
-        );
+            telegramId,
+            alphaMessage,
+            publicButtons,
+          );
           if (state.alertId) {
             await createAlertDelivery({
               alertId: state.alertId,
@@ -1145,8 +1220,14 @@ async function processTierDispatch() {
 
             await safeSendTelegram(
               telegramId,
-              buildMessage({ tier: 'FREE', pair, result, state, freeTrialInfo }),
-              buttons
+              buildMessage({
+                tier: 'FREE',
+                pair,
+                result,
+                state,
+                freeTrialInfo,
+              }),
+              publicButtons,
             );
 
             if (state.alertId) {
