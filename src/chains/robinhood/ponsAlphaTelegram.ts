@@ -18,36 +18,63 @@ function buildMessage(args: {
   elapsedSec: number;
   reason: string;
 }): string {
-  const title =
-    args.state === 'ENTRY_WINDOW'
-      ? '⚡ ALPHAOS · PONS ENTRY WINDOW'
-      : '🔥 ALPHAOS · PONS FAST BREAKOUT';
+  const isEntry =
+    args.state === 'ENTRY_WINDOW';
 
-  const action =
-    args.state === 'ENTRY_WINDOW'
-      ? 'MANUAL ENTRY SETUP'
-      : 'STRONG MOMENTUM · VERIFY BEFORE ENTRY';
+  const title =
+    isEntry
+      ? '⚡ ALPHAOS · ENTRY WINDOW'
+      : '🔥 ALPHAOS · FAST BREAKOUT';
+
+  const decision =
+    isEntry
+      ? '🟢 ACTION: CHECK & BUY'
+      : '🟠 ACTION: VERIFY · DO NOT CHASE';
+
+  const instruction =
+    isEntry
+      ? 'Momentum confirmation detected. Check the live token now. If the move is still intact, this is the manual entry window.'
+      : 'Strong breakout detected. Price may already be moving fast. Check the live token before entering. Skip if extended.';
 
   return [
     title,
     '',
-    `<b>${action}</b>`,
+    `<b>${decision}</b>`,
     '',
-    `ROI: <b>${args.roi >= 0 ? '+' : ''}${args.roi.toFixed(2)}%</b>`,
-    `Momentum: <b>${
+    instruction,
+    '',
+    `ROI NOW     <b>${args.roi >= 0 ? '+' : ''}${args.roi.toFixed(2)}%</b>`,
+    `MOMENTUM    <b>${
       args.change == null
         ? 'N/A'
         : `${args.change >= 0 ? '+' : ''}${args.change.toFixed(2)}%`
     }</b>`,
-    `Age: <b>${args.elapsedSec}s</b>`,
+    `AGE         <b>${args.elapsedSec}s</b>`,
     '',
-    `Token:`,
+    'TOKEN',
     `<code>${args.token}</code>`,
     '',
     `🧠 ${args.reason}`,
     '',
-    '⚠️ Manual mode: verify current price before buying. Do not chase an extended move.',
+    isEntry
+      ? '⚠️ Manual mode · verify live price before entry.'
+      : '⚠️ Do not buy purely because of this alert if price has already extended.',
   ].join('\n');
+}
+
+function buildButtons(
+  token: string,
+) {
+  return {
+    inline_keyboard: [
+      [
+        {
+          text: '🔎 OPEN TOKEN',
+          url: `https://robinhoodchain.blockscout.com/token/${token}`,
+        },
+      ],
+    ],
+  };
 }
 
 export async function broadcastPonsAlphaAlert(args: {
@@ -92,11 +119,19 @@ export async function broadcastPonsAlphaAlert(args: {
 
                 disable_web_page_preview:
                   true,
+
+                reply_markup:
+                  buildButtons(
+                    args.token,
+                  ),
               }),
           },
         );
 
       if (!response.ok) {
+        const body =
+          await response.text();
+
         console.error(
           '[PonsAlphaTelegram] Send failed:',
           {
@@ -105,6 +140,8 @@ export async function broadcastPonsAlphaAlert(args: {
 
             status:
               response.status,
+
+            body,
           },
         );
 
