@@ -90,6 +90,51 @@ export async function syncPonsOpportunity(
     args.state ===
     'MOMENTUM_BUILDING'
   ) {
+    /*
+     * A new constructive setup supersedes any previous
+     * PONS risk thesis for this token.
+     */
+    await transitionActiveStrategyOpportunity({
+      assetId:
+        args.token,
+
+      chain:
+        'robinhood',
+
+      strategyKey:
+        'PONS_RISK',
+
+      status:
+        'REVIEWED',
+
+      recommendedAction:
+        'IGNORE',
+
+      why:
+        args.reason,
+
+      whatHappened:
+        'A new constructive PONS momentum setup formed after the previous risk state.',
+
+      invalidation:
+        'The previous risk thesis has been superseded by a new independent setup.',
+
+      riskReason:
+        'Previous PONS risk conditions are no longer the primary active thesis.',
+
+      confidence:
+        55,
+
+      riskScore:
+        45,
+
+      rawData: {
+        ...rawData,
+        transition:
+          'PONS_RISK_TO_NEW_SETUP',
+      },
+    });
+
     await recordOpportunityAndEmit({
       opportunityType:
         'DEX_CONFIRMATION',
@@ -536,6 +581,7 @@ export async function syncPonsOpportunity(
       of [
         'PONS_IGNITION',
         'PONS_BREAKOUT',
+        'PONS_RISK',
       ]
     ) {
       await transitionActiveStrategyOpportunity({
