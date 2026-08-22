@@ -1,4 +1,8 @@
 import {
+  resolveTokenOpenTarget,
+} from '../core/tokenOpenRouter.js';
+
+import {
   eventEngine,
 } from './eventEngine.js';
 
@@ -236,39 +240,13 @@ function buildOpportunityMessage(
   );
 }
 
-function openTokenUrl(
-  opportunity: OpportunityRow,
-): string {
-  const chain =
-    String(
-      opportunity.chain ??
-      '',
-    ).toLowerCase();
-
-  if (
-    chain ===
-      'robinhood' ||
-    chain ===
-      'pons'
-  ) {
-    return (
-      'https://robinhoodchain.blockscout.com/token/' +
-      encodeURIComponent(
-        opportunity.asset_id,
-      )
-    );
-  }
-
-  return (
-    'https://dexscreener.com/search?q=' +
-    encodeURIComponent(
-      opportunity.asset_id,
-    )
-  );
-}
-
 function buildButtons(
   opportunity: OpportunityRow,
+  tokenTarget: Awaited<
+    ReturnType<
+      typeof resolveTokenOpenTarget
+    >
+  >,
 ): InlineButton[][] {
   const rows: InlineButton[][] = [
     [
@@ -276,12 +254,13 @@ function buildButtons(
         text:
           opportunity.recommended_action ===
           'EXIT'
-            ? '🚨 OPEN TOKEN'
-            : '🔎 CHECK TOKEN',
+            ? `🚨 ${tokenTarget.label.replace(
+                /^[^A-Z]*/i,
+                '',
+              )}`
+            : tokenTarget.label,
         url:
-          openTokenUrl(
-            opportunity,
-          ),
+          tokenTarget.url,
       },
     ],
   ];
@@ -578,6 +557,15 @@ async function deliverOpportunity(
     return;
   }
 
+  const tokenTarget =
+    await resolveTokenOpenTarget({
+      chain:
+        opportunity.chain,
+
+      tokenAddress:
+        opportunity.asset_id,
+    });
+
   const users =
     await getDeliverableUsers();
 
@@ -650,6 +638,7 @@ async function deliverOpportunity(
         ),
         buildButtons(
           opportunity,
+          tokenTarget,
         ),
       );
 

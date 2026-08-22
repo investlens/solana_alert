@@ -4,6 +4,10 @@ import {
 } from 'telegraf';
 
 import {
+  resolveTokenOpenTarget,
+} from '../core/tokenOpenRouter.js';
+
+import {
   getLatestOpportunities,
 } from '../core/opportunityRegistry.js';
 
@@ -136,34 +140,6 @@ function getBucket(
   return opportunities.filter(
     (opportunity) =>
       classifyOpportunity(opportunity) === bucket,
-  );
-}
-
-function openTokenUrl(
-  opportunity: OpportunityRow,
-): string {
-  const chain =
-    String(
-      opportunity.chain ?? '',
-    ).toLowerCase();
-
-  if (
-    chain === 'robinhood' ||
-    chain === 'pons'
-  ) {
-    return (
-      'https://robinhoodchain.blockscout.com/token/' +
-      encodeURIComponent(
-        opportunity.asset_id,
-      )
-    );
-  }
-
-  return (
-    'https://dexscreener.com/search?q=' +
-    encodeURIComponent(
-      opportunity.asset_id,
-    )
   );
 }
 
@@ -739,6 +715,15 @@ async function renderOpportunity(
     '<i>Manual execution only · verify live price, liquidity and momentum before acting.</i>',
   ].join('\n');
 
+  const tokenTarget =
+    await resolveTokenOpenTarget({
+      chain:
+        opportunity.chain,
+
+      tokenAddress:
+        opportunity.asset_id,
+    });
+
   const backCallback =
     bucket
       ? `OPP_BUCKET_${bucket}`
@@ -748,13 +733,8 @@ async function renderOpportunity(
     Markup.inlineKeyboard([
       [
         Markup.button.url(
-          opportunity.recommended_action ===
-            'EXIT'
-            ? '🚨 Open Token'
-            : '🔎 Check Token',
-          openTokenUrl(
-            opportunity,
-          ),
+          tokenTarget.label,
+          tokenTarget.url,
         ),
       ],
       [
