@@ -63,11 +63,55 @@ export type OpportunityInput = {
   rawData?: Record<string, unknown>;
 };
 
+function strategyExpiryIso(
+  args: OpportunityInput,
+  nowMs: number,
+): string | null {
+  if (args.expiresAt !== undefined) {
+    return args.expiresAt;
+  }
+
+  const strategy =
+    String(args.strategyKey ?? '').toUpperCase();
+
+  const action =
+    String(args.recommendedAction ?? '').toUpperCase();
+
+  let ttlMs: number | null = null;
+
+  if (
+    strategy === 'PONS_BREAKOUT'
+  ) {
+    ttlMs = 3 * 60 * 1000;
+  } else if (
+    strategy === 'PONS_IGNITION'
+  ) {
+    ttlMs = 10 * 60 * 1000;
+  } else if (
+    strategy === 'PONS_RISK'
+  ) {
+    ttlMs = 10 * 60 * 1000;
+  }
+
+  return ttlMs == null
+    ? null
+    : new Date(nowMs + ttlMs).toISOString();
+}
+
 export async function recordOpportunity(
   args: OpportunityInput,
 ) {
+  const nowMs =
+    Date.now();
+
   const now =
-    new Date().toISOString();
+    new Date(nowMs).toISOString();
+
+  const effectiveExpiresAt =
+    strategyExpiryIso(
+      args,
+      nowMs,
+    );
 
   /*
    * Phase 2 continuous intelligence:
@@ -223,7 +267,7 @@ export async function recordOpportunity(
               nextObservationCount,
 
             expires_at:
-              args.expiresAt ?? null,
+              effectiveExpiresAt,
 
             raw_data:
               args.rawData ?? {},
@@ -354,7 +398,7 @@ export async function recordOpportunity(
           ),
 
         expires_at:
-          args.expiresAt ?? null,
+          effectiveExpiresAt,
 
         raw_data:
           args.rawData ?? {},
