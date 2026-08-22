@@ -54,6 +54,7 @@ import { buildProAlertMessage } from './ui/proAlertMessageBuilder.js';
 import { startOutcomeCheckpointAgent } from './agents/outcomeCheckpointAgent.js';
 import { startOutcomeTracker } from "./services/outcomeTracker.js";
 import { startNotificationService } from "./services/notificationService.js";
+import { startOpportunityDeliveryService } from "./services/opportunityDeliveryService.js";
 import { getAlphaSettings } from './services/settingsService.js';
 import {
   hasTokenAlertCreated,
@@ -1458,6 +1459,7 @@ async function main() {
   startOutcomeTracker();
   startAnalyticsSummary();
   startNotificationService();
+  startOpportunityDeliveryService();
 
   console.log(
     '🔥🔥🔥 PONS SHADOW STARTUP ENTERED 🔥🔥🔥',

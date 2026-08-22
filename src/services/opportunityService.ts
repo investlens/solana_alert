@@ -121,5 +121,99 @@ export async function recordOpportunityAndEmit(
     );
   }
 
+  const actionableActions =
+    new Set([
+      'BUY',
+      'CHECK_ENTRY',
+      'EXIT',
+    ]);
+
+  const opportunityStatus =
+    String(
+      opportunity.status ??
+      '',
+    ).toUpperCase();
+
+  const opportunityAction =
+    String(
+      opportunity.recommended_action ??
+      args.recommendedAction ??
+      '',
+    ).toUpperCase();
+
+  /*
+   * Delivery semantics:
+   *
+   * - WATCH/TRACK remain intelligence only.
+   * - Only a currently NEW actionable thesis is surfaced.
+   * - Persistent opportunity_deliveries prevents the same
+   *   opportunity from being sent twice to the same user.
+   *
+   * This also allows a previously WATCHING opportunity to
+   * become NEW/CHECK_ENTRY later and become deliverable.
+   */
+  if (
+    args.strategyKey &&
+    opportunityStatus === 'NEW' &&
+    actionableActions.has(
+      opportunityAction,
+    )
+  ) {
+    try {
+      await eventEngine.emit({
+        eventType:
+          'OPPORTUNITY_ACTIONABLE',
+
+        source:
+          args.sourceAgent,
+
+        token: {
+          chain:
+            args.chain ??
+            'solana',
+
+          tokenAddress:
+            args.assetId,
+        },
+
+        deduplicationKey:
+          [
+            'opportunity',
+            opportunity.id,
+            opportunityAction,
+          ].join(':'),
+
+        deduplicationWindowSeconds:
+          24 * 60 * 60,
+
+        payload: {
+          opportunityId:
+            opportunity.id,
+
+          strategyKey:
+            args.strategyKey,
+
+          recommendedAction:
+            opportunityAction,
+
+          confidence:
+            opportunity.confidence ??
+            args.confidence ??
+            null,
+
+          riskScore:
+            opportunity.risk_score ??
+            args.riskScore ??
+            null,
+        },
+      });
+    } catch (error) {
+      console.warn(
+        '[OpportunityService] Actionable event failed (ignored):',
+        error,
+      );
+    }
+  }
+
   return opportunity;
 }
