@@ -6,7 +6,7 @@ export function mainAlphaMenu() {
     [Markup.button.callback('📈 Trade Terminal', 'TRADE_MENU')],
     [
       Markup.button.callback('⭐ Premium', 'PREMIUM'),
-      Markup.button.callback('⚙️ Settings', 'SETTINGS'),
+      Markup.button.callback('🎯 Strategies', 'STRATEGY_SETTINGS'),
     ],
   ]);
 }
