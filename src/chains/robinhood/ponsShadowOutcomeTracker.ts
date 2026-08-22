@@ -21,10 +21,563 @@ import {
 } from './ponsAlphaTelegram.js';
 
 import {
+  transitionActiveStrategyOpportunity,
+} from '../../core/opportunityRegistry.js';
+
+import {
+  recordOpportunityAndEmit,
+} from '../../services/opportunityService.js';
+
+import {
   getPonsV2CurveState,
   quotePonsV2Sell,
 } from './ponsV2CurveQuote.js';
 
+
+
+function ponsConfidence(
+  value: number,
+): number {
+  return Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(value),
+    ),
+  );
+}
+
+type PonsOpportunitySyncArgs = {
+  token: string;
+  state: string;
+  reason: string;
+  currentRoi: number;
+  roiChange: number | null;
+  recentPeakRoi: number | null;
+  elapsedSec: number;
+};
+
+export async function syncPonsOpportunity(
+  args: PonsOpportunitySyncArgs,
+): Promise<void> {
+  const rawData = {
+    ponsAlphaState:
+      args.state,
+
+    currentRoi:
+      args.currentRoi,
+
+    roiChange:
+      args.roiChange,
+
+    recentPeakRoi:
+      args.recentPeakRoi,
+
+    elapsedSec:
+      args.elapsedSec,
+
+    source:
+      'PONS_ALPHA_CLASSIFIER',
+  };
+
+  /*
+   * PONS IGNITION
+   *
+   * Constructive momentum, but entry is
+   * not confirmed yet.
+   */
+  if (
+    args.state ===
+    'MOMENTUM_BUILDING'
+  ) {
+    await recordOpportunityAndEmit({
+      opportunityType:
+        'DEX_CONFIRMATION',
+
+      assetId:
+        args.token,
+
+      chain:
+        'robinhood',
+
+      sourceAgent:
+        'PonsAlphaClassifier',
+
+      title:
+        `PONS Ignition: ${args.token}`,
+
+      strategyKey:
+        'PONS_IGNITION',
+
+      recommendedAction:
+        'TRACK',
+
+      why:
+        args.reason,
+
+      whatHappened:
+        `PONS curve momentum is building. Current ROI is ${args.currentRoi.toFixed(
+          2,
+        )}%.`,
+
+      invalidation:
+        'Invalidate if momentum fades, the setup becomes flat/dead, or the classifier enters a risk state.',
+
+      riskReason:
+        'Momentum is constructive but AlphaOS does not yet have confirmed entry acceleration.',
+
+      confidence:
+        ponsConfidence(
+          Math.max(
+            50,
+            Math.min(
+              75,
+              55 +
+                Math.max(
+                  0,
+                  args.currentRoi,
+                ),
+            ),
+          ),
+        ),
+
+      riskScore:
+        50,
+
+      rawData,
+    });
+
+    return;
+  }
+
+  /*
+   * PONS BREAKOUT
+   *
+   * ENTRY_WINDOW is the strongest manual
+   * entry-confirmation state.
+   */
+  if (
+    args.state ===
+    'ENTRY_WINDOW'
+  ) {
+    await transitionActiveStrategyOpportunity({
+      assetId:
+        args.token,
+
+      chain:
+        'robinhood',
+
+      strategyKey:
+        'PONS_IGNITION',
+
+      status:
+        'REVIEWED',
+
+      recommendedAction:
+        'TRACK',
+
+      why:
+        args.reason,
+
+      whatHappened:
+        'PONS ignition matured into a confirmed breakout/entry-window setup.',
+
+      invalidation:
+        'The ignition phase has completed and is superseded by PONS_BREAKOUT.',
+
+      riskReason:
+        'The token has progressed beyond early ignition into a separate breakout thesis.',
+
+      confidence:
+        75,
+
+      riskScore:
+        40,
+
+      rawData: {
+        ...rawData,
+        transition:
+          'PONS_IGNITION_TO_PONS_BREAKOUT',
+      },
+    });
+
+    await recordOpportunityAndEmit({
+      opportunityType:
+        'DEX_CONFIRMATION',
+
+      assetId:
+        args.token,
+
+      chain:
+        'robinhood',
+
+      sourceAgent:
+        'PonsAlphaClassifier',
+
+      title:
+        `PONS Breakout: ${args.token}`,
+
+      strategyKey:
+        'PONS_BREAKOUT',
+
+      recommendedAction:
+        'CHECK_ENTRY',
+
+      why:
+        args.reason,
+
+      whatHappened:
+        `Confirmed PONS acceleration detected. Current ROI is ${args.currentRoi.toFixed(
+          2,
+        )}%${
+          args.roiChange == null
+            ? '.'
+            : ` with ${args.roiChange >= 0 ? '+' : ''}${args.roiChange.toFixed(
+                2,
+              )}% checkpoint acceleration.`
+        }`,
+
+      invalidation:
+        'Do not enter if the live move has already extended, momentum reverses, or PONS changes to FADING, DO_NOT_CHASE, or FLAT_DEAD.',
+
+      riskReason:
+        'PONS launches move extremely quickly. Entry must still be verified against the live curve before execution.',
+
+      confidence:
+        ponsConfidence(
+          Math.max(
+            70,
+            Math.min(
+              92,
+              72 +
+                Math.max(
+                  0,
+                  args.roiChange ??
+                    0,
+                ),
+            ),
+          ),
+        ),
+
+      riskScore:
+        40,
+
+      rawData,
+    });
+
+    return;
+  }
+
+  /*
+   * FAST_BREAKOUT
+   *
+   * Important: this is deliberately NOT
+   * converted into CHECK_ENTRY.
+   *
+   * Existing AlphaOS behaviour says verify
+   * the token but do not chase an extended
+   * move.
+   */
+  if (
+    args.state ===
+    'FAST_BREAKOUT'
+  ) {
+    await transitionActiveStrategyOpportunity({
+      assetId:
+        args.token,
+
+      chain:
+        'robinhood',
+
+      strategyKey:
+        'PONS_IGNITION',
+
+      status:
+        'REVIEWED',
+
+      recommendedAction:
+        'TRACK',
+
+      why:
+        args.reason,
+
+      whatHappened:
+        'PONS ignition matured into a fast-breakout setup.',
+
+      invalidation:
+        'The ignition phase has completed and is superseded by PONS_BREAKOUT.',
+
+      riskReason:
+        'The token has accelerated beyond the early ignition state.',
+
+      confidence:
+        75,
+
+      riskScore:
+        55,
+
+      rawData: {
+        ...rawData,
+        transition:
+          'PONS_IGNITION_TO_FAST_BREAKOUT',
+      },
+    });
+
+    await recordOpportunityAndEmit({
+      opportunityType:
+        'DEX_CONFIRMATION',
+
+      assetId:
+        args.token,
+
+      chain:
+        'robinhood',
+
+      sourceAgent:
+        'PonsAlphaClassifier',
+
+      title:
+        `PONS Fast Breakout: ${args.token}`,
+
+      strategyKey:
+        'PONS_BREAKOUT',
+
+      recommendedAction:
+        'TRACK',
+
+      why:
+        args.reason,
+
+      whatHappened:
+        `A fast PONS breakout is underway at ${args.currentRoi.toFixed(
+          2,
+        )}% ROI.`,
+
+      invalidation:
+        'Do not chase if price remains extended. Wait for a safer setup or fresh confirmation.',
+
+      riskReason:
+        'The move is strong but may already be too extended for a safe entry.',
+
+      confidence:
+        78,
+
+      riskScore:
+        65,
+
+      rawData,
+    });
+
+    return;
+  }
+
+  /*
+   * RISK / INVALIDATION
+   */
+  if (
+    args.state ===
+      'FADING' ||
+    args.state ===
+      'DO_NOT_CHASE'
+  ) {
+    const action =
+      args.state ===
+      'FADING'
+        ? 'EXIT'
+        : 'WATCH';
+
+    /*
+     * First invalidate any active breakout
+     * thesis.
+     */
+    await transitionActiveStrategyOpportunity({
+      assetId:
+        args.token,
+
+      chain:
+        'robinhood',
+
+      strategyKey:
+        'PONS_BREAKOUT',
+
+      status:
+        'EXPIRED',
+
+      recommendedAction:
+        'IGNORE',
+
+      why:
+        args.reason,
+
+      whatHappened:
+        `PONS state changed to ${args.state}. Current ROI is ${args.currentRoi.toFixed(
+          2,
+        )}%.`,
+
+      invalidation:
+        'The previous breakout thesis is no longer valid.',
+
+      riskReason:
+        args.reason,
+
+      confidence:
+        40,
+
+      riskScore:
+        85,
+
+      rawData,
+    });
+
+    /*
+     * Also close an ignition thesis if one
+     * is still active.
+     */
+    await transitionActiveStrategyOpportunity({
+      assetId:
+        args.token,
+
+      chain:
+        'robinhood',
+
+      strategyKey:
+        'PONS_IGNITION',
+
+      status:
+        'EXPIRED',
+
+      recommendedAction:
+        'IGNORE',
+
+      why:
+        args.reason,
+
+      whatHappened:
+        `PONS momentum deteriorated into ${args.state}.`,
+
+      invalidation:
+        'The previous ignition thesis is no longer valid.',
+
+      riskReason:
+        args.reason,
+
+      confidence:
+        35,
+
+      riskScore:
+        85,
+
+      rawData,
+    });
+
+    await recordOpportunityAndEmit({
+      opportunityType:
+        'DEX_CONFIRMATION',
+
+      assetId:
+        args.token,
+
+      chain:
+        'robinhood',
+
+      sourceAgent:
+        'PonsAlphaClassifier',
+
+      title:
+        `PONS Risk: ${args.token}`,
+
+      strategyKey:
+        'PONS_RISK',
+
+      recommendedAction:
+        action,
+
+      why:
+        args.reason,
+
+      whatHappened:
+        `PONS classified the live curve as ${args.state}. Current ROI is ${args.currentRoi.toFixed(
+          2,
+        )}%.`,
+
+      invalidation:
+        'Risk remains active until a new independent setup forms.',
+
+      riskReason:
+        args.reason,
+
+      confidence:
+        80,
+
+      riskScore:
+        args.state ===
+        'FADING'
+          ? 90
+          : 75,
+
+      rawData,
+    });
+
+    return;
+  }
+
+  /*
+   * DEAD / EXPIRED SETUP
+   *
+   * Close active opportunity theses without
+   * creating another noisy user opportunity.
+   */
+  if (
+    args.state ===
+    'FLAT_DEAD'
+  ) {
+    for (
+      const strategyKey
+      of [
+        'PONS_IGNITION',
+        'PONS_BREAKOUT',
+      ]
+    ) {
+      await transitionActiveStrategyOpportunity({
+        assetId:
+          args.token,
+
+        chain:
+          'robinhood',
+
+        strategyKey,
+
+        status:
+          'EXPIRED',
+
+        recommendedAction:
+          'IGNORE',
+
+        why:
+          args.reason,
+
+        whatHappened:
+          `PONS setup expired at ${args.currentRoi.toFixed(
+            2,
+          )}% ROI.`,
+
+        invalidation:
+          'The previous PONS setup is no longer active.',
+
+        riskReason:
+          'Momentum failed to develop into a valid continuation setup.',
+
+        confidence:
+          30,
+
+        riskScore:
+          70,
+
+        rawData,
+      });
+    }
+  }
+}
 
 const TRACKER_INTERVAL_MS =
   1_000;
@@ -1217,6 +1770,51 @@ async function updateShadowRow(
           alphaTransitionRows.length >
             0
         ) {
+          try {
+            await syncPonsOpportunity({
+              token:
+                row.token_address,
+
+              state:
+                alphaClassification.state,
+
+              reason:
+                alphaClassification.reason,
+
+              currentRoi,
+
+              roiChange:
+                alphaClassification.roiChange,
+
+              recentPeakRoi:
+                alphaClassification.recentPeakRoi,
+
+              elapsedSec:
+                Math.floor(
+                  elapsedMs /
+                    1000,
+                ),
+            });
+          } catch (error) {
+            console.error(
+              '[PonsOpportunity] Sync failed:',
+              {
+                token:
+                  row.token_address,
+
+                state:
+                  alphaClassification.state,
+
+                error:
+                  error instanceof Error
+                    ? error.message
+                    : String(
+                        error,
+                      ),
+              },
+            );
+          }
+
           console.log(
             `[PonsAlpha] state=${
               alphaClassification.state

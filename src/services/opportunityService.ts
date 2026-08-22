@@ -1,66 +1,123 @@
-import { eventEngine } from './eventEngine.js';
+import {
+  eventEngine,
+} from './eventEngine.js';
+
 import {
   recordOpportunity,
-  type OpportunityType,
-  type OpportunityStatus,
+  type OpportunityInput,
 } from '../core/opportunityRegistry.js';
 
-export async function recordOpportunityAndEmit(args: {
-  opportunityType: OpportunityType;
-  assetId: string;
-  chain?: string | null;
-  sourceAgent: string;
-  title?: string |null;
-  entryPrice?: number | null;
-  exitPrice?: number | null;
-  expectedProfit?: number | null;
-  expectedProfitPercent?: number | null;
-  riskScore?: number;
-  confidence?: number;
-  status?: OpportunityStatus;
-  rawData?: Record<string, unknown>;
-}) {
-  // Existing behaviour (unchanged)
-  const opportunity = await recordOpportunity(args);
+export type RecordOpportunityAndEmitInput =
+  OpportunityInput;
 
-  // If the insert failed, preserve existing behaviour.
+export async function recordOpportunityAndEmit(
+  args: RecordOpportunityAndEmitInput,
+) {
+  /*
+   * Preserve the existing opportunity persistence flow,
+   * now with Phase 2 strategy intelligence attached.
+   */
+  const opportunity =
+    await recordOpportunity(
+      args,
+    );
+
   if (!opportunity) {
     return null;
   }
 
   try {
     await eventEngine.emit({
-      eventType: 'TOKEN_DISCOVERED',
+      eventType:
+        'TOKEN_DISCOVERED',
 
-      source: args.sourceAgent,
+      source:
+        args.sourceAgent,
 
       token: {
-        chain: args.chain ?? 'solana',
-        tokenAddress: args.assetId,
+        chain:
+          args.chain ??
+          'solana',
+
+        tokenAddress:
+          args.assetId,
       },
 
-      deduplicationWindowSeconds: 60,
+      deduplicationWindowSeconds:
+        60,
 
       payload: {
-        opportunityId: opportunity.id,
+        opportunityId:
+          opportunity.id,
 
-        title: args.title,
+        opportunityType:
+          args.opportunityType,
 
-        confidence: args.confidence,
+        strategyKey:
+          args.strategyKey ??
+          null,
 
-        riskScore: args.riskScore,
+        recommendedAction:
+          args.recommendedAction ??
+          null,
 
-        expectedProfit: args.expectedProfit,
+        title:
+          args.title ??
+          null,
 
-        expectedProfitPercent: args.expectedProfitPercent,
+        why:
+          args.why ??
+          null,
 
-        rawData: args.rawData ?? {},
+        whatHappened:
+          args.whatHappened ??
+          null,
+
+        invalidation:
+          args.invalidation ??
+          null,
+
+        riskReason:
+          args.riskReason ??
+          null,
+
+        confidence:
+          args.confidence ??
+          null,
+
+        riskScore:
+          args.riskScore ??
+          null,
+
+        expectedProfit:
+          args.expectedProfit ??
+          null,
+
+        expectedProfitPercent:
+          args.expectedProfitPercent ??
+          null,
+
+        lastObservedAt:
+          args.lastObservedAt ??
+          null,
+
+        observationCount:
+          args.observationCount ??
+          1,
+
+        expiresAt:
+          args.expiresAt ??
+          null,
+
+        rawData:
+          args.rawData ??
+          {},
       },
     });
-  } catch (err) {
+  } catch (error) {
     console.warn(
       '[OpportunityService] Event emission failed (ignored):',
-      err,
+      error,
     );
   }
 

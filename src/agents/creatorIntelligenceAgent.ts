@@ -144,29 +144,114 @@ if (launchEventLookupError) {
   });
 
   if (trustScore >= 70 || bestMarketCap >= 500_000) {
+    const isSolana =
+      chain.toLowerCase() === 'solana';
+
+    const creatorEvidence = [
+      `Creator trust score is ${trustScore}/100.`,
+      `${successfulLaunches} successful launch${successfulLaunches === 1 ? '' : 'es'} recorded.`,
+      bestMarketCap > 0
+        ? `Best observed creator launch reached $${Math.round(bestMarketCap).toLocaleString()} market cap.`
+        : null,
+    ]
+      .filter(Boolean)
+      .join(' ');
+
+    const creatorRiskReason =
+      failedLaunches > 0
+        ? `${failedLaunches} failed creator launch${failedLaunches === 1 ? '' : 'es'} remain in the historical record. Creator reputation is supportive, not a guarantee of token performance.`
+        : 'No failed creator launches are currently recorded, but creator reputation alone does not validate market momentum, liquidity, holder quality, or sellability.';
+
     await recordOpportunityAndEmit({
       opportunityType: 'TOKEN_CREATOR',
       assetId: args.token,
       chain,
-      sourceAgent: args.sourceAgent ?? 'CreatorIntelligenceAgent',
-      title: `P0 Proven Creator Launch: ${args.symbol ?? args.token}`,
+      sourceAgent:
+        args.sourceAgent ??
+        'CreatorIntelligenceAgent',
+
+      title: isSolana
+        ? `Creator Alpha: ${args.symbol ?? args.token}`
+        : `Proven Creator Launch: ${args.symbol ?? args.token}`,
+
+      strategyKey:
+        isSolana
+          ? 'SOL_CREATOR_ALPHA'
+          : null,
+
+      recommendedAction:
+        isSolana
+          ? 'WATCH'
+          : null,
+
+      why:
+        isSolana
+          ? creatorEvidence
+          : null,
+
+      whatHappened:
+        isSolana
+          ? 'A new Solana token was associated with a creator whose AlphaOS creator history crossed the Creator Alpha qualification threshold.'
+          : null,
+
+      invalidation:
+        isSolana
+          ? 'Invalidate the Creator Alpha thesis if subsequent creator behaviour, market structure, liquidity, sellability, holder quality, or price/flow data materially deteriorates.'
+          : null,
+
+      riskReason:
+        isSolana
+          ? creatorRiskReason
+          : null,
+
       entryPrice: null,
       exitPrice: null,
       expectedProfit: null,
       expectedProfitPercent: null,
-      riskScore: Math.max(10, 100 - trustScore),
-      confidence: trustScore,
+
+      riskScore:
+        Math.max(
+          10,
+          100 - trustScore,
+        ),
+
+      confidence:
+        trustScore,
+
       status: 'NEW',
+
+      lastObservedAt:
+        new Date().toISOString(),
+
+      observationCount:
+        1,
+
       rawData: {
-        creatorWallet: args.creatorWallet,
-        token: args.token,
-        symbol: args.symbol,
+        creatorWallet:
+          args.creatorWallet,
+
+        token:
+          args.token,
+
+        symbol:
+          args.symbol,
+
         marketCap,
         bestMarketCap,
         trustScore,
         totalLaunches,
         successfulLaunches,
         failedLaunches,
+
+        strategyKey:
+          isSolana
+            ? 'SOL_CREATOR_ALPHA'
+            : null,
+
+        strategyEvidence:
+          isSolana
+            ? creatorEvidence
+            : null,
       },
     });
   }
