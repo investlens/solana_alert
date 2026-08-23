@@ -1429,9 +1429,6 @@ async function main() {
   // Restore active trades from Supabase BEFORE starting scanners
   await restoreOpenTrades();
 
-  // Restore active trades from Supabase BEFORE starting scanners
-  await restoreOpenTrades();
-
   const tasks = [
     startScanner(),
     startWalletWatch(),

@@ -41,6 +41,7 @@ import {
   type AlphaNotificationState,
 } from '../ui/alphaNotification.js';
 import { deliverReservedTelegram } from './telegramDeliveryContract.js';
+import { createLeaseToken, DELIVERY_LEASE_SECONDS } from './reservationLease.js';
 
 type DeliverableAction =
   | 'BUY'
@@ -591,63 +592,29 @@ async function reserveDelivery(args: {
   opportunity: OpportunityRow;
   user: DeliverableUser;
   deliveryIdentity: string;
-}): Promise<boolean> {
-  const {
-    error,
-  } =
-    await supabase
-      .from(
-        'opportunity_deliveries',
-      )
-      .insert({
-        opportunity_id:
-          args.opportunity.id,
-
-        telegram_id:
-          args.user.telegram_id,
-
-        strategy_key:
-          args.opportunity.strategy_key,
-
-        chain:
-          args.opportunity.chain,
-
-        recommended_action:
-          args.opportunity.recommended_action,
-
-        tier_at_delivery:
-          args.user.tier,
-
-        delivery_channel:
-          'telegram',
-
-        delivery_identity:
-          args.deliveryIdentity,
-
-        metadata: {
-          state:
-            'RESERVED',
-        },
-      });
-
-  if (!error) {
-    return true;
-  }
-
-  if (
-    error.code ===
-    '23505'
-  ) {
-    return false;
-  }
-
-  throw error;
+}): Promise<string | null> {
+  const leaseToken = createLeaseToken();
+  const { data, error } = await supabase.rpc('reserve_opportunity_delivery', {
+    p_opportunity_id: args.opportunity.id,
+    p_telegram_id: args.user.telegram_id,
+    p_strategy_key: args.opportunity.strategy_key,
+    p_chain: args.opportunity.chain,
+    p_recommended_action: args.opportunity.recommended_action,
+    p_tier_at_delivery: args.user.tier,
+    p_delivery_channel: 'telegram',
+    p_delivery_identity: args.deliveryIdentity,
+    p_lease_token: leaseToken,
+    p_lease_seconds: DELIVERY_LEASE_SECONDS,
+  });
+  if (error) throw error;
+  return data === true ? leaseToken : null;
 }
 
 async function releaseDelivery(
   opportunityId: number,
   telegramId: string,
   deliveryIdentity: string,
+  leaseToken: string,
 ): Promise<void> {
   const { error } = await supabase
     .from(
@@ -669,7 +636,8 @@ async function releaseDelivery(
     .eq(
       'delivery_identity',
       deliveryIdentity,
-    );
+    )
+    .contains('metadata', { state: 'RESERVED', lease_token: leaseToken });
 
   if (error) throw error;
 }
@@ -678,8 +646,10 @@ async function markDeliveryComplete(
   opportunityId: number,
   telegramId: string,
   deliveryIdentity: string,
+  leaseToken: string,
 ): Promise<void> {
   const {
+    data,
     error,
   } =
     await supabase
@@ -710,10 +680,16 @@ async function markDeliveryComplete(
     .eq(
       'delivery_identity',
       deliveryIdentity,
-    );
+    )
+    .contains('metadata', { state: 'RESERVED', lease_token: leaseToken })
+    .select('id')
+    .maybeSingle();
 
   if (error) {
     throw error;
+  }
+  if (!data) {
+    throw new Error('Opportunity delivery lease was lost before completion');
   }
 }
 
@@ -970,14 +946,14 @@ async function deliverOpportunity(
       continue;
     }
 
-    const reserved =
+    const leaseToken =
       await reserveDelivery({
         opportunity,
         user,
         deliveryIdentity,
       });
 
-    if (!reserved) {
+    if (!leaseToken) {
       continue;
     }
 
@@ -997,8 +973,9 @@ async function deliverOpportunity(
         opportunity.id,
         user.telegram_id,
         deliveryIdentity,
+        leaseToken,
       ),
-      release: () => releaseDelivery(opportunity.id, user.telegram_id, deliveryIdentity),
+      release: () => releaseDelivery(opportunity.id, user.telegram_id, deliveryIdentity, leaseToken),
     });
 
     if (delivery.recorded) {

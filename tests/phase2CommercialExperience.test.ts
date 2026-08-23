@@ -123,7 +123,7 @@ test('payment journey shows destination before accepting input and Cancel clears
   assert.ok(selection >= 0 && submission > selection);
   assert.match(commands.slice(selection, submission), /Payment destination[\s\S]*SUBMIT_PLAN_/);
   assert.match(commands.slice(submission), /setConversationState\(telegramId, 'SUBMIT_PAYMENT_HASH'\)/);
-  assert.match(commands, /bot\.action\('UPGRADE_CANCEL'[\s\S]{0,240}clearConversationState\(telegramId\)/);
+  assert.match(commands, /bot\.action\('UPGRADE_CANCEL'[\s\S]{0,240}clearPaymentInputState\(telegramId\)/);
   assert.match(commands, /isLikelySolanaSignature/);
 });
 

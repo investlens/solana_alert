@@ -26,6 +26,7 @@ import { getUserByTelegramId } from '../core/subscriptions.js';
 import { accessProfileForUser, hasCapability } from '../product/capabilities.js';
 import { assertAlphaActions, renderAlphaNotification, type AlphaNotificationState } from '../ui/alphaNotification.js';
 import { deliverReservedTelegram } from './telegramDeliveryContract.js';
+import { createLeaseToken, DELIVERY_LEASE_SECONDS } from './reservationLease.js';
 
 type InlineButton = {
   text: string;
@@ -121,57 +122,28 @@ async function reserveDelivery(args: {
   telegramId: string;
 
   event: WalletWatchEvent;
-}): Promise<boolean> {
-  const {
-    error,
-  } =
-    await supabase
-      .from(
-        'wallet_activity_deliveries',
-      )
-      .insert({
-        telegram_id:
-          args.telegramId,
-
-        wallet_address:
-          args.event.wallet,
-
-        transaction_signature:
-          args.event.signature,
-
-        activity_type:
-          args.event.kind.toUpperCase(),
-
-        token_address:
-          args.event.tokenMint ??
-          null,
-
-        metadata: {
-          state:
-            'RESERVED',
-        },
-      });
-
-  if (!error) {
-    return true;
-  }
-
-  if (
-    error.code ===
-    '23505'
-  ) {
-    return false;
-  }
-
-  throw error;
+}): Promise<string | null> {
+  const leaseToken = createLeaseToken();
+  const { data, error } = await supabase.rpc('reserve_wallet_activity_delivery', {
+    p_telegram_id: args.telegramId,
+    p_wallet_address: args.event.wallet,
+    p_transaction_signature: args.event.signature,
+    p_activity_type: args.event.kind.toUpperCase(),
+    p_token_address: args.event.tokenMint ?? null,
+    p_lease_token: leaseToken,
+    p_lease_seconds: DELIVERY_LEASE_SECONDS,
+  });
+  if (error) throw error;
+  return data === true ? leaseToken : null;
 }
 
 async function markDelivered(args: {
   telegramId: string;
 
   event: WalletWatchEvent;
+  leaseToken: string;
 }) {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from(
       'wallet_activity_deliveries',
     )
@@ -195,14 +167,19 @@ async function markDelivered(args: {
     .eq(
       'transaction_signature',
       args.event.signature,
-    );
+    )
+    .contains('metadata', { state: 'RESERVED', lease_token: args.leaseToken })
+    .select('id')
+    .maybeSingle();
   if (error) throw error;
+  if (!data) throw new Error('Wallet delivery lease was lost before completion');
 }
 
 async function releaseDelivery(args: {
   telegramId: string;
 
   event: WalletWatchEvent;
+  leaseToken: string;
 }) {
   const { error } = await supabase
     .from(
@@ -220,7 +197,8 @@ async function releaseDelivery(args: {
     .eq(
       'transaction_signature',
       args.event.signature,
-    );
+    )
+    .contains('metadata', { state: 'RESERVED', lease_token: args.leaseToken });
   if (error) throw error;
 }
 
@@ -417,7 +395,7 @@ deliverTrackedWalletActivity(
           continue;
         }
 
-        const reserved =
+        const leaseToken =
           await reserveDelivery({
             telegramId:
               subscriber.telegram_id,
@@ -425,7 +403,7 @@ deliverTrackedWalletActivity(
             event,
           });
 
-        if (!reserved) {
+        if (!leaseToken) {
           continue;
         }
 
@@ -447,8 +425,9 @@ deliverTrackedWalletActivity(
               subscriber.telegram_id,
 
             event,
+            leaseToken,
           }),
-          release: () => releaseDelivery({ telegramId: subscriber.telegram_id, event }),
+          release: () => releaseDelivery({ telegramId: subscriber.telegram_id, event, leaseToken }),
         });
 
         if (delivery.recorded) {

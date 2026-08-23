@@ -67,6 +67,13 @@ function releaseTradeAction(key: string) {
   recentTradeActions.delete(key);
 }
 
+function clearPaymentInputState(telegramId: string) {
+  upgradeSessions.delete(telegramId);
+  if (getConversationState(telegramId) === 'SUBMIT_PAYMENT_HASH') {
+    clearConversationState(telegramId);
+  }
+}
+
 function isAdmin(telegramId: string) {
   return telegramId === config.adminTelegramId;
 }
@@ -307,6 +314,8 @@ export function registerBotCommands(bot: Telegraf<any>) {
         '',
       );
 
+    clearPaymentInputState(telegramId);
+
     const username =
       ctx.from?.username;
 
@@ -342,7 +351,9 @@ export function registerBotCommands(bot: Telegraf<any>) {
   });
 
   bot.action('MAIN_MENU', async (ctx) => {
-    clearConversationState(String(ctx.from?.id ?? ''));
+    const telegramId = String(ctx.from?.id ?? '');
+    clearPaymentInputState(telegramId);
+    clearConversationState(telegramId);
     await ctx.answerCbQuery();
     await sendMainMenu(ctx);
   });
@@ -872,6 +883,7 @@ bot.action('AUTO_TRADE_STATUS', async (ctx) => {
   });
 
   bot.action(['PREMIUM', 'MEMBERSHIP_HOME'], async (ctx) => {
+    clearPaymentInputState(String(ctx.from?.id ?? ''));
     await ctx.answerCbQuery();
 
     await renderScreen(
@@ -915,6 +927,7 @@ bot.action('AUTO_TRADE_STATUS', async (ctx) => {
   });
 
   bot.action(['PREMIUM_PLANS', 'MEMBERSHIP_PLANS'], async (ctx) => {
+    clearPaymentInputState(String(ctx.from?.id ?? ''));
     await ctx.answerCbQuery();
 
     await renderScreen(
@@ -1365,8 +1378,7 @@ bot.action('AUTO_TRADE_STATUS', async (ctx) => {
 
   bot.action('UPGRADE_CANCEL', async (ctx) => {
     const telegramId = String(ctx.from?.id ?? '');
-    upgradeSessions.delete(telegramId);
-    clearConversationState(telegramId);
+    clearPaymentInputState(telegramId);
     await ctx.answerCbQuery('Cancelled');
     await sendMainMenu(ctx);
   });
@@ -1653,8 +1665,7 @@ bot.action('AUTO_TRADE_STATUS', async (ctx) => {
       txHash,
     });
 
-    upgradeSessions.delete(telegramId);
-    clearConversationState(telegramId);
+    clearPaymentInputState(telegramId);
 
     await ctx.reply(
       [
