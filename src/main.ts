@@ -90,11 +90,6 @@ import {
   deliverTrackedWalletActivity,
 } from './services/walletActivityDeliveryService.js';
 import { enrichTokenByMintAddress } from './services/dexscreener.js';
-import {
-  buildPrivateWalletBuyMessage,
-  buildPrivateWalletLaunchMessage,
-  buildPrivateWalletSellMessage,
-} from './ui/privateMessageBuilder.js';
 import { fmtUsd } from './utils/format.js';
 import { sleep } from './utils/format.js';
 
@@ -659,68 +654,13 @@ async function startWalletWatch() {
         events,
       );
 
-      for (const event of events) {
-        if (!event.tokenMint) continue;
-
-        const enriched = await enrichTokenByMintAddress(event.tokenMint);
-        const pair = enriched?.pair;
-        const result = enriched?.result;
-
-        const chartUrl =
-        pair?.url ??
-        (event.tokenMint?.endsWith('pump')
-          ? `https://pump.fun/${event.tokenMint}`
-          : null);
-        const buyUrl = pair?.baseToken?.address
-        ? `https://jup.ag/swap/SOL-${pair.baseToken.address}`
-        : event.tokenMint?.endsWith('pump')
-          ? `https://pump.fun/${event.tokenMint}`
-          : null;
-        const tokenName = pair?.baseToken?.symbol || pair?.baseToken?.name || event.tokenMint;
-        const marketCap = result?.marketCap ? fmtUsd(result.marketCap) : null;
-
-        if (event.kind === 'buy') {
-          await sendTelegram(
-            config.adminTelegramId,
-            buildPrivateWalletBuyMessage({
-              wallet: event.wallet,
-              tokenName,
-              tokenMint: event.tokenMint,
-              marketCap,
-              amountSol: event.amountSol,
-              chartUrl,
-              buyUrl,
-            })
-          );
-        }
-
-        if (event.kind === 'sell') {
-          await sendTelegram(
-            config.adminTelegramId,
-            buildPrivateWalletSellMessage({
-              wallet: event.wallet,
-              tokenName,
-              tokenMint: event.tokenMint,
-              marketCap,
-              amountSol: event.amountSol,
-              chartUrl,
-            })
-          );
-        }
-
-        if (event.kind === 'launch') {
-          await sendTelegram(
-            config.adminTelegramId,
-            buildPrivateWalletLaunchMessage({
-              wallet: event.wallet,
-              tokenName,
-              tokenMint: event.tokenMint,
-              chartUrl,
-              buyUrl,
-            })
-          );
-        }
-      }
+      /*
+       * Wallet Telegram delivery is intentionally centralized
+       * in deliverTrackedWalletActivity().
+       *
+       * Do not add another wallet broadcaster here:
+       * it creates duplicate alerts and inconsistent UX.
+       */
     } catch (error) {
       console.error('wallet watch loop error', error);
     }

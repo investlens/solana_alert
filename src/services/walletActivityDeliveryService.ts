@@ -3,6 +3,10 @@ import {
 } from './telegram.js';
 
 import {
+  config,
+} from '../config.js';
+
+import {
   supabase,
 } from './supabase.js';
 
@@ -345,6 +349,69 @@ deliverTrackedWalletActivity(
           chain:
             'solana',
         });
+
+      /*
+       * Compatibility bridge:
+       *
+       * Older admin watched wallets may still live in
+       * WATCHED_WALLETS rather than user_tracked_wallets.
+       *
+       * Unified WalletActivity owns delivery for BOTH sources.
+       * This preserves admin coverage while eliminating the old
+       * second Telegram broadcaster.
+       */
+      const legacyAdminWatch =
+        (
+          config.watchedWallets ??
+          []
+        ).some(
+          wallet =>
+            String(
+              wallet,
+            ).toLowerCase() ===
+            String(
+              event.wallet,
+            ).toLowerCase(),
+        );
+
+      if (
+        legacyAdminWatch &&
+        config.adminTelegramId &&
+        !subscribers.some(
+          subscriber =>
+            subscriber.telegram_id ===
+            config.adminTelegramId,
+        )
+      ) {
+        subscribers.push({
+          id:
+            -1,
+
+          telegram_id:
+            config.adminTelegramId,
+
+          wallet_address:
+            event.wallet,
+
+          chain:
+            'solana',
+
+          label:
+            'Smart Wallet',
+
+          is_active:
+            true,
+
+          alerts_enabled:
+            true,
+
+          created_at:
+            new Date().toISOString(),
+
+          updated_at:
+            new Date().toISOString(),
+        });
+      }
 
       if (
         subscribers.length ===
