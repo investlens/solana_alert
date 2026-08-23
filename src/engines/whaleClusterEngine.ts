@@ -1,6 +1,7 @@
 import { sendTelegram } from '../services/telegram.js';
 import { config } from '../config.js';
 import { addAlphaSignal } from './alphaFeed.js';
+import { assertAlphaActions, renderAlphaNotification } from '../ui/alphaNotification.js';
 
 type WhaleHit = {
   wallet: string;
@@ -85,29 +86,29 @@ export async function runWhaleClusterEngine() {
 
     await sendTelegram(
       config.ownerChatId,
-      [
-        '🐋🐋 <b>WHALE CLUSTER ALERT</b>',
-        '',
-        `<b>${symbol}</b>`,
-        `Whales Detected: <b>${wallets.length}</b>`,
-        `Cluster Size: <b>$${Math.round(totalUsd).toLocaleString()}</b>`,
-        `Window: <b>${CLUSTER_WINDOW_MIN}m</b>`,
-        '',
-        'Multiple tracked whales entered same token.',
-        'Potential smart-money accumulation.',
-      ].join('\n'),
-      [
+      renderAlphaNotification({
+        category: 'smart-money', severity: 'positive', state: 'WALLET_BUY',
+        symbol, address: token, confidence: wallets.length >= 3 ? 90 : 75, risk: 'REVIEW',
+        metrics: [
+          { label: 'Wallets', value: wallets.length },
+          { label: 'Cluster size', value: `$${Math.round(totalUsd).toLocaleString()}` },
+          { label: 'Window', value: `${CLUSTER_WINDOW_MIN}m` },
+        ],
+        reason: 'Multiple tracked wallets entered the same token.',
+        recommendedAction: 'Review market conditions and wallet evidence.',
+      }),
+      assertAlphaActions([
         [
           {
-            text: '🟢 Buy',
+            text: '⚡ Trade',
             url: buyUrl,
           },
           {
-            text: '📈 Chart',
+            text: '📊 Chart',
             url: dexUrl,
           },
         ],
-      ]
+      ])
     );
   }
 }

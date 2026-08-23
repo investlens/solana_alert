@@ -13,6 +13,7 @@ import {
 import {
   sendTelegram,
 } from '../../services/telegram.js';
+import { renderAlphaNotification } from '../../ui/alphaNotification.js';
 
 import {
   scanRobinhoodSellability,
@@ -748,58 +749,21 @@ function buildMicroBreakoutMessage(args: {
       1000,
     );
 
-  return [
-    '🔥 <b>ALPHAOS • ROBINHOOD MICRO BREAKOUT</b>',
-    '',
-    `<b>${symbol}</b>`,
-    '',
-    `⚡ Trigger: <b>${getMicroBreakoutLabel(
-      args.elapsed,
-    )}</b>`,
-    `Momentum: <b>+${args.currentRoi.toFixed(
-      2,
-    )}%</b>`,
-    `Age from discovery: <b>${ageSeconds}s</b>`,
-    '',
-    '📊 <b>MARKET</b>',
-    `Current MC: <b>$${Math.round(
-      args.currentMarketCap,
-    ).toLocaleString()}</b>`,
-    `Current Liquidity: <b>$${Math.round(
-      args.currentLiquidity,
-    ).toLocaleString()}</b>`,
-    `Current Price: <code>${args.currentPrice}</code>`,
-    '',
-    '🛡 <b>LIVE SAFETY RECHECK</b>',
-    `Exit impact: <b>${
-      args.sellImpact == null
-        ? 'UNKNOWN'
-        : `${args.sellImpact.toFixed(
-            3,
-          )}%`
-    }</b>`,
-    `Top holder: <b>${
-      args.top1 == null
-        ? 'UNKNOWN'
-        : `${args.top1.toFixed(
-            2,
-          )}%`
-    }</b>`,
-    `Dev holding: <b>${
-      args.devHolding == null
-        ? 'UNKNOWN'
-        : `${args.devHolding.toFixed(
-            2,
-          )}%`
-    }</b>`,
-    '',
-    '🧠 Originally discovered as a clean micro launch.',
-    '<b>No Robinhood trade has been opened.</b>',
-    '',
-    `<code>${args.row.token_address}</code>`,
-  ].join(
-    '\n',
-  );
+  return renderAlphaNotification({
+    category: 'market', severity: 'positive', state: 'ENTRY_READY',
+    symbol, address: args.row.token_address, age: `${ageSeconds}s`, risk: 'REVIEW',
+    metrics: [
+      { label: 'Momentum', value: `+${args.currentRoi.toFixed(2)}%` },
+      { label: 'Market cap', value: `$${Math.round(args.currentMarketCap).toLocaleString()}` },
+      { label: 'Liquidity', value: `$${Math.round(args.currentLiquidity).toLocaleString()}` },
+      { label: 'Exit impact', value: args.sellImpact == null ? 'Data unavailable' : `${args.sellImpact.toFixed(3)}%` },
+      { label: 'Top holder', value: args.top1 == null ? 'Data unavailable' : `${args.top1.toFixed(2)}%` },
+      { label: 'Dev holding', value: args.devHolding == null ? 'Data unavailable' : `${args.devHolding.toFixed(2)}%` },
+    ],
+    reason: `A clean early launch reached ${getMicroBreakoutLabel(args.elapsed)} momentum.`,
+    recommendedAction: 'Review live conditions. Direct execution is unavailable.',
+    access: 'ADMIN',
+  });
 }
 
 async function maybeSendMicroBreakout(args: {

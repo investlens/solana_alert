@@ -9,6 +9,7 @@ import {
 import {
   sendTelegram,
 } from '../../services/telegram.js';
+import { renderAlphaNotification } from '../../ui/alphaNotification.js';
 
 import {
   fetchRobinhoodBoosts,
@@ -326,30 +327,21 @@ function buildBoostMessage(args: {
           '%'
         );
 
-  return [
-    '⚡ ALPHAOS • DEX BOOST DETECTED',
-    '',
-    `🔥 ${args.symbol}`,
-    '',
-    `Event: ${eventLabel}`,
-    `Boost Added: +${args.boostAmount}`,
-    `Total Boost: ${args.totalBoostAmount}`,
-    '',
-    `💰 MC: ${formatUsd(args.marketCap)}`,
-    `💧 Liquidity: ${formatUsd(args.liquidity)}`,
-    `💵 Price: ${formatPrice(args.price)}`,
-    '',
-    `📊 5m Volume: ${formatUsd(args.volume5m)}`,
-    `🟢 Buys: ${args.buys5m}`,
-    `🔴 Sells: ${args.sells5m}`,
-    '',
-    `👨‍💻 Dev Holding: ${dev}`,
-    `👥 Top Holder: ${top1}`,
-    '',
-    '🧠 AlphaOS: BOOST TRACKING',
-    '',
-    `Token: ${args.tokenAddress}`,
-  ].join('\n');
+  return renderAlphaNotification({
+    category: 'market', severity: 'watch', state: 'BUILDING',
+    symbol: args.symbol, address: args.tokenAddress, risk: 'REVIEW',
+    metrics: [
+      { label: 'Event', value: eventLabel },
+      { label: 'Boost', value: `+${args.boostAmount} / ${args.totalBoostAmount}` },
+      { label: 'Market cap', value: formatUsd(args.marketCap) },
+      { label: 'Liquidity', value: formatUsd(args.liquidity) },
+      { label: '5m volume', value: formatUsd(args.volume5m) },
+      { label: 'Dev holding', value: dev },
+    ],
+    evidence: [`Top holder ${top1}`, `Buys / sells ${args.buys5m}/${args.sells5m}`],
+    reason: 'A new or increased market boost was detected.',
+    recommendedAction: 'Monitor for sustained market confirmation.',
+  });
 }
 
 

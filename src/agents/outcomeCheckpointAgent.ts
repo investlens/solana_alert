@@ -3,6 +3,7 @@ import { enrichTokenByMintAddress } from '../services/dexscreener.js';
 import { recordTokenMemoryEvent } from '../memory/tokenMemoryEvents.js';
 import { sendTelegram } from '../services/telegram.js';
 import { getAlertDeliveries } from '../core/delivery.js';
+import { renderAlphaNotification } from '../ui/alphaNotification.js';
 
 type CheckpointKey = '5M' | '15M' | '30M' | '1H' | '6H' | '24H';
 
@@ -133,23 +134,19 @@ function buildOutcomeMessage(args: {
       ? '🟢 Holding gains well'
       : '🟡 Healthy pullback after strong move';
 
-  return [
-    '🏆 <b>ALPHAOS WINNER</b>',
-    '━━━━━━━━━━━━━━━━━━',
-    '',
-    `<b>$${cleanSymbol}</b>`,
-    '',
-    `🚀 Highest ROI: <b>${formatPct(args.maxReturnPct)}</b>`,
-    `📈 Current ROI: <b>${formatPct(args.returnPct)}</b>`,
-    '',
-    `💰 Alert MC: <b>$${Math.round(args.alertMarketCap).toLocaleString()}</b>`,
-    `💎 Current MC: <b>$${Math.round(args.currentMarketCap).toLocaleString()}</b>`,
-    '',
-    `🧠 Outcome: <b>${args.outcome.replace(/_/g, ' ')}</b>`,
-    recovered,
-    '',
-    '⏱ 1-hour AlphaOS performance review',
-  ].join('\n');
+  return renderAlphaNotification({
+    category: 'market', severity: 'success', state: 'POSITION_UPDATE',
+    symbol: cleanSymbol, risk: 'MEASURED OUTCOME',
+    metrics: [
+      { label: 'Peak ROI', value: formatPct(args.maxReturnPct) },
+      { label: 'Current ROI', value: formatPct(args.returnPct) },
+      { label: 'Alert MC', value: `$${Math.round(args.alertMarketCap).toLocaleString()}` },
+      { label: 'Current MC', value: `$${Math.round(args.currentMarketCap).toLocaleString()}` },
+      { label: 'Outcome', value: args.outcome.replace(/_/g, ' ') },
+    ],
+    reason: recovered.replace(/^[^ ]+ /, ''),
+    recommendedAction: 'Measured 1-hour performance update.',
+  });
 }
 
 function shouldSendOutcomeNotification(args: {

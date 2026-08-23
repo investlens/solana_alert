@@ -30,6 +30,7 @@ import {
   evaluateEmergencyExit,
   type EmergencyExitReason,
 } from "../services/emergencyExitManager.js";
+import { buildExecutionNotification } from '../ui/alphaNotificationPresets.js';
 
 let autoTradePaused = false;
 
@@ -301,7 +302,12 @@ export async function startAdminAutoTrade(args: {
   if (autoTradePaused) {
   await sendTelegram(
     config.ownerChatId,
-    '⏸️ <b>AUTO TRADE PAUSED</b>\n\nSignal skipped because auto trading is paused.'
+    buildExecutionNotification({
+      state: 'PAUSED',
+      symbol: args.symbol,
+      address: args.token,
+      reason: 'Signal skipped because auto trading is paused.',
+    }),
   );
   return;
 }
@@ -390,7 +396,7 @@ export async function startAdminAutoTrade(args: {
         if (!config.adminTradingEnabled) {
           await sendTelegram(
             config.ownerChatId,
-            "❌ Live trading blocked.\n\nADMIN_TRADING_ENABLED is false.",
+            buildExecutionNotification({ state: 'FAILED', reason: 'Live trading is disabled by the admin safety control.' }),
           );
 
           return;
@@ -399,7 +405,7 @@ export async function startAdminAutoTrade(args: {
         if (!config.adminTradingPrivateKey) {
           await sendTelegram(
             config.ownerChatId,
-            "❌ Live trading blocked.\n\nAdmin private key is missing.",
+            buildExecutionNotification({ state: 'FAILED', reason: 'Live trading credentials are unavailable.' }),
           );
 
           return;
@@ -526,14 +532,10 @@ try {
 
   await sendTelegram(
     config.ownerChatId,
-    [
-      '❌ <b>POSITION CREATION FAILED</b>',
-      '',
-      `<b>${args.symbol}</b>`,
-      `Token: <code>${args.token}</code>`,
-      '',
-      err instanceof Error ? err.message : String(err),
-    ].join('\n'),
+    buildExecutionNotification({
+      state: 'FAILED', symbol: args.symbol, address: args.token,
+      reason: `Position creation failed: ${err instanceof Error ? err.message : String(err)}`,
+    }),
   );
 
   return;
@@ -573,14 +575,10 @@ trade = isPaperMode
 
   await sendTelegram(
     config.ownerChatId,
-    [
-      '❌ <b>AUTO BUY FAILED</b>',
-      '',
-      `<b>${args.symbol}</b>`,
-      `Token: <code>${args.token}</code>`,
-      '',
-      err instanceof Error ? err.message : String(err),
-    ].join('\n'),
+    buildExecutionNotification({
+      state: 'FAILED', symbol: args.symbol, address: args.token,
+      reason: err instanceof Error ? err.message : String(err),
+    }),
   );
 
   return;
@@ -597,17 +595,11 @@ if (!trade.verified) {
 
   await sendTelegram(
     config.ownerChatId,
-    [
-      '⚠️ <b>BUY RECONCILIATION REQUIRED</b>',
-      '',
-      `<b>${args.symbol}</b>`,
-      `Token: <code>${args.token}</code>`,
-      '',
-      'The transaction was submitted successfully, but AlphaOS could not verify the received token balance.',
-      '',
-      'The bot will not attempt another buy.',
-      `Tx: <code>${trade.signature}</code>`,
-    ].join('\n'),
+    buildExecutionNotification({
+      state: 'FAILED', symbol: args.symbol, address: args.token,
+      metrics: [{ label: 'Tx', value: trade.signature }],
+      reason: 'Buy submitted, but the received balance could not be verified. Manual reconciliation is required; no retry will occur.',
+    }),
   );
 
   return;
@@ -659,15 +651,11 @@ if (
 
   await sendTelegram(
     config.ownerChatId,
-    [
-      '⚠️ <b>BUY RECONCILIATION REQUIRED</b>',
-      '',
-      `<b>${args.symbol}</b>`,
-      `Token: <code>${args.token}</code>`,
-      '',
-      'The transaction succeeded, but the received token amount was invalid.',
-      `Tx: <code>${trade.signature}</code>`,
-    ].join('\n'),
+    buildExecutionNotification({
+      state: 'FAILED', symbol: args.symbol, address: args.token,
+      metrics: [{ label: 'Tx', value: trade.signature }],
+      reason: 'Buy succeeded, but the received token amount was invalid. Manual reconciliation is required.',
+    }),
   );
 
   return;
@@ -699,20 +687,17 @@ await recordTradeOpen({
 
   await sendTelegram(
     config.ownerChatId,
-    [
-      isPaperMode
-        ? "🧪 <b>PAPER AUTO BUY STARTED</b>"
-        : "🤖 <b>AUTO BUY EXECUTED</b>",
-      '',
-      `<b>${args.symbol}</b>`,
-      `Amount: <b>${amountSol.toFixed(4)} SOL</b>`,
-      `Entry Price: <b>$${fmtPrice(confirmedPrice)}</b>`,
-      `Initial Stop: <b>$${fmtPrice(position.stopPrice)}</b>`,
-      `Initial Stop Width: <b>${initialStopLossPercent}%</b>`,
-      '',
-      'AlphaOS is now protecting this position.',
-      `Tx: <code>${trade.signature}</code>`,
-    ].join('\n'),
+    buildExecutionNotification({
+      state: 'EXECUTED', symbol: args.symbol, address: args.token,
+      metrics: [
+        { label: 'Mode', value: isPaperMode ? 'PAPER BUY' : 'LIVE BUY' },
+        { label: 'Amount', value: `${amountSol.toFixed(4)} SOL` },
+        { label: 'Entry', value: `$${fmtPrice(confirmedPrice)}` },
+        { label: 'Stop', value: `$${fmtPrice(position.stopPrice)}` },
+        { label: 'Tx', value: trade.signature },
+      ],
+      reason: 'Position opened and protection is active.',
+    }),
     sellButtons(args.token)
   );
 }
@@ -771,19 +756,18 @@ export async function manualCloseAutoTrade(token: string, percent: 25 | 50 | 100
 
   await sendTelegram(
     config.ownerChatId,
-    [
-      isPaperPosition
-      ? '🧪 <b>PAPER MANUAL SELL</b>'
-      : '✅ <b>MANUAL SELL EXECUTED</b>',
-      '',
-      `<b>${trade.symbol}</b>`,
-      `Sold: <b>${percent}%</b>`,
-      `Current Price: <b>$${fmtPrice(currentPrice)}</b>`,
-      `ROI Now: <b>${roiNow.toFixed(1)}%</b>`,
-      `Paper PnL: <b>${fmtSol(pnlSol)}</b>`,
-      `Paper Value: <b>${valueSol.toFixed(4)} SOL</b>`,
-      `Tx: <code>${sell.signature}</code>`,
-    ].join('\n')
+    buildExecutionNotification({
+      state: 'EXECUTED', symbol: trade.symbol, address: token,
+      metrics: [
+        { label: 'Mode', value: isPaperPosition ? 'PAPER SELL' : 'LIVE SELL' },
+        { label: 'Sold', value: `${percent}%` },
+        { label: 'Price', value: `$${fmtPrice(currentPrice)}` },
+        { label: 'ROI', value: `${roiNow.toFixed(1)}%` },
+        { label: 'PnL', value: fmtSol(pnlSol) },
+        { label: 'Tx', value: sell.signature },
+      ],
+      reason: 'Manual position reduction completed.',
+    })
   );
 
   return {
@@ -1118,22 +1102,18 @@ console.log("[AutoTrade] Trailing stop updated.", {
      */
     await sendTelegram(
       config.ownerChatId,
-      [
-        isPaperPosition
-          ? "🧪 <b>PAPER AUTO SELL COMPLETE</b>"
-          : "✅ <b>AUTO SELL EXECUTED</b>",
-        "",
-        `<b>${trade.symbol}</b>`,
-        `Reason: <b>${exitReason.replace(/_/g, " ")}</b>`,
-        `Entry Price: <b>$${fmtPrice(trade.entryPrice)}</b>`,
-        `Highest Price: <b>$${fmtPrice(trade.highestPrice)}</b>`,
-        `Stop Price: <b>$${fmtPrice(trade.stopPrice)}</b>`,
-        `Exit Price: <b>$${fmtPrice(currentPrice)}</b>`,
-        `Final ROI: <b>${roiNow.toFixed(1)}%</b>`,
-        `Estimated PnL: <b>${fmtSol(pnlSol)}</b>`,
-        `Estimated Exit Value: <b>${valueSol.toFixed(4)} SOL</b>`,
-        `Tx: <code>${sell.signature}</code>`,
-      ].join("\n"),
+      buildExecutionNotification({
+        state: 'EXECUTED', symbol: trade.symbol, address: token,
+        metrics: [
+          { label: 'Mode', value: isPaperPosition ? 'PAPER SELL' : 'LIVE SELL' },
+          { label: 'Reason', value: exitReason.replace(/_/g, ' ') },
+          { label: 'Exit', value: `$${fmtPrice(currentPrice)}` },
+          { label: 'ROI', value: `${roiNow.toFixed(1)}%` },
+          { label: 'PnL', value: fmtSol(pnlSol) },
+          { label: 'Tx', value: sell.signature },
+        ],
+        reason: 'Position closed and execution recorded.',
+      }),
     );
   } catch (sellError) {
     const errorMessage =
@@ -1169,19 +1149,15 @@ console.log("[AutoTrade] Trailing stop updated.", {
 
     await sendTelegram(
       config.ownerChatId,
-      [
-        "❌ <b>AUTO SELL FAILED</b>",
-        "",
-        `<b>${trade.symbol}</b>`,
-        `Reason: <b>${exitReason.replace(/_/g, " ")}</b>`,
-        `Token: <code>${token}</code>`,
-        `Current Price: <b>$${fmtPrice(currentPrice)}</b>`,
-        `Stop Price: <b>$${fmtPrice(trade.stopPrice)}</b>`,
-        "",
-        "AlphaOS will retry during the next position check.",
-        "",
-        `<code>${errorMessage}</code>`,
-      ].join("\n"),
+      buildExecutionNotification({
+        state: 'FAILED', symbol: trade.symbol, address: token,
+        metrics: [
+          { label: 'Reason', value: exitReason.replace(/_/g, ' ') },
+          { label: 'Price', value: `$${fmtPrice(currentPrice)}` },
+          { label: 'Stop', value: `$${fmtPrice(trade.stopPrice)}` },
+        ],
+        reason: `${errorMessage} AlphaOS will retry during the next position check.`,
+      }),
     );
   }
 }
@@ -1199,14 +1175,10 @@ console.log("[AutoTrade] Trailing stop updated.", {
 
       await sendTelegram(
         config.ownerChatId,
-        [
-          "⚠️ <b>AUTO TRADE CHECK FAILED</b>",
-          "",
-          `<b>${trade.symbol}</b>`,
-          error instanceof Error
-            ? error.message
-            : String(error),
-        ].join("\n"),
+        buildExecutionNotification({
+          state: 'FAILED', symbol: trade.symbol, address: token,
+          reason: `Position check failed: ${error instanceof Error ? error.message : String(error)}`,
+        }),
       );
     }
   }

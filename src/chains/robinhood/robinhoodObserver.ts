@@ -5,6 +5,7 @@ import {
 import {
   sendTelegram,
 } from '../../services/telegram.js';
+import { renderAlphaNotification } from '../../ui/alphaNotification.js';
 
 import {
   startPostAlertDevWatch,
@@ -447,78 +448,23 @@ if (
   }
 }
 
-  return [
-    '🟣 <b>ALPHAOS • ROBINHOOD EARLY WATCH</b>',
-    '',
-    `<b>${symbol}</b> · ${name}`,
-    '',
-    '🧭 <b>DISCOVERY</b>',
-    `Source: <b>${token.source}</b>`,
-    'Status: <b>VETTED EARLY OBSERVATION</b>',
-    '',
-    '🛡 <b>SECURITY</b>',
-    `Contract: ✅ PASS · ${args.contractScore}/100`,
-    `Admin indicators: ${
-      args.adminPenalty > 0
-        ? `⚠️ Penalty ${args.adminPenalty}`
-        : '✅ No material indicator detected'
-    }`,
-    `Pool: ✅ VERIFIED`,
-    `Exit route: ✅ ${escapeHtml(args.sellStatus)}`,
-    `Exit impact: ${impactText}`,
-    `Holder risk: ${
-      args.holderRisk === 'HIGH'
-        ? '⚠️'
-        : '⚪'
-    } ${escapeHtml(holderText)}`,
-    '',
-    '📊 <b>MARKET</b>',
-    `Market Cap: ${formatUsd(market.marketCapUsd)}`,
-    `Liquidity: ${formatUsd(market.liquidityUsd)}`,
-    `Price: ${formatPrice(market.priceUsd)}`,
-    `5m Volume: ${formatUsd(market.volume5mUsd)}`,
-    `Buys / Sells: ${market.buys5m} / ${market.sells5m}`,
-    '',
-    '👥 <b>HOLDERS</b>',
-`Observed circulating wallets: ${args.holderCount}`,
-`Largest observed wallet: ${
-  args.top1Pct == null
-    ? 'Tracking'
-    : `${args.top1Pct.toFixed(2)}%`
-}`,
-'',
-
-'🧠 <b>TOKEN INTELLIGENCE</b>',
-
-`👨‍💻 Dev Holding: ${
-  args.devHoldingPercent == null
-    ? '⚪ UNKNOWN'
-    : args.devHoldingPercent >= 10
-      ? `⚠️ ${args.devHoldingPercent.toFixed(2)}%`
-      : `✅ ${args.devHoldingPercent.toFixed(4)}%`
-}`,
-
-`💳 DEX Paid: ${
-  args.dexPaid === true
-    ? '✅ YES'
-    : args.dexPaid === false
-      ? '❌ NO'
-      : '⚪ UNKNOWN'
-}`,
-'',
-
-...creatorLines,
-
-'⚠️ <b>NOTES</b>',
-    warningLines,
-    '',
-    '🧠 AlphaOS is tracking this token.',
-    '<b>No Robinhood trade has been opened.</b>',
-    '',
-    'EARLY DISCOVERY + VETTING ACTIVE',
-    '',
-    `<code>${token.tokenAddress}</code>`,
-  ].join('\n');
+  return renderAlphaNotification({
+    category: 'market', severity: 'watch', state: 'WATCHING',
+    symbol, subtitle: name, address: token.tokenAddress, risk: holderText,
+    confidence: args.contractScore,
+    metrics: [
+      { label: 'Market cap', value: formatUsd(market.marketCapUsd) },
+      { label: 'Liquidity', value: formatUsd(market.liquidityUsd) },
+      { label: '5m volume', value: formatUsd(market.volume5mUsd) },
+      { label: 'Exit impact', value: impactText },
+      { label: 'Dev holding', value: args.devHoldingPercent == null ? 'Data unavailable' : `${args.devHoldingPercent.toFixed(2)}%` },
+      { label: 'Creator', value: args.creatorStatus && args.creatorStatus !== 'UNKNOWN' ? `${args.creatorStatus}${args.creatorScore == null ? '' : ` · ${args.creatorScore}/100`}` : 'Data unavailable' },
+    ],
+    evidence: args.warnings,
+    reason: 'A vetted early Robinhood-chain token is being monitored.',
+    recommendedAction: 'Watch for confirmation. Direct execution is unavailable.',
+    access: 'ADMIN',
+  });
 }
 
 async function saveEvaluatedObservation(args: {

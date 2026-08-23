@@ -33,6 +33,14 @@ import {
   opportunityDeliveryIdentity,
 } from './opportunityDeliveryIdentity.js';
 import { accessProfileForUser, hasCapability } from '../product/capabilities.js';
+import { strategyDisplay } from '../product/strategyPresentation.js';
+import {
+  assertAlphaActions,
+  burnEvidenceMetric,
+  renderAlphaNotification,
+  type AlphaNotificationState,
+} from '../ui/alphaNotification.js';
+import { deliverReservedTelegram } from './telegramDeliveryContract.js';
 
 type DeliverableAction =
   | 'BUY'
@@ -334,7 +342,7 @@ function signedPercent(
   }${value.toFixed(2)}%`;
 }
 
-function buildOpportunityMessage(
+export function buildOpportunityMessage(
   opportunity: OpportunityRow,
 ): string {
   const presentation =
@@ -360,13 +368,6 @@ function buildOpportunityMessage(
       'elapsedSec',
     );
 
-  const confidence =
-    opportunity.confidence == null
-      ? '-'
-      : `${Math.round(
-          opportunity.confidence,
-        )}`;
-
   const age =
     elapsedSec == null
       ? '-'
@@ -384,53 +385,41 @@ function buildOpportunityMessage(
     opportunity.what_happened ??
     'AlphaOS detected a qualified market-state change.';
 
-  return [
-    `<b>${presentation.title}</b>`,
-    '',
-    `<b>${escapeHtml(
-      strategyLabel(
-        opportunity,
-      ),
-    )}</b> · ${escapeHtml(
-      age,
-    )}`,
-    '',
-    `Move        <b>${escapeHtml(
-      signedPercent(
-        currentRoi,
-      ),
-    )}</b>`,
-    `Momentum    <b>${escapeHtml(
-      signedPercent(
-        roiChange,
-      ),
-    )}</b>`,
-    `Confidence  <b>${escapeHtml(
-      confidence,
-    )}</b>`,
-    `Risk        <b>${escapeHtml(
-      presentation.riskLabel,
-    )}</b>`,
-    ...devEvidenceLines(
-      opportunity,
-    ),
-    '',
-    `🧠 ${escapeHtml(
-      reason,
-    )}`,
-    '',
-    `<b>${escapeHtml(
-      presentation.action,
-    )}</b>`,
-    '',
-    `<code>${escapeHtml(
-      compactAddress(
-        opportunity.asset_id,
-      ),
-    )}</code>`,
-  ].join(
-    '\n',
-  );
+  const action = String(opportunity.recommended_action ?? '').toUpperCase();
+  const state: AlphaNotificationState = action === 'EXIT'
+    ? 'EXIT_AVOID'
+    : action === 'BUY' || action === 'CHECK_ENTRY'
+      ? 'ENTRY_READY'
+      : action === 'TRACK'
+        ? 'BUILDING'
+        : 'WATCHING';
+  const holding = rawNumber(opportunity, 'devHoldingPercent');
+  const transferred = rawNumber(opportunity, 'otherDevTransferPercent');
+  const burned = rawNumber(opportunity, 'totalBurnPercent');
+
+  return renderAlphaNotification({
+    category: action === 'EXIT' ? 'risk' : 'opportunity',
+    severity: action === 'EXIT' ? 'critical' : action === 'BUY' ? 'positive' : 'watch',
+    state,
+    title: opportunity.title,
+    symbol: strategyDisplay(opportunity.strategy_key).name,
+    address: opportunity.asset_id,
+    chain: opportunity.chain,
+    age,
+    confidence: opportunity.confidence,
+    risk: presentation.riskLabel,
+    metrics: [
+      { label: 'Move', value: signedPercent(currentRoi) },
+      { label: 'Momentum', value: signedPercent(roiChange) },
+      ...(holding == null ? [] : [{ label: 'Dev holding', value: `${holding.toFixed(2)}%` }]),
+      ...(transferred == null ? [] : [{ label: 'Transferred', value: `${transferred.toFixed(2)}%` }]),
+      ...(opportunity.raw_data && Object.prototype.hasOwnProperty.call(opportunity.raw_data, 'totalBurnPercent')
+        ? [burnEvidenceMetric(burned)]
+        : []),
+    ],
+    reason,
+    recommendedAction: presentation.action,
+  });
 }
 
 function executionAvailable(
@@ -459,19 +448,19 @@ function buildButtons(
       typeof resolveTokenOpenTarget
     >
   >,
+  user: DeliverableUser,
 ): InlineButton[][] {
   const rows:
     InlineButton[][] = [];
 
   if (
-    executionAvailable(
-      opportunity,
-    )
+    executionAvailable(opportunity) &&
+    hasCapability(accessProfileForUser(user), 'trading.admin')
   ) {
     rows.push([
       {
         text:
-          '⚡ TRADE',
+          '⚡ Trade',
 
         callback_data:
           `OPP_TRADE_${opportunity.id}`,
@@ -482,7 +471,7 @@ function buildButtons(
   rows.push([
     {
       text:
-        '👀 TRACK',
+        '👀 Track',
 
       callback_data:
         `OPP_TRACK_${opportunity.id}`,
@@ -492,8 +481,8 @@ function buildButtons(
       text:
         tokenTarget.source ===
         'dexscreener'
-          ? '📊 CHART'
-          : '🔎 TOKEN',
+          ? '📊 Chart'
+          : '🔎 Token',
 
       url:
         tokenTarget.url,
@@ -501,12 +490,13 @@ function buildButtons(
   ]);
 
   if (
-    opportunity.strategy_key
+    opportunity.strategy_key &&
+    Buffer.byteLength(`STRAT_TOGGLE_${opportunity.strategy_key}`, 'utf8') <= 64
   ) {
     rows.push([
       {
         text:
-          '🔕 MUTE',
+          '🔕 Mute',
 
         callback_data:
           `STRAT_TOGGLE_${opportunity.strategy_key}`,
@@ -514,7 +504,7 @@ function buildButtons(
     ]);
   }
 
-  return rows;
+  return assertAlphaActions(rows);
 }
 
 function userCanReceiveOpportunity(
@@ -991,10 +981,8 @@ async function deliverOpportunity(
       continue;
     }
 
-    let telegramSent = false;
-
-    try {
-      await sendTelegram(
+    const delivery = await deliverReservedTelegram({
+      send: () => sendTelegram(
         user.telegram_id,
         buildOpportunityMessage(
           opportunity,
@@ -1002,28 +990,21 @@ async function deliverOpportunity(
         buildButtons(
           opportunity,
           tokenTarget,
+          user,
         ),
-      );
-
-      telegramSent = true;
-
-      await markDeliveryComplete(
+      ),
+      complete: () => markDeliveryComplete(
         opportunity.id,
         user.telegram_id,
         deliveryIdentity,
-      );
+      ),
+      release: () => releaseDelivery(opportunity.id, user.telegram_id, deliveryIdentity),
+    });
 
-      delivered +=
-        1;
-    } catch (error) {
-      if (!telegramSent) {
-        await releaseDelivery(
-          opportunity.id,
-          user.telegram_id,
-          deliveryIdentity,
-        );
-      }
-
+    if (delivery.recorded) {
+      delivered += 1;
+    } else if (delivery.error) {
+      const error = delivery.error;
       const message =
         error instanceof Error
           ? error.message
@@ -1042,7 +1023,9 @@ async function deliverOpportunity(
       }
 
       console.error(
-        '[OpportunityDelivery] Telegram delivery failed:',
+        delivery.sent
+          ? '[OpportunityDelivery] Delivery accounting failed after Telegram send:'
+          : '[OpportunityDelivery] Telegram delivery failed:',
         {
           opportunityId:
             opportunity.id,

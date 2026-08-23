@@ -9,6 +9,7 @@ import {
 import {
   scanRobinhoodDevMovement,
 } from './devMovementScanner.js';
+import { buildCreatorNotification } from '../../../ui/alphaNotificationPresets.js';
 
 
 const DEV_WATCH_DELAYS_MS =
@@ -52,30 +53,15 @@ function buildWarningMessage(args: {
   transferCount: number;
   destinations: string[];
 }): string {
-  return [
-    '🚨 ALPHAOS • DEV MOVEMENT DETECTED',
-    '',
-    `⚠️ ${args.symbol}`,
-    '',
-    'Developer wallet moved tokens AFTER the AlphaOS alert.',
-    '',
-    `Transfers: ${args.transferCount}`,
-    '',
-    '🛑 AlphaOS Risk Update:',
-    'Treat this token as HIGH RISK.',
-    '',
-    `Contract: ${args.tokenAddress}`,
-    '',
-    args.destinations.length > 0
-      ? `Destination: ${args.destinations[0]}`
-      : '',
-  ]
-    .filter(
-      Boolean,
-    )
-    .join(
-      '\n',
-    );
+  return buildCreatorNotification({
+    symbol: args.symbol,
+    address: args.tokenAddress,
+    risk: true,
+    transferredAmount: args.transferCount,
+    reason: args.destinations.length
+      ? `Developer tokens moved after alert toward ${args.destinations[0]}.`
+      : 'Developer tokens moved after the AlphaOS alert.',
+  });
 }
 
 

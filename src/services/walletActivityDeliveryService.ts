@@ -24,6 +24,8 @@ import type {
 import { escapeTelegramHtml } from '../ui/escapeHtml.js';
 import { getUserByTelegramId } from '../core/subscriptions.js';
 import { accessProfileForUser, hasCapability } from '../product/capabilities.js';
+import { assertAlphaActions, renderAlphaNotification, type AlphaNotificationState } from '../ui/alphaNotification.js';
+import { deliverReservedTelegram } from './telegramDeliveryContract.js';
 
 type InlineButton = {
   text: string;
@@ -169,7 +171,7 @@ async function markDelivered(args: {
 
   event: WalletWatchEvent;
 }) {
-  await supabase
+  const { error } = await supabase
     .from(
       'wallet_activity_deliveries',
     )
@@ -194,6 +196,7 @@ async function markDelivered(args: {
       'transaction_signature',
       args.event.signature,
     );
+  if (error) throw error;
 }
 
 async function releaseDelivery(args: {
@@ -201,7 +204,7 @@ async function releaseDelivery(args: {
 
   event: WalletWatchEvent;
 }) {
-  await supabase
+  const { error } = await supabase
     .from(
       'wallet_activity_deliveries',
     )
@@ -218,6 +221,7 @@ async function releaseDelivery(args: {
       'transaction_signature',
       args.event.signature,
     );
+  if (error) throw error;
 }
 
 async function buildButtons(
@@ -243,8 +247,8 @@ async function buildButtons(
         text:
           target.source ===
           'dexscreener'
-            ? '📊 CHART'
-            : '🔎 TOKEN',
+            ? '📊 Chart'
+            : '🔎 Token',
 
         url:
           target.url,
@@ -252,7 +256,7 @@ async function buildButtons(
 
       {
         text:
-          '🐋 ACTIVITY',
+          '🐋 Wallet Activity',
 
         callback_data:
           'WALLET_TRACKING',
@@ -262,7 +266,7 @@ async function buildButtons(
     buttons.push([
       {
         text:
-          '🐋 WALLET ACTIVITY',
+          '🐋 Wallet Activity',
 
         callback_data:
           'WALLET_TRACKING',
@@ -270,10 +274,10 @@ async function buildButtons(
     ]);
   }
 
-  return buttons;
+  return assertAlphaActions(buttons);
 }
 
-function buildMessage(args: {
+export function buildWalletActivityMessage(args: {
   event: WalletWatchEvent;
 
   label: string | null;
@@ -289,50 +293,26 @@ function buildMessage(args: {
       event.wallet,
     );
 
-  const lines = [
-    `<b>${activityTitle(
-      event,
-    )}</b>`,
-    '',
-    `<b>${escapeTelegramHtml(wallet)}</b> ${escapeTelegramHtml(actionLabel(
-      event,
-    ))}`,
-  ];
-
-  if (
-    event.tokenMint
-  ) {
-    lines.push(
-      `<code>${escapeTelegramHtml(shortAddress(
-        event.tokenMint,
-      ))}</code>`,
-    );
-  }
-
-  if (
-    (
-      event.kind ===
-      'buy' ||
-      event.kind ===
-      'sell'
-    )
-  ) {
-    lines.push(
-      '',
-      `Value   <b>${formatAmount(
-        event.amountSol,
-      )}</b>`,
-    );
-  }
-
-  lines.push(
-    '',
-    '<i>Tracked-wallet activity · verify market conditions before acting.</i>',
-  );
-
-  return lines.join(
-    '\n',
-  );
+  const state: AlphaNotificationState = event.kind === 'buy'
+    ? 'WALLET_BUY'
+    : event.kind === 'sell'
+      ? 'WALLET_SELL'
+      : 'WALLET_LAUNCH';
+  return renderAlphaNotification({
+    category: 'wallet',
+    severity: event.kind === 'sell' ? 'warning' : event.kind === 'buy' ? 'positive' : 'watch',
+    state,
+    symbol: wallet,
+    subtitle: event.tokenMint ? shortAddress(event.tokenMint) : undefined,
+    address: event.wallet,
+    metrics: event.kind === 'launch' ? [] : [{ label: 'Value', value: formatAmount(event.amountSol) }],
+    reason: event.kind === 'buy'
+      ? 'Watched wallet opened a position.'
+      : event.kind === 'sell'
+        ? 'Watched wallet reduced a position.'
+        : 'Watched wallet interacted with a new launch.',
+    recommendedAction: 'Review current market conditions before acting.',
+  });
 }
 
 export async function
@@ -449,11 +429,11 @@ deliverTrackedWalletActivity(
           continue;
         }
 
-        try {
-          await sendTelegram(
+        const delivery = await deliverReservedTelegram({
+          send: () => sendTelegram(
             subscriber.telegram_id,
 
-            buildMessage({
+            buildWalletActivityMessage({
               event,
 
               label:
@@ -461,15 +441,17 @@ deliverTrackedWalletActivity(
             }),
 
             buttons,
-          );
-
-          await markDelivered({
+          ),
+          complete: () => markDelivered({
             telegramId:
               subscriber.telegram_id,
 
             event,
-          });
+          }),
+          release: () => releaseDelivery({ telegramId: subscriber.telegram_id, event }),
+        });
 
+        if (delivery.recorded) {
           console.log(
             '[WalletActivity] Delivered:',
             {
@@ -486,18 +468,12 @@ deliverTrackedWalletActivity(
                 event.tokenMint,
             },
           );
-        } catch (
-          error
-        ) {
-          await releaseDelivery({
-            telegramId:
-              subscriber.telegram_id,
-
-            event,
-          });
-
+        } else if (delivery.error) {
+          const error = delivery.error;
           console.error(
-            '[WalletActivity] Delivery failed:',
+            delivery.sent
+              ? '[WalletActivity] Delivery accounting failed after Telegram send:'
+              : '[WalletActivity] Delivery failed:',
             {
               telegramId:
                 subscriber.telegram_id,
