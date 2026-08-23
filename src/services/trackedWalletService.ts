@@ -1,6 +1,7 @@
 import {
   supabase,
 } from './supabase.js';
+import { requireWalletAddress, walletFamilyHasLiveMonitoring } from './walletAddress.js';
 
 export type TrackedWallet = {
   id: number;
@@ -135,24 +136,13 @@ addTrackedWallet(args: {
 
   label?: string | null;
 }): Promise<void> {
-  const walletAddress =
-    normalizeAddress(
-      args.walletAddress,
-    );
-
-  if (!walletAddress) {
-    throw new Error(
-      'Wallet address is required',
-    );
+  const detected = requireWalletAddress(args.walletAddress);
+  const walletAddress = detected.normalizedAddress;
+  const chain = detected.family;
+  if (args.chain && String(args.chain).trim().toLowerCase() !== chain) {
+    throw new Error('Wallet family does not match requested chain');
   }
-
-  const chain =
-    String(
-      args.chain ??
-      'solana',
-    )
-      .trim()
-      .toLowerCase();
+  const liveMonitoring = walletFamilyHasLiveMonitoring(chain);
 
   const {
     error,
@@ -176,10 +166,10 @@ addTrackedWallet(args: {
             null,
 
           is_active:
-            true,
+            liveMonitoring,
 
           alerts_enabled:
-            true,
+            liveMonitoring,
 
           updated_at:
             new Date().toISOString(),
@@ -203,6 +193,11 @@ setTrackedWalletActive(args: {
 
   active: boolean;
 }): Promise<void> {
+  const wallet = await getTrackedWalletByIdForUser({ telegramId: args.telegramId, id: args.id });
+  if (!wallet) throw new Error('Wallet not found');
+  if (!walletFamilyHasLiveMonitoring(wallet.chain)) {
+    throw new Error('Live monitoring is unavailable for this wallet family');
+  }
   const {
     error,
   } =
@@ -407,7 +402,9 @@ export async function getRecentWalletActivityForUser(
   limit = 15,
 ): Promise<Array<Record<string, any>>> {
   const wallets = await getTrackedWalletsForUser(telegramId);
-  const addresses = wallets.map(wallet => wallet.wallet_address);
+  const addresses = wallets
+    .filter(wallet => walletFamilyHasLiveMonitoring(wallet.chain))
+    .map(wallet => wallet.wallet_address);
   if (!addresses.length) return [];
 
   const { data, error } = await supabase

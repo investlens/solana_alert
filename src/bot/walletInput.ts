@@ -1,6 +1,9 @@
-import { PublicKey } from '@solana/web3.js';
 export { escapeTelegramHtml } from '../ui/escapeHtml.js';
+export { detectWalletAddress } from '../services/walletAddress.js';
+import { requireWalletAddress } from '../services/walletAddress.js';
 
 export function normalizeSolanaPublicAddress(value: string): string {
-  return new PublicKey(value.trim()).toBase58();
+  const detected = requireWalletAddress(value);
+  if (detected.family !== 'solana') throw new Error('Not a Solana public address');
+  return detected.normalizedAddress;
 }

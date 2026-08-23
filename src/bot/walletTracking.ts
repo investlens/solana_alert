@@ -18,9 +18,10 @@ import {
   setConversationState,
 } from './conversationState.js';
 import {
+  detectWalletAddress,
   escapeTelegramHtml,
-  normalizeSolanaPublicAddress,
 } from './walletInput.js';
+import { walletCoverageText, walletFamilyHasLiveMonitoring } from '../services/walletAddress.js';
 import { getContextAccess, requireCapability } from './accessControl.js';
 import { hasCapability } from '../product/capabilities.js';
 
@@ -98,17 +99,15 @@ async function renderWalletCenter(
       10,
     )
   ) {
+    const liveMonitoring = walletFamilyHasLiveMonitoring(wallet.chain);
     lines.push(
-      `${
-        wallet.is_active
-          ? '🟢'
-          : '⚪'
-      } ${wallet.label
+      `${liveMonitoring && wallet.is_active ? '🟢' : '⚪'} <b>${escapeTelegramHtml(wallet.chain.toUpperCase())}</b> · ${wallet.label
         ? `<b>${escapeTelegramHtml(wallet.label)}</b> · `
         : ''
       }<code>${escapeTelegramHtml(shortAddress(
         wallet.wallet_address,
       ))}</code>`,
+      `<i>${walletCoverageText(wallet.chain, wallet.is_active)}</i>`,
     );
   }
 
@@ -130,8 +129,10 @@ async function renderWalletCenter(
           'WALLET_TRACKING',
         ),
       ],
-      [Markup.button.callback('⚡ Recent Activity', 'WALLET_RECENT_ACTIVITY')],
     ];
+  if (wallets.some(wallet => walletFamilyHasLiveMonitoring(wallet.chain))) {
+    buttons.push([Markup.button.callback('⚡ Recent Activity', 'WALLET_RECENT_ACTIVITY')]);
+  }
 
   for (
     const wallet
@@ -140,29 +141,18 @@ async function renderWalletCenter(
       8,
     )
   ) {
-    buttons.push([
-      Markup.button.callback(
-        wallet.is_active
-          ? `⏸ ${shortAddress(
-              wallet.wallet_address,
-            )}`
-          : `▶️ ${shortAddress(
-              wallet.wallet_address,
-            )}`,
-
-        `WALLET_TOGGLE_${wallet.id}`,
-      ),
-
-      Markup.button.callback(
-        '⚡ Activity',
-        `WALLET_ACTIVITY_${wallet.id}`,
-      ),
-
-      Markup.button.callback(
-        '🗑',
-        `WALLET_REMOVE_CONFIRM_${wallet.id}`,
-      ),
-    ]);
+    const row = [];
+    if (walletFamilyHasLiveMonitoring(wallet.chain)) {
+      row.push(
+        Markup.button.callback(
+          wallet.is_active ? `⏸ ${shortAddress(wallet.wallet_address)}` : `▶️ ${shortAddress(wallet.wallet_address)}`,
+          `WALLET_TOGGLE_${wallet.id}`,
+        ),
+        Markup.button.callback('⚡ Activity', `WALLET_ACTIVITY_${wallet.id}`),
+      );
+    }
+    row.push(Markup.button.callback('🗑', `WALLET_REMOVE_CONFIRM_${wallet.id}`));
+    buttons.push(row);
   }
 
   buttons.push([
@@ -259,9 +249,10 @@ registerWalletTracking(
         [
           '➕ <b>ADD WALLET</b>',
           '',
-          'Paste the public Solana wallet address below.',
+          'Paste a public wallet address.',
+          'AlphaOS will detect the wallet type and show available tracking coverage.',
           '',
-          '<i>No private key or seed phrase is ever required.</i>',
+          '<i>Public addresses only. Never share private keys or seed phrases.</i>',
         ].join(
           '\n',
         ),
@@ -362,28 +353,28 @@ registerWalletTracking(
           return;
         }
 
-        let address: string;
-        try {
-          address = normalizeSolanaPublicAddress(walletAddress);
-        } catch {
-          await ctx.reply('❌ That does not look like a valid Solana wallet.');
+        const detected = detectWalletAddress(walletAddress);
+        if (!detected.valid || !detected.family || !detected.normalizedAddress) {
+          await ctx.reply('❌ That does not look like a valid public wallet address.');
           return;
         }
+        const address = detected.normalizedAddress;
 
         await addTrackedWallet({
           telegramId,
 
           walletAddress: address,
 
-          chain:
-            'solana',
+          chain: detected.family,
 
           label,
         });
 
         await ctx.reply(
           [
-            '✅ <b>Wallet Added</b>',
+            detected.liveMonitoringAvailable
+              ? '✅ <b>SOLANA WALLET ADDED</b>'
+              : '✅ <b>EVM WALLET SAVED</b>',
             '',
             label
               ? `<b>${escapeTelegramHtml(label)}</b>`
@@ -391,7 +382,9 @@ registerWalletTracking(
 
             `<code>${escapeTelegramHtml(address)}</code>`,
             '',
-            'AlphaOS will include this wallet in activity tracking.',
+            detected.liveMonitoringAvailable
+              ? 'Live activity tracking is available.'
+              : 'Live activity monitoring is not available for this wallet yet.',
           ].join(
             '\n',
           ),
@@ -494,6 +487,11 @@ registerWalletTracking(
           return;
         }
 
+        if (!walletFamilyHasLiveMonitoring(wallet.chain)) {
+          await ctx.answerCbQuery('Live monitoring is unavailable for this wallet type', { show_alert: true });
+          return;
+        }
+
         await setTrackedWalletActive({
           telegramId,
 
@@ -568,7 +566,9 @@ registerWalletTracking(
             : 'Tracked wallet',
           `<code>${escapeTelegramHtml(wallet.wallet_address)}</code>`,
           '',
-          'This stops AlphaOS wallet activity tracking for this address.',
+          walletFamilyHasLiveMonitoring(wallet.chain)
+            ? 'This stops AlphaOS wallet activity tracking for this address.'
+            : 'This removes the saved public wallet from AlphaOS.',
         ].join(
           '\n',
         ),
@@ -669,6 +669,17 @@ registerWalletTracking(
             'Wallet not found',
           );
 
+          return;
+        }
+
+        if (!walletFamilyHasLiveMonitoring(wallet.chain)) {
+          await ctx.answerCbQuery();
+          await ctx.reply('Live monitoring is not available for this wallet type yet.', {
+            reply_markup: Markup.inlineKeyboard([[
+              Markup.button.callback('⬅️ Wallets', 'WALLET_TRACKING'),
+              Markup.button.callback('🏠 Home', 'MAIN_MENU'),
+            ]]).reply_markup,
+          });
           return;
         }
 
@@ -835,12 +846,11 @@ registerWalletTracking(
       }
 
       try {
-        /*
-         * Constructor validation prevents random text from
-         * becoming a tracked Solana wallet.
-         */
-        const address =
-          normalizeSolanaPublicAddress(value);
+        const detected = detectWalletAddress(value);
+        if (!detected.valid || !detected.family || !detected.normalizedAddress) {
+          throw new Error('Invalid public wallet address');
+        }
+        const address = detected.normalizedAddress;
 
         await addTrackedWallet({
           telegramId,
@@ -848,19 +858,22 @@ registerWalletTracking(
           walletAddress:
             address,
 
-          chain:
-            'solana',
+          chain: detected.family,
         });
 
         clearConversationState(telegramId);
 
         await ctx.reply(
           [
-            '✅ <b>WALLET TRACKING ACTIVE</b>',
+            detected.liveMonitoringAvailable
+              ? '✅ <b>SOLANA WALLET ADDED</b>'
+              : '✅ <b>EVM WALLET SAVED</b>',
             '',
             `<code>${address}</code>`,
             '',
-            'AlphaOS will alert you when this wallet buys or sells.',
+            detected.liveMonitoringAvailable
+              ? 'Live activity tracking is available.'
+              : 'Live activity monitoring is not available for this wallet yet.',
           ].join(
             '\n',
           ),
@@ -882,7 +895,7 @@ registerWalletTracking(
       } catch {
         await ctx.reply(
           [
-            '❌ That does not look like a valid Solana wallet.',
+            '❌ That does not look like a valid public wallet address.',
             '',
             'Paste the public wallet address again or send /cancel.',
           ].join(
