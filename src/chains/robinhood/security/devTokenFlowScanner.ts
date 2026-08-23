@@ -37,11 +37,17 @@ const BALANCE_OF =
 const TOTAL_SUPPLY =
   '0x18160ddd';
 
+const DECIMALS =
+  '0x313ce567';
+
 export type DevTokenFlowResult = {
   tokenAddress: Address;
   deployerAddress: Address | null;
 
   devHoldingPercent:
+    number | null;
+
+  devTokenBalance:
     number | null;
 
   totalBurnPercent:
@@ -60,6 +66,12 @@ export type DevTokenFlowResult = {
 
   scannedAt: number;
 };
+
+const FLOW_CACHE_TTL_MS = 5 * 60 * 1000;
+const FLOW_FAILURE_TTL_MS = 60 * 1000;
+const FLOW_TIMEOUT_MS = 3_000;
+const flowCache = new Map<string, { expiresAt: number; result: DevTokenFlowResult }>();
+const flowInFlight = new Map<string, Promise<DevTokenFlowResult>>();
 
 function getRpcUrl(): string {
   const url =
@@ -176,6 +188,12 @@ function percent(
     ) /
     10_000
   );
+}
+
+function tokenAmount(value: bigint | null, decimals: bigint | null): number | null {
+  if (value == null || decimals == null || decimals < 0n || decimals > 30n) return null;
+  const amount = Number(value) / (10 ** Number(decimals));
+  return Number.isFinite(amount) ? amount : null;
 }
 
 function addressArgument(
@@ -446,8 +464,8 @@ async function resolvePonsDeployer(
   };
 }
 
-export async function
-scanRobinhoodDevTokenFlow(
+async function
+scanRobinhoodDevTokenFlowUncached(
   tokenAddress: string,
 ): Promise<DevTokenFlowResult> {
   const token =
@@ -461,6 +479,7 @@ scanRobinhoodDevTokenFlow(
       deployerAddress: null,
 
       devHoldingPercent: null,
+      devTokenBalance: null,
       totalBurnPercent: null,
       confirmedDevBurnPercent: null,
       otherDevTransferPercent: null,
@@ -511,6 +530,7 @@ scanRobinhoodDevTokenFlow(
       devBalance,
       deadBalance,
       zeroBalance,
+      decimals,
     ] =
       await Promise.all([
         ethCall(
@@ -538,6 +558,11 @@ scanRobinhoodDevTokenFlow(
             ZERO_ADDRESS,
           ),
         ),
+
+        ethCall(
+          token,
+          DECIMALS,
+        ),
       ]);
 
     const totalBurn =
@@ -561,6 +586,12 @@ scanRobinhoodDevTokenFlow(
           percent(
             devBalance,
             totalSupply,
+          ),
+
+        devTokenBalance:
+          tokenAmount(
+            devBalance,
+            decimals,
           ),
 
         totalBurnPercent:
@@ -618,4 +649,50 @@ scanRobinhoodDevTokenFlow(
 
     return empty;
   }
+}
+
+export async function reuseRobinhoodDevTokenFlow(
+  tokenAddress: string,
+  loader: (tokenAddress: string) => Promise<DevTokenFlowResult> = scanRobinhoodDevTokenFlowUncached,
+  now: () => number = Date.now,
+): Promise<DevTokenFlowResult> {
+  const key = getAddress(tokenAddress).toLowerCase();
+  const cached = flowCache.get(key);
+  if (cached && cached.expiresAt > now()) return cached.result;
+  const pending = flowInFlight.get(key);
+  if (pending) return pending;
+
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  const timed = Promise.race([
+    loader(tokenAddress),
+    new Promise<DevTokenFlowResult>((resolve) => {
+      timeout = setTimeout(() => resolve({
+        tokenAddress: getAddress(tokenAddress), deployerAddress: null,
+        devHoldingPercent: null, devTokenBalance: null, totalBurnPercent: null,
+        confirmedDevBurnPercent: null, otherDevTransferPercent: null,
+        evidenceStatus: 'UNAVAILABLE', scannedAt: now(),
+      }), FLOW_TIMEOUT_MS);
+    }),
+  ]);
+  const request = timed
+    .then((result) => {
+      if (timeout) clearTimeout(timeout);
+      flowCache.set(key, {
+        result,
+        expiresAt: now() + (result.evidenceStatus === 'UNAVAILABLE' ? FLOW_FAILURE_TTL_MS : FLOW_CACHE_TTL_MS),
+      });
+      return result;
+    })
+    .finally(() => {
+      if (timeout) clearTimeout(timeout);
+      flowInFlight.delete(key);
+    });
+  flowInFlight.set(key, request);
+  return request;
+}
+
+export async function scanRobinhoodDevTokenFlow(
+  tokenAddress: string,
+): Promise<DevTokenFlowResult> {
+  return reuseRobinhoodDevTokenFlow(tokenAddress);
 }

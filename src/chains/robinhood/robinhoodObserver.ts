@@ -13,9 +13,7 @@ import {
   startPostAlertDevWatch,
 } from './security/devPostAlertWatcher.js';
 
-import {
-  scanRobinhoodDevHolding,
-} from './security/devHoldingScanner.js';
+import { scanRobinhoodDevTokenFlow } from './security/devTokenFlowScanner.js';
 
 import {
   scanRobinhoodDexPaid,
@@ -301,6 +299,9 @@ export function buildWatchMessage(args: {
   devHoldingPercent:
   number | null;
 
+  burnedPercent?:
+  number | null;
+
     devHoldingStatus:
     string;
 
@@ -444,6 +445,8 @@ if (
   const decisionEvidence = normalizeCoreDecisionMetrics({
     devHoldingPercent: args.devHoldingPercent,
     devHoldingEvidence: args.devHoldingPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
+    burnedPercent: args.burnedPercent,
+    burnEvidence: args.burnedPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
   });
   return renderAlphaNotification({
     category: 'market', severity: 'watch', state: 'WATCHING',
@@ -1122,7 +1125,7 @@ if (!isVerifiedSource) {
   dexPaid,
 ] =
   await Promise.all([
-    scanRobinhoodDevHolding(
+    scanRobinhoodDevTokenFlow(
       token.tokenAddress,
     ),
 
@@ -1208,10 +1211,10 @@ if (
       devHolding.deployerAddress,
 
     devHoldingPercent:
-      devHolding.holdingPercent,
+      devHolding.devHoldingPercent,
 
     devTokenBalance:
-      devHolding.balanceTokens,
+      devHolding.devTokenBalance,
 
     dexPaid:
       dexPaid.dexPaid,
@@ -1287,10 +1290,10 @@ if (
       devHolding.deployerAddress,
 
     devHoldingPercent:
-      devHolding.holdingPercent,
+      devHolding.devHoldingPercent,
 
     devTokenBalance:
-      devHolding.balanceTokens,
+      devHolding.devTokenBalance,
 
     dexPaid:
       dexPaid.dexPaid,
@@ -1365,10 +1368,10 @@ if (
       devHolding.deployerAddress,
 
     devHoldingPercent:
-      devHolding.holdingPercent,
+      devHolding.devHoldingPercent,
 
     devTokenBalance:
-      devHolding.balanceTokens,
+      devHolding.devTokenBalance,
 
     dexPaid:
       dexPaid.dexPaid,
@@ -1439,10 +1442,10 @@ if (
       devHolding.deployerAddress,
 
     devHoldingPercent:
-      devHolding.holdingPercent,
+      devHolding.devHoldingPercent,
 
     devTokenBalance:
-      devHolding.balanceTokens,
+      devHolding.devTokenBalance,
 
     dexPaid:
       dexPaid.dexPaid,
@@ -1513,10 +1516,10 @@ if (
       devHolding.deployerAddress,
 
     devHoldingPercent:
-      devHolding.holdingPercent,
+      devHolding.devHoldingPercent,
 
     devTokenBalance:
-      devHolding.balanceTokens,
+      devHolding.devTokenBalance,
 
     dexPaid:
       dexPaid.dexPaid,
@@ -1587,10 +1590,10 @@ if (
       devHolding.deployerAddress,
 
     devHoldingPercent:
-      devHolding.holdingPercent,
+      devHolding.devHoldingPercent,
 
     devTokenBalance:
-      devHolding.balanceTokens,
+      devHolding.devTokenBalance,
 
     dexPaid:
       dexPaid.dexPaid,
@@ -1613,8 +1616,8 @@ if (
 }
 
 if (
-  devHolding.holdingPercent != null &&
-  devHolding.holdingPercent >
+  devHolding.devHoldingPercent != null &&
+  devHolding.devHoldingPercent >
     MAX_ALERT_DEV_HOLDING_PERCENT
 ) {
   console.log(
@@ -1628,7 +1631,7 @@ if (
         token.tokenAddress,
 
       devHolding:
-        devHolding.holdingPercent,
+        devHolding.devHoldingPercent,
     },
   );
 
@@ -1661,10 +1664,10 @@ if (
       devHolding.deployerAddress,
 
     devHoldingPercent:
-      devHolding.holdingPercent,
+      devHolding.devHoldingPercent,
 
     devTokenBalance:
-      devHolding.balanceTokens,
+      devHolding.devTokenBalance,
 
     dexPaid:
       dexPaid.dexPaid,
@@ -1925,7 +1928,7 @@ console.log(
       token.tokenAddress,
 
     devHolding:
-      devHolding.holdingPercent,
+      devHolding.devHoldingPercent,
   },
 );
 
@@ -1969,10 +1972,10 @@ const warnings =
         holderRisk.top1Pct,
 
         devHoldingPercent:
-        devHolding.holdingPercent,
+        devHolding.devHoldingPercent,
 
         devHoldingStatus:
-        devHolding.status,
+        devHolding.evidenceStatus,
 
         dexPaid:
         dexPaid.dexPaid,
@@ -2049,10 +2052,10 @@ const warnings =
       devHolding.deployerAddress,
 
     devHoldingPercent:
-      devHolding.holdingPercent,
+      devHolding.devHoldingPercent,
 
     devTokenBalance:
-      devHolding.balanceTokens,
+      devHolding.devTokenBalance,
 
     dexPaid:
       dexPaid.dexPaid,

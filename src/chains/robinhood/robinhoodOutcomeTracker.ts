@@ -25,9 +25,7 @@ import {
   scanRobinhoodHolderRisk,
 } from './security/holderRiskScanner.js';
 
-import {
-  scanRobinhoodDevHolding,
-} from './security/devHoldingScanner.js';
+import { scanRobinhoodDevTokenFlow } from './security/devTokenFlowScanner.js';
 
 import {
   scanRobinhoodDevMovement,
@@ -738,6 +736,9 @@ export function buildMicroBreakoutMessage(args: {
 
   devHolding:
     number | null;
+
+  burnedPercent?:
+    number | null;
 }): string {
   const symbol =
   escapeHtml(
@@ -758,6 +759,8 @@ export function buildMicroBreakoutMessage(args: {
   const decisionEvidence = normalizeCoreDecisionMetrics({
     devHoldingPercent: args.devHolding,
     devHoldingEvidence: args.devHolding == null ? 'UNAVAILABLE' : 'VERIFIED',
+    burnedPercent: args.burnedPercent,
+    burnEvidence: args.burnedPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
   });
   return renderAlphaNotification({
     category: 'market', severity: 'positive', state: 'ENTRY_READY',
@@ -878,7 +881,7 @@ async function maybeSendMicroBreakout(args: {
         },
       ),
 
-      scanRobinhoodDevHolding(
+      scanRobinhoodDevTokenFlow(
         row.token_address,
       ),
     ]);
@@ -954,7 +957,7 @@ async function maybeSendMicroBreakout(args: {
 
 
   if (
-  devHolding.holdingPercent ==
+  devHolding.devHoldingPercent ==
   null
 ) {
   console.log(
@@ -967,7 +970,7 @@ async function maybeSendMicroBreakout(args: {
 
 
 if (
-  devHolding.holdingPercent >
+  devHolding.devHoldingPercent >
   MICRO_MAX_DEV_HOLDING_PERCENT
 ) {
   console.log(
@@ -978,7 +981,7 @@ if (
 
       devHolding:
         devHolding
-          .holdingPercent,
+          .devHoldingPercent,
     },
   );
 
@@ -1053,7 +1056,10 @@ if (
         holderRisk.top1Pct,
 
       devHolding:
-        devHolding.holdingPercent,
+        devHolding.devHoldingPercent,
+
+      burnedPercent:
+        devHolding.totalBurnPercent,
     });
 
 

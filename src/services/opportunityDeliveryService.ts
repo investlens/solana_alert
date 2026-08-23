@@ -5,6 +5,10 @@ import {
 import {
   scanRobinhoodDevTokenFlow,
 } from '../chains/robinhood/security/devTokenFlowScanner.js';
+import {
+  getSolanaCoreMarketIntelligence,
+  mergeSolanaCoreMarketIntelligence,
+} from '../chains/solana/coreMarketIntelligence.js';
 
 import {
   eventEngine,
@@ -914,6 +918,24 @@ async function deliverOpportunity(
           ? error.message
           : String(error),
       );
+    }
+  }
+
+  if (String(opportunity.chain ?? '').toLowerCase() === 'solana') {
+    const existingEvidence = normalizeCoreDecisionMetrics(opportunity.raw_data);
+    if (existingEvidence.devHoldingEvidence !== 'VERIFIED') {
+      try {
+        const solanaEvidence = await getSolanaCoreMarketIntelligence(opportunity.asset_id);
+        const enriched = mergeSolanaCoreMarketIntelligence(opportunity.raw_data, solanaEvidence);
+        devEvidenceEnriched = enriched.devHoldingEvidence === 'VERIFIED';
+        opportunity.raw_data = enriched;
+      } catch (error) {
+        // Core evidence is optional: alert delivery must remain available.
+        console.log(
+          '[OpportunityDelivery] Solana core evidence unavailable:',
+          error instanceof Error ? error.message : String(error),
+        );
+      }
     }
   }
 

@@ -21,9 +21,7 @@ import {
   getRobinhoodMarketSnapshot,
 } from './market.js';
 
-import {
-  scanRobinhoodDevHolding,
-} from './security/devHoldingScanner.js';
+import { scanRobinhoodDevTokenFlow } from './security/devTokenFlowScanner.js';
 
 import {
   scanRobinhoodHolderRisk,
@@ -296,6 +294,9 @@ export function buildBoostMessage(args: {
   devHoldingPercent:
     number | null;
 
+  burnedPercent?:
+    number | null;
+
   holderTop1Percent:
     number | null;
 
@@ -325,6 +326,8 @@ export function buildBoostMessage(args: {
   const decisionEvidence = normalizeCoreDecisionMetrics({
     devHoldingPercent: args.devHoldingPercent,
     devHoldingEvidence: args.devHoldingPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
+    burnedPercent: args.burnedPercent,
+    burnEvidence: args.burnedPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
   });
   return renderAlphaNotification({
     category: 'market', severity: 'watch', state: 'BUILDING',
@@ -444,7 +447,7 @@ async function processBoost(
     holderRisk,
   ] =
     await Promise.all([
-      scanRobinhoodDevHolding(
+      scanRobinhoodDevTokenFlow(
         boost.tokenAddress,
       ).catch(
         (error) => {
@@ -473,7 +476,11 @@ async function processBoost(
 
 
   const devHoldingPercent =
-    devHolding?.holdingPercent ??
+    devHolding?.devHoldingPercent ??
+    null;
+
+  const burnedPercent =
+    devHolding?.totalBurnPercent ??
     null;
 
   const holderTop1Percent =
@@ -560,6 +567,8 @@ async function processBoost(
         market.sells5m,
 
       devHoldingPercent,
+
+      burnedPercent,
 
       holderTop1Percent,
 
