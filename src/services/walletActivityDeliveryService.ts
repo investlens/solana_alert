@@ -21,6 +21,7 @@ import {
 import type {
   WalletWatchEvent,
 } from '../core/walletWatcher.js';
+import { escapeTelegramHtml } from '../ui/escapeHtml.js';
 
 type InlineButton = {
   text: string;
@@ -291,18 +292,18 @@ function buildMessage(args: {
       event,
     )}</b>`,
     '',
-    `<b>${wallet}</b> ${actionLabel(
+    `<b>${escapeTelegramHtml(wallet)}</b> ${escapeTelegramHtml(actionLabel(
       event,
-    )}`,
+    ))}`,
   ];
 
   if (
     event.tokenMint
   ) {
     lines.push(
-      `<code>${shortAddress(
+      `<code>${escapeTelegramHtml(shortAddress(
         event.tokenMint,
-      )}</code>`,
+      ))}</code>`,
     );
   }
 

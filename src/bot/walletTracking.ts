@@ -4,10 +4,6 @@ import {
 } from 'telegraf';
 
 import {
-  PublicKey,
-} from '@solana/web3.js';
-
-import {
   addTrackedWallet,
   getRecentTrackedWalletActivity,
   getTrackedWalletByIdForUser,
@@ -15,9 +11,15 @@ import {
   removeTrackedWallet,
   setTrackedWalletActive,
 } from '../services/trackedWalletService.js';
-
-const pendingWalletAdds =
-  new Set<string>();
+import {
+  clearConversationState,
+  getConversationState,
+  setConversationState,
+} from './conversationState.js';
+import {
+  escapeTelegramHtml,
+  normalizeSolanaPublicAddress,
+} from './walletInput.js';
 
 function userId(
   ctx: any,
@@ -50,6 +52,13 @@ function shortAddress(
       -6,
     )
   );
+}
+
+function isMessageNotModified(error: unknown): boolean {
+  const message = error instanceof Error
+    ? error.message
+    : String(error);
+  return message.toLowerCase().includes('message is not modified');
 }
 
 async function renderWalletCenter(
@@ -92,11 +101,11 @@ async function renderWalletCenter(
           ? '🟢'
           : '⚪'
       } ${wallet.label
-        ? `<b>${wallet.label}</b> · `
+        ? `<b>${escapeTelegramHtml(wallet.label)}</b> · `
         : ''
-      }<code>${shortAddress(
+      }<code>${escapeTelegramHtml(shortAddress(
         wallet.wallet_address,
-      )}</code>`,
+      ))}</code>`,
     );
   }
 
@@ -176,7 +185,8 @@ async function renderWalletCenter(
       ),
       options,
     );
-  } catch {
+  } catch (error) {
+    if (isMessageNotModified(error)) return;
     await ctx.reply(
       lines.join(
         '\n',
@@ -194,6 +204,9 @@ registerWalletTracking(
     'WALLET_TRACKING',
     async ctx => {
       await ctx.answerCbQuery();
+
+      const telegramId = userId(ctx);
+      if (telegramId) clearConversationState(telegramId);
 
       await renderWalletCenter(
         ctx,
@@ -213,9 +226,7 @@ registerWalletTracking(
         return;
       }
 
-      pendingWalletAdds.add(
-        telegramId,
-      );
+      setConversationState(telegramId, 'ADD_WALLET');
 
       await ctx.answerCbQuery(
         'Paste wallet address',
@@ -263,9 +274,7 @@ registerWalletTracking(
         );
 
       if (telegramId) {
-        pendingWalletAdds.delete(
-          telegramId,
-        );
+        clearConversationState(telegramId);
       }
 
       await ctx.answerCbQuery(
@@ -326,10 +335,18 @@ registerWalletTracking(
           return;
         }
 
+        let address: string;
+        try {
+          address = normalizeSolanaPublicAddress(walletAddress);
+        } catch {
+          await ctx.reply('❌ That does not look like a valid Solana wallet.');
+          return;
+        }
+
         await addTrackedWallet({
           telegramId,
 
-          walletAddress,
+          walletAddress: address,
 
           chain:
             'solana',
@@ -342,10 +359,10 @@ registerWalletTracking(
             '✅ <b>Wallet Added</b>',
             '',
             label
-              ? `<b>${label}</b>`
+              ? `<b>${escapeTelegramHtml(label)}</b>`
               : 'Wallet',
 
-            `<code>${walletAddress}</code>`,
+            `<code>${escapeTelegramHtml(address)}</code>`,
             '',
             'AlphaOS will include this wallet in activity tracking.',
           ].join(
@@ -444,6 +461,10 @@ registerWalletTracking(
           '[WalletTracking] Toggle failed:',
           error,
         );
+
+        await ctx.answerCbQuery('Could not update wallet', {
+          show_alert: true,
+        }).catch(() => {});
       }
     },
   );
@@ -485,9 +506,9 @@ registerWalletTracking(
           '🗑 <b>REMOVE WALLET?</b>',
           '',
           wallet.label
-            ? `<b>${wallet.label}</b>`
+            ? `<b>${escapeTelegramHtml(wallet.label)}</b>`
             : 'Tracked wallet',
-          `<code>${wallet.wallet_address}</code>`,
+          `<code>${escapeTelegramHtml(wallet.wallet_address)}</code>`,
           '',
           'This stops AlphaOS wallet activity tracking for this address.',
         ].join(
@@ -553,6 +574,10 @@ registerWalletTracking(
           '[WalletTracking] Remove failed:',
           error,
         );
+
+        await ctx.answerCbQuery('Could not remove wallet', {
+          show_alert: true,
+        }).catch(() => {});
       }
     },
   );
@@ -599,10 +624,10 @@ registerWalletTracking(
           '⚡ <b>WALLET ACTIVITY</b>',
           '',
           wallet.label
-            ? `<b>${wallet.label}</b>`
-            : `<code>${shortAddress(
+            ? `<b>${escapeTelegramHtml(wallet.label)}</b>`
+            : `<code>${escapeTelegramHtml(shortAddress(
                 wallet.wallet_address,
-              )}</code>`,
+              ))}</code>`,
           '',
         ];
 
@@ -659,8 +684,8 @@ registerWalletTracking(
               : '';
 
           lines.push(
-            `${icon} <b>${action ||
-              'ACTIVITY'}</b> ${token}${amountText}`,
+            `${icon} <b>${escapeTelegramHtml(action ||
+              'ACTIVITY')}</b> ${escapeTelegramHtml(token)}${amountText}`,
           );
         }
 
@@ -697,6 +722,10 @@ registerWalletTracking(
           '[WalletTracking] Activity failed:',
           error,
         );
+
+        await ctx.answerCbQuery('Could not load wallet activity', {
+          show_alert: true,
+        }).catch(() => {});
       }
     },
   );
@@ -714,9 +743,7 @@ registerWalletTracking(
 
       if (
         !telegramId ||
-        !pendingWalletAdds.has(
-          telegramId,
-        )
+        getConversationState(telegramId) !== 'ADD_WALLET'
       ) {
         return next();
       }
@@ -736,9 +763,7 @@ registerWalletTracking(
           value.toLowerCase() ===
           '/cancel'
         ) {
-          pendingWalletAdds.delete(
-            telegramId,
-          );
+          clearConversationState(telegramId);
 
           await ctx.reply(
             'Wallet add cancelled.',
@@ -756,9 +781,7 @@ registerWalletTracking(
          * becoming a tracked Solana wallet.
          */
         const address =
-          new PublicKey(
-            value,
-          ).toBase58();
+          normalizeSolanaPublicAddress(value);
 
         await addTrackedWallet({
           telegramId,
@@ -770,9 +793,7 @@ registerWalletTracking(
             'solana',
         });
 
-        pendingWalletAdds.delete(
-          telegramId,
-        );
+        clearConversationState(telegramId);
 
         await ctx.reply(
           [

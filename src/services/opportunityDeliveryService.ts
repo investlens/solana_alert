@@ -29,6 +29,10 @@ import {
   type DeliverableUser,
 } from '../core/delivery.js';
 
+import {
+  opportunityDeliveryIdentity,
+} from './opportunityDeliveryIdentity.js';
+
 type DeliverableAction =
   | 'BUY'
   | 'CHECK_ENTRY'
@@ -611,6 +615,7 @@ async function loadOpportunity(
 async function reserveDelivery(args: {
   opportunity: OpportunityRow;
   user: DeliverableUser;
+  deliveryIdentity: string;
 }): Promise<boolean> {
   const {
     error,
@@ -641,6 +646,9 @@ async function reserveDelivery(args: {
         delivery_channel:
           'telegram',
 
+        delivery_identity:
+          args.deliveryIdentity,
+
         metadata: {
           state:
             'RESERVED',
@@ -664,8 +672,9 @@ async function reserveDelivery(args: {
 async function releaseDelivery(
   opportunityId: number,
   telegramId: string,
+  deliveryIdentity: string,
 ): Promise<void> {
-  await supabase
+  const { error } = await supabase
     .from(
       'opportunity_deliveries',
     )
@@ -681,12 +690,19 @@ async function releaseDelivery(
     .eq(
       'delivery_channel',
       'telegram',
+    )
+    .eq(
+      'delivery_identity',
+      deliveryIdentity,
     );
+
+  if (error) throw error;
 }
 
 async function markDeliveryComplete(
   opportunityId: number,
   telegramId: string,
+  deliveryIdentity: string,
 ): Promise<void> {
   const {
     error,
@@ -712,21 +728,17 @@ async function markDeliveryComplete(
         'telegram_id',
         telegramId,
       )
-      .eq(
-        'delivery_channel',
-        'telegram',
-      );
+    .eq(
+      'delivery_channel',
+      'telegram',
+    )
+    .eq(
+      'delivery_identity',
+      deliveryIdentity,
+    );
 
   if (error) {
-    console.warn(
-      '[OpportunityDelivery] Delivery completion update failed:',
-      {
-        opportunityId,
-        telegramId,
-        error:
-          error.message,
-      },
-    );
+    throw error;
   }
 }
 
@@ -754,6 +766,12 @@ async function deliverOpportunity(
       opportunity.recommended_action ??
       '',
     ).toUpperCase();
+
+  const deliveryIdentity =
+    opportunityDeliveryIdentity({
+      action,
+      status: opportunity.status,
+    });
 
   if (
     !ACTIONABLE.has(
@@ -981,11 +999,14 @@ async function deliverOpportunity(
       await reserveDelivery({
         opportunity,
         user,
+        deliveryIdentity,
       });
 
     if (!reserved) {
       continue;
     }
+
+    let telegramSent = false;
 
     try {
       await sendTelegram(
@@ -999,18 +1020,24 @@ async function deliverOpportunity(
         ),
       );
 
+      telegramSent = true;
+
       await markDeliveryComplete(
         opportunity.id,
         user.telegram_id,
+        deliveryIdentity,
       );
 
       delivered +=
         1;
     } catch (error) {
-      await releaseDelivery(
-        opportunity.id,
-        user.telegram_id,
-      );
+      if (!telegramSent) {
+        await releaseDelivery(
+          opportunity.id,
+          user.telegram_id,
+          deliveryIdentity,
+        );
+      }
 
       const message =
         error instanceof Error

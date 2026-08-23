@@ -36,6 +36,11 @@ import {
   alphaFeedMenu,
   tradeTerminalMenu,
 } from './menus.js';
+import {
+  clearConversationState,
+  getConversationState,
+  setConversationState,
+} from './conversationState.js';
 
 const upgradeSessions = new Map<string, PendingUpgradeSession>();
 
@@ -260,6 +265,7 @@ export function registerBotCommands(bot: Telegraf<any>) {
   });
 
   bot.action('MAIN_MENU', async (ctx) => {
+    clearConversationState(String(ctx.from?.id ?? ''));
     await ctx.answerCbQuery();
     await sendMainMenu(ctx);
   });
@@ -1335,11 +1341,17 @@ bot.action('AUTO_TRADE_STATUS', async (ctx) => {
       amountSol: 0.1,
       awaitingTxHash: true,
     });
+    setConversationState(telegramId, 'SUBMIT_PAYMENT_HASH');
 
     await ctx.answerCbQuery();
     await ctx.reply(
       ['✅ Plan selected: *15 days*', 'Amount: `0.1 SOL`', '', 'Now paste your transaction hash.'].join('\n'),
-      { parse_mode: 'Markdown' }
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('✖️ Cancel', 'UPGRADE_CANCEL')],
+        ]),
+      }
     );
   });
 
@@ -1352,12 +1364,26 @@ bot.action('AUTO_TRADE_STATUS', async (ctx) => {
       amountSol: 0.15,
       awaitingTxHash: true,
     });
+    setConversationState(telegramId, 'SUBMIT_PAYMENT_HASH');
 
     await ctx.answerCbQuery();
     await ctx.reply(
       ['✅ Plan selected: *30 days*', 'Amount: `0.15 SOL`', '', 'Now paste your transaction hash.'].join('\n'),
-      { parse_mode: 'Markdown' }
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('✖️ Cancel', 'UPGRADE_CANCEL')],
+        ]),
+      }
     );
+  });
+
+  bot.action('UPGRADE_CANCEL', async (ctx) => {
+    const telegramId = String(ctx.from?.id ?? '');
+    upgradeSessions.delete(telegramId);
+    clearConversationState(telegramId);
+    await ctx.answerCbQuery('Cancelled');
+    await sendMainMenu(ctx);
   });
 
   bot.action(/^ADMIN_BUY_SMALL_(.+)$/, async (ctx) => {
@@ -1499,13 +1525,22 @@ bot.action('AUTO_TRADE_STATUS', async (ctx) => {
     const telegramId = String(ctx.from?.id ?? '');
     const session = upgradeSessions.get(telegramId);
 
-    if (!session?.awaitingTxHash) {
+    if (
+      getConversationState(telegramId) !== 'SUBMIT_PAYMENT_HASH' ||
+      !session?.awaitingTxHash
+    ) {
       return next();
     }
 
     const txHash = ctx.message.text.trim();
 
     if (txHash.startsWith('/')) {
+      if (txHash.toLowerCase() === '/cancel') {
+        upgradeSessions.delete(telegramId);
+        clearConversationState(telegramId);
+        await ctx.reply('Payment submission cancelled.');
+        return;
+      }
       return next();
     }
 
@@ -1525,6 +1560,7 @@ bot.action('AUTO_TRADE_STATUS', async (ctx) => {
     });
 
     upgradeSessions.delete(telegramId);
+    clearConversationState(telegramId);
 
     await ctx.reply(
       [

@@ -10,6 +10,16 @@ import {
   resolveTokenOpenTarget,
 } from '../core/tokenOpenRouter.js';
 
+import {
+  getTrackedOpportunities,
+  trackOpportunity,
+  untrackOpportunity,
+} from '../services/opportunityWatchlistService.js';
+
+import {
+  escapeTelegramHtml,
+} from './walletInput.js';
+
 type OpportunityRow = {
   id: number;
   asset_id: string;
@@ -62,145 +72,6 @@ async function loadOpportunity(
   );
 }
 
-/*
- * Tracking is persisted in the opportunity delivery metadata
- * rather than creating another isolated watch mechanism.
- *
- * This is intentionally user-scoped and can later be surfaced
- * identically in Telegram and the web app.
- */
-async function markTracked(args: {
-  opportunityId: number;
-  telegramId: string;
-}) {
-  const {
-    data: existing,
-    error: lookupError,
-  } =
-    await supabase
-      .from(
-        'opportunity_deliveries',
-      )
-      .select(
-        'id,metadata',
-      )
-      .eq(
-        'opportunity_id',
-        args.opportunityId,
-      )
-      .eq(
-        'telegram_id',
-        args.telegramId,
-      )
-      .eq(
-        'delivery_channel',
-        'telegram',
-      )
-      .maybeSingle();
-
-  if (lookupError) {
-    throw lookupError;
-  }
-
-  if (existing) {
-    const metadata =
-      (
-        existing.metadata &&
-        typeof existing.metadata ===
-        'object'
-      )
-        ? existing.metadata as
-          Record<string, unknown>
-        : {};
-
-    const {
-      error,
-    } =
-      await supabase
-        .from(
-          'opportunity_deliveries',
-        )
-        .update({
-          metadata: {
-            ...metadata,
-
-            tracked:
-              true,
-
-            tracked_at:
-              new Date().toISOString(),
-          },
-        })
-        .eq(
-          'id',
-          existing.id,
-        );
-
-    if (error) {
-      throw error;
-    }
-
-    return;
-  }
-
-  /*
-   * User may track from Opportunity Center even if no
-   * Telegram delivery row exists yet.
-   */
-  const opportunity =
-    await loadOpportunity(
-      args.opportunityId,
-    );
-
-  if (!opportunity) {
-    throw new Error(
-      'Opportunity no longer exists',
-    );
-  }
-
-  const {
-    error,
-  } =
-    await supabase
-      .from(
-        'opportunity_deliveries',
-      )
-      .insert({
-        opportunity_id:
-          opportunity.id,
-
-        telegram_id:
-          args.telegramId,
-
-        strategy_key:
-          opportunity.strategy_key,
-
-        chain:
-          opportunity.chain,
-
-        recommended_action:
-          opportunity.recommended_action,
-
-        delivery_channel:
-          'telegram',
-
-        metadata: {
-          state:
-            'TRACKED',
-
-          tracked:
-            true,
-
-          tracked_at:
-            new Date().toISOString(),
-        },
-      });
-
-  if (error) {
-    throw error;
-  }
-}
-
 export function
 registerOpportunityActions(
   bot: Telegraf<any>,
@@ -240,7 +111,7 @@ registerOpportunityActions(
           return;
         }
 
-        await markTracked({
+        await trackOpportunity({
           opportunityId:
             id,
 
@@ -254,7 +125,7 @@ registerOpportunityActions(
             '',
             'AlphaOS will keep this opportunity in your tracked set.',
             '',
-            `<code>${opportunity.asset_id}</code>`,
+            `<code>${escapeTelegramHtml(opportunity.asset_id)}</code>`,
           ].join(
             '\n',
           ),
@@ -280,6 +151,67 @@ registerOpportunityActions(
         } catch {
           // ignored
         }
+
+        await ctx.reply(
+          'Could not update your watchlist. Please try again.',
+        ).catch(() => {});
+      }
+    },
+  );
+
+  bot.action(
+    /^OPP_UNTRACK_(\d+)$/,
+    async ctx => {
+      const userId = telegramId(ctx);
+      if (!userId) return;
+
+      try {
+        await ctx.answerCbQuery('Updating watchlist…');
+        await untrackOpportunity({
+          opportunityId: Number(ctx.match[1]),
+          telegramId: userId,
+        });
+        await ctx.reply('✅ Opportunity removed from your watchlist.');
+      } catch (error) {
+        console.error('[OpportunityActions] Untrack failed:', error);
+        await ctx.answerCbQuery('Could not update watchlist', {
+          show_alert: true,
+        }).catch(() => {});
+      }
+    },
+  );
+
+  bot.action(
+    'OPP_WATCHLIST',
+    async ctx => {
+      const userId = telegramId(ctx);
+      if (!userId) return;
+
+      try {
+        await ctx.answerCbQuery();
+        const rows = await getTrackedOpportunities(userId, 10);
+
+        const lines = [
+          '👀 <b>MY WATCHLIST</b>',
+          '',
+          rows.length ? `Tracked opportunities: <b>${rows.length}</b>` : 'No tracked opportunities yet.',
+        ];
+
+        const buttons = rows.map(row => [{
+          text: `Open opportunity ${row.opportunity_id}`,
+          callback_data: `OPP_VIEW_${row.opportunity_id}`,
+        }]);
+        buttons.push([{ text: '⬅️ Opportunities', callback_data: 'OPPORTUNITY_CENTER' }]);
+
+        await ctx.reply(lines.join('\n'), {
+          parse_mode: 'HTML',
+          reply_markup: { inline_keyboard: buttons },
+        });
+      } catch (error) {
+        console.error('[OpportunityActions] Watchlist failed:', error);
+        await ctx.answerCbQuery('Could not load watchlist', {
+          show_alert: true,
+        }).catch(() => {});
       }
     },
   );

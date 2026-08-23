@@ -11,6 +11,10 @@ import {
   getLatestOpportunities,
 } from '../core/opportunityRegistry.js';
 
+import {
+  isOpportunityTracked,
+} from '../services/opportunityWatchlistService.js';
+
 type OpportunityRow = {
   id: number | string;
   asset_id: string;
@@ -402,7 +406,15 @@ async function renderScreen(
         reply_markup: replyMarkup,
       },
     );
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error
+      ? error.message
+      : String(error);
+
+    if (message.toLowerCase().includes('message is not modified')) {
+      return;
+    }
+
     await ctx.reply(
       text,
       {
@@ -489,6 +501,12 @@ async function renderOpportunityHome(
         Markup.button.callback(
           '🔄 Refresh',
           'OPPORTUNITY_CENTER',
+        ),
+      ],
+      [
+        Markup.button.callback(
+          '👀 My Watchlist',
+          'OPP_WATCHLIST',
         ),
       ],
       [
@@ -701,6 +719,14 @@ async function renderOpportunity(
 
   const actionRows: any[][] = [];
 
+  const telegramId = String(ctx.from?.id ?? '');
+  const tracked = telegramId
+    ? await isOpportunityTracked({
+        telegramId,
+        opportunityId: Number(opportunity.id),
+      })
+    : false;
+
   if (
     String(
       opportunity.chain ??
@@ -718,8 +744,10 @@ async function renderOpportunity(
 
   actionRows.push([
     Markup.button.callback(
-      '👀 TRACK',
-      `OPP_TRACK_${opportunity.id}`,
+      tracked ? '✅ UNTRACK' : '👀 TRACK',
+      tracked
+        ? `OPP_UNTRACK_${opportunity.id}`
+        : `OPP_TRACK_${opportunity.id}`,
     ),
 
     Markup.button.url(

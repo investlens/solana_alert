@@ -85,6 +85,7 @@ import { sendTelegram } from './services/telegram.js';
 import { confirmMomentum } from './services/momentumConfirmation.js';
 import type { DexProfile, RiskResult, TokenState } from './types.js';
 import { pollWatchedWallets } from './core/walletWatcher.js';
+import { deliverLegacyAlert } from './core/legacyAlertDelivery.js';
 
 import {
   deliverTrackedWalletActivity,
@@ -1129,22 +1130,25 @@ async function processTierDispatch() {
           });
         }
 
-        await safeSendTelegram(
-            telegramId,
-            alphaMessage,
-            publicButtons,
-          );
-          if (state.alertId) {
-            await createAlertDelivery({
-              alertId: state.alertId,
-              chain: config.discoveryChain,
-              tokenAddress,
+          await deliverLegacyAlert({
+            send: () => safeSendTelegram(
               telegramId,
-              tierAtDelivery: 'paid',
-              deliveryType: 'paid_delay',
-              delaySeconds: config.paidDelaySec,
-            });
-          }
+              alphaMessage!,
+              publicButtons,
+            ),
+            persist: async () => {
+              if (!state.alertId) return;
+              await createAlertDelivery({
+                alertId: state.alertId,
+                chain: config.discoveryChain,
+                tokenAddress,
+                telegramId,
+                tierAtDelivery: 'paid',
+                deliveryType: 'paid_delay',
+                delaySeconds: config.paidDelaySec,
+              });
+            },
+          });
         }
 
         if (user.tier === 'free') {
@@ -1168,36 +1172,36 @@ async function processTierDispatch() {
               freeDelaySec,
             };
 
-            await safeSendTelegram(
-              telegramId,
-              buildMessage({
-                tier: 'FREE',
-                pair,
-                result,
-                state,
-                freeTrialInfo,
-              }),
-              publicButtons,
-            );
-
-            if (state.alertId) {
-              await createAlertDelivery({
-                alertId: state.alertId,
-                chain: config.discoveryChain,
-                tokenAddress,
+            await deliverLegacyAlert({
+              send: () => safeSendTelegram(
                 telegramId,
-                tierAtDelivery: 'free',
-                deliveryType:
-                  fastDelayActive
+                buildMessage({
+                  tier: 'FREE',
+                  pair,
+                  result,
+                  state,
+                  freeTrialInfo,
+                }),
+                publicButtons,
+              ),
+              persist: async () => {
+                if (!state.alertId) return;
+                await createAlertDelivery({
+                  alertId: state.alertId,
+                  chain: config.discoveryChain,
+                  tokenAddress,
+                  telegramId,
+                  tierAtDelivery: 'free',
+                  deliveryType: fastDelayActive
                     ? 'free_trial_fast'
                     : 'free_delayed',
-                delaySeconds: freeDelaySec,
-              });
-            }
-
-            if (fastDelayActive) {
-              await incrementFreeTrialUsed(telegramId);
-            }
+                  delaySeconds: freeDelaySec,
+                });
+              },
+              consumeFreeTrial: fastDelayActive
+                ? () => incrementFreeTrialUsed(telegramId)
+                : undefined,
+            });
           }
         }
       }
