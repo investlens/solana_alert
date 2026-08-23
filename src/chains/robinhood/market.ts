@@ -86,6 +86,13 @@ export function chooseBestRobinhoodPair(
   )[0] ?? null;
 }
 
+export function verifiedRobinhoodChartUrl(pair: DexScreenerPair): string | undefined {
+  if (pair.url && /^https:\/\/dexscreener\.com\/robinhood\//i.test(pair.url)) return pair.url;
+  return pair.pairAddress
+    ? `https://dexscreener.com/robinhood/${pair.pairAddress}`
+    : undefined;
+}
+
 export async function fetchRobinhoodPairs(
   tokenAddress: string,
 ): Promise<DexScreenerPair[]> {
@@ -270,9 +277,7 @@ export async function getRobinhoodMarketSnapshot(
     dexId:
       pair.dexId,
 
-    chartUrl:
-      pair.url ??
-      `https://dexscreener.com/robinhood/${pair.pairAddress ?? ''}`,
+    chartUrl: verifiedRobinhoodChartUrl(pair),
 
     timestamp:
       Date.now(),

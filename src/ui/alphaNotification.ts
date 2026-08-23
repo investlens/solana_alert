@@ -14,6 +14,7 @@ export type AlphaNotificationState =
   | 'ENTRY_READY'
   | 'BUILDING'
   | 'WATCHING'
+  | 'BOOSTED_OPPORTUNITY'
   | 'EXIT_AVOID'
   | 'WALLET_BUY'
   | 'WALLET_SELL'
@@ -62,6 +63,7 @@ const STATE_LABELS: Record<AlphaNotificationState, string> = {
   ENTRY_READY: '🔥 ENTRY READY',
   BUILDING: '📈 BUILDING',
   WATCHING: '👀 WATCHING',
+  BOOSTED_OPPORTUNITY: '🚀 BOOSTED OPPORTUNITY',
   EXIT_AVOID: '🔴 EXIT / AVOID',
   WALLET_BUY: '🐋 WALLET BUY',
   WALLET_SELL: '🔴 WALLET EXIT',

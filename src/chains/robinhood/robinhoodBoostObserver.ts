@@ -11,7 +11,13 @@ import {
 } from '../../services/telegram.js';
 import { renderAlphaNotification } from '../../ui/alphaNotification.js';
 import { buildAlphaMarketActions } from '../../ui/alphaNotificationActions.js';
-import { coreDecisionEvidenceMetrics, marketContextMetrics, normalizeCoreDecisionMetrics, normalizeNotificationMarketContext } from '../../ui/notificationMarketContext.js';
+import {
+  coreDecisionEvidenceMetrics,
+  marketContextMetrics,
+  normalizeCoreDecisionMetrics,
+  normalizeNotificationMarketContext,
+  type NotificationMarketContext,
+} from '../../ui/notificationMarketContext.js';
 
 import {
   fetchRobinhoodBoosts,
@@ -30,6 +36,14 @@ import {
 
 const BOOST_INTERVAL_MS =
   15_000;
+
+export const BOOSTED_OPPORTUNITY_THRESHOLD = 200;
+
+export function boostNotificationState(totalBoostAmount: number) {
+  return totalBoostAmount >= BOOSTED_OPPORTUNITY_THRESHOLD
+    ? 'BOOSTED_OPPORTUNITY' as const
+    : 'BUILDING' as const;
+}
 
 
 /*
@@ -162,6 +176,53 @@ async function getLastStoredBoostTotal(
   );
 }
 
+type BoostOpportunityContext = {
+  id: number;
+  strategyKey: string | null;
+  confidence: number | null;
+  risk: string | null;
+  rawData: Record<string, unknown>;
+};
+
+async function getBoostOpportunityContext(tokenAddress: string): Promise<BoostOpportunityContext | null> {
+  const { data, error } = await supabase
+    .from('opportunities')
+    .select('id,strategy_key,confidence,risk_score,raw_data')
+    .eq('asset_id', tokenAddress)
+    .eq('chain', 'robinhood')
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.warn('[RobinhoodBoostObserver] Opportunity context unavailable:', {
+      token: tokenAddress,
+      error: error.message,
+    });
+    return null;
+  }
+  if (!data) return null;
+  const riskScore = Number(data.risk_score);
+  return {
+    id: Number(data.id),
+    strategyKey: data.strategy_key ?? null,
+    confidence: Number.isFinite(Number(data.confidence)) ? Number(data.confidence) : null,
+    risk: !Number.isFinite(riskScore) ? null : riskScore >= 80 ? 'HIGH' : riskScore >= 55 ? 'MEDIUM' : 'LOW',
+    rawData: (data.raw_data as Record<string, unknown> | null) ?? {},
+  };
+}
+
+function contextNumber(context: Record<string, unknown>, key: string): number | null {
+  if (context[key] == null || context[key] === '') return null;
+  const value = Number(context[key]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function contextAge(context: Record<string, unknown>): string | null {
+  const seconds = contextNumber(context, 'elapsedSec');
+  if (seconds == null || seconds < 0) return null;
+  return seconds < 60 ? `${Math.round(seconds)}s` : `${Math.round(seconds / 60)}m`;
+}
+
 
 async function saveBoostEvent(args: {
   tokenAddress: string;
@@ -278,18 +339,27 @@ async function saveBoostEvent(args: {
 
 export function buildBoostMessage(args: {
   symbol: string;
+  name?: string | null;
   tokenAddress: string;
 
   boostAmount: number;
   totalBoostAmount: number;
 
-  price: number;
-  marketCap: number;
-  liquidity: number;
+  price?: number | null;
+  marketCap?: number | null;
+  fdv?: number | null;
+  liquidity?: number | null;
 
-  volume5m: number;
-  buys5m: number;
-  sells5m: number;
+  volume5m?: number | null;
+  buys5m?: number | null;
+  sells5m?: number | null;
+  age?: string | null;
+  move?: number | null;
+  momentum?: number | null;
+  confidence?: number | null;
+  risk?: string | null;
+  rawData?: Record<string, unknown> | null;
+  marketContext?: Partial<NotificationMarketContext> | null;
 
   devHoldingPercent:
     number | null;
@@ -304,12 +374,6 @@ export function buildBoostMessage(args: {
     | 'NEW'
     | 'INCREASE';
 }): string {
-  const eventLabel =
-    args.eventType ===
-      'NEW'
-      ? 'NEW BOOST'
-      : 'BOOST INCREASE';
-
   const top1 =
     args.holderTop1Percent ==
     null
@@ -320,9 +384,12 @@ export function buildBoostMessage(args: {
           '%'
         );
 
-  const market = normalizeNotificationMarketContext({
-    marketCap: args.marketCap, liquidity: args.liquidity, volume5m: args.volume5m,
-  });
+  const market = normalizeNotificationMarketContext(
+    args.marketContext as Record<string, unknown> | null,
+    args.rawData,
+    { marketCap: args.marketCap, fdv: args.fdv, liquidity: args.liquidity,
+      volume5m: args.volume5m, address: args.tokenAddress },
+  );
   const decisionEvidence = normalizeCoreDecisionMetrics({
     devHoldingPercent: args.devHoldingPercent,
     devHoldingEvidence: args.devHoldingPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
@@ -330,17 +397,51 @@ export function buildBoostMessage(args: {
     burnEvidence: args.burnedPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
   });
   return renderAlphaNotification({
-    category: 'market', severity: 'watch', state: 'BUILDING',
-    symbol: args.symbol, address: args.tokenAddress, risk: 'REVIEW',
+    category: 'market', severity: args.totalBoostAmount >= BOOSTED_OPPORTUNITY_THRESHOLD ? 'warning' : 'watch',
+    state: boostNotificationState(args.totalBoostAmount),
+    symbol: args.symbol, subtitle: args.name, address: args.tokenAddress,
+    confidence: args.confidence, risk: args.risk ?? 'REVIEW',
     metrics: [
-      { label: 'Event', value: eventLabel },
-      { label: 'Boost', value: `+${args.boostAmount} / ${args.totalBoostAmount}` },
+      { label: 'Boost', value: `${args.totalBoostAmount} total (+${args.boostAmount})` },
+      ...(args.age ? [{ label: 'Age', value: args.age }] : []),
       ...marketContextMetrics(market),
+      ...(args.momentum != null
+        ? [{ label: 'Momentum', value: `${args.momentum >= 0 ? '+' : ''}${args.momentum.toFixed(2)}%` }]
+        : args.move != null
+          ? [{ label: 'Move', value: `${args.move >= 0 ? '+' : ''}${args.move.toFixed(2)}%` }]
+          : []),
     ],
     specialistMetrics: coreDecisionEvidenceMetrics(decisionEvidence),
-    evidence: [`Top holder ${top1}`, `Buys / sells ${args.buys5m}/${args.sells5m}`],
-    reason: 'A new or increased market boost was detected.',
-    recommendedAction: 'Monitor for sustained market confirmation.',
+    evidence: [
+      ...(args.holderTop1Percent == null ? [] : [`Top holder ${top1}`]),
+      ...(args.buys5m == null || args.sells5m == null ? [] : [`Buys / sells ${args.buys5m}/${args.sells5m}`]),
+    ],
+    reason: args.totalBoostAmount >= BOOSTED_OPPORTUNITY_THRESHOLD
+      ? 'Boost activity reached a high-attention level.'
+      : 'Market attention increased.',
+    recommendedAction: market.preIndexValuation
+      ? 'Market indexing · review verified launch valuation.'
+      : 'Review market quality and momentum.',
+  });
+}
+
+export function buildBoostActions(args: {
+  tokenAddress: string;
+  chartUrl?: string | null;
+  opportunityId?: number | null;
+  strategyKey?: string | null;
+}) {
+  const muteCallback = args.strategyKey
+    ? `STRAT_TOGGLE_${args.strategyKey}`
+    : null;
+  return buildAlphaMarketActions({
+    chartUrl: args.chartUrl,
+    tokenUrl: `https://robinhoodchain.blockscout.com/token/${args.tokenAddress}`,
+    copyContractCallback: `COPY_CA_${args.tokenAddress}`,
+    trackCallback: args.opportunityId != null ? `OPP_TRACK_${args.opportunityId}` : null,
+    muteCallback: muteCallback && Buffer.byteLength(muteCallback, 'utf8') <= 64
+      ? muteCallback
+      : null,
   });
 }
 
@@ -432,7 +533,13 @@ async function processBoost(
       boost.tokenAddress,
     );
 
-  if (!market) {
+  const opportunity = await getBoostOpportunityContext(boost.tokenAddress);
+  const opportunityMarket = normalizeNotificationMarketContext(
+    opportunity?.rawData,
+    { address: boost.tokenAddress },
+  );
+
+  if (!market && !opportunityMarket.preIndexValuation) {
     console.log(
       '[RobinhoodBoostObserver] Waiting for market indexing:',
       boost.tokenAddress,
@@ -488,8 +595,8 @@ async function processBoost(
     null;
 
 
-  const eventId =
-    await saveBoostEvent({
+  const eventId = market
+    ? await saveBoostEvent({
       tokenAddress:
         boost.tokenAddress,
 
@@ -526,7 +633,8 @@ async function processBoost(
       devHoldingPercent,
 
       holderTop1Percent,
-    });
+      })
+    : `preindex:${boost.tokenAddress}:${boost.totalAmount}`;
 
 
   if (!eventId) {
@@ -537,7 +645,10 @@ async function processBoost(
   const message =
     buildBoostMessage({
       symbol:
-        market.symbol,
+        market?.symbol ?? opportunityMarket.symbol ?? 'UNKNOWN',
+
+      name:
+        market?.name ?? opportunityMarket.name,
 
       tokenAddress:
         boost.tokenAddress,
@@ -549,22 +660,38 @@ async function processBoost(
         boost.totalAmount,
 
       price:
-        market.priceUsd,
+        market?.priceUsd,
 
       marketCap:
-        market.marketCapUsd,
+        market?.marketCapUsd,
+
+      fdv:
+        market?.fdvUsd,
 
       liquidity:
-        market.liquidityUsd,
+        market?.liquidityUsd,
 
       volume5m:
-        market.volume5mUsd,
+        market?.volume5mUsd,
 
       buys5m:
-        market.buys5m,
+        market?.buys5m,
 
       sells5m:
-        market.sells5m,
+        market?.sells5m,
+
+      age: contextAge(opportunity?.rawData ?? {}),
+      move: contextNumber(opportunity?.rawData ?? {}, 'currentRoi'),
+      momentum: contextNumber(opportunity?.rawData ?? {}, 'roiChange'),
+      confidence: opportunity?.confidence,
+      risk: opportunity?.risk,
+      rawData: opportunity?.rawData,
+      marketContext: market ? {
+        symbol: market.symbol, name: market.name, address: boost.tokenAddress,
+        marketCap: market.marketCapUsd, fdv: market.fdvUsd ?? null,
+        liquidity: market.liquidityUsd, volume5m: market.volume5mUsd,
+        chartUrl: market.chartUrl ?? null,
+      } : opportunityMarket,
 
       devHoldingPercent,
 
@@ -579,9 +706,11 @@ async function processBoost(
   await sendTelegram(
     config.adminTelegramId,
     message,
-    buildAlphaMarketActions({
-      chartUrl: `https://dexscreener.com/robinhood/${boost.tokenAddress}`,
-      tokenUrl: `https://robinhoodchain.blockscout.com/token/${boost.tokenAddress}`,
+    buildBoostActions({
+      tokenAddress: boost.tokenAddress,
+      chartUrl: market?.chartUrl,
+      opportunityId: opportunity?.id,
+      strategyKey: opportunity?.strategyKey,
     }),
   );
 
@@ -596,7 +725,7 @@ async function processBoost(
     '[RobinhoodBoostObserver] BOOST ALERT sent:',
     {
       symbol:
-        market.symbol,
+        market?.symbol ?? opportunityMarket.symbol,
 
       token:
         boost.tokenAddress,
@@ -609,7 +738,7 @@ async function processBoost(
         boost.totalAmount,
 
       marketCap:
-        market.marketCapUsd,
+        market?.marketCapUsd ?? null,
     },
   );
 

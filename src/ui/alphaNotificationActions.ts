@@ -6,6 +6,7 @@ export type AlphaMarketActionInput = {
   tradeUrl?: string | null;
   trackCallback?: string | null;
   muteCallback?: string | null;
+  copyContractCallback?: string | null;
   walletActivityCallback?: string | null;
 };
 
@@ -19,6 +20,10 @@ export function buildAlphaMarketActions(input: AlphaMarketActionInput): AlphaNot
   }
   market.push({ text: '🔎 Token', url: input.tokenUrl });
   rows.push(market);
+
+  if (input.copyContractCallback) {
+    rows.push([{ text: '📋 Copy CA', callback_data: input.copyContractCallback }]);
+  }
 
   const preferences: AlphaNotificationAction[] = [];
   if (input.trackCallback) preferences.push({ text: '👀 Track', callback_data: input.trackCallback });
