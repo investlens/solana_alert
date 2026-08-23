@@ -14,6 +14,9 @@ import {
 import {
   isOpportunityTracked,
 } from '../services/opportunityWatchlistService.js';
+import { getContextAccess, requireCapability } from './accessControl.js';
+import { hasCapability } from '../product/capabilities.js';
+import { strategyDisplay } from '../product/strategyPresentation.js';
 
 type OpportunityRow = {
   id: number | string;
@@ -428,6 +431,7 @@ async function renderScreen(
 async function renderOpportunityHome(
   ctx: any,
 ) {
+  const access = await getContextAccess(ctx);
   const opportunities =
     await loadLiveOpportunities();
 
@@ -473,11 +477,12 @@ async function renderOpportunityHome(
     '<i>Evidence changes continuously. Always verify live market conditions before execution.</i>',
   ].join('\n');
 
-  const keyboard =
-    Markup.inlineKeyboard([
+  const homeRows: any[][] = [
       [
         Markup.button.callback(
-          `🔥 Entry Ready (${entry.length})`,
+          hasCapability(access, 'opportunities.realtime')
+            ? `🔥 Entry Ready (${entry.length})`
+            : '🔒 Entry Ready · Pro',
           'OPP_BUCKET_ENTRY',
         ),
       ],
@@ -503,19 +508,21 @@ async function renderOpportunityHome(
           'OPPORTUNITY_CENTER',
         ),
       ],
-      [
+      ...(hasCapability(access, 'watchlist.use') ? [[
         Markup.button.callback(
           '👀 My Watchlist',
           'OPP_WATCHLIST',
         ),
-      ],
+      ]] : []),
       [
         Markup.button.callback(
-          '⬅️ Main Menu',
+          '🏠 Home',
           'MAIN_MENU',
         ),
       ],
-    ]).reply_markup;
+    ];
+
+  const keyboard = Markup.inlineKeyboard(homeRows).reply_markup;
 
   await renderScreen(
     ctx,
@@ -668,6 +675,9 @@ async function renderOpportunity(
     opportunity.updated_at ??
     opportunity.created_at;
 
+  const strategy = strategyDisplay(opportunity.strategy_key);
+  const state = bucketMeta(bucket ?? 'WATCHING').title.replace(/^[^ ]+ /, '');
+
   const text = [
     '⚡ <b>ALPHAOS · OPPORTUNITY</b>',
     '',
@@ -678,21 +688,21 @@ async function renderOpportunity(
       ),
     )}</code>`,
     '',
+    `Chain       <b>${escapeHtml(String(opportunity.chain ?? 'Unknown'))}</b>`,
+    `State       <b>${escapeHtml(state)}</b>`,
     `Action      <b>${escapeHtml(
       action,
     )}</b>`,
-    `Strategy    <b>${escapeHtml(
-      opportunity.strategy_key ??
-        'UNKNOWN',
-    )}</b>`,
+    `Monitor     <b>${escapeHtml(strategy.name)}</b>`,
     `Confidence  <b>${confidence}</b>`,
     `Risk        <b>${risk}</b>`,
     '',
-    `🧠 ${escapeHtml(
+    `🧠 <b>Why AlphaOS cares</b>`,
+    escapeHtml(
       opportunity.why ??
         opportunity.what_happened ??
         'AlphaOS detected a strategy-qualified market change.',
-    )}`,
+    ),
     '',
     `Last seen   <b>${escapeHtml(
       relativeTime(
@@ -720,7 +730,9 @@ async function renderOpportunity(
   const actionRows: any[][] = [];
 
   const telegramId = String(ctx.from?.id ?? '');
-  const tracked = telegramId
+  const access = await getContextAccess(ctx);
+  const canWatch = hasCapability(access, 'watchlist.use');
+  const tracked = telegramId && canWatch
     ? await isOpportunityTracked({
         telegramId,
         opportunityId: Number(opportunity.id),
@@ -728,6 +740,7 @@ async function renderOpportunity(
     : false;
 
   if (
+    hasCapability(access, 'trading.admin') &&
     String(
       opportunity.chain ??
       '',
@@ -743,13 +756,12 @@ async function renderOpportunity(
   }
 
   actionRows.push([
-    Markup.button.callback(
-      tracked ? '✅ UNTRACK' : '👀 TRACK',
-      tracked
-        ? `OPP_UNTRACK_${opportunity.id}`
-        : `OPP_TRACK_${opportunity.id}`,
-    ),
-
+    ...(canWatch ? [Markup.button.callback(
+        tracked ? '✅ UNTRACK' : '👀 TRACK',
+        tracked
+          ? `OPP_UNTRACK_${opportunity.id}`
+          : `OPP_TRACK_${opportunity.id}`,
+      )] : []),
     Markup.button.url(
       tokenTarget.source ===
       'dexscreener'
@@ -773,7 +785,7 @@ async function renderOpportunity(
 
   actionRows.push([
     Markup.button.callback(
-      '🏠 Main Menu',
+      '🏠 Home',
       'MAIN_MENU',
     ),
   ]);
@@ -807,13 +819,18 @@ export function registerOpportunityCenter(
   bot.action(
     /^OPP_BUCKET_(ENTRY|BUILDING|WATCHING|RISK)$/,
     async (ctx) => {
-      await ctx.answerCbQuery();
-
       const bucket =
         String(
           ctx.match?.[1] ??
             'WATCHING',
         ) as OpportunityBucket;
+
+      if (
+        bucket === 'ENTRY' &&
+        !await requireCapability(ctx, 'opportunities.realtime', 'OPPORTUNITY_CENTER')
+      ) return;
+
+      await ctx.answerCbQuery();
 
       await renderBucket(
         ctx,

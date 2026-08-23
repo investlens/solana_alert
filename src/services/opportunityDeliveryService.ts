@@ -32,6 +32,7 @@ import {
 import {
   opportunityDeliveryIdentity,
 } from './opportunityDeliveryIdentity.js';
+import { accessProfileForUser, hasCapability } from '../product/capabilities.js';
 
 type DeliverableAction =
   | 'BUY'
@@ -536,26 +537,10 @@ function userCanReceiveOpportunity(
       .trim()
       .toLowerCase();
 
-  if (
-    user.tier ===
-    'admin'
-  ) {
-    return true;
-  }
-
-  if (
-    mode !==
-    'paid'
-  ) {
-    return false;
-  }
-
-  return (
-    user.tier ===
-      'paid' &&
-    user.subscription_status ===
-      'active'
-  );
+  const access = accessProfileForUser(user);
+  if (access.tier === 'admin') return true;
+  if (mode !== 'paid') return false;
+  return hasCapability(access, 'opportunities.realtime');
 }
 
 async function loadOpportunity(

@@ -1,159 +1,82 @@
-import {
-  Markup,
-} from 'telegraf';
+import { Markup } from 'telegraf';
+import { hasCapability, type AccessProfile } from '../product/capabilities.js';
 
-export function mainAlphaMenu() {
+export function mainAlphaMenu(access: AccessProfile) {
   return Markup.inlineKeyboard([
     [
-      Markup.button.callback(
-        '⚡ Opportunities',
-        'OPPORTUNITY_CENTER',
-      ),
+      Markup.button.callback('⚡ Opportunities', 'OPPORTUNITY_CENTER'),
+      Markup.button.callback('🧠 Intelligence', 'INTELLIGENCE_CENTER'),
     ],
     [
       Markup.button.callback(
-        '🐋 Wallets',
+        hasCapability(access, 'wallets.track') ? '🐋 Wallets' : '🔒 Wallets',
         'WALLET_TRACKING',
       ),
-
-      Markup.button.callback(
-        '🎯 Strategies',
-        'STRATEGY_SETTINGS',
-      ),
+      Markup.button.callback('📈 Trading', 'TRADE_MENU'),
     ],
     [
-      Markup.button.callback(
-        '🧠 Research',
-        'ALPHA_FEED',
-      ),
-
-      Markup.button.callback(
-        '📈 Trade',
-        'TRADE_MENU',
-      ),
+      Markup.button.callback('⚙️ Controls', 'SETTINGS'),
+      Markup.button.callback('⭐ Membership', 'MEMBERSHIP_HOME'),
     ],
-    [
-      Markup.button.callback(
-        '⭐ Premium',
-        'PREMIUM',
-      ),
-
-      Markup.button.callback(
-        '⚙️ Controls',
-        'SETTINGS',
-      ),
-    ],
+    ...(hasCapability(access, 'trading.admin')
+      ? [[Markup.button.callback('👑 Admin Trading', 'ADMIN_TERMINAL_REFRESH')]]
+      : []),
   ]);
 }
 
-export function alphaFeedMenu() {
+export function intelligenceMenu(access: AccessProfile) {
+  const rows: any[][] = [
+    [Markup.button.callback('🔎 Investigations', 'INTEL_INVESTIGATIONS')],
+  ];
+
+  if (hasCapability(access, 'intelligence.smartMoney')) {
+    rows.push([
+      Markup.button.callback('🐋 Smart Money', 'INTEL_SMART_MONEY'),
+      Markup.button.callback('👤 Creators', 'INTEL_CREATORS'),
+    ]);
+    rows.push([Markup.button.callback('📊 Performance', 'INTEL_PERFORMANCE')]);
+  } else {
+    rows.push([Markup.button.callback('⭐ Unlock Full Intelligence', 'MEMBERSHIP_PLANS')]);
+  }
+
+  rows.push([Markup.button.callback('🏠 Home', 'MAIN_MENU')]);
+  return Markup.inlineKeyboard(rows);
+}
+
+export function tradingMenu(access: AccessProfile) {
+  if (hasCapability(access, 'trading.admin')) {
+    return Markup.inlineKeyboard([
+      [
+        Markup.button.callback('📈 Positions', 'POSITIONS'),
+        Markup.button.callback('🤖 Automation', 'AUTO_TRADE_STATUS'),
+      ],
+      [
+        Markup.button.callback('🛡 Risk Controls', 'ADMIN_TRADE_SETTINGS'),
+        Markup.button.callback('🧠 Learning', 'LEARNING_SUMMARY'),
+      ],
+      [Markup.button.callback('🏠 Home', 'MAIN_MENU')],
+    ]);
+  }
+
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('⚡ Browse Opportunities', 'OPPORTUNITY_CENTER')],
+    [Markup.button.callback('🏠 Home', 'MAIN_MENU')],
+  ]);
+}
+
+export function backHome(parentLabel: string, parentCallback: string) {
   return Markup.inlineKeyboard([
     [
-      Markup.button.callback(
-        '🧠 Live Investigations',
-        'DEX_PAID',
-      ),
-    ],
-    [
-      Markup.button.callback(
-        '🐋 Smart Money',
-        'WHALE_RADAR',
-      ),
-
-      Markup.button.callback(
-        '👤 Creator Intel',
-        'CREATOR_INTEL',
-      ),
-    ],
-    [
-      Markup.button.callback(
-        '📈 Performance',
-        'HISTORY',
-      ),
-    ],
-    [
-      Markup.button.callback(
-        '⬅️ Main Menu',
-        'MAIN_MENU',
-      ),
+      Markup.button.callback(`⬅️ ${parentLabel}`, parentCallback),
+      Markup.button.callback('🏠 Home', 'MAIN_MENU'),
     ],
   ]);
-}
-
-export function tradeTerminalMenu(
-  isAdmin: boolean,
-) {
-  return Markup.inlineKeyboard(
-    isAdmin
-      ? [
-          [
-            Markup.button.callback(
-              '📊 Auto Trade Status',
-              'AUTO_TRADE_STATUS',
-            ),
-          ],
-          [
-            Markup.button.callback(
-              '📈 Positions',
-              'POSITIONS',
-            ),
-
-            Markup.button.callback(
-              '🧠 Learning',
-              'LEARNING_SUMMARY',
-            ),
-          ],
-          [
-            Markup.button.callback(
-              '⏸ Pause',
-              'PAUSE_AUTO_TRADE',
-            ),
-
-            Markup.button.callback(
-              '▶️ Resume',
-              'RESUME_AUTO_TRADE',
-            ),
-          ],
-          [
-            Markup.button.callback(
-              '⬅️ Main Menu',
-              'MAIN_MENU',
-            ),
-          ],
-        ]
-      : [
-          [
-            Markup.button.callback(
-              '⚡ Opportunities',
-              'OPPORTUNITY_CENTER',
-            ),
-          ],
-          [
-            Markup.button.callback(
-              '⭐ Premium Access',
-              'PREMIUM',
-            ),
-          ],
-          [
-            Markup.button.callback(
-              '⬅️ Main Menu',
-              'MAIN_MENU',
-            ),
-          ],
-        ],
-  );
 }
 
 export function backToMainMenu() {
   return {
-    reply_markup:
-      Markup.inlineKeyboard([
-        [
-          Markup.button.callback(
-            '⬅️ Main Menu',
-            'MAIN_MENU',
-          ),
-        ],
-      ]).reply_markup,
+    reply_markup: Markup.inlineKeyboard([
+      [Markup.button.callback('🏠 Home', 'MAIN_MENU')],
+    ]).reply_markup,
   };
 }

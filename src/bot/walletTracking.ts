@@ -6,6 +6,7 @@ import {
 import {
   addTrackedWallet,
   getRecentTrackedWalletActivity,
+  getRecentWalletActivityForUser,
   getTrackedWalletByIdForUser,
   getTrackedWalletsForUser,
   removeTrackedWallet,
@@ -20,6 +21,8 @@ import {
   escapeTelegramHtml,
   normalizeSolanaPublicAddress,
 } from './walletInput.js';
+import { getContextAccess, requireCapability } from './accessControl.js';
+import { hasCapability } from '../product/capabilities.js';
 
 function userId(
   ctx: any,
@@ -79,7 +82,7 @@ async function renderWalletCenter(
     );
 
   const lines = [
-    '🐋 <b>WALLET TRACKING</b>',
+    '🐋 <b>WALLETS</b>',
     '',
     wallets.length ===
     0
@@ -127,6 +130,7 @@ async function renderWalletCenter(
           'WALLET_TRACKING',
         ),
       ],
+      [Markup.button.callback('⚡ Recent Activity', 'WALLET_RECENT_ACTIVITY')],
     ];
 
   for (
@@ -163,7 +167,7 @@ async function renderWalletCenter(
 
   buttons.push([
     Markup.button.callback(
-      '⬅️ Main Menu',
+      '🏠 Home',
       'MAIN_MENU',
     ),
   ]);
@@ -200,6 +204,25 @@ export function
 registerWalletTracking(
   bot: Telegraf<any>,
 ) {
+  bot.use(async (ctx, next) => {
+    const telegramId = userId(ctx);
+    const callback = String((ctx.callbackQuery as any)?.data ?? '');
+    const command = String((ctx.message as any)?.text ?? '').split(/\s+/, 1)[0].toLowerCase();
+    const walletFlow = Boolean(
+      callback.startsWith('WALLET_') ||
+      command === '/trackwallet' ||
+      (telegramId && getConversationState(telegramId) === 'ADD_WALLET')
+    );
+
+    if (!walletFlow) return next();
+
+    const access = await getContextAccess(ctx);
+    if (hasCapability(access, 'wallets.track')) return next();
+
+    if (telegramId) clearConversationState(telegramId);
+    await requireCapability(ctx, 'wallets.track', 'SETTINGS');
+  });
+
   bot.action(
     'WALLET_TRACKING',
     async ctx => {
@@ -257,6 +280,10 @@ registerWalletTracking(
                 Markup.button.callback(
                   '⬅️ Wallets',
                   'WALLET_TRACKING',
+                ),
+                Markup.button.callback(
+                  '🏠 Home',
+                  'MAIN_MENU',
                 ),
               ],
             ]).reply_markup,
@@ -394,6 +421,37 @@ registerWalletTracking(
         await ctx.reply(
           'Could not add that wallet.',
         );
+      }
+    },
+  );
+
+  bot.action(
+    'WALLET_RECENT_ACTIVITY',
+    async ctx => {
+      const telegramId = userId(ctx);
+      if (!telegramId) return;
+      await ctx.answerCbQuery();
+      try {
+        const activity = await getRecentWalletActivityForUser(telegramId, 12);
+        const lines = ['⚡ <b>RECENT WALLET ACTIVITY</b>', ''];
+        if (!activity.length) lines.push('No tracked-wallet activity recorded yet.');
+        for (const row of activity) {
+          lines.push(
+            `${String(row.action ?? '').toUpperCase() === 'SELL' ? '🔴' : '🟢'} ` +
+            `<b>${escapeTelegramHtml(String(row.action ?? 'Activity').toUpperCase())}</b> ` +
+            `${escapeTelegramHtml(shortAddress(String(row.token ?? '-')))}`,
+          );
+        }
+        await ctx.reply(lines.join('\n'), {
+          parse_mode: 'HTML',
+          reply_markup: Markup.inlineKeyboard([[
+            Markup.button.callback('⬅️ Wallets', 'WALLET_TRACKING'),
+            Markup.button.callback('🏠 Home', 'MAIN_MENU'),
+          ]]).reply_markup,
+        });
+      } catch (error) {
+        console.error('[WalletTracking] Recent activity failed:', error);
+        await ctx.reply('Unable to load recent wallet activity. Please try again.');
       }
     },
   );
@@ -712,6 +770,7 @@ registerWalletTracking(
                     `WALLET_ACTIVITY_${wallet.id}`,
                   ),
                 ],
+                [Markup.button.callback('🏠 Home', 'MAIN_MENU')],
               ]).reply_markup,
           },
         );

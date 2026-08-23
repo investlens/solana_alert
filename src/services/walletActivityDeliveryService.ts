@@ -22,6 +22,8 @@ import type {
   WalletWatchEvent,
 } from '../core/walletWatcher.js';
 import { escapeTelegramHtml } from '../ui/escapeHtml.js';
+import { getUserByTelegramId } from '../core/subscriptions.js';
+import { accessProfileForUser, hasCapability } from '../product/capabilities.js';
 
 type InlineButton = {
   text: string;
@@ -430,6 +432,11 @@ deliverTrackedWalletActivity(
         const subscriber
         of subscribers
       ) {
+        const user = await getUserByTelegramId(subscriber.telegram_id);
+        if (!hasCapability(accessProfileForUser(user), 'wallets.activity')) {
+          continue;
+        }
+
         const reserved =
           await reserveDelivery({
             telegramId:

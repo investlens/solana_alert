@@ -86,7 +86,7 @@ function terminalKeyboard() {
       ],
       [
         {
-          text: '⬅️ Main Menu',
+          text: '🏠 Home',
           callback_data: 'MAIN_MENU',
         },
       ],

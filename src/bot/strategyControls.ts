@@ -7,6 +7,10 @@ import {
   getUserStrategyState,
   toggleUserStrategy,
 } from '../services/strategyService.js';
+import { strategyDisplay } from '../product/strategyPresentation.js';
+import { escapeTelegramHtml } from '../ui/escapeHtml.js';
+import { assertValidCallbackData } from './callbackData.js';
+import { requireCapability } from './accessControl.js';
 
 function chainLabel(chain: string): string {
   if (chain === 'solana') {
@@ -47,10 +51,10 @@ async function renderStrategies(
     );
 
   const lines: string[] = [
-    '🎯 <b>ALPHAOS STRATEGIES</b>',
-    '━━━━━━━━━━━━━━━━━━',
+    '🎯 <b>ALERT STRATEGIES</b>',
     '',
-    'Tap any strategy below to turn its alerts ON or OFF.',
+    'ON = AlphaOS may send normal alerts from this strategy.',
+    'OFF = normal alerts from this strategy are muted.',
     '',
     '✅ ON · alerts enabled',
     '⭕ OFF · alerts muted',
@@ -76,7 +80,10 @@ async function renderStrategies(
         strategyIcon(
           strategy.user_enabled,
         )
-      } ${strategy.name}`,
+      } ${escapeTelegramHtml(strategyDisplay(
+        strategy.strategy_key,
+        strategy.name,
+      ).name)}`,
     );
   }
 
@@ -95,8 +102,8 @@ async function renderStrategies(
             strategyIcon(
               strategy.user_enabled,
             )
-          } ${strategy.name}`,
-          `STRAT_TOGGLE_${strategy.strategy_key}`,
+          } ${strategyDisplay(strategy.strategy_key, strategy.name).name}`,
+          assertValidCallbackData(`STRAT_TOGGLE_${strategy.strategy_key}`),
         ),
       ],
     );
@@ -108,7 +115,12 @@ async function renderStrategies(
     ),
 
     Markup.button.callback(
-      '🏠 Main Menu',
+      '⬅️ Controls',
+      'SETTINGS',
+    ),
+
+    Markup.button.callback(
+      '🏠 Home',
       'MAIN_MENU',
     ),
   ]);
@@ -167,6 +179,7 @@ export function registerStrategyControls(
   bot.action(
     'STRATEGY_SETTINGS',
     async ctx => {
+      if (!await requireCapability(ctx, 'strategies.manage', 'SETTINGS')) return;
       await ctx.answerCbQuery();
 
       try {
@@ -189,6 +202,7 @@ export function registerStrategyControls(
   bot.action(
     /^STRAT_TOGGLE_(.+)$/,
     async ctx => {
+      if (!await requireCapability(ctx, 'strategies.manage', 'SETTINGS')) return;
       const strategyKey =
         ctx.match?.[1];
 

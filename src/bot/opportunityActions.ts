@@ -19,6 +19,8 @@ import {
 import {
   escapeTelegramHtml,
 } from './walletInput.js';
+import { requireCapability } from './accessControl.js';
+import { strategyDisplay } from '../product/strategyPresentation.js';
 
 type OpportunityRow = {
   id: number;
@@ -80,6 +82,7 @@ registerOpportunityActions(
     /^OPP_TRACK_(\d+)$/,
     async ctx => {
       try {
+        if (!await requireCapability(ctx, 'watchlist.use', 'OPPORTUNITY_CENTER')) return;
         await ctx.answerCbQuery(
           'Tracking opportunity…',
         );
@@ -132,6 +135,12 @@ registerOpportunityActions(
           {
             parse_mode:
               'HTML',
+            reply_markup: {
+              inline_keyboard: [[
+                { text: '👀 Watchlist', callback_data: 'OPP_WATCHLIST' },
+                { text: '🏠 Home', callback_data: 'MAIN_MENU' },
+              ]],
+            },
           },
         );
       } catch (error) {
@@ -162,6 +171,7 @@ registerOpportunityActions(
   bot.action(
     /^OPP_UNTRACK_(\d+)$/,
     async ctx => {
+      if (!await requireCapability(ctx, 'watchlist.use', 'OPPORTUNITY_CENTER')) return;
       const userId = telegramId(ctx);
       if (!userId) return;
 
@@ -184,6 +194,7 @@ registerOpportunityActions(
   bot.action(
     'OPP_WATCHLIST',
     async ctx => {
+      if (!await requireCapability(ctx, 'watchlist.use', 'OPPORTUNITY_CENTER')) return;
       const userId = telegramId(ctx);
       if (!userId) return;
 
@@ -191,17 +202,34 @@ registerOpportunityActions(
         await ctx.answerCbQuery();
         const rows = await getTrackedOpportunities(userId, 10);
 
-        const lines = [
+        const lines: string[] = [
           '👀 <b>MY WATCHLIST</b>',
           '',
           rows.length ? `Tracked opportunities: <b>${rows.length}</b>` : 'No tracked opportunities yet.',
+          '',
         ];
 
-        const buttons = rows.map(row => [{
-          text: `Open opportunity ${row.opportunity_id}`,
-          callback_data: `OPP_VIEW_${row.opportunity_id}`,
-        }]);
-        buttons.push([{ text: '⬅️ Opportunities', callback_data: 'OPPORTUNITY_CENTER' }]);
+        const buttons = rows.map(row => {
+          const opportunity: any = Array.isArray(row.opportunities)
+            ? row.opportunities[0]
+            : row.opportunities;
+          const strategy = strategyDisplay(opportunity?.strategy_key);
+          const state = String(opportunity?.recommended_action ?? opportunity?.status ?? 'WATCH')
+            .replace(/_/g, ' ');
+          lines.push(
+            `<b>${escapeTelegramHtml(opportunity?.title ?? opportunity?.asset_id ?? `Opportunity ${row.opportunity_id}`)}</b>`,
+            `${escapeTelegramHtml(strategy.name)} · ${escapeTelegramHtml(state)}`,
+            '',
+          );
+          return [{
+            text: `Open ${String(opportunity?.title ?? row.opportunity_id).slice(0, 28)}`,
+            callback_data: `OPP_VIEW_${row.opportunity_id}`,
+          }];
+        });
+        buttons.push([
+          { text: '⬅️ Opportunities', callback_data: 'OPPORTUNITY_CENTER' },
+          { text: '🏠 Home', callback_data: 'MAIN_MENU' },
+        ]);
 
         await ctx.reply(lines.join('\n'), {
           parse_mode: 'HTML',
@@ -231,6 +259,7 @@ registerOpportunityActions(
     /^OPP_TRADE_(\d+)$/,
     async ctx => {
       try {
+        if (!await requireCapability(ctx, 'trading.admin', 'OPPORTUNITY_CENTER')) return;
         const id =
           Number(
             ctx.match[1],
@@ -302,7 +331,7 @@ registerOpportunityActions(
             'pons'
         ) {
           await ctx.answerCbQuery(
-            'PONS trading adapter is being prepared. Tracking and market access are live.',
+            'Direct trading is unavailable for this market. Review it using the token link.',
             {
               show_alert:
                 true,

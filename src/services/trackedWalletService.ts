@@ -401,3 +401,21 @@ getRecentTrackedWalletActivity(
     []
   ) as Array<Record<string, any>>;
 }
+
+export async function getRecentWalletActivityForUser(
+  telegramId: string,
+  limit = 15,
+): Promise<Array<Record<string, any>>> {
+  const wallets = await getTrackedWalletsForUser(telegramId);
+  const addresses = wallets.map(wallet => wallet.wallet_address);
+  if (!addresses.length) return [];
+
+  const { data, error } = await supabase
+    .from('wallet_trade_history')
+    .select('*')
+    .in('wallet', addresses)
+    .order('created_at', { ascending: false })
+    .limit(Math.max(1, Math.min(50, limit)));
+  if (error) throw error;
+  return data ?? [];
+}

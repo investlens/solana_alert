@@ -56,6 +56,18 @@ export async function getPendingPayments() {
   return data ?? [];
 }
 
+export async function getLatestPaymentForUser(telegramId: string) {
+  const { data, error } = await supabase
+    .from('payments')
+    .select('status,plan_days,amount_sol,tx_hash,requested_at,approved_at,rejected_at')
+    .eq('telegram_id', telegramId)
+    .order('requested_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
 export async function txHashExists(txHash: string) {
   const { data, error } = await supabase
     .from('payments')

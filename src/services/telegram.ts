@@ -34,7 +34,7 @@ export function buildAlphaAlertButtons(links: AlphaAlertLinks): InlineButton[][]
   if (pump) marketRow.push({ text: '🚀 Pump.fun', url: pump });
   if (marketRow.length) rows.push(marketRow);
 
-  if (buy) rows.push([{ text: '⚡ Open Trade Terminal', url: buy }]);
+  if (buy) rows.push([{ text: '⚡ Open Trading Route', url: buy }]);
   return rows;
 }
 
