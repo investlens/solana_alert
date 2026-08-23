@@ -247,6 +247,83 @@ setTrackedWalletActive(args: {
   }
 }
 
+export async function enableRobinhoodMonitoringForSavedWallet(args: {
+  telegramId: string;
+  id: number;
+}): Promise<TrackedWallet> {
+  const source = await getTrackedWalletByIdForUser(args);
+  if (!source) throw new Error('Wallet not found');
+  if (source.chain !== 'evm') {
+    if (source.chain === 'robinhood') {
+      const { error } = await supabase
+        .from('user_tracked_wallets')
+        .update({ is_active: true, alerts_enabled: true, updated_at: new Date().toISOString() })
+        .eq('id', source.id)
+        .eq('telegram_id', args.telegramId)
+        .eq('chain', 'robinhood');
+      if (error) throw error;
+      const enabled = await getTrackedWalletByIdForUser(args);
+      if (!enabled) throw new Error('Wallet not found after enabling monitoring');
+      return enabled;
+    }
+    throw new Error('Only a saved generic EVM wallet can enable Robinhood monitoring');
+  }
+
+  const { data: existingRows, error: existingError } = await supabase
+    .from('user_tracked_wallets')
+    .select('*')
+    .eq('telegram_id', args.telegramId)
+    .eq('chain', 'robinhood')
+    .ilike('wallet_address', source.wallet_address)
+    .limit(1);
+  if (existingError) throw existingError;
+  const existing = (existingRows?.[0] as TrackedWallet | undefined) ?? null;
+  const label = existing?.label ?? source.label ?? null;
+  const now = new Date().toISOString();
+
+  let targetId = existing?.id ?? null;
+  if (targetId != null) {
+    const { error } = await supabase
+      .from('user_tracked_wallets')
+      .update({ label, is_active: true, alerts_enabled: true, updated_at: now })
+      .eq('id', targetId)
+      .eq('telegram_id', args.telegramId)
+      .eq('chain', 'robinhood');
+    if (error) throw error;
+  } else {
+    const { data, error } = await supabase
+      .from('user_tracked_wallets')
+      .update({
+        chain: 'robinhood',
+        label,
+        is_active: true,
+        alerts_enabled: true,
+        updated_at: now,
+      })
+      .eq('id', source.id)
+      .eq('telegram_id', args.telegramId)
+      .eq('chain', 'evm')
+      .select('id')
+      .single();
+    if (error) throw error;
+    targetId = Number(data.id);
+  }
+
+  if (targetId !== source.id) {
+    const { error: cleanupError } = await supabase
+      .from('user_tracked_wallets')
+      .delete()
+      .eq('id', source.id)
+      .eq('telegram_id', args.telegramId)
+      .eq('chain', 'evm');
+    if (cleanupError) throw cleanupError;
+  }
+
+  const target = await getTrackedWalletByIdForUser({ telegramId: args.telegramId, id: targetId });
+  if (!target) throw new Error('Robinhood wallet was not found after enabling monitoring');
+  return target;
+}
+
 export async function
 removeTrackedWallet(args: {
   telegramId: string;

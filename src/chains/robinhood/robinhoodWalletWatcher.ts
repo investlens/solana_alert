@@ -255,3 +255,13 @@ export async function commitRobinhoodWalletCheckpoints(wallets: Address[], block
   );
   if (error) throw error;
 }
+
+export async function initializeRobinhoodWalletCursorAtCurrentBlock(wallet: Address): Promise<bigint> {
+  const currentBlock = await robinhoodPublicClient.getBlockNumber();
+  const { error } = await supabase.from('wallet_monitor_cursors').upsert(
+    [{ chain: 'robinhood', wallet_address: wallet, last_processed_block: currentBlock.toString() }],
+    { onConflict: 'chain,wallet_address', ignoreDuplicates: true },
+  );
+  if (error) throw error;
+  return currentBlock;
+}

@@ -59,6 +59,27 @@ test('Robinhood trade classification requires corroborating quote/native transac
   assert.equal(sell?.kind, 'sell');
 });
 
+test('real AAA purchase fixture is BUY only because native value corroborates the inbound token', () => {
+  const aaa = getAddress('0x6C58D6F67f728A74158E31FA1B6b497967e4786F');
+  const settler = getAddress('0x39b38686A19836Ac10162c490E4558e120CbBE5f');
+  const amount = 946_007_458_403_385_118_437_064n;
+  const purchase = classifyRobinhoodWalletTransaction(wallet, {
+    hash: '0x257a6988a587275882761b5bee52f842301cbd513699dd08e7b1ed47ecf7c16c',
+    from: wallet,
+    value: 20_000_000_000_000_000n,
+    transfers: [{ token: aaa, from: settler, to: wallet, value: amount }],
+  });
+  assert.deepEqual(purchase, {
+    kind: 'buy', token: aaa, amountRaw: amount,
+    evidence: 'Token received with verified native transaction value',
+  });
+  const transferOnly = classifyRobinhoodWalletTransaction(wallet, {
+    hash, from: other, value: 0n,
+    transfers: [{ token: aaa, from: settler, to: wallet, value: amount }],
+  });
+  assert.equal(transferOnly?.kind, 'receive');
+});
+
 test('simple inbound and outbound transfers remain neutral', () => {
   assert.equal(classifyRobinhoodWalletTransaction(wallet, tx([
     { token, from: other, to: wallet, value: 100n },
@@ -147,6 +168,39 @@ test('network model, selection UX, watcher isolation and durable per-network cur
   assert.match(migration, /primary key \(chain, wallet_address\)/);
   assert.match(migration, /enable row level security/);
   assert.match(migration, /'RECEIVE', 'SEND'/);
+});
+
+test('saved generic EVM upgrade is explicit, confirmed, idempotent and narrowly scoped', async () => {
+  const ui = await readFile(new URL('../src/bot/walletTracking.ts', import.meta.url), 'utf8');
+  assert.match(ui, /Enable Robinhood Monitoring/);
+  assert.match(ui, /ENABLE ROBINHOOD MONITORING\?/);
+  assert.match(ui, /WALLET_ENABLE_RH_CONFIRM_/);
+  assert.match(ui, /Markup\.button\.callback\('❌ Cancel', 'WALLET_TRACKING'\)/);
+  assert.match(ui, /enableRobinhoodMonitoringForSavedWallet/);
+  assert.match(ui, /initializeRobinhoodWalletCursorAtCurrentBlock/);
+
+  const store = await readFile(new URL('../src/services/trackedWalletService.ts', import.meta.url), 'utf8');
+  assert.match(store, /source\.chain !== 'evm'/);
+  assert.match(store, /\.eq\('telegram_id', args\.telegramId\)[\s\S]*\.eq\('chain', 'robinhood'\)[\s\S]*\.ilike\('wallet_address', source\.wallet_address\)/);
+  assert.match(store, /existing\?\.label \?\? source\.label/);
+  assert.match(store, /is_active: true, alerts_enabled: true/);
+  assert.match(store, /\.eq\('id', source\.id\)[\s\S]*\.eq\('telegram_id', args\.telegramId\)[\s\S]*\.eq\('chain', 'evm'\)/);
+  assert.doesNotMatch(store, /\.delete\(\)[\s\S]*\.neq\('chain'/);
+
+  const watcher = await readFile(new URL('../src/chains/robinhood/robinhoodWalletWatcher.ts', import.meta.url), 'utf8');
+  assert.match(watcher, /initializeRobinhoodWalletCursorAtCurrentBlock/);
+  assert.match(watcher, /getBlockNumber\(\)[\s\S]*ignoreDuplicates: true/);
+});
+
+test('exact transaction diagnostic bypasses lookback without weakening the scan cap', async () => {
+  const diagnostic = await readFile(new URL('../scripts/inspectRobinhoodWallet.ts', import.meta.url), 'utf8');
+  assert.match(diagnostic, /argument\('--tx'\)/);
+  assert.match(diagnostic, /getTransaction\(\{ hash \}\)/);
+  assert.match(diagnostic, /getTransactionReceipt\(\{ hash \}\)/);
+  assert.match(diagnostic, /getBlock\(\{ blockNumber: receipt\.blockNumber \}\)/);
+  assert.match(diagnostic, /classifyRobinhoodWalletTransaction/);
+  assert.match(diagnostic, /Math\.min\(2_000/);
+  assert.doesNotMatch(diagnostic, /sendTelegram|\.insert\(|\.update\(|\.delete\(/);
 });
 
 test('subscriber and delivery keys remain per-user while paused/removed rows are excluded', async () => {

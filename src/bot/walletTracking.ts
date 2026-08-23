@@ -5,6 +5,7 @@ import {
 
 import {
   addTrackedWallet,
+  enableRobinhoodMonitoringForSavedWallet,
   getRecentTrackedWalletActivity,
   getRecentWalletActivityForUser,
   getTrackedWalletByIdForUser,
@@ -24,6 +25,8 @@ import {
 import { walletCoverageText, walletFamilyHasLiveMonitoring, walletNetworkLabel } from '../services/walletAddress.js';
 import { getContextAccess, requireCapability } from './accessControl.js';
 import { hasCapability } from '../product/capabilities.js';
+import { initializeRobinhoodWalletCursorAtCurrentBlock } from '../chains/robinhood/robinhoodWalletWatcher.js';
+import { getAddress } from 'viem';
 
 function userId(
   ctx: any,
@@ -165,6 +168,12 @@ async function renderWalletCenter(
     )
   ) {
     const row = [];
+    if (wallet.chain === 'evm') {
+      row.push(Markup.button.callback(
+        '🔵 Enable Robinhood Monitoring',
+        `WALLET_ENABLE_RH_CONFIRM_${wallet.id}`,
+      ));
+    }
     if (walletFamilyHasLiveMonitoring(wallet.chain)) {
       row.push(
         Markup.button.callback(
@@ -520,6 +529,68 @@ registerWalletTracking(
       } catch (error) {
         console.error('[WalletTracking] Recent activity failed:', error);
         await ctx.reply('Unable to load recent wallet activity. Please try again.');
+      }
+    },
+  );
+
+  bot.action(
+    /^WALLET_ENABLE_RH_CONFIRM_(\d+)$/,
+    async ctx => {
+      const telegramId = userId(ctx);
+      if (!telegramId) return;
+      const wallet = await getTrackedWalletByIdForUser({ telegramId, id: Number(ctx.match[1]) });
+      if (!wallet || wallet.chain !== 'evm') {
+        await ctx.answerCbQuery('Saved EVM wallet not found', { show_alert: true });
+        return;
+      }
+      await ctx.answerCbQuery();
+      await ctx.reply([
+        '🔵 <b>ENABLE ROBINHOOD MONITORING?</b>', '',
+        '<b>Wallet</b>',
+        `<code>${escapeTelegramHtml(shortAddress(wallet.wallet_address))}</code>`, '',
+        'AlphaOS will monitor public Robinhood-chain activity for:',
+        '• Buys',
+        '• Sells',
+        '• Token transfers',
+        '• Verified launches', '',
+        '<i>No private keys or signing permission are required.</i>',
+      ].join('\n'), {
+        parse_mode: 'HTML',
+        reply_markup: Markup.inlineKeyboard([
+          [Markup.button.callback('✅ Enable', `WALLET_ENABLE_RH_${wallet.id}`)],
+          [Markup.button.callback('❌ Cancel', 'WALLET_TRACKING')],
+        ]).reply_markup,
+      });
+    },
+  );
+
+  bot.action(
+    /^WALLET_ENABLE_RH_(\d+)$/,
+    async ctx => {
+      const telegramId = userId(ctx);
+      if (!telegramId) return;
+      try {
+        const wallet = await enableRobinhoodMonitoringForSavedWallet({
+          telegramId,
+          id: Number(ctx.match[1]),
+        });
+        await initializeRobinhoodWalletCursorAtCurrentBlock(getAddress(wallet.wallet_address));
+        await ctx.answerCbQuery('Robinhood monitoring enabled');
+        await ctx.reply([
+          '✅ <b>ROBINHOOD MONITORING ENABLED</b>', '',
+          `<code>${escapeTelegramHtml(shortAddress(wallet.wallet_address))}</code>`, '',
+          'Live monitoring · <b>ON</b>',
+          'Monitoring starts from the current block. Earlier activity is not replayed.',
+        ].join('\n'), {
+          parse_mode: 'HTML',
+          reply_markup: Markup.inlineKeyboard([[
+            Markup.button.callback('⬅️ Wallets', 'WALLET_TRACKING'),
+            Markup.button.callback('🏠 Home', 'MAIN_MENU'),
+          ]]).reply_markup,
+        });
+      } catch (error) {
+        console.error('[WalletTracking] Robinhood enable failed:', error);
+        await ctx.answerCbQuery('Could not enable monitoring', { show_alert: true }).catch(() => {});
       }
     },
   );
