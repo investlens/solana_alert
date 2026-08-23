@@ -21,7 +21,7 @@ import {
   detectWalletAddress,
   escapeTelegramHtml,
 } from './walletInput.js';
-import { walletCoverageText, walletFamilyHasLiveMonitoring } from '../services/walletAddress.js';
+import { walletCoverageText, walletFamilyHasLiveMonitoring, walletNetworkLabel } from '../services/walletAddress.js';
 import { getContextAccess, requireCapability } from './accessControl.js';
 import { hasCapability } from '../product/capabilities.js';
 
@@ -34,6 +34,29 @@ function userId(
   return id == null
     ? null
     : String(id);
+}
+
+type PendingEvmWallet = { address: string; label: string | null };
+const pendingEvmWallets = new Map<string, PendingEvmWallet>();
+
+async function showEvmNetworkSelection(ctx: any, telegramId: string, wallet: PendingEvmWallet) {
+  pendingEvmWallets.set(telegramId, wallet);
+  await ctx.reply([
+    '🌐 <b>EVM WALLET DETECTED</b>', '',
+    `<code>${escapeTelegramHtml(shortAddress(wallet.address))}</code>`, '',
+    'Choose the network to monitor:', '',
+    '<i>Public addresses only. Never share private keys or seed phrases.</i>',
+  ].join('\n'), {
+    parse_mode: 'HTML',
+    reply_markup: Markup.inlineKeyboard([
+      [Markup.button.callback('🔵 Robinhood / PONS', 'WALLET_NETWORK_ROBINHOOD')],
+      [Markup.button.callback('⚫ Ethereum — Coming later', 'WALLET_NETWORK_UNAVAILABLE')],
+      [Markup.button.callback('🔷 Base — Coming later', 'WALLET_NETWORK_UNAVAILABLE')],
+      [Markup.button.callback('🟡 BSC — Coming later', 'WALLET_NETWORK_UNAVAILABLE')],
+      [Markup.button.callback('✖️ Cancel', 'WALLET_ADD_CANCEL'), Markup.button.callback('⬅️ Wallets', 'WALLET_TRACKING')],
+      [Markup.button.callback('🏠 Home', 'MAIN_MENU')],
+    ]).reply_markup,
+  });
 }
 
 function shortAddress(
@@ -101,7 +124,7 @@ async function renderWalletCenter(
   ) {
     const liveMonitoring = walletFamilyHasLiveMonitoring(wallet.chain);
     lines.push(
-      `${liveMonitoring && wallet.is_active ? '🟢' : '⚪'} <b>${escapeTelegramHtml(wallet.chain.toUpperCase())}</b> · ${wallet.label
+      `${liveMonitoring && wallet.is_active ? '🟢' : '⚪'} <b>${escapeTelegramHtml(walletNetworkLabel(wallet.chain))}</b> · ${wallet.label
         ? `<b>${escapeTelegramHtml(wallet.label)}</b> · `
         : ''
       }<code>${escapeTelegramHtml(shortAddress(
@@ -204,6 +227,8 @@ registerWalletTracking(
       (telegramId && getConversationState(telegramId) === 'ADD_WALLET')
     );
 
+    if (callback === 'MAIN_MENU' && telegramId) pendingEvmWallets.delete(telegramId);
+
     if (!walletFlow) return next();
 
     const access = await getContextAccess(ctx);
@@ -219,7 +244,10 @@ registerWalletTracking(
       await ctx.answerCbQuery();
 
       const telegramId = userId(ctx);
-      if (telegramId) clearConversationState(telegramId);
+      if (telegramId) {
+        clearConversationState(telegramId);
+        pendingEvmWallets.delete(telegramId);
+      }
 
       await renderWalletCenter(
         ctx,
@@ -293,6 +321,7 @@ registerWalletTracking(
 
       if (telegramId) {
         clearConversationState(telegramId);
+        pendingEvmWallets.delete(telegramId);
       }
 
       await ctx.answerCbQuery(
@@ -360,6 +389,12 @@ registerWalletTracking(
         }
         const address = detected.normalizedAddress;
 
+        if (detected.family === 'evm') {
+          setConversationState(telegramId, 'ADD_WALLET');
+          await showEvmNetworkSelection(ctx, telegramId, { address, label });
+          return;
+        }
+
         await addTrackedWallet({
           telegramId,
 
@@ -417,6 +452,46 @@ registerWalletTracking(
       }
     },
   );
+
+  bot.action('WALLET_NETWORK_UNAVAILABLE', async ctx => {
+    await ctx.answerCbQuery('This network is not live yet', { show_alert: true });
+  });
+
+  bot.action('WALLET_NETWORK_ROBINHOOD', async ctx => {
+    const telegramId = userId(ctx);
+    if (!telegramId) return;
+    const pending = pendingEvmWallets.get(telegramId);
+    if (!pending || getConversationState(telegramId) !== 'ADD_WALLET') {
+      pendingEvmWallets.delete(telegramId);
+      await ctx.answerCbQuery('Wallet selection expired. Add the wallet again.', { show_alert: true });
+      return;
+    }
+    try {
+      await addTrackedWallet({
+        telegramId, walletAddress: pending.address, chain: 'robinhood', label: pending.label,
+      });
+      pendingEvmWallets.delete(telegramId);
+      clearConversationState(telegramId);
+      await ctx.answerCbQuery('Robinhood monitoring enabled');
+      await ctx.reply([
+        '✅ <b>WALLET ADDED</b>', '',
+        `Robinhood · <code>${escapeTelegramHtml(shortAddress(pending.address))}</code>`,
+        pending.label ? `<b>${escapeTelegramHtml(pending.label)}</b>` : '', '',
+        'Live monitoring · <b>ON</b>', '',
+        'AlphaOS watches this public wallet for token activity.', '',
+        '<i>Public wallet addresses only. Never share private keys or seed phrases.</i>',
+      ].filter(Boolean).join('\n'), {
+        parse_mode: 'HTML',
+        reply_markup: Markup.inlineKeyboard([[
+          Markup.button.callback('🐋 View Wallets', 'WALLET_TRACKING'),
+          Markup.button.callback('🏠 Home', 'MAIN_MENU'),
+        ]]).reply_markup,
+      });
+    } catch (error) {
+      console.error('[WalletTracking] Robinhood wallet add failed:', error);
+      await ctx.answerCbQuery('Could not add wallet', { show_alert: true }).catch(() => {});
+    }
+  });
 
   bot.action(
     'WALLET_RECENT_ACTIVITY',
@@ -687,6 +762,8 @@ registerWalletTracking(
           await getRecentTrackedWalletActivity(
             wallet.wallet_address,
             8,
+            telegramId,
+            wallet.chain,
           );
 
         const lines = [
@@ -834,6 +911,7 @@ registerWalletTracking(
           '/cancel'
         ) {
           clearConversationState(telegramId);
+          pendingEvmWallets.delete(telegramId);
 
           await ctx.reply(
             'Wallet add cancelled.',
@@ -851,6 +929,11 @@ registerWalletTracking(
           throw new Error('Invalid public wallet address');
         }
         const address = detected.normalizedAddress;
+
+        if (detected.family === 'evm') {
+          await showEvmNetworkSelection(ctx, telegramId, { address, label: null });
+          return;
+        }
 
         await addTrackedWallet({
           telegramId,

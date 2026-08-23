@@ -25,9 +25,10 @@ import { escapeTelegramHtml } from '../ui/escapeHtml.js';
 import { getUserByTelegramId } from '../core/subscriptions.js';
 import { accessProfileForUser, hasCapability } from '../product/capabilities.js';
 import { assertAlphaActions, renderAlphaNotification, type AlphaNotificationState } from '../ui/alphaNotification.js';
+import { buildAlphaMarketActions } from '../ui/alphaNotificationActions.js';
 import { deliverReservedTelegram } from './telegramDeliveryContract.js';
 import { createLeaseToken, DELIVERY_LEASE_SECONDS } from './reservationLease.js';
-import { marketContextMetrics, normalizeNotificationMarketContext } from '../ui/notificationMarketContext.js';
+import { coreDecisionEvidenceMetrics, marketContextMetrics, normalizeCoreDecisionMetrics, normalizeNotificationMarketContext } from '../ui/notificationMarketContext.js';
 
 type InlineButton = {
   text: string;
@@ -99,6 +100,10 @@ function activityTitle(
 
     case 'launch':
       return '🚀 WALLET LAUNCH';
+    case 'receive':
+      return '🐋 TOKEN RECEIVED';
+    case 'send':
+      return '🐋 TOKEN SENT';
   }
 }
 
@@ -116,6 +121,10 @@ function actionLabel(
 
     case 'launch':
       return 'launched';
+    case 'receive':
+      return 'received';
+    case 'send':
+      return 'sent';
   }
 }
 
@@ -205,45 +214,78 @@ async function releaseDelivery(args: {
 
 async function buildButtons(
   event: WalletWatchEvent,
+  target?: Awaited<ReturnType<typeof resolveTokenOpenTarget>>,
 ): Promise<InlineButton[][]> {
-  const buttons:
-    InlineButton[][] = [];
-
   if (
     event.tokenMint
   ) {
-    const target =
+    const resolved = target ??
       await resolveTokenOpenTarget({
-        chain:
-          'solana',
+        chain: event.chain ?? 'solana',
 
         tokenAddress:
           event.tokenMint,
       });
 
-    const marketActions: InlineButton[] = [];
-    if (target.chartUrl && target.chartUrl !== target.tokenUrl) {
-      marketActions.push({ text: '📊 Chart', url: target.chartUrl });
-    }
-    marketActions.push({ text: '🔎 Token', url: target.tokenUrl });
-    buttons.push(marketActions);
-    buttons.push([{
-      text: '🐋 Wallet Activity',
-      callback_data: 'WALLET_TRACKING',
-    }]);
-  } else {
-    buttons.push([
-      {
-        text:
-          '🐋 Wallet Activity',
-
-        callback_data:
-          'WALLET_TRACKING',
-      },
-    ]);
+    return buildWalletActivityButtons(event, resolved);
   }
+  return assertAlphaActions([[{ text: '🐋 Wallet Activity', callback_data: 'WALLET_TRACKING' }]]);
+}
 
-  return assertAlphaActions(buttons);
+export function buildWalletActivityButtons(
+  event: WalletWatchEvent,
+  target: Awaited<ReturnType<typeof resolveTokenOpenTarget>>,
+): InlineButton[][] {
+  return buildAlphaMarketActions({
+    chartUrl: target.chartUrl,
+    tokenUrl: target.tokenUrl,
+    copyContractCallback: event.chain === 'robinhood' && event.tokenMint ? `COPY_CA_${event.tokenMint}` : null,
+    walletActivityCallback: 'WALLET_TRACKING',
+  });
+}
+
+async function enrichWalletEvent(event: WalletWatchEvent) {
+  if (!event.tokenMint) return undefined;
+  const current = event as unknown as Record<string, any>;
+  const target = await resolveTokenOpenTarget({
+    chain: event.chain ?? 'solana',
+    tokenAddress: event.tokenMint,
+  });
+  let opportunityRaw: Record<string, unknown> | null = null;
+  if (event.chain === 'robinhood') {
+    const { data, error } = await supabase
+      .from('opportunities')
+      .select('raw_data')
+      .ilike('asset_id', event.tokenMint)
+      .eq('chain', 'robinhood')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    opportunityRaw = (data?.raw_data as Record<string, unknown> | null) ?? null;
+  }
+  const market = normalizeNotificationMarketContext(
+    current,
+    target.marketContext as Record<string, unknown> | undefined,
+    opportunityRaw,
+    { marketIndexState: target.marketIndexState },
+    { address: event.tokenMint },
+  );
+  Object.assign(event, {
+    tokenSymbol: market.symbol ?? event.tokenSymbol,
+    tokenName: market.name ?? event.tokenName,
+    marketCap: market.marketCap ?? current.marketCap,
+    fdv: market.fdv ?? current.fdv,
+    preIndexValuation: opportunityRaw?.preIndexValuation ?? current.preIndexValuation,
+    liquidity: market.liquidity ?? current.liquidity,
+    volume5m: market.volume5m ?? current.volume5m,
+    chartUrl: target.chartUrl ?? current.chartUrl,
+    devHoldingPercent: opportunityRaw?.devHoldingPercent ?? current.devHoldingPercent,
+    devHoldingEvidence: opportunityRaw?.devHoldingEvidence ?? current.devHoldingEvidence,
+    burnedPercent: opportunityRaw?.totalBurnPercent ?? opportunityRaw?.burnedPercent ?? current.burnedPercent,
+    burnEvidence: opportunityRaw?.burnEvidence ?? current.burnEvidence,
+  });
+  return target;
 }
 
 export function buildWalletActivityMessage(args: {
@@ -266,24 +308,45 @@ export function buildWalletActivityMessage(args: {
     ? 'WALLET_BUY'
     : event.kind === 'sell'
       ? 'WALLET_SELL'
-      : 'WALLET_LAUNCH';
+      : event.kind === 'launch'
+        ? 'WALLET_LAUNCH'
+        : 'WALLET_MOVE';
   const market = normalizeNotificationMarketContext(event as unknown as Record<string, unknown>);
+  const decisionEvidence = normalizeCoreDecisionMetrics(event as unknown as Record<string, unknown>);
+  const tokenAmount = 'tokenAmount' in event ? event.tokenAmount : null;
+  const amountSol = 'amountSol' in event ? event.amountSol : null;
+  const amount = tokenAmount == null
+    ? null
+    : `${tokenAmount.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${event.tokenSymbol ?? 'tokens'}`;
+  const amountLabel = event.kind === 'sell'
+    ? 'Sold'
+    : event.kind === 'send'
+      ? 'Sent'
+      : 'Amount';
   return renderAlphaNotification({
     category: 'wallet',
     severity: event.kind === 'sell' ? 'warning' : event.kind === 'buy' ? 'positive' : 'watch',
     state,
-    symbol: wallet,
-    subtitle: event.tokenMint ? shortAddress(event.tokenMint) : undefined,
-    address: event.wallet,
-    metrics: event.kind === 'launch' ? [] : [
+    symbol: event.tokenSymbol,
+    token: event.tokenName,
+    subtitle: event.tokenName,
+    address: event.tokenMint,
+    metrics: [
+      { label: 'Wallet', value: wallet.toUpperCase() },
+      ...(amount ? [{ label: amountLabel, value: amount }] : []),
       ...marketContextMetrics(market),
-      { label: 'Value', value: formatAmount(event.amountSol) },
+      ...(amountSol == null ? [] : [{ label: 'Value', value: formatAmount(amountSol) }]),
     ],
+    specialistMetrics: coreDecisionEvidenceMetrics(decisionEvidence),
     reason: event.kind === 'buy'
       ? 'Watched wallet opened a position.'
       : event.kind === 'sell'
         ? 'Watched wallet reduced a position.'
-        : 'Watched wallet interacted with a new launch.',
+        : event.kind === 'launch'
+          ? 'Watched wallet created a verified PONS launch.'
+          : event.kind === 'receive'
+            ? 'Watched wallet received tokens; a purchase was not proven.'
+            : 'Watched wallet sent tokens; a sale was not proven.',
     recommendedAction: 'Review current market conditions before acting.',
   });
 }
@@ -291,7 +354,8 @@ export function buildWalletActivityMessage(args: {
 export async function
 deliverTrackedWalletActivity(
   events: WalletWatchEvent[],
-): Promise<void> {
+): Promise<{ failedWallets: Set<string> }> {
+  const failedWallets = new Set<string>();
   for (
     const event
     of events
@@ -302,8 +366,7 @@ deliverTrackedWalletActivity(
           walletAddress:
             event.wallet,
 
-          chain:
-            'solana',
+          chain: event.chain ?? 'solana',
         });
 
       /*
@@ -316,7 +379,7 @@ deliverTrackedWalletActivity(
        * This preserves admin coverage while eliminating the old
        * second Telegram broadcaster.
        */
-      const legacyAdminWatch =
+      const legacyAdminWatch = event.chain !== 'robinhood' &&
         (
           config.watchedWallets ??
           []
@@ -376,9 +439,12 @@ deliverTrackedWalletActivity(
         continue;
       }
 
+      const target = await enrichWalletEvent(event);
+
       const buttons =
         await buildButtons(
           event,
+          target,
         );
 
       for (
@@ -443,6 +509,7 @@ deliverTrackedWalletActivity(
             },
           );
         } else if (delivery.error) {
+          failedWallets.add(event.wallet.toLowerCase());
           const error = delivery.error;
           console.error(
             delivery.sent
@@ -468,6 +535,7 @@ deliverTrackedWalletActivity(
     } catch (
       error
     ) {
+      failedWallets.add(event.wallet.toLowerCase());
       console.error(
         '[WalletActivity] Event processing failed:',
         {
@@ -487,4 +555,5 @@ deliverTrackedWalletActivity(
       );
     }
   }
+  return { failedWallets };
 }

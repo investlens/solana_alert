@@ -29,6 +29,21 @@ function normalizeAddress(
   return address.trim();
 }
 
+export function resolveTrackedWalletChain(
+  family: 'solana' | 'evm',
+  requested?: string,
+): 'solana' | 'evm' | 'robinhood' {
+  const requestedChain = String(requested ?? family).trim().toLowerCase();
+  if (family === 'solana') {
+    if (requestedChain !== 'solana') throw new Error('Wallet family does not match requested chain');
+    return 'solana';
+  }
+  if (!['evm', 'robinhood'].includes(requestedChain)) {
+    throw new Error('Wallet family does not match requested chain');
+  }
+  return requestedChain as 'evm' | 'robinhood';
+}
+
 export async function
 getTrackedWalletsForUser(
   telegramId: string,
@@ -126,6 +141,15 @@ getActiveTrackedWalletAddresses(
   ];
 }
 
+export async function getTrackedWalletAddressesForChain(chain: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('user_tracked_wallets')
+    .select('wallet_address')
+    .eq('chain', chain.toLowerCase());
+  if (error) throw error;
+  return [...new Set((data ?? []).map(row => normalizeAddress(String(row.wallet_address ?? ''))).filter(Boolean))];
+}
+
 export async function
 addTrackedWallet(args: {
   telegramId: string;
@@ -138,10 +162,7 @@ addTrackedWallet(args: {
 }): Promise<void> {
   const detected = requireWalletAddress(args.walletAddress);
   const walletAddress = detected.normalizedAddress;
-  const chain = detected.family;
-  if (args.chain && String(args.chain).trim().toLowerCase() !== chain) {
-    throw new Error('Wallet family does not match requested chain');
-  }
+  const chain = resolveTrackedWalletChain(detected.family, args.chain);
   const liveMonitoring = walletFamilyHasLiveMonitoring(chain);
 
   const {
@@ -232,6 +253,7 @@ removeTrackedWallet(args: {
 
   id: number;
 }): Promise<void> {
+  const wallet = await getTrackedWalletByIdForUser({ telegramId: args.telegramId, id: args.id });
   const {
     error,
   } =
@@ -251,6 +273,24 @@ removeTrackedWallet(args: {
 
   if (error) {
     throw error;
+  }
+
+  if (wallet?.chain === 'robinhood') {
+    const { data: remaining, error: remainingError } = await supabase
+      .from('user_tracked_wallets')
+      .select('id')
+      .eq('chain', 'robinhood')
+      .ilike('wallet_address', wallet.wallet_address)
+      .limit(1);
+    if (remainingError) throw remainingError;
+    if (!remaining?.length) {
+      const { error: cursorError } = await supabase
+        .from('wallet_monitor_cursors')
+        .delete()
+        .eq('chain', 'robinhood')
+        .ilike('wallet_address', wallet.wallet_address);
+      if (cursorError) throw cursorError;
+    }
   }
 }
 
@@ -356,7 +396,24 @@ export async function
 getRecentTrackedWalletActivity(
   walletAddress: string,
   limit = 10,
+  telegramId?: string,
+  chain = 'solana',
 ): Promise<Array<Record<string, any>>> {
+  if (chain.toLowerCase() === 'robinhood' && telegramId) {
+    const { data, error } = await supabase
+      .from('wallet_activity_deliveries')
+      .select('activity_type,token_address,created_at')
+      .eq('telegram_id', telegramId)
+      .eq('wallet_address', walletAddress)
+      .order('created_at', { ascending: false })
+      .limit(Math.max(1, Math.min(25, limit)));
+    if (error) throw error;
+    return (data ?? []).map(row => ({
+      action: row.activity_type,
+      token: row.token_address,
+      created_at: row.created_at,
+    }));
+  }
   const {
     data,
     error,
@@ -414,5 +471,17 @@ export async function getRecentWalletActivityForUser(
     .order('created_at', { ascending: false })
     .limit(Math.max(1, Math.min(50, limit)));
   if (error) throw error;
-  return data ?? [];
+  const { data: deliveries, error: deliveryError } = await supabase
+    .from('wallet_activity_deliveries')
+    .select('activity_type,token_address,created_at')
+    .eq('telegram_id', telegramId)
+    .order('created_at', { ascending: false })
+    .limit(Math.max(1, Math.min(50, limit)));
+  if (deliveryError) throw deliveryError;
+  return [
+    ...(data ?? []),
+    ...(deliveries ?? [])
+      .filter(row => /^0x[a-fA-F0-9]{40}$/.test(String(row.token_address ?? '')))
+      .map(row => ({ action: row.activity_type, token: row.token_address, created_at: row.created_at })),
+  ].sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''))).slice(0, limit);
 }

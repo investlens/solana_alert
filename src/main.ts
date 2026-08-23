@@ -85,6 +85,10 @@ import { sendTelegram } from './services/telegram.js';
 import { confirmMomentum } from './services/momentumConfirmation.js';
 import type { DexProfile, RiskResult, TokenState } from './types.js';
 import { pollWatchedWallets } from './core/walletWatcher.js';
+import {
+  commitRobinhoodWalletCheckpoints,
+  pollRobinhoodTrackedWallets,
+} from './chains/robinhood/robinhoodWalletWatcher.js';
 import { deliverLegacyAlert } from './core/legacyAlertDelivery.js';
 
 import {
@@ -654,6 +658,15 @@ async function startWalletWatch() {
       await deliverTrackedWalletActivity(
         events,
       );
+
+      const robinhood = await pollRobinhoodTrackedWallets();
+      if (robinhood.checkpointBlock != null) {
+        const delivery = await deliverTrackedWalletActivity(robinhood.events);
+        const completedWallets = robinhood.wallets.filter(
+          wallet => !delivery.failedWallets.has(wallet.toLowerCase()),
+        );
+        await commitRobinhoodWalletCheckpoints(completedWallets, robinhood.checkpointBlock);
+      }
 
       /*
        * Wallet Telegram delivery is intentionally centralized

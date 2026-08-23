@@ -14,6 +14,11 @@ export const robinhoodPublicClient =
     transport: http(
       robinhoodChain.rpcUrls
         .default.http[0],
+      {
+        timeout: 10_000,
+        retryCount: 2,
+        retryDelay: 500,
+      },
     ),
   });
 

@@ -36,9 +36,11 @@ type EnhancedTx = {
 export type WalletWatchEvent =
   | {
       kind: 'buy';
+      chain?: 'solana' | 'robinhood';
       wallet: string;
       signature: string;
       timestamp?: number;
+      blockNumber?: number;
       tokenMint: string | null;
       amountSol: number | null;
       type: string;
@@ -46,22 +48,59 @@ export type WalletWatchEvent =
       marketCap?: number | null;
       liquidity?: number | null;
       volume5m?: number | null;
+      tokenAmount?: number | null;
+      tokenName?: string | null;
+      fdv?: number | null;
+      devHoldingPercent?: number | null;
+      devHoldingEvidence?: string | null;
+      burnedPercent?: number | null;
+      burnEvidence?: string | null;
     }
   | {
       kind: 'sell';
+      chain?: 'solana' | 'robinhood';
       wallet: string;
       signature: string;
       timestamp?: number;
+      blockNumber?: number;
       tokenMint: string | null;
       amountSol: number | null;
       type: string;
+      tokenAmount?: number | null;
+      tokenSymbol?: string | null;
+      tokenName?: string | null;
+      marketCap?: number | null;
+      fdv?: number | null;
+      liquidity?: number | null;
+      volume5m?: number | null;
+      devHoldingPercent?: number | null;
+      devHoldingEvidence?: string | null;
+      burnedPercent?: number | null;
+      burnEvidence?: string | null;
     }
   | {
       kind: 'launch';
+      chain?: 'solana' | 'robinhood';
       wallet: string;
       signature: string;
       timestamp?: number;
+      blockNumber?: number;
       tokenMint: string | null;
+      type: string;
+      tokenSymbol?: string | null;
+      tokenName?: string | null;
+    }
+  | {
+      kind: 'receive' | 'send';
+      chain: 'robinhood';
+      wallet: string;
+      signature: string;
+      timestamp?: number;
+      blockNumber?: number;
+      tokenMint: string;
+      tokenAmount: number | null;
+      tokenSymbol?: string | null;
+      tokenName?: string | null;
       type: string;
     };
 

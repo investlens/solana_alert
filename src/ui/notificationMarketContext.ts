@@ -120,7 +120,7 @@ export function normalizeNotificationMarketContext(
   ]);
   const fdv = positiveNumber(sources, ['fdv', 'fdvUsd', 'fdv_usd']);
   const indexed = sources.some(source => source?.marketIndexState === 'VERIFIED');
-  const preIndexValuation = indexed || marketCap != null || fdv != null
+  const preIndexValuation = indexed
     ? null
     : sources.map(source => verifiedPonsPreIndexValuation(source, address)).find(Boolean) ?? null;
   return {

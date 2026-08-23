@@ -20,13 +20,19 @@ const invalidDetection: WalletAddressDetection = {
 };
 
 export function walletFamilyHasLiveMonitoring(family: WalletFamily | string): boolean {
-  return String(family).toLowerCase() === 'solana';
+  return ['solana', 'robinhood'].includes(String(family).toLowerCase());
 }
 
 export function walletCoverageText(family: WalletFamily | string, active: boolean): string {
   return walletFamilyHasLiveMonitoring(family)
     ? `Live tracking · ${active ? 'ON' : 'PAUSED'}`
     : 'Saved wallet · Monitoring unavailable';
+}
+
+export function walletNetworkLabel(chain: string): string {
+  if (chain.toLowerCase() === 'robinhood') return 'Robinhood / PONS';
+  if (chain.toLowerCase() === 'solana') return 'Solana';
+  return chain.toUpperCase();
 }
 
 export function detectWalletAddress(value: string): WalletAddressDetection {

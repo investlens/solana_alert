@@ -19,6 +19,7 @@ export type AlphaNotificationState =
   | 'WALLET_BUY'
   | 'WALLET_SELL'
   | 'WALLET_LAUNCH'
+  | 'WALLET_MOVE'
   | 'CREATOR_EVENT'
   | 'RISK'
   | 'EXECUTED'
@@ -68,6 +69,7 @@ const STATE_LABELS: Record<AlphaNotificationState, string> = {
   WALLET_BUY: '🐋 WALLET BUY',
   WALLET_SELL: '🔴 WALLET EXIT',
   WALLET_LAUNCH: '🚀 WALLET LAUNCH',
+  WALLET_MOVE: '🐋 WALLET MOVE',
   CREATOR_EVENT: '👨‍💻 CREATOR EVENT',
   RISK: '⚠️ RISK',
   EXECUTED: '✅ EXECUTED',
