@@ -404,7 +404,7 @@ export function classifyPonsAlpha(
         'ENTRY_WINDOW',
 
       reason:
-        `Confirmed acceleration: ${describeMetricComparison('ROI', previousRoi, currentRoi)}`,
+        describeMetricComparison('Momentum', previousRoi, currentRoi),
 
       actionable:
         true,

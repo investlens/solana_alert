@@ -42,7 +42,7 @@ import {
 } from '../ui/alphaNotification.js';
 import { deliverReservedTelegram } from './telegramDeliveryContract.js';
 import { createLeaseToken, DELIVERY_LEASE_SECONDS } from './reservationLease.js';
-import { marketContextMetrics, normalizeNotificationMarketContext } from '../ui/notificationMarketContext.js';
+import { marketContextMetrics, normalizeNotificationMarketContext, type NotificationMarketContext } from '../ui/notificationMarketContext.js';
 
 type DeliverableAction =
   | 'BUY'
@@ -398,6 +398,7 @@ export function buildOpportunityMessage(
   const holding = rawNumber(opportunity, 'devHoldingPercent');
   const transferred = rawNumber(opportunity, 'otherDevTransferPercent');
   const burned = rawNumber(opportunity, 'totalBurnPercent');
+  const transferEvidenceComplete = opportunity.raw_data?.devFlowEvidenceStatus === 'COMPLETE';
   const market = normalizeNotificationMarketContext(
     opportunity.raw_data,
     opportunity.raw_data?.market as Record<string, unknown> | undefined,
@@ -412,7 +413,7 @@ export function buildOpportunityMessage(
     state,
     title: opportunity.title,
     symbol,
-    token: symbol ? undefined : compactAlphaAddress(opportunity.asset_id),
+    token: symbol ? undefined : market.name ?? compactAlphaAddress(opportunity.asset_id),
     address: opportunity.asset_id,
     chain: opportunity.chain,
     age,
@@ -422,8 +423,12 @@ export function buildOpportunityMessage(
       ...marketContextMetrics(market),
       ...(currentRoi == null ? [] : [{ label: 'Move', value: signedPercent(currentRoi) }]),
       ...(roiChange == null ? [] : [{ label: 'Momentum', value: signedPercent(roiChange) }]),
+    ],
+    specialistMetrics: [
       ...(holding == null ? [] : [{ label: 'Dev holding', value: `${holding.toFixed(2)}%` }]),
-      ...(transferred == null ? [] : [{ label: 'Transferred', value: `${transferred.toFixed(2)}%` }]),
+      ...(transferred == null || (transferred === 0 && !transferEvidenceComplete)
+        ? []
+        : [{ label: 'Transferred', value: `${transferred.toFixed(2)}%` }]),
       ...(opportunity.raw_data && Object.prototype.hasOwnProperty.call(opportunity.raw_data, 'totalBurnPercent')
         ? [burnEvidenceMetric(burned)]
         : []),
@@ -452,7 +457,7 @@ function executionAvailable(
   );
 }
 
-function buildButtons(
+export function buildButtons(
   opportunity: OpportunityRow,
   tokenTarget: Awaited<
     ReturnType<
@@ -503,6 +508,28 @@ function buildButtons(
   rows.push(preferenceActions);
 
   return assertAlphaActions(rows);
+}
+
+export function mergeOpportunityMarketContext(
+  opportunity: OpportunityRow,
+  enrichment: Partial<NotificationMarketContext> | null | undefined,
+): Record<string, unknown> {
+  const existing = opportunity.raw_data ?? {};
+  const normalized = normalizeNotificationMarketContext(
+    existing,
+    existing.market as Record<string, unknown> | undefined,
+    enrichment as Record<string, unknown> | undefined,
+    { address: opportunity.asset_id },
+  );
+  return {
+    ...existing,
+    ...(normalized.symbol ? { symbol: normalized.symbol } : {}),
+    ...(normalized.name ? { name: normalized.name } : {}),
+    ...(normalized.marketCap != null ? { marketCap: normalized.marketCap } : {}),
+    ...(normalized.liquidity != null ? { liquidity: normalized.liquidity } : {}),
+    ...(normalized.volume5m != null ? { volume5m: normalized.volume5m } : {}),
+    ...(normalized.chartUrl ? { chartUrl: normalized.chartUrl } : {}),
+  };
 }
 
 function userCanReceiveOpportunity(
@@ -743,7 +770,15 @@ async function deliverOpportunity(
 
       tokenAddress:
         opportunity.asset_id,
+
+      includeMetadataFallback:
+        action !== 'EXIT',
     });
+
+  opportunity.raw_data = mergeOpportunityMarketContext(
+    opportunity,
+    tokenTarget.marketContext,
+  );
 
   if (
     String(
@@ -812,6 +847,19 @@ async function deliverOpportunity(
           ? error.message
           : String(error),
       );
+    }
+  }
+
+  if (tokenTarget.marketContext) {
+    const { error } = await supabase
+      .from('opportunities')
+      .update({ raw_data: opportunity.raw_data })
+      .eq('id', opportunity.id);
+    if (error) {
+      console.warn('[OpportunityDelivery] Market enrichment persistence failed', {
+        opportunityId: opportunity.id,
+        error: error.message,
+      });
     }
   }
 

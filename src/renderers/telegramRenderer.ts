@@ -1,6 +1,5 @@
 import type { Investigation } from '../models/investigation.js';
 import { renderAlphaNotification } from '../ui/alphaNotification.js';
-import { formatUsd } from '../ui/alphaAlert/index.js';
 import { marketContextMetrics, normalizeNotificationMarketContext } from '../ui/notificationMarketContext.js';
 
 export function renderTelegramInvestigation(investigation: Investigation): string {
@@ -23,7 +22,6 @@ export function renderTelegramInvestigation(investigation: Investigation): strin
     risk: investigation.ai.riskLevel,
     metrics: [
       ...marketContextMetrics(market),
-      ...(investigation.market.volume5m > 0 ? [{ label: '5m volume', value: formatUsd(investigation.market.volume5m) }] : []),
       { label: 'Buys / sells', value: `${investigation.orderflow.buys5m}/${investigation.orderflow.sells5m}` },
       ...(investigation.creator.wallet ? [{ label: 'Creator', value: `${Math.round(investigation.creator.score)}/100` }] : []),
     ],

@@ -60,9 +60,10 @@ test('unavailable market cap and liquidity are omitted and never fabricated as z
 });
 
 test('metric comparison uses directionally correct language', () => {
-  assert.equal(describeMetricComparison('ROI', 1, 5), 'ROI improved from +1.00% to +5.00%.');
+  assert.equal(describeMetricComparison('ROI', 1, 5), 'ROI accelerated from +1.00% to +5.00%.');
   assert.equal(describeMetricComparison('ROI', 7.46, 5.29), 'ROI cooled from +7.46% to +5.29%.');
-  assert.equal(describeMetricComparison('ROI', 5, -2), 'ROI reversed lower from +5.00% to -2.00%.');
+  assert.equal(describeMetricComparison('ROI', 5, -2), 'ROI reversed negative from +5.00% to -2.00%.');
+  assert.equal(describeMetricComparison('ROI', -7.53, 9.89), 'ROI turned positive after an earlier dip.');
   assert.equal(describeMetricComparison('ROI', null, 3), 'ROI is +3.00%.');
   assert.doesNotMatch(describeMetricComparison('ROI', 7.46, 5.29), /improved/);
 });

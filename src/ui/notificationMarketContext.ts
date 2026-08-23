@@ -7,6 +7,8 @@ export type NotificationMarketContext = {
   address: string | null;
   marketCap: number | null;
   liquidity: number | null;
+  volume5m: number | null;
+  chartUrl: string | null;
 };
 
 type MarketContextSource = Record<string, unknown> | null | undefined;
@@ -20,6 +22,11 @@ function text(sources: MarketContextSource[], keys: string[]): string | null {
     }
   }
   return null;
+}
+
+function httpsUrl(sources: MarketContextSource[], keys: string[]): string | null {
+  const value = text(sources, keys);
+  return value && /^https:\/\//i.test(value) ? value : null;
 }
 
 function positiveNumber(sources: MarketContextSource[], keys: string[]): number | null {
@@ -37,8 +44,8 @@ export function normalizeNotificationMarketContext(
   ...sources: MarketContextSource[]
 ): NotificationMarketContext {
   return {
-    symbol: text(sources, ['symbol', 'tokenSymbol', 'token_symbol']),
-    name: text(sources, ['name', 'tokenName', 'token_name']),
+    symbol: text(sources, ['symbol', 'tokenSymbol', 'token_symbol'])?.replace(/^UNKNOWN$/i, '') || null,
+    name: text(sources, ['name', 'tokenName', 'token_name'])?.replace(/^Unknown Token$/i, '') || null,
     address: text(sources, ['address', 'tokenAddress', 'token_address', 'mint', 'asset_id']),
     marketCap: positiveNumber(sources, [
       'marketCap', 'marketCapUsd', 'market_cap', 'currentMarketCap', 'current_market_cap',
@@ -48,14 +55,19 @@ export function normalizeNotificationMarketContext(
       'liquidity', 'liquidityUsd', 'liquidity_usd', 'currentLiquidity', 'current_liquidity',
       'entryLiquidity', 'entry_liquidity',
     ]),
+    volume5m: positiveNumber(sources, [
+      'volume5m', 'volume5mUsd', 'volume_5m', 'volume_5m_usd',
+    ]),
+    chartUrl: httpsUrl(sources, ['chartUrl', 'marketUrl', 'chart_url', 'market_url']),
   };
 }
 
 export function marketContextMetrics(
-  context: Pick<NotificationMarketContext, 'marketCap' | 'liquidity'>,
+  context: Pick<NotificationMarketContext, 'marketCap' | 'liquidity' | 'volume5m'>,
 ): AlphaNotificationMetric[] {
   return [
     ...(context.marketCap == null ? [] : [{ label: 'Market cap', value: formatUsd(context.marketCap) }]),
     ...(context.liquidity == null ? [] : [{ label: 'Liquidity', value: formatUsd(context.liquidity) }]),
+    ...(context.volume5m == null ? [] : [{ label: '5m volume', value: formatUsd(context.volume5m) }]),
   ];
 }

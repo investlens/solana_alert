@@ -50,8 +50,11 @@ function ponsConfidence(
 type PonsOpportunitySyncArgs = {
   token: string;
   symbol?: string | null;
+  name?: string | null;
   marketCap?: number | null;
   liquidity?: number | null;
+  volume5m?: number | null;
+  chartUrl?: string | null;
   state: string;
   reason: string;
   currentRoi: number;
@@ -60,13 +63,14 @@ type PonsOpportunitySyncArgs = {
   elapsedSec: number;
 };
 
-export async function syncPonsOpportunity(
-  args: PonsOpportunitySyncArgs,
-): Promise<void> {
-  const rawData = {
+export function buildPonsOpportunityRawData(args: PonsOpportunitySyncArgs) {
+  return {
     symbol: args.symbol ?? null,
+    name: args.name ?? null,
     marketCap: args.marketCap ?? null,
     liquidity: args.liquidity ?? null,
+    volume5m: args.volume5m ?? null,
+    chartUrl: args.chartUrl ?? null,
     ponsAlphaState:
       args.state,
 
@@ -85,6 +89,12 @@ export async function syncPonsOpportunity(
     source:
       'PONS_ALPHA_CLASSIFIER',
   };
+}
+
+export async function syncPonsOpportunity(
+  args: PonsOpportunitySyncArgs,
+): Promise<void> {
+  const rawData = buildPonsOpportunityRawData(args);
 
   /*
    * PONS IGNITION

@@ -45,6 +45,7 @@ export type AlphaNotification = {
   confidence?: number | null;
   risk?: string | null;
   metrics?: AlphaNotificationMetric[];
+  specialistMetrics?: AlphaNotificationMetric[];
   evidence?: string[];
   reason?: string | null;
   recommendedAction?: string | null;
@@ -136,7 +137,7 @@ export function renderAlphaNotification(alert: AlphaNotification): string {
     lines.push(`<code>${escapeAlphaHtml(compactAddress)}</code>`);
   }
 
-  const metrics: AlphaNotificationMetric[] = [
+  const decisionMetrics: AlphaNotificationMetric[] = [
     ...(alert.age ? [{ label: 'Age', value: alert.age }] : []),
     ...(alert.metrics ?? []),
     ...(alert.confidence != null && Number.isFinite(alert.confidence)
@@ -144,6 +145,10 @@ export function renderAlphaNotification(alert: AlphaNotification): string {
       : []),
     ...(alert.risk ? [{ label: 'Risk', value: alert.risk }] : []),
   ].filter(validMetric).slice(0, 8);
+  const metrics = [
+    ...decisionMetrics,
+    ...(alert.specialistMetrics ?? []).filter(validMetric),
+  ].slice(0, 12);
 
   if (metrics.length) {
     lines.push('');

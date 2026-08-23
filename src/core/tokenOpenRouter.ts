@@ -1,17 +1,21 @@
 import {
   getRobinhoodMarketSnapshot,
 } from '../chains/robinhood/market.js';
+import { getRobinhoodTokenMetadata } from '../chains/robinhood/tokenMetadata.js';
+import type { NotificationMarketContext } from '../ui/notificationMarketContext.js';
 
 export type TokenOpenTarget = {
   chartUrl?: string;
   tokenUrl: string;
   chartSource?: 'dexscreener' | 'dexscreener_search';
   tokenSource: 'solscan' | 'blockscout' | 'dexscreener_search';
+  marketContext?: Partial<NotificationMarketContext>;
 };
 
 type TokenOpenInput = {
   chain?: string | null;
   tokenAddress: string;
+  includeMetadataFallback?: boolean;
 };
 
 export function resolveTokenExplorerUrl(
@@ -82,6 +86,15 @@ export async function resolveTokenOpenTarget(
           tokenUrl: resolveTokenExplorerUrl(chain, tokenAddress),
           chartSource: 'dexscreener',
           tokenSource: 'blockscout',
+          marketContext: {
+            symbol: snapshot.symbol,
+            name: snapshot.name,
+            address: tokenAddress,
+            marketCap: snapshot.marketCapUsd,
+            liquidity: snapshot.liquidityUsd,
+            volume5m: snapshot.volume5mUsd,
+            chartUrl: snapshot.chartUrl,
+          },
         };
       }
     } catch (error) {
@@ -95,6 +108,31 @@ export async function resolveTokenOpenTarget(
               : String(error),
         },
       );
+    }
+
+    if (input.includeMetadataFallback) {
+      try {
+        const metadata = await Promise.race([
+          getRobinhoodTokenMetadata(tokenAddress),
+          new Promise<null>(resolve => setTimeout(() => resolve(null), 2_000)),
+        ]);
+        if (metadata?.symbol || metadata?.name) {
+          return {
+            tokenUrl: resolveTokenExplorerUrl(chain, tokenAddress),
+            tokenSource: 'blockscout',
+            marketContext: {
+              symbol: metadata.symbol,
+              name: metadata.name,
+              address: tokenAddress,
+            },
+          };
+        }
+      } catch (error) {
+        console.warn('[TOKEN_OPEN_ROUTER] Robinhood metadata fallback failed', {
+          tokenAddress,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
 
     return {

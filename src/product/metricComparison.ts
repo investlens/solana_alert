@@ -21,12 +21,12 @@ export function describeMetricComparison(
 
   if (current > previous) {
     return previous < 0 && current >= 0
-      ? `${label} reversed higher from ${signed(previous)} to ${signed(current)}.`
-      : `${label} improved from ${signed(previous)} to ${signed(current)}.`;
+      ? `${label} turned positive after an earlier dip.`
+      : `${label} accelerated from ${signed(previous)} to ${signed(current)}.`;
   }
 
   if (previous >= 0 && current < 0) {
-    return `${label} reversed lower from ${signed(previous)} to ${signed(current)}.`;
+    return `${label} reversed negative from ${signed(previous)} to ${signed(current)}.`;
   }
   if (current > 0) {
     return `${label} cooled from ${signed(previous)} to ${signed(current)}.`;

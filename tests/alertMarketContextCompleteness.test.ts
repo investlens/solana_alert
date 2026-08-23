@@ -22,11 +22,11 @@ async function opportunityMessage(action: string, rawData: Record<string, unknow
 test('shared market normalization preserves strongest reliable producer context', () => {
   const context = normalizeNotificationMarketContext(
     { token_symbol: 'alpha', token_address: address },
-    { marketCapUsd: 48_200, liquidityUsd: 12_500 },
+    { marketCapUsd: 48_200, liquidityUsd: 12_500, volume5mUsd: 4_200 },
   );
   assert.equal(context.symbol, 'alpha');
   assert.equal(context.address, address);
-  assert.deepEqual(marketContextMetrics(context).map(metric => metric.label), ['Market cap', 'Liquidity']);
+  assert.deepEqual(marketContextMetrics(context).map(metric => metric.label), ['Market cap', 'Liquidity', '5m volume']);
 });
 
 test('PONS Entry Ready, Watching and Risk preserve symbol and market context', async () => {
