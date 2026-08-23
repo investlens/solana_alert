@@ -23,6 +23,7 @@ export async function upsertAlphaSignal(signal: AlphaSignal) {
       high_after_alert: signal.highAfterAlert ?? null,
       roi_now: signal.roiNow ?? null,
       roi_high: signal.roiHigh ?? null,
+      price_source_version: signal.priceSourceVersion ?? null,
       updated_at: new Date().toISOString(),
     },
     { onConflict: 'signal_key' }

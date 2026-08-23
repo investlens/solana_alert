@@ -30,6 +30,22 @@ export async function recordCreatorLaunch(args: {
     )
     .maybeSingle();
 
+  const { data: existingLaunchEvent, error: launchEventLookupError } =
+    await supabase
+      .from('creator_wallet_events')
+      .select('id')
+      .eq('chain', chain)
+      .eq('creator_wallet', args.creatorWallet)
+      .eq('token', args.token)
+      .eq('event_type', 'LAUNCH')
+      .maybeSingle();
+
+  // A scanner restart can rediscover the same launch. Do not count the same
+  // creator/token event again or inflate its evidence score.
+  if (existingLaunchEvent) {
+    return existing;
+  }
+
   const totalLaunches = Number(existing?.total_launches ?? 0) + 1;
   const previousBestMc = Number(existing?.best_market_cap ?? 0);
   const marketCap = Number(args.marketCap ?? 0);
@@ -79,35 +95,13 @@ export async function recordCreatorLaunch(args: {
     return null;
   }
 
-  const { data: existingLaunchEvent, error: launchEventLookupError } =
-  await supabase
-    .from('creator_wallet_events')
-    .select('id')
-    .eq(
-      'chain',
-      chain,
-    )
-    .eq(
-      'creator_wallet',
-      args.creatorWallet,
-    )
-    .eq(
-      'token',
-      args.token,
-    )
-    .eq(
-      'event_type',
-      'LAUNCH',
-    )
-    .maybeSingle();
-
 if (launchEventLookupError) {
   console.log('creator launch event lookup error:', {
     creatorWallet: args.creatorWallet,
     token: args.token,
     error: launchEventLookupError.message,
   });
-} else if (!existingLaunchEvent) {
+} else {
   const { error: launchEventInsertError } = await supabase
     .from('creator_wallet_events')
     .insert({

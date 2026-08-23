@@ -255,9 +255,9 @@ function alphaScore(c: Candidate) {
 }
 
 function conviction(score: number) {
-  if (score >= 85) return 'WHALE GRADE';
-  if (score >= 75) return 'HIGH CONVICTION';
-  if (score >= 70) return 'STRONG WATCH';
+  if (score >= 85) return 'PRIORITY REVIEW';
+  if (score >= 75) return 'QUALIFIED REVIEW';
+  if (score >= 70) return 'WATCH';
   return 'IGNORE';
 }
 
@@ -730,10 +730,7 @@ console.log('final intelligence decision:', {
 
     addAlphaSignal({
       type: 'DEX_PAID',
-      title:
-        label === 'WHALE GRADE'
-          ? '🐋 Whale Grade Alpha'
-          : '🔥 High Conviction Alpha',
+      title: 'DEX Market Review',
       symbol: c.symbol,
       token: c.token,
       score,

@@ -78,9 +78,9 @@ type BuildInvestigationInput = {
 };
 
 function getSignalTitle(tier: SignalTier): string {
-  if (tier === 'P0') return 'HIGH CONVICTION';
-  if (tier === 'P1') return 'PRIORITY SIGNAL';
-  return 'STRONG WATCH';
+  if (tier === 'P0') return 'PRIORITY REVIEW';
+  if (tier === 'P1') return 'QUALIFIED WATCH';
+  return 'WATCH';
 }
 
 function getTimingLabel(ageMinutes: number): string {

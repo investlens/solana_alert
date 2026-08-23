@@ -16,8 +16,7 @@ import {
 } from '../core/autoTradeManager.js';
 import {
  fetchSignalsByType,
- fetchLatestStoredSignals,
- fetchBestStoredSignals
+ fetchLatestStoredSignals
 } from '../storage/signalStore.js';
 import {
   approveLatestPendingPayment,
@@ -47,7 +46,7 @@ import {
   hasCapability,
 } from '../product/capabilities.js';
 import { getContextAccess, requireCapability } from './accessControl.js';
-import { renderIntelligenceHome } from './intelligenceCenter.js';
+import { renderIntelligenceHome, renderPerformanceScreen } from './intelligenceCenter.js';
 import { getLatestOpportunities } from '../core/opportunityRegistry.js';
 import { escapeTelegramHtml } from '../ui/escapeHtml.js';
 import { isLikelySolanaSignature } from './paymentInput.js';
@@ -500,7 +499,7 @@ bot.action('RESUME_AUTO_TRADE', async (ctx) => {
 
   resumeAutoTrade();
   await ctx.answerCbQuery('Auto trade resumed');
-  await ctx.reply('▶️ <b>Auto Trade Resumed</b>\n\nEligible high-conviction signals can auto-buy again.', {
+  await ctx.reply('▶️ <b>Auto Trade Resumed</b>\n\nSignals that meet the configured execution rules can be considered again.', {
     parse_mode: 'HTML',
   });
 });
@@ -590,12 +589,9 @@ bot.action('AUTO_TRADE_STATUS', async (ctx) => {
       '',
       ...signals.map((s: any, i: number) =>
         [
-          `${i + 1}. <b>${escapeTelegramHtml(String(s.title ?? 'DEX Paid Signal'))}</b>`,
+          `${i + 1}. <b>DEX Market Review</b>`,
           `<b>${escapeTelegramHtml(String(s.symbol ?? 'Unknown'))}</b>`,
-          `Conviction: <b>${escapeTelegramHtml(String(s.conviction ?? 'n/a'))}</b>`,
-          s.score != null ? `Score: <b>${Number(s.score).toFixed(0)}/100</b>` : '',
-          s.roi_high != null ? `ROI High: <b>${Number(s.roi_high).toFixed(1)}%</b>` : '',
-          s.roi_now != null ? `ROI Now: <b>${Number(s.roi_now).toFixed(1)}%</b>` : '',
+          s.score != null ? `Evidence score: <b>${Number(s.score).toFixed(0)}/100</b>` : '',
           s.alert_price != null ? `Alert Price: <b>$${s.alert_price}</b>` : '',
           s.high_after_alert != null ? `High After Alert: <b>$${s.high_after_alert}</b>` : '',
           s.current_price != null ? `Current Price: <b>$${s.current_price}</b>` : '',
@@ -808,78 +804,7 @@ bot.action('AUTO_TRADE_STATUS', async (ctx) => {
       bot.action('HISTORY', async (ctx) => {
     if (!await requireCapability(ctx, 'intelligence.performance', 'INTELLIGENCE_CENTER')) return;
     await ctx.answerCbQuery();
-
-    const signals = await fetchBestStoredSignals(10);
-
-    function fmtPrice(value: unknown) {
-      const n = Number(value);
-      if (!Number.isFinite(n)) return 'n/a';
-      if (n < 0.000001) return `$${n.toExponential(2)}`;
-      if (n < 0.01) return `$${n.toFixed(8)}`;
-      return `$${n.toFixed(6)}`;
-    }
-
-    function fmtRoi(value: unknown) {
-      const n = Number(value);
-      if (!Number.isFinite(n)) return 'n/a';
-      return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
-    }
-
-    function resultLabel(value: unknown) {
-      const n = Number(value);
-      if (!Number.isFinite(n)) return 'Tracking';
-      if (n >= 200) return '🚀 Moonshot';
-      if (n >= 100) return '🔥 2x+ Winner';
-      if (n >= 50) return '💎 Strong Winner';
-      if (n >= 20) return '✅ Winner';
-      if (n >= 0) return '🟡 Green';
-      return '🔻 Drawdown';
-    }
-
-    if (!signals.length) {
-      await ctx.reply(
-        [
-          '📊 <b>PERFORMANCE</b>',
-          '',
-          'No completed signal performance yet.',
-          '',
-          'Once calls start moving, this page will show:',
-          '• Alert Price',
-          '• High After Alert',
-          '• Current Price',
-          '• ROI High',
-          '• ROI Now',
-        ].join('\n'),
-        { parse_mode: 'HTML', reply_markup: backHome('Intelligence', 'INTELLIGENCE_CENTER').reply_markup }
-      );
-      return;
-    }
-
-    await ctx.reply(
-      [
-        '📊 <b>PERFORMANCE</b>',
-        '',
-        '<b>Best Calls by High ROI</b>',
-        '',
-        ...signals.map((s: any, i: number) =>
-          [
-            `${i + 1}. <b>${escapeTelegramHtml(String(s.symbol ?? 'Unknown'))}</b>`,
-            `${escapeTelegramHtml(String(s.title ?? 'AlphaOS Opportunity'))}`,
-            '',
-            `🚀 ROI High: <b>${fmtRoi(s.roi_high)}</b>`,
-            `💰 ROI Now: <b>${fmtRoi(s.roi_now)}</b>`,
-            '',
-            `🎯 Alert Price: <b>${fmtPrice(s.alert_price)}</b>`,
-            `📈 High After Alert: <b>${fmtPrice(s.high_after_alert)}</b>`,
-            `📍 Current Price: <b>${fmtPrice(s.current_price)}</b>`,
-            '',
-            `Status: <b>${resultLabel(s.roi_high)}</b>`,
-            `Mint: <code>${escapeTelegramHtml(String(s.token))}</code>`,
-          ].join('\n')
-        ),
-      ].join('\n\n'),
-      { parse_mode: 'HTML', reply_markup: backHome('Intelligence', 'INTELLIGENCE_CENTER').reply_markup }
-    );
+    await renderPerformanceScreen(ctx);
   });
 
   bot.action(['PREMIUM', 'MEMBERSHIP_HOME'], async (ctx) => {

@@ -174,10 +174,22 @@ export async function fetchOrders(tokenAddress: string): Promise<DexOrder[]> {
   }
 }
 
-export function chooseBestPair(pairs: DexPair[]): DexPair | null {
+export function chooseBestPair(
+  pairs: DexPair[],
+  tokenAddress?: string,
+): DexPair | null {
   if (!pairs.length) return null;
 
-  const filtered = pairs.filter((pair) => Number(pair.liquidity?.usd ?? 0) > 0);
+  const normalizedToken = tokenAddress?.toLowerCase();
+  const filtered = pairs.filter((pair) => {
+    if (Number(pair.liquidity?.usd ?? 0) <= 0) return false;
+    if (!normalizedToken) return true;
+
+    // Dexscreener returns pairs where the requested mint may be the quote.
+    // priceUsd describes the base token, so quote-token pairs are not a valid
+    // price source for the tracked mint.
+    return pair.baseToken?.address?.toLowerCase() === normalizedToken;
+  });
   if (!filtered.length) return null;
 
   return [...filtered].sort((a, b) => {
@@ -196,7 +208,7 @@ export async function enrichToken(
   if (!tokenAddress) return null;
 
   const [pairs, orders] = await Promise.all([fetchPairs(tokenAddress), fetchOrders(tokenAddress)]);
-  const pair = chooseBestPair(pairs);
+  const pair = chooseBestPair(pairs, tokenAddress);
   if (!pair) return null;
 
   const paidApproved = Array.isArray(orders) && orders.some((o) => o.status === 'approved');

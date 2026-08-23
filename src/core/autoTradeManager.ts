@@ -174,7 +174,7 @@ function protectedFloorRoiForPeak(
 
 async function fetchCurrentMarket(token: string) {
   const pairs = await fetchPairs(token);
-  const pair: any = chooseBestPair(pairs);
+  const pair: any = chooseBestPair(pairs, token);
 
   const price = Number(pair?.priceUsd ?? 0);
   const liquidityUsd = Number(pair?.liquidity?.usd ?? 0);

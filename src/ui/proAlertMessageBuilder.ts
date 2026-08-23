@@ -33,7 +33,7 @@ export function buildProAlertMessage(args: {
       { label: 'Buy / sell', value: ratio(result.buys5m, result.sells5m) },
     ],
     evidence: warning ? [warning] : [],
-    reason: highPriority ? 'High-conviction momentum and market-quality checks passed.' : 'Momentum and market-quality checks passed.',
+    reason: highPriority ? 'Priority momentum and market-quality checks passed.' : 'Momentum and market-quality checks passed.',
     recommendedAction: 'Verify live liquidity and price before acting.',
     access: 'PRO',
   });

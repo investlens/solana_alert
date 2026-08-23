@@ -9,6 +9,12 @@ import {
 } from '../services/intelligenceService.js';
 import { getContextAccess, requireCapability } from './accessControl.js';
 import { intelligenceMenu, backHome } from './menus.js';
+import {
+  creatorSummary,
+  formatPercentage,
+  smartMoneyHistory,
+  smartMoneySummary,
+} from '../product/intelligenceCredibility.js';
 
 function compact(value: unknown) {
   const text = String(value ?? '');
@@ -45,6 +51,33 @@ export async function renderIntelligenceHome(ctx: any) {
     ].join('\n'),
     intelligenceMenu(access).reply_markup,
   );
+}
+
+export async function renderPerformanceScreen(ctx: any) {
+  const performance = await getPerformanceLeaders();
+  const rows = performance.leaders;
+  const lines = [
+    '📊 <b>PERFORMANCE</b>',
+    '',
+    'Recorded peak and latest observed outcomes from tracked calls.',
+    '',
+  ];
+  if (!rows.length) lines.push('No verified performance records are available yet.');
+  for (const row of rows as any[]) {
+    lines.push(
+      `<b>${escapeTelegramHtml(row.symbol ?? compact(row.token))}</b>`,
+      `Peak ${formatPercentage(row.performance.peakRoi)} · Last observed ${formatPercentage(row.performance.currentRoi)}`,
+      row.performance.stale ? 'Observation is stale' : 'Observation is current',
+      '',
+    );
+  }
+  if (performance.reviewCount > 0) {
+    lines.push(`${performance.reviewCount} historical record${performance.reviewCount === 1 ? '' : 's'} withheld pending source-data verification.`);
+  }
+  if (performance.unavailableCount > 0) {
+    lines.push(`${performance.unavailableCount} record${performance.unavailableCount === 1 ? '' : 's'} unavailable because required prices are missing or invalid.`);
+  }
+  await editOrReply(ctx, lines.join('\n'), backHome('Intelligence', 'INTELLIGENCE_CENTER').reply_markup);
 }
 
 export function registerIntelligenceCenter(bot: Telegraf<any>) {
@@ -90,9 +123,14 @@ export function registerIntelligenceCenter(bot: Telegraf<any>) {
       const lines = ['🐋 <b>SMART MONEY</b>', '', 'Tracked wallets ranked by measured history.', ''];
       if (!rows.length) lines.push('No scored smart-money wallets are available yet.');
       for (const row of rows as any[]) {
+        const history = smartMoneyHistory(row.completed_trades);
         lines.push(
-          `<b>${escapeTelegramHtml(row.label ?? 'Tracked wallet')}</b> · ${escapeTelegramHtml(compact(row.wallet))}`,
-          `Trust ${number(row.trust_score)}/100 · Win rate ${number(row.win_rate, 1)}%`,
+          `<b>${history.maturity}</b> · ${escapeTelegramHtml(compact(row.wallet))}`,
+          smartMoneySummary({
+            completedTrades: row.completed_trades,
+            totalBuys: row.total_buys,
+            winRate: row.win_rate,
+          }),
           '',
         );
       }
@@ -108,12 +146,17 @@ export function registerIntelligenceCenter(bot: Telegraf<any>) {
     await ctx.answerCbQuery();
     try {
       const rows = await getCreatorLeaders();
-      const lines = ['👤 <b>CREATORS</b>', '', 'Creator history measured from tracked launches.', ''];
+      const lines = ['👤 <b>CREATORS</b>', '', 'Observed launches and classified outcome history.', ''];
       if (!rows.length) lines.push('No scored creator history is available yet.');
       for (const row of rows as any[]) {
+        const summary = creatorSummary({
+          totalLaunches: row.total_launches,
+          successfulLaunches: row.successful_launches,
+          failedLaunches: row.failed_launches,
+        });
         lines.push(
           `<b>${escapeTelegramHtml(compact(row.creator_wallet))}</b> · ${escapeTelegramHtml(String(row.chain ?? 'solana'))}`,
-          `Trust ${number(row.trust_score)}/100 · ${number(row.successful_launches)}/${number(row.total_launches)} successful`,
+          ...summary,
           '',
         );
       }
@@ -128,17 +171,7 @@ export function registerIntelligenceCenter(bot: Telegraf<any>) {
     if (!await requireCapability(ctx, 'intelligence.performance', 'INTELLIGENCE_CENTER')) return;
     await ctx.answerCbQuery();
     try {
-      const rows = await getPerformanceLeaders();
-      const lines = ['📊 <b>PERFORMANCE</b>', '', 'Measured peak and current outcomes from tracked calls.', ''];
-      if (!rows.length) lines.push('No completed performance records are available yet.');
-      for (const row of rows as any[]) {
-        lines.push(
-          `<b>${escapeTelegramHtml(row.symbol ?? compact(row.token))}</b>`,
-          `Peak ${Number(row.roi_high) >= 0 ? '+' : ''}${number(row.roi_high, 1)}% · Now ${Number(row.roi_now) >= 0 ? '+' : ''}${number(row.roi_now, 1)}%`,
-          '',
-        );
-      }
-      await editOrReply(ctx, lines.join('\n'), backHome('Intelligence', 'INTELLIGENCE_CENTER').reply_markup);
+      await renderPerformanceScreen(ctx);
     } catch (error) {
       console.error('[Intelligence] Performance failed:', error);
       await ctx.reply('Unable to load Performance. Please try again.', backHome('Intelligence', 'INTELLIGENCE_CENTER'));

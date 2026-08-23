@@ -1,5 +1,9 @@
 
 import { upsertAlphaSignal } from '../storage/signalStore.js';
+import {
+  calculateRoi,
+  PERFORMANCE_PRICE_SOURCE_VERSION,
+} from '../product/intelligenceCredibility.js';
 
 export type AlphaSignalType =
   | 'DEX_PAID'
@@ -26,6 +30,7 @@ export type AlphaSignal = {
   highAfterAlert?: number | null;
   roiNow?: number | null;
   roiHigh?: number | null;
+  priceSourceVersion?: string | null;
 };
 
 const signals: AlphaSignal[] = [];
@@ -33,11 +38,6 @@ const MAX_SIGNALS = 50;
 
 function makeSignalKey(type: AlphaSignalType, token: string) {
   return `${type}:${token}`;
-}
-
-function calcRoi(from: number | null | undefined, to: number | null | undefined) {
-  if (!from || !to || !Number.isFinite(from) || !Number.isFinite(to)) return null;
-  return ((to - from) / from) * 100;
 }
 
 export function addAlphaSignal(signal: Omit<AlphaSignal, 'id' | 'createdAt'>) {
@@ -53,8 +53,9 @@ export function addAlphaSignal(signal: Omit<AlphaSignal, 'id' | 'createdAt'>) {
       existing.highAfterAlert =
         existingHigh == null ? signal.currentPrice : Math.max(existingHigh, signal.currentPrice);
 
-      existing.roiNow = calcRoi(existing.alertPrice, existing.currentPrice);
-      existing.roiHigh = calcRoi(existing.alertPrice, existing.highAfterAlert);
+      existing.roiNow = calculateRoi(existing.alertPrice, existing.currentPrice);
+      existing.roiHigh = calculateRoi(existing.alertPrice, existing.highAfterAlert);
+      existing.priceSourceVersion = PERFORMANCE_PRICE_SOURCE_VERSION;
     }
 
     existing.score = signal.score ?? existing.score;
@@ -79,8 +80,9 @@ export function addAlphaSignal(signal: Omit<AlphaSignal, 'id' | 'createdAt'>) {
   alertPrice,
   currentPrice,
   highAfterAlert,
-  roiNow: calcRoi(alertPrice, currentPrice),
-  roiHigh: calcRoi(alertPrice, highAfterAlert),
+  roiNow: calculateRoi(alertPrice, currentPrice),
+  roiHigh: calculateRoi(alertPrice, highAfterAlert),
+  priceSourceVersion: PERFORMANCE_PRICE_SOURCE_VERSION,
 };
 
 signals.unshift(newSignal);
@@ -112,8 +114,9 @@ export function updateAlphaSignalPrice(args: {
   signal.highAfterAlert =
     existingHigh == null ? args.currentPrice : Math.max(existingHigh, args.currentPrice);
 
-  signal.roiNow = calcRoi(signal.alertPrice, signal.currentPrice);
-  signal.roiHigh = calcRoi(signal.alertPrice, signal.highAfterAlert);
+  signal.roiNow = calculateRoi(signal.alertPrice, signal.currentPrice);
+  signal.roiHigh = calculateRoi(signal.alertPrice, signal.highAfterAlert);
+  signal.priceSourceVersion = PERFORMANCE_PRICE_SOURCE_VERSION;
 
   upsertAlphaSignal(signal).catch((e) =>
     console.error('alpha signal perf update failed:', e)

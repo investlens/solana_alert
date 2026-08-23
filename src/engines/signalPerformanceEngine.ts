@@ -30,7 +30,7 @@ export async function runSignalPerformanceEngine(){
       await fetchPairs(signal.token);
 
      const pair:any=
-      chooseBestPair(pairs);
+      chooseBestPair(pairs, signal.token);
 
      if(pair?.priceUsd){
        updateAlphaSignalPrice({
