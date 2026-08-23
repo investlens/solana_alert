@@ -85,6 +85,10 @@ import { sendTelegram } from './services/telegram.js';
 import { confirmMomentum } from './services/momentumConfirmation.js';
 import type { DexProfile, RiskResult, TokenState } from './types.js';
 import { pollWatchedWallets } from './core/walletWatcher.js';
+
+import {
+  deliverTrackedWalletActivity,
+} from './services/walletActivityDeliveryService.js';
 import { enrichTokenByMintAddress } from './services/dexscreener.js';
 import {
   buildPrivateWalletBuyMessage,
@@ -650,6 +654,10 @@ async function startWalletWatch() {
   while (true) {
     try {
       const events = await pollWatchedWallets();
+
+      await deliverTrackedWalletActivity(
+        events,
+      );
 
       for (const event of events) {
         if (!event.tokenMint) continue;

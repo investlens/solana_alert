@@ -33,7 +33,7 @@ type EnhancedTx = {
   }>;
 };
 
-type WalletWatchEvent =
+export type WalletWatchEvent =
   | {
       kind: 'buy';
       wallet: string;

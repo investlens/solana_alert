@@ -258,3 +258,146 @@ removeTrackedWallet(args: {
     throw error;
   }
 }
+
+
+export async function
+getTrackedWalletSubscribersForAddress(args: {
+  walletAddress: string;
+  chain?: string;
+}): Promise<TrackedWallet[]> {
+  const {
+    data,
+    error,
+  } =
+    await supabase
+      .from(
+        'user_tracked_wallets',
+      )
+      .select(`
+        id,
+        telegram_id,
+        wallet_address,
+        chain,
+        label,
+        is_active,
+        alerts_enabled,
+        created_at,
+        updated_at
+      `)
+      .eq(
+        'wallet_address',
+        args.walletAddress,
+      )
+      .eq(
+        'chain',
+        String(
+          args.chain ??
+          'solana',
+        ).toLowerCase(),
+      )
+      .eq(
+        'is_active',
+        true,
+      )
+      .eq(
+        'alerts_enabled',
+        true,
+      );
+
+  if (error) {
+    throw error;
+  }
+
+  return (
+    data ??
+    []
+  ) as TrackedWallet[];
+}
+
+export async function
+getTrackedWalletByIdForUser(args: {
+  telegramId: string;
+  id: number;
+}): Promise<TrackedWallet | null> {
+  const {
+    data,
+    error,
+  } =
+    await supabase
+      .from(
+        'user_tracked_wallets',
+      )
+      .select(`
+        id,
+        telegram_id,
+        wallet_address,
+        chain,
+        label,
+        is_active,
+        alerts_enabled,
+        created_at,
+        updated_at
+      `)
+      .eq(
+        'id',
+        args.id,
+      )
+      .eq(
+        'telegram_id',
+        args.telegramId,
+      )
+      .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return (
+    data as TrackedWallet | null
+  );
+}
+
+export async function
+getRecentTrackedWalletActivity(
+  walletAddress: string,
+  limit = 10,
+): Promise<Array<Record<string, any>>> {
+  const {
+    data,
+    error,
+  } =
+    await supabase
+      .from(
+        'wallet_trade_history',
+      )
+      .select('*')
+      .eq(
+        'wallet',
+        walletAddress,
+      )
+      .order(
+        'created_at',
+        {
+          ascending:
+            false,
+        },
+      )
+      .limit(
+        Math.max(
+          1,
+          Math.min(
+            25,
+            limit,
+          ),
+        ),
+      );
+
+  if (error) {
+    throw error;
+  }
+
+  return (
+    data ??
+    []
+  ) as Array<Record<string, any>>;
+}

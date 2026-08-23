@@ -4,11 +4,20 @@ import {
 } from 'telegraf';
 
 import {
+  PublicKey,
+} from '@solana/web3.js';
+
+import {
   addTrackedWallet,
+  getRecentTrackedWalletActivity,
+  getTrackedWalletByIdForUser,
   getTrackedWalletsForUser,
   removeTrackedWallet,
   setTrackedWalletActive,
 } from '../services/trackedWalletService.js';
+
+const pendingWalletAdds =
+  new Set<string>();
 
 function userId(
   ctx: any,
@@ -132,6 +141,11 @@ async function renderWalletCenter(
       ),
 
       Markup.button.callback(
+        '⚡ Activity',
+        `WALLET_ACTIVITY_${wallet.id}`,
+      ),
+
+      Markup.button.callback(
         '🗑',
         `WALLET_REMOVE_${wallet.id}`,
       ),
@@ -190,20 +204,30 @@ registerWalletTracking(
   bot.action(
     'WALLET_ADD_HELP',
     async ctx => {
-      await ctx.answerCbQuery();
+      const telegramId =
+        userId(
+          ctx,
+        );
+
+      if (!telegramId) {
+        return;
+      }
+
+      pendingWalletAdds.add(
+        telegramId,
+      );
+
+      await ctx.answerCbQuery(
+        'Paste wallet address',
+      );
 
       await ctx.reply(
         [
           '➕ <b>ADD WALLET</b>',
           '',
-          'Send:',
+          'Paste the public Solana wallet address below.',
           '',
-          '<code>/trackwallet WALLET_ADDRESS optional label</code>',
-          '',
-          'Example:',
-          '<code>/trackwallet 7Ks...R9d Whale Alpha</code>',
-          '',
-          'Only public wallet addresses are required.',
+          '<i>No private key or seed phrase is ever required.</i>',
         ].join(
           '\n',
         ),
@@ -420,6 +444,262 @@ registerWalletTracking(
         console.error(
           '[WalletTracking] Remove failed:',
           error,
+        );
+      }
+    },
+  );
+
+
+  bot.action(
+    /^WALLET_ACTIVITY_(\d+)$/,
+    async ctx => {
+      try {
+        const telegramId =
+          userId(
+            ctx,
+          );
+
+        if (!telegramId) {
+          return;
+        }
+
+        const wallet =
+          await getTrackedWalletByIdForUser({
+            telegramId,
+
+            id:
+              Number(
+                ctx.match[1],
+              ),
+          });
+
+        if (!wallet) {
+          await ctx.answerCbQuery(
+            'Wallet not found',
+          );
+
+          return;
+        }
+
+        const activity =
+          await getRecentTrackedWalletActivity(
+            wallet.wallet_address,
+            8,
+          );
+
+        const lines = [
+          '⚡ <b>WALLET ACTIVITY</b>',
+          '',
+          wallet.label
+            ? `<b>${wallet.label}</b>`
+            : `<code>${shortAddress(
+                wallet.wallet_address,
+              )}</code>`,
+          '',
+        ];
+
+        if (
+          activity.length ===
+          0
+        ) {
+          lines.push(
+            'No recorded buy/sell activity yet.',
+          );
+        }
+
+        for (
+          const row
+          of activity
+        ) {
+          const action =
+            String(
+              row.action ??
+              '',
+            ).toUpperCase();
+
+          const icon =
+            action ===
+            'BUY'
+              ? '🟢'
+              : action ===
+                'SELL'
+                ? '🔴'
+                : '⚪';
+
+          const token =
+            shortAddress(
+              String(
+                row.token ??
+                '-',
+              ),
+            );
+
+          const amount =
+            Number(
+              row.amount_sol,
+            );
+
+          const amountText =
+            Number.isFinite(
+              amount,
+            ) &&
+            amount >
+            0
+              ? ` · ${amount.toFixed(
+                  3,
+                )} SOL`
+              : '';
+
+          lines.push(
+            `${icon} <b>${action ||
+              'ACTIVITY'}</b> ${token}${amountText}`,
+          );
+        }
+
+        await ctx.answerCbQuery();
+
+        await ctx.reply(
+          lines.join(
+            '\n',
+          ),
+          {
+            parse_mode:
+              'HTML',
+
+            reply_markup:
+              Markup.inlineKeyboard([
+                [
+                  Markup.button.callback(
+                    '⬅️ Wallets',
+                    'WALLET_TRACKING',
+                  ),
+
+                  Markup.button.callback(
+                    '🔄 Refresh',
+                    `WALLET_ACTIVITY_${wallet.id}`,
+                  ),
+                ],
+              ]).reply_markup,
+          },
+        );
+      } catch (
+        error
+      ) {
+        console.error(
+          '[WalletTracking] Activity failed:',
+          error,
+        );
+      }
+    },
+  );
+
+  bot.on(
+    'text',
+    async (
+      ctx,
+      next,
+    ) => {
+      const telegramId =
+        userId(
+          ctx,
+        );
+
+      if (
+        !telegramId ||
+        !pendingWalletAdds.has(
+          telegramId,
+        )
+      ) {
+        return next();
+      }
+
+      const value =
+        String(
+          ctx.message?.text ??
+          '',
+        ).trim();
+
+      if (
+        value.startsWith(
+          '/',
+        )
+      ) {
+        if (
+          value.toLowerCase() ===
+          '/cancel'
+        ) {
+          pendingWalletAdds.delete(
+            telegramId,
+          );
+
+          await ctx.reply(
+            'Wallet add cancelled.',
+          );
+
+          return;
+        }
+
+        return next();
+      }
+
+      try {
+        /*
+         * Constructor validation prevents random text from
+         * becoming a tracked Solana wallet.
+         */
+        const address =
+          new PublicKey(
+            value,
+          ).toBase58();
+
+        await addTrackedWallet({
+          telegramId,
+
+          walletAddress:
+            address,
+
+          chain:
+            'solana',
+        });
+
+        pendingWalletAdds.delete(
+          telegramId,
+        );
+
+        await ctx.reply(
+          [
+            '✅ <b>WALLET TRACKING ACTIVE</b>',
+            '',
+            `<code>${address}</code>`,
+            '',
+            'AlphaOS will alert you when this wallet buys or sells.',
+          ].join(
+            '\n',
+          ),
+          {
+            parse_mode:
+              'HTML',
+
+            reply_markup:
+              Markup.inlineKeyboard([
+                [
+                  Markup.button.callback(
+                    '🐋 View Wallets',
+                    'WALLET_TRACKING',
+                  ),
+                ],
+              ]).reply_markup,
+          },
+        );
+      } catch {
+        await ctx.reply(
+          [
+            '❌ That does not look like a valid Solana wallet.',
+            '',
+            'Paste the public wallet address again or send /cancel.',
+          ].join(
+            '\n',
+          ),
         );
       }
     },
