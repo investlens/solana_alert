@@ -3,6 +3,7 @@ import { Markup } from 'telegraf';
 export function mainAlphaMenu() {
   return Markup.inlineKeyboard([
     [Markup.button.callback('⚡ Opportunities', 'OPPORTUNITY_CENTER')],
+    [Markup.button.callback('🐋 Wallets', 'WALLET_TRACKING')],
     [Markup.button.callback('🧠 AI Research', 'ALPHA_FEED')],
     [Markup.button.callback('📈 Trade Terminal', 'TRADE_MENU')],
     [

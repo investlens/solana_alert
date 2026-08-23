@@ -8,11 +8,16 @@ import {
   registerOpportunityActions,
 } from './opportunityActions.js';
 
+import {
+  registerWalletTracking,
+} from './walletTracking.js';
+
 export function createBot() {
   const bot = new Telegraf(config.botToken);
   registerBotCommands(bot);
   registerStrategyControls(bot);
   registerOpportunityCenter(bot);
   registerOpportunityActions(bot);
+  registerWalletTracking(bot);
   return bot;
 }

@@ -1,3 +1,7 @@
+import {
+  getActiveTrackedWalletAddresses,
+} from '../services/trackedWalletService.js';
+
 import { config } from '../config.js';
 import { recordWhaleHit } from '../engines/whaleClusterEngine.js';
 import { recordWalletTrade } from '../agents/smartWalletAgent.js';
@@ -217,7 +221,16 @@ function extractLaunchEvent(wallet: string, tx: EnhancedTx): WalletLaunchEvent |
 export async function pollWatchedWallets(): Promise<WalletWatchEvent[]> {
   const events: WalletWatchEvent[] = [];
 
-  for (const wallet of config.watchedWallets) {
+  for (const wallet of [
+      ...new Set([
+        ...(config.watchedWallets ?? []),
+        ...(
+          await getActiveTrackedWalletAddresses(
+            'solana',
+          )
+        ),
+      ]),
+    ]) {
     try {
       const txs = (await fetchEnhancedTransactionsForAddress(
         wallet,
