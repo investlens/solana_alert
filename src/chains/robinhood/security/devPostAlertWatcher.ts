@@ -10,6 +10,7 @@ import {
   scanRobinhoodDevMovement,
 } from './devMovementScanner.js';
 import { buildCreatorNotification } from '../../../ui/alphaNotificationPresets.js';
+import { buildAlphaMarketActions } from '../../../ui/alphaNotificationActions.js';
 
 
 const DEV_WATCH_DELAYS_MS =
@@ -157,6 +158,10 @@ export function startPostAlertDevWatch(args: {
           await sendTelegram(
             config.adminTelegramId,
             message,
+            buildAlphaMarketActions({
+              chartUrl: `https://dexscreener.com/robinhood/${args.tokenAddress}`,
+              tokenUrl: `https://robinhoodchain.blockscout.com/token/${args.tokenAddress}`,
+            }),
           );
 
 

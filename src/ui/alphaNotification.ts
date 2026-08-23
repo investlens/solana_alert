@@ -89,6 +89,10 @@ export function compactAlphaAddress(value?: string | null, start = 6, end = 5): 
   return `${clean.slice(0, start)}…${clean.slice(-end)}`;
 }
 
+export function normalizeAlphaSymbol(value?: string | null): string {
+  return String(value ?? '').trim().replace(/^\$+/, '').toUpperCase();
+}
+
 export function alphaStateLabel(state: AlphaNotificationState): string {
   return STATE_LABELS[state];
 }
@@ -113,28 +117,32 @@ function validMetric(metric: AlphaNotificationMetric): boolean {
 
 export function renderAlphaNotification(alert: AlphaNotification): string {
   const compactAddress = compactAlphaAddress(alert.address);
-  const identity = alert.symbol || alert.token || alert.title || compactAddress;
+  const symbol = normalizeAlphaSymbol(alert.symbol);
+  const identity = symbol || alert.token || alert.title || compactAddress;
   const lines = [`<b>ALPHAOS · ${alphaStateLabel(alert.state)}</b>`];
 
   if (identity) {
     const identityParts = [
       `<b>${escapeAlphaHtml(identity)}</b>`,
-      alert.subtitle ? escapeAlphaHtml(alert.subtitle) : null,
-      alert.symbol && compactAddress ? `<code>${escapeAlphaHtml(compactAddress)}</code>` : null,
+      symbol && compactAddress ? `<code>${escapeAlphaHtml(compactAddress)}</code>` : null,
     ].filter(Boolean);
     lines.push('', identityParts.join(' · '));
   }
-  if (alert.address && !alert.symbol && identity !== compactAddress) {
+  const subtitle = String(alert.subtitle ?? '').trim();
+  if (subtitle && subtitle.toLowerCase() !== identity.toLowerCase()) {
+    lines.push(escapeAlphaHtml(subtitle));
+  }
+  if (alert.address && !symbol && identity !== compactAddress) {
     lines.push(`<code>${escapeAlphaHtml(compactAddress)}</code>`);
   }
 
   const metrics: AlphaNotificationMetric[] = [
     ...(alert.age ? [{ label: 'Age', value: alert.age }] : []),
+    ...(alert.metrics ?? []),
     ...(alert.confidence != null && Number.isFinite(alert.confidence)
       ? [{ label: 'Confidence', value: `${Math.round(alert.confidence)}/100` }]
       : []),
     ...(alert.risk ? [{ label: 'Risk', value: alert.risk }] : []),
-    ...(alert.metrics ?? []),
   ].filter(validMetric).slice(0, 8);
 
   if (metrics.length) {

@@ -35,7 +35,7 @@ test('representative Wallet Buy, Sell, and Launch snapshots', () => {
   assert.match(buy, /3\.20 SOL/);
   assert.match(sell, /ALPHAOS · 🔴 WALLET EXIT/);
   assert.match(launch, /ALPHAOS · 🚀 WALLET LAUNCH/);
-  assert.match(buy, /A&amp;B &lt;Whale&gt;/);
+  assert.match(buy, /A&amp;B &lt;WHALE&gt;/);
 });
 
 test('Creator positive and developer risk snapshots', () => {

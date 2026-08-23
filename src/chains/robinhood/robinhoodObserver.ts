@@ -6,6 +6,7 @@ import {
   sendTelegram,
 } from '../../services/telegram.js';
 import { renderAlphaNotification } from '../../ui/alphaNotification.js';
+import { buildAlphaMarketActions } from '../../ui/alphaNotificationActions.js';
 
 import {
   startPostAlertDevWatch,
@@ -342,19 +343,9 @@ creatorBestPeakMarketCap:
     market,
   } = args;
 
-  const symbol =
-    escapeHtml(
-      token.symbol ??
-      market.symbol ??
-      'UNKNOWN',
-    );
+  const symbol = token.symbol ?? market.symbol ?? 'UNKNOWN';
 
-  const name =
-    escapeHtml(
-      token.name ??
-      market.name ??
-      symbol,
-    );
+  const name = token.name ?? market.name ?? symbol;
 
   const holderText =
     args.holderCount < 5
@@ -461,8 +452,8 @@ if (
       { label: 'Creator', value: args.creatorStatus && args.creatorStatus !== 'UNKNOWN' ? `${args.creatorStatus}${args.creatorScore == null ? '' : ` · ${args.creatorScore}/100`}` : 'Data unavailable' },
     ],
     evidence: args.warnings,
-    reason: 'A vetted early Robinhood-chain token is being monitored.',
-    recommendedAction: 'Watch for confirmation. Direct execution is unavailable.',
+    reason: 'Early market quality passed initial checks.',
+    recommendedAction: 'Waiting for entry confirmation.',
     access: 'ADMIN',
   });
 }
@@ -2016,39 +2007,10 @@ const warnings =
             warnings,
     });
 
-  const buttons = [
-  [
-    {
-      text:
-        '📊 Chart',
-
-      url:
-        buildChartUrl(
-          token.tokenAddress,
-        ),
-    },
-
-    {
-      text:
-        '🔎 Explorer',
-
-      url:
-        buildExplorerUrl(
-          token.tokenAddress,
-        ),
-    },
-  ],
-
-  [
-    {
-      text:
-        '📋 Copy Contract',
-
-      callback_data:
-        `COPY_CA_${token.tokenAddress}`,
-    },
-  ],
-];
+  const buttons = buildAlphaMarketActions({
+    chartUrl: buildChartUrl(token.tokenAddress),
+    tokenUrl: buildExplorerUrl(token.tokenAddress),
+  });
 
   const observationId =
   await saveEvaluatedObservation({

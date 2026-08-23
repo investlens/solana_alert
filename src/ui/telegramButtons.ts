@@ -1,10 +1,8 @@
 import type { Investigation } from '../models/investigation.js';
+import { assertAlphaActions, type AlphaNotificationAction } from './alphaNotification.js';
+import { buildAlphaMarketActions } from './alphaNotificationActions.js';
 
-type TelegramButton = {
-  text: string;
-  url?: string;
-  callback_data?: string;
-};
+type TelegramButton = AlphaNotificationAction;
 
 type BuildTelegramButtonsOptions = {
   isAdmin: boolean;
@@ -26,29 +24,24 @@ export function buildTelegramButtons(
   options: BuildTelegramButtonsOptions
 ): TelegramButton[][] {
   const rows: TelegramButton[][] = [];
-
-  const primaryRow: TelegramButton[] = [];
-
-  if (validUrl(investigation.links.reportUrl)) {
-    primaryRow.push({
-      text: '🧠 AI Report',
-      url: investigation.links.reportUrl,
-    });
-  }
-
-  primaryRow.push({
-    text: '📈 Chart',
-    url: investigation.links.chartUrl,
+  const marketRows = buildAlphaMarketActions({
+    chartUrl: investigation.links.chartUrl,
+    tokenUrl: `https://solscan.io/token/${encodeURIComponent(investigation.token.address)}`,
   });
 
-  rows.push(primaryRow);
+  if (options.isAdmin) {
+    rows.push([{
+      text: '⚡ Trade',
+      callback_data: `ADMIN_BUY_DEFAULT_${investigation.token.address}`,
+    }]);
+  } else if (validUrl(investigation.links.buyUrl)) {
+    rows.push([{ text: '⚡ Trade', url: investigation.links.buyUrl }]);
+  }
+  rows.push(...marketRows);
 
-  rows.push([
-    {
-      text: '🟢 Buy',
-      url: investigation.links.buyUrl,
-    },
-  ]);
+  if (validUrl(investigation.links.reportUrl)) {
+    rows.push([{ text: '🧠 Analyze', url: investigation.links.reportUrl }]);
+  }
 
   const socialButtons: TelegramButton[] = [];
 
@@ -80,17 +73,6 @@ export function buildTelegramButtons(
   if (options.isAdmin) {
     rows.push([
       {
-        text: '⚡ Buy 0.03 SOL',
-        callback_data: `ADMIN_BUY_SMALL_${investigation.token.address}`,
-      },
-      {
-        text: '🔥 Buy 0.05 SOL',
-        callback_data: `ADMIN_BUY_DEFAULT_${investigation.token.address}`,
-      },
-    ]);
-
-    rows.push([
-      {
         text: '⏸ Pause Auto',
         callback_data: 'PAUSE_AUTO_TRADE',
       },
@@ -101,5 +83,5 @@ export function buildTelegramButtons(
     ]);
   }
 
-  return rows;
+  return assertAlphaActions(rows);
 }

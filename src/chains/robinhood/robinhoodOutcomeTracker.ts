@@ -14,6 +14,7 @@ import {
   sendTelegram,
 } from '../../services/telegram.js';
 import { renderAlphaNotification } from '../../ui/alphaNotification.js';
+import { buildAlphaMarketActions } from '../../ui/alphaNotificationActions.js';
 
 import {
   scanRobinhoodSellability,
@@ -761,7 +762,7 @@ function buildMicroBreakoutMessage(args: {
       { label: 'Dev holding', value: args.devHolding == null ? 'Data unavailable' : `${args.devHolding.toFixed(2)}%` },
     ],
     reason: `A clean early launch reached ${getMicroBreakoutLabel(args.elapsed)} momentum.`,
-    recommendedAction: 'Review live conditions. Direct execution is unavailable.',
+    recommendedAction: 'Review live conditions before acting.',
     access: 'ADMIN',
   });
 }
@@ -1130,25 +1131,10 @@ if (
   await sendTelegram(
     config.adminTelegramId,
     message,
-    [
-      [
-        {
-          text:
-            '📊 Chart',
-
-          url:
-            `https://dexscreener.com/robinhood/${row.token_address}`,
-        },
-
-        {
-          text:
-            '🔎 Explorer',
-
-          url:
-            `https://robinhoodchain.blockscout.com/token/${row.token_address}`,
-        },
-      ],
-    ],
+    buildAlphaMarketActions({
+      chartUrl: `https://dexscreener.com/robinhood/${row.token_address}`,
+      tokenUrl: `https://robinhoodchain.blockscout.com/token/${row.token_address}`,
+    }),
   );
 
 

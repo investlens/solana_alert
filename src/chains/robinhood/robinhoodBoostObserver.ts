@@ -10,6 +10,7 @@ import {
   sendTelegram,
 } from '../../services/telegram.js';
 import { renderAlphaNotification } from '../../ui/alphaNotification.js';
+import { buildAlphaMarketActions } from '../../ui/alphaNotificationActions.js';
 
 import {
   fetchRobinhoodBoosts,
@@ -573,6 +574,10 @@ async function processBoost(
   await sendTelegram(
     config.adminTelegramId,
     message,
+    buildAlphaMarketActions({
+      chartUrl: `https://dexscreener.com/robinhood/${boost.tokenAddress}`,
+      tokenUrl: `https://robinhoodchain.blockscout.com/token/${boost.tokenAddress}`,
+    }),
   );
 
 
