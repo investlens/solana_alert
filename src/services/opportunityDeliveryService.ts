@@ -3,6 +3,10 @@ import {
 } from '../core/tokenOpenRouter.js';
 
 import {
+  scanRobinhoodDevTokenFlow,
+} from '../chains/robinhood/security/devTokenFlowScanner.js';
+
+import {
   eventEngine,
 } from './eventEngine.js';
 
@@ -54,16 +58,7 @@ const ACTIONABLE =
     'EXIT',
   ]);
 
-/*
- * PONS_BREAKOUT already has a proven dedicated Telegram
- * broadcaster. Keep it there until unified delivery has been
- * validated in production, otherwise users could receive
- * duplicate ENTRY_WINDOW alerts.
- */
-const TEMPORARILY_EXTERNAL_STRATEGIES =
-  new Set<string>([
-    'PONS_BREAKOUT',
-  ]);
+
 
 function escapeHtml(
   value: unknown,
@@ -149,94 +144,306 @@ function actionMeta(
   };
 }
 
+function rawNumber(
+  opportunity: OpportunityRow,
+  key: string,
+): number | null {
+  const value =
+    opportunity.raw_data?.[key];
+
+  return (
+    typeof value === 'number' &&
+    Number.isFinite(value)
+  )
+    ? value
+    : null;
+}
+
+function devEvidenceLines(
+  opportunity: OpportunityRow,
+): string[] {
+  const holding =
+    rawNumber(
+      opportunity,
+      'devHoldingPercent',
+    );
+
+  const burned =
+    rawNumber(
+      opportunity,
+      'totalBurnPercent',
+    );
+
+  const devBurn =
+    rawNumber(
+      opportunity,
+      'confirmedDevBurnPercent',
+    );
+
+  const transferred =
+    rawNumber(
+      opportunity,
+      'otherDevTransferPercent',
+    );
+
+  if (
+    holding == null &&
+    burned == null &&
+    devBurn == null &&
+    transferred == null
+  ) {
+    return [];
+  }
+
+  const lines = [
+    '',
+    '👨‍💻 <b>DEV</b>',
+  ];
+
+  if (holding != null) {
+    lines.push(
+      `Holding     <b>${holding.toFixed(2)}%</b>`,
+    );
+  }
+
+  if (
+    burned != null &&
+    burned > 0
+  ) {
+    lines.push(
+      `🔥 Burned    <b>${burned.toFixed(2)}%</b>`,
+    );
+  }
+
+  if (
+    devBurn != null &&
+    devBurn > 0
+  ) {
+    lines.push(
+      `🔥 Dev Burn  <b>${devBurn.toFixed(2)}%</b>`,
+    );
+  }
+
+  if (
+    transferred != null &&
+    transferred > 0
+  ) {
+    lines.push(
+      `Transferred <b>${transferred.toFixed(2)}%</b>`,
+    );
+  }
+
+  return lines;
+}
+
+function actionPresentation(
+  opportunity: OpportunityRow,
+): {
+  title: string;
+  action: string;
+  riskLabel: string;
+} {
+  const action =
+    String(
+      opportunity.recommended_action ??
+      '',
+    ).toUpperCase();
+
+  const risk =
+    Number(
+      opportunity.risk_score ??
+      50,
+    );
+
+  const riskLabel =
+    risk >= 80
+      ? 'HIGH'
+      : risk >= 55
+        ? 'MEDIUM'
+        : 'LOW';
+
+  if (action === 'EXIT') {
+    return {
+      title:
+        '🔴 ALPHAOS · EXIT / AVOID',
+      action:
+        'Protect capital · review now',
+      riskLabel,
+    };
+  }
+
+  if (action === 'BUY') {
+    return {
+      title:
+        '🔥 ALPHAOS · BUY SETUP',
+      action:
+        'Qualified setup detected',
+      riskLabel,
+    };
+  }
+
+  return {
+    title:
+      '🔥 ALPHAOS · ENTRY READY',
+    action:
+      'Entry window detected',
+    riskLabel,
+  };
+}
+
+function strategyLabel(
+  opportunity: OpportunityRow,
+): string {
+  const strategy =
+    String(
+      opportunity.strategy_key ??
+      'OPPORTUNITY',
+    );
+
+  return strategy
+    .replace(
+      /^PONS_/,
+      '',
+    )
+    .replace(
+      /^SOL_/,
+      '',
+    )
+    .replace(
+      /_/g,
+      ' ',
+    );
+}
+
+function signedPercent(
+  value: number | null,
+): string {
+  if (value == null) {
+    return '-';
+  }
+
+  return `${
+    value >= 0
+      ? '+'
+      : ''
+  }${value.toFixed(2)}%`;
+}
+
 function buildOpportunityMessage(
   opportunity: OpportunityRow,
 ): string {
-  const action =
-    opportunity.recommended_action as
-      DeliverableAction;
+  const presentation =
+    actionPresentation(
+      opportunity,
+    );
 
-  const meta =
-    actionMeta(
-      action,
+  const currentRoi =
+    rawNumber(
+      opportunity,
+      'currentRoi',
+    );
+
+  const roiChange =
+    rawNumber(
+      opportunity,
+      'roiChange',
+    );
+
+  const elapsedSec =
+    rawNumber(
+      opportunity,
+      'elapsedSec',
     );
 
   const confidence =
     opportunity.confidence == null
-      ? 'Tracking'
+      ? '-'
       : `${Math.round(
           opportunity.confidence,
-        )}/100`;
+        )}`;
 
-  const risk =
-    opportunity.risk_score == null
-      ? 'Tracking'
-      : `${Math.round(
-          opportunity.risk_score,
-        )}/100`;
+  const age =
+    elapsedSec == null
+      ? '-'
+      : elapsedSec < 60
+        ? `${Math.round(
+            elapsedSec,
+          )}s`
+        : `${Math.round(
+            elapsedSec /
+            60,
+          )}m`;
+
+  const reason =
+    opportunity.why ??
+    opportunity.what_happened ??
+    'AlphaOS detected a qualified market-state change.';
 
   return [
-    '⚡ <b>ALPHAOS · STRATEGY INTELLIGENCE</b>',
+    `<b>${presentation.title}</b>`,
     '',
     `<b>${escapeHtml(
-      opportunity.title ??
-      compactAddress(
-        opportunity.asset_id,
+      strategyLabel(
+        opportunity,
+      ),
+    )}</b> · ${escapeHtml(
+      age,
+    )}`,
+    '',
+    `Move        <b>${escapeHtml(
+      signedPercent(
+        currentRoi,
       ),
     )}</b>`,
+    `Momentum    <b>${escapeHtml(
+      signedPercent(
+        roiChange,
+      ),
+    )}</b>`,
+    `Confidence  <b>${escapeHtml(
+      confidence,
+    )}</b>`,
+    `Risk        <b>${escapeHtml(
+      presentation.riskLabel,
+    )}</b>`,
+    ...devEvidenceLines(
+      opportunity,
+    ),
+    '',
+    `🧠 ${escapeHtml(
+      reason,
+    )}`,
+    '',
+    `<b>${escapeHtml(
+      presentation.action,
+    )}</b>`,
+    '',
     `<code>${escapeHtml(
       compactAddress(
         opportunity.asset_id,
       ),
     )}</code>`,
-    '',
-    `<b>${meta.heading}</b>`,
-    meta.instruction,
-    '',
-    `🧠 <b>STRATEGY</b>`,
-    escapeHtml(
-      opportunity.strategy_key ??
-      'UNKNOWN',
-    ),
-    '',
-    `❓ <b>WHY YOU RECEIVED THIS</b>`,
-    escapeHtml(
-      opportunity.why ??
-      'AlphaOS detected a strategy-qualified change.',
-    ),
-    '',
-    `📈 <b>WHAT HAPPENED</b>`,
-    escapeHtml(
-      opportunity.what_happened ??
-      'A material market-state change was detected.',
-    ),
-    '',
-    `🎯 <b>WHAT TO DO</b>`,
-    escapeHtml(
-      action.replace(
-        /_/g,
-        ' ',
-      ),
-    ),
-    '',
-    `🛑 <b>INVALIDATION</b>`,
-    escapeHtml(
-      opportunity.invalidation ??
-      'Exit or ignore the setup if the qualifying conditions no longer hold.',
-    ),
-    '',
-    `⚠️ <b>RISK</b>`,
-    escapeHtml(
-      opportunity.risk_reason ??
-      'Crypto markets can reverse quickly.',
-    ),
-    '',
-    `Confidence  <b>${confidence}</b>`,
-    `Risk Score  <b>${risk}</b>`,
-    '',
-    'Manual execution only · verify live market conditions before acting.',
   ].join(
     '\n',
+  );
+}
+
+function executionAvailable(
+  opportunity: OpportunityRow,
+): boolean {
+  /*
+   * Current real execution adapter:
+   * Solana -> Jupiter admin trading.
+   *
+   * Robinhood/PONS execution must NOT pass through
+   * the Solana adapter.
+   */
+  return (
+    String(
+      opportunity.chain ??
+      '',
+    ).toLowerCase() ===
+    'solana'
   );
 }
 
@@ -248,22 +455,45 @@ function buildButtons(
     >
   >,
 ): InlineButton[][] {
-  const rows: InlineButton[][] = [
-    [
+  const rows:
+    InlineButton[][] = [];
+
+  if (
+    executionAvailable(
+      opportunity,
+    )
+  ) {
+    rows.push([
       {
         text:
-          opportunity.recommended_action ===
-          'EXIT'
-            ? `🚨 ${tokenTarget.label.replace(
-                /^[^A-Z]*/i,
-                '',
-              )}`
-            : tokenTarget.label,
-        url:
-          tokenTarget.url,
+          '⚡ TRADE',
+
+        callback_data:
+          `OPP_TRADE_${opportunity.id}`,
       },
-    ],
-  ];
+    ]);
+  }
+
+  rows.push([
+    {
+      text:
+        '👀 TRACK',
+
+      callback_data:
+        `OPP_TRACK_${opportunity.id}`,
+    },
+
+    {
+      text:
+        tokenTarget.source ===
+        'dexscreener'
+          ? '📊 CHART'
+          : '🔎 TOKEN',
+
+      url:
+        tokenTarget.url,
+    },
+  ]);
 
   if (
     opportunity.strategy_key
@@ -271,7 +501,8 @@ function buildButtons(
     rows.push([
       {
         text:
-          '🔕 MUTE STRATEGY',
+          '🔕 MUTE',
+
         callback_data:
           `STRAT_TOGGLE_${opportunity.strategy_key}`,
       },
@@ -296,7 +527,7 @@ function userCanReceiveOpportunity(
   const mode =
     String(
       process.env.OPPORTUNITY_DELIVERY_MODE ??
-      'admin_only',
+      'paid',
     )
       .trim()
       .toLowerCase();
@@ -538,24 +769,6 @@ async function deliverOpportunity(
     return;
   }
 
-  if (
-    TEMPORARILY_EXTERNAL_STRATEGIES.has(
-      opportunity.strategy_key,
-    )
-  ) {
-    console.log(
-      '[OpportunityDelivery] Existing external delivery retained:',
-      {
-        opportunityId:
-          opportunity.id,
-
-        strategy:
-          opportunity.strategy_key,
-      },
-    );
-
-    return;
-  }
 
   const tokenTarget =
     await resolveTokenOpenTarget({
@@ -566,8 +779,113 @@ async function deliverOpportunity(
         opportunity.asset_id,
     });
 
+  if (
+    String(
+      opportunity.chain ??
+      '',
+    ).toLowerCase() ===
+    'robinhood'
+  ) {
+    try {
+      const devFlow =
+        await scanRobinhoodDevTokenFlow(
+          opportunity.asset_id,
+        );
+
+      opportunity.raw_data = {
+        ...(
+          opportunity.raw_data ??
+          {}
+        ),
+
+        devHoldingPercent:
+          devFlow.devHoldingPercent,
+
+        totalBurnPercent:
+          devFlow.totalBurnPercent,
+
+        confirmedDevBurnPercent:
+          devFlow.confirmedDevBurnPercent,
+
+        otherDevTransferPercent:
+          devFlow.otherDevTransferPercent,
+
+        devFlowEvidenceStatus:
+          devFlow.evidenceStatus,
+
+        deployerAddress:
+          devFlow.deployerAddress,
+      };
+
+      console.log(
+        '[OpportunityDelivery] Developer flow enriched:',
+        {
+          opportunityId:
+            opportunity.id,
+
+          holding:
+            devFlow.devHoldingPercent,
+
+          burned:
+            devFlow.totalBurnPercent,
+
+          devBurn:
+            devFlow.confirmedDevBurnPercent,
+
+          transferred:
+            devFlow.otherDevTransferPercent,
+
+          evidence:
+            devFlow.evidenceStatus,
+        },
+      );
+    } catch (error) {
+      console.log(
+        '[OpportunityDelivery] Developer flow unavailable:',
+        error instanceof Error
+          ? error.message
+          : String(error),
+      );
+    }
+  }
+
   const users =
-    await getDeliverableUsers();
+    (
+      await getDeliverableUsers()
+    ).sort(
+      (a, b) => {
+        const priority = (
+          tier: DeliverableUser['tier'],
+        ) =>
+          tier === 'admin'
+            ? 0
+            : tier === 'paid'
+              ? 1
+              : 2;
+
+        return (
+          priority(
+            a.tier,
+          ) -
+          priority(
+            b.tier,
+          )
+        );
+      },
+    );
+
+  /*
+   * Admin receives actionable intelligence first.
+   *
+   * Paid users become eligible 10 seconds after
+   * unified delivery begins.
+   *
+   * This is one shared gate — NOT 10 seconds per
+   * subscriber.
+   */
+  const paidReleaseAt =
+    Date.now() +
+    10_000;
 
   let delivered =
     0;
@@ -581,6 +899,45 @@ async function deliverOpportunity(
       )
     ) {
       continue;
+    }
+
+    if (
+      user.tier ===
+      'paid'
+    ) {
+      const delayMs =
+        Math.max(
+          0,
+          paidReleaseAt -
+          Date.now(),
+        );
+
+      if (
+        delayMs >
+        0
+      ) {
+        console.log(
+          '[OpportunityDelivery] Admin-first release gate:',
+          {
+            opportunityId:
+              opportunity.id,
+
+            telegramId:
+              user.telegram_id,
+
+            delayMs,
+          },
+        );
+
+        await new Promise<void>(
+          resolve => {
+            setTimeout(
+              resolve,
+              delayMs,
+            );
+          },
+        );
+      }
     }
 
     let strategyEnabled =
