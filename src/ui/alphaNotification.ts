@@ -112,13 +112,21 @@ function validMetric(metric: AlphaNotificationMetric): boolean {
 }
 
 export function renderAlphaNotification(alert: AlphaNotification): string {
-  const identity = alert.symbol || alert.token || alert.title;
+  const compactAddress = compactAlphaAddress(alert.address);
+  const identity = alert.symbol || alert.token || alert.title || compactAddress;
   const lines = [`<b>ALPHAOS · ${alphaStateLabel(alert.state)}</b>`];
 
   if (identity) {
-    lines.push('', `<b>${escapeAlphaHtml(identity)}</b>${alert.subtitle ? ` · ${escapeAlphaHtml(alert.subtitle)}` : ''}`);
+    const identityParts = [
+      `<b>${escapeAlphaHtml(identity)}</b>`,
+      alert.subtitle ? escapeAlphaHtml(alert.subtitle) : null,
+      alert.symbol && compactAddress ? `<code>${escapeAlphaHtml(compactAddress)}</code>` : null,
+    ].filter(Boolean);
+    lines.push('', identityParts.join(' · '));
   }
-  if (alert.address) lines.push(`<code>${escapeAlphaHtml(compactAlphaAddress(alert.address))}</code>`);
+  if (alert.address && !alert.symbol && identity !== compactAddress) {
+    lines.push(`<code>${escapeAlphaHtml(compactAddress)}</code>`);
+  }
 
   const metrics: AlphaNotificationMetric[] = [
     ...(alert.age ? [{ label: 'Age', value: alert.age }] : []),
@@ -127,7 +135,7 @@ export function renderAlphaNotification(alert: AlphaNotification): string {
       : []),
     ...(alert.risk ? [{ label: 'Risk', value: alert.risk }] : []),
     ...(alert.metrics ?? []),
-  ].filter(validMetric).slice(0, 6);
+  ].filter(validMetric).slice(0, 8);
 
   if (metrics.length) {
     lines.push('');

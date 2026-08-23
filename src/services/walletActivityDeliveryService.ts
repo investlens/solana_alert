@@ -220,26 +220,16 @@ async function buildButtons(
           event.tokenMint,
       });
 
-    buttons.push([
-      {
-        text:
-          target.source ===
-          'dexscreener'
-            ? '📊 Chart'
-            : '🔎 Token',
-
-        url:
-          target.url,
-      },
-
-      {
-        text:
-          '🐋 Wallet Activity',
-
-        callback_data:
-          'WALLET_TRACKING',
-      },
-    ]);
+    const marketActions: InlineButton[] = [];
+    if (target.chartUrl && target.chartUrl !== target.tokenUrl) {
+      marketActions.push({ text: '📊 Chart', url: target.chartUrl });
+    }
+    marketActions.push({ text: '🔎 Token', url: target.tokenUrl });
+    buttons.push(marketActions);
+    buttons.push([{
+      text: '🐋 Wallet Activity',
+      callback_data: 'WALLET_TRACKING',
+    }]);
   } else {
     buttons.push([
       {

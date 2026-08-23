@@ -408,21 +408,17 @@ registerOpportunityActions(
 
         await ctx.answerCbQuery();
 
+        const marketActions = [];
+        if (target.chartUrl && target.chartUrl !== target.tokenUrl) {
+          marketActions.push({ text: '📊 Chart', url: target.chartUrl });
+        }
+        marketActions.push({ text: '🔎 Token', url: target.tokenUrl });
+
         await ctx.reply(
-          '📊 Open market:',
+          'Open token market:',
           {
             reply_markup: {
-              inline_keyboard: [
-                [
-                  {
-                    text:
-                      target.label,
-
-                    url:
-                      target.url,
-                  },
-                ],
-              ],
+              inline_keyboard: [marketActions],
             },
           },
         );

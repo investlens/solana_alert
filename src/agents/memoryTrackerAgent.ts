@@ -314,7 +314,11 @@ export async function evaluateSolMomentum(
     [
       `Price ${priceChange >= 0 ? 'moved up' : 'moved down'} ${Math.abs(priceChange).toFixed(1)}%.`,
       `Market cap ${marketCapChange >= 0 ? 'moved up' : 'moved down'} ${Math.abs(marketCapChange).toFixed(1)}%.`,
-      `Liquidity ${liquidityChange >= 0 ? 'improved' : 'weakened'} ${Math.abs(liquidityChange).toFixed(1)}%.`,
+      liquidityChange > 0
+        ? `Liquidity improved ${liquidityChange.toFixed(1)}%.`
+        : liquidityChange < 0
+          ? `Liquidity weakened ${Math.abs(liquidityChange).toFixed(1)}%.`
+          : 'Liquidity held steady.',
       `Current buy ratio is ${buyRatio.toFixed(2)}.`,
     ].join(' ');
 
@@ -390,6 +394,15 @@ export async function evaluateSolMomentum(
     rawData: {
       strategy:
         'SOL_MOMENTUM',
+
+      symbol:
+        row.symbol,
+
+      marketCap:
+        current.marketCap,
+
+      liquidity:
+        current.liquidityUsd,
 
       decision:
         momentum.decision,
@@ -792,11 +805,17 @@ export async function evaluateSolReentry(
       strategy:
         'SOL_REENTRY',
 
+      symbol:
+        row.symbol,
+
       decision:
         momentum.decision,
 
       peakMarketCap,
       currentMarketCap,
+
+      currentLiquidity:
+        current.liquidityUsd,
 
       drawdownFromPeakPct,
 

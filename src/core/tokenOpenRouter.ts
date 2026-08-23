@@ -3,18 +3,31 @@ import {
 } from '../chains/robinhood/market.js';
 
 export type TokenOpenTarget = {
-  url: string;
-  label: string;
-  source:
-    | 'dexscreener'
-    | 'blockscout'
-    | 'dexscreener_search';
+  chartUrl?: string;
+  tokenUrl: string;
+  chartSource?: 'dexscreener' | 'dexscreener_search';
+  tokenSource: 'solscan' | 'blockscout' | 'dexscreener_search';
 };
 
 type TokenOpenInput = {
   chain?: string | null;
   tokenAddress: string;
 };
+
+export function resolveTokenExplorerUrl(
+  chainValue: string | null | undefined,
+  tokenAddress: string,
+): string {
+  const chain = String(chainValue ?? '').trim().toLowerCase();
+  const encoded = encodeURIComponent(tokenAddress.trim());
+  if (chain === 'robinhood' || chain === 'pons') {
+    return `https://robinhoodchain.blockscout.com/token/${encoded}`;
+  }
+  if (chain === 'solana' || !chain) {
+    return `https://solscan.io/token/${encoded}`;
+  }
+  return `https://dexscreener.com/search?q=${encoded}`;
+}
 
 /*
  * Smart Token Router
@@ -35,7 +48,9 @@ type TokenOpenInput = {
  *      yet have a usable DexScreener market.
  *
  * Other chains:
- *   Use DexScreener search for now.
+ *   Expose separate chart and token destinations when the chain has a safe,
+ *   known route; otherwise retain DexScreener search as the non-execution
+ *   fallback.
  */
 export async function resolveTokenOpenTarget(
   input: TokenOpenInput,
@@ -63,9 +78,10 @@ export async function resolveTokenOpenTarget(
         snapshot.priceUsd > 0
       ) {
         return {
-          url: snapshot.chartUrl,
-          label: '📊 OPEN ON DEXSCREENER',
-          source: 'dexscreener',
+          chartUrl: snapshot.chartUrl,
+          tokenUrl: resolveTokenExplorerUrl(chain, tokenAddress),
+          chartSource: 'dexscreener',
+          tokenSource: 'blockscout',
         };
       }
     } catch (error) {
@@ -82,19 +98,24 @@ export async function resolveTokenOpenTarget(
     }
 
     return {
-      url:
-        'https://robinhoodchain.blockscout.com/token/' +
-        encodeURIComponent(tokenAddress),
-      label: '🔎 OPEN EXPLORER',
-      source: 'blockscout',
+      tokenUrl: resolveTokenExplorerUrl(chain, tokenAddress),
+      tokenSource: 'blockscout',
+    };
+  }
+
+  if (chain === 'solana' || !chain) {
+    return {
+      chartUrl: 'https://dexscreener.com/solana/' + encodeURIComponent(tokenAddress),
+      tokenUrl: resolveTokenExplorerUrl(chain, tokenAddress),
+      chartSource: 'dexscreener',
+      tokenSource: 'solscan',
     };
   }
 
   return {
-    url:
-      'https://dexscreener.com/search?q=' +
-      encodeURIComponent(tokenAddress),
-    label: '🔎 CHECK TOKEN',
-    source: 'dexscreener_search',
+    chartUrl: 'https://dexscreener.com/search?q=' + encodeURIComponent(tokenAddress),
+    tokenUrl: resolveTokenExplorerUrl(chain, tokenAddress),
+    chartSource: 'dexscreener_search',
+    tokenSource: 'dexscreener_search',
   };
 }

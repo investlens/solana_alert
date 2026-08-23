@@ -1,3 +1,5 @@
+import { describeMetricComparison } from '../../product/metricComparison.js';
+
 export type PonsAlphaState =
   | 'WATCHING'
   | 'FLAT_DEAD'
@@ -402,11 +404,7 @@ export function classifyPonsAlpha(
         'ENTRY_WINDOW',
 
       reason:
-        `Confirmed acceleration: ROI improved ${roiChange.toFixed(
-          2,
-        )}% to +${currentRoi.toFixed(
-          2,
-        )}%.`,
+        `Confirmed acceleration: ${describeMetricComparison('ROI', previousRoi, currentRoi)}`,
 
       actionable:
         true,
@@ -474,9 +472,7 @@ export function classifyPonsAlpha(
         'MOMENTUM_BUILDING',
 
       reason:
-        `Still negative, but curve ROI improved ${roiChange.toFixed(
-          2,
-        )}% since the previous checkpoint.`,
+        `Still negative, but ${describeMetricComparison('curve ROI', previousRoi, currentRoi)}`,
 
       actionable:
         false,

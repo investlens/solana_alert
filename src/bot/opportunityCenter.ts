@@ -755,21 +755,21 @@ async function renderOpportunity(
     ]);
   }
 
-  actionRows.push([
-    ...(canWatch ? [Markup.button.callback(
-        tracked ? '✅ UNTRACK' : '👀 TRACK',
-        tracked
-          ? `OPP_UNTRACK_${opportunity.id}`
-          : `OPP_TRACK_${opportunity.id}`,
-      )] : []),
-    Markup.button.url(
-      tokenTarget.source ===
-      'dexscreener'
-        ? '📊 CHART'
-        : '🔎 TOKEN',
-      tokenTarget.url,
-    ),
-  ]);
+  const marketActions = [];
+  if (tokenTarget.chartUrl && tokenTarget.chartUrl !== tokenTarget.tokenUrl) {
+    marketActions.push(Markup.button.url('📊 Chart', tokenTarget.chartUrl));
+  }
+  marketActions.push(Markup.button.url('🔎 Token', tokenTarget.tokenUrl));
+  actionRows.push(marketActions);
+
+  if (canWatch) {
+    actionRows.push([Markup.button.callback(
+      tracked ? '✅ Untrack' : '👀 Track',
+      tracked
+        ? `OPP_UNTRACK_${opportunity.id}`
+        : `OPP_TRACK_${opportunity.id}`,
+    )]);
+  }
 
   actionRows.push([
     Markup.button.callback(

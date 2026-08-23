@@ -33,15 +33,16 @@ import {
   opportunityDeliveryIdentity,
 } from './opportunityDeliveryIdentity.js';
 import { accessProfileForUser, hasCapability } from '../product/capabilities.js';
-import { strategyDisplay } from '../product/strategyPresentation.js';
 import {
   assertAlphaActions,
   burnEvidenceMetric,
+  compactAlphaAddress,
   renderAlphaNotification,
   type AlphaNotificationState,
 } from '../ui/alphaNotification.js';
 import { deliverReservedTelegram } from './telegramDeliveryContract.js';
 import { createLeaseToken, DELIVERY_LEASE_SECONDS } from './reservationLease.js';
+import { formatUsd } from '../ui/alphaAlert/index.js';
 
 type DeliverableAction =
   | 'BUY'
@@ -171,6 +172,30 @@ function rawNumber(
   )
     ? value
     : null;
+}
+
+function rawText(opportunity: OpportunityRow, ...keys: string[]): string | null {
+  for (const key of keys) {
+    const value = opportunity.raw_data?.[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function rawPositiveNumber(opportunity: OpportunityRow, ...keys: string[]): number | null {
+  const containers = [
+    opportunity.raw_data,
+    opportunity.raw_data?.market,
+    opportunity.raw_data?.intelligence,
+  ];
+  for (const container of containers) {
+    if (!container || typeof container !== 'object' || Array.isArray(container)) continue;
+    for (const key of keys) {
+      const value = Number((container as Record<string, unknown>)[key]);
+      if (Number.isFinite(value) && value > 0) return value;
+    }
+  }
+  return null;
 }
 
 function devEvidenceLines(
@@ -397,21 +422,31 @@ export function buildOpportunityMessage(
   const holding = rawNumber(opportunity, 'devHoldingPercent');
   const transferred = rawNumber(opportunity, 'otherDevTransferPercent');
   const burned = rawNumber(opportunity, 'totalBurnPercent');
+  const symbol = rawText(opportunity, 'symbol', 'tokenSymbol', 'token_symbol');
+  const marketCap = rawPositiveNumber(
+    opportunity, 'marketCap', 'marketCapUsd', 'currentMarketCap', 'market_cap',
+  );
+  const liquidity = rawPositiveNumber(
+    opportunity, 'liquidity', 'liquidityUsd', 'currentLiquidity', 'current_liquidity',
+  );
 
   return renderAlphaNotification({
     category: action === 'EXIT' ? 'risk' : 'opportunity',
     severity: action === 'EXIT' ? 'critical' : action === 'BUY' ? 'positive' : 'watch',
     state,
     title: opportunity.title,
-    symbol: strategyDisplay(opportunity.strategy_key).name,
+    symbol,
+    token: symbol ? undefined : compactAlphaAddress(opportunity.asset_id),
     address: opportunity.asset_id,
     chain: opportunity.chain,
     age,
     confidence: opportunity.confidence,
     risk: presentation.riskLabel,
     metrics: [
-      { label: 'Move', value: signedPercent(currentRoi) },
-      { label: 'Momentum', value: signedPercent(roiChange) },
+      ...(marketCap == null ? [] : [{ label: 'Market cap', value: formatUsd(marketCap) }]),
+      ...(liquidity == null ? [] : [{ label: 'Liquidity', value: formatUsd(liquidity) }]),
+      ...(currentRoi == null ? [] : [{ label: 'Move', value: signedPercent(currentRoi) }]),
+      ...(roiChange == null ? [] : [{ label: 'Momentum', value: signedPercent(roiChange) }]),
       ...(holding == null ? [] : [{ label: 'Dev holding', value: `${holding.toFixed(2)}%` }]),
       ...(transferred == null ? [] : [{ label: 'Transferred', value: `${transferred.toFixed(2)}%` }]),
       ...(opportunity.raw_data && Object.prototype.hasOwnProperty.call(opportunity.raw_data, 'totalBurnPercent')
@@ -469,41 +504,28 @@ function buildButtons(
     ]);
   }
 
-  rows.push([
-    {
-      text:
-        '👀 Track',
+  const marketActions: InlineButton[] = [];
+  if (tokenTarget.chartUrl && tokenTarget.chartUrl !== tokenTarget.tokenUrl) {
+    marketActions.push({ text: '📊 Chart', url: tokenTarget.chartUrl });
+  }
+  marketActions.push({ text: '🔎 Token', url: tokenTarget.tokenUrl });
+  rows.push(marketActions);
 
-      callback_data:
-        `OPP_TRACK_${opportunity.id}`,
-    },
-
-    {
-      text:
-        tokenTarget.source ===
-        'dexscreener'
-          ? '📊 Chart'
-          : '🔎 Token',
-
-      url:
-        tokenTarget.url,
-    },
-  ]);
+  const preferenceActions: InlineButton[] = [{
+    text: '👀 Track',
+    callback_data: `OPP_TRACK_${opportunity.id}`,
+  }];
 
   if (
     opportunity.strategy_key &&
     Buffer.byteLength(`STRAT_TOGGLE_${opportunity.strategy_key}`, 'utf8') <= 64
   ) {
-    rows.push([
-      {
-        text:
-          '🔕 Mute',
-
-        callback_data:
-          `STRAT_TOGGLE_${opportunity.strategy_key}`,
-      },
-    ]);
+    preferenceActions.push({
+      text: '🔕 Mute',
+      callback_data: `STRAT_TOGGLE_${opportunity.strategy_key}`,
+    });
   }
+  rows.push(preferenceActions);
 
   return assertAlphaActions(rows);
 }
