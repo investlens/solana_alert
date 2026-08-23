@@ -27,6 +27,7 @@ import {
 import {
   recordOpportunityAndEmit,
 } from '../../services/opportunityService.js';
+import { hasVerifiedOpportunityIdentity, mergePonsLifecycleContext } from '../../product/opportunityContext.js';
 
 import {
   getPonsV2CurveState,
@@ -94,7 +95,24 @@ export function buildPonsOpportunityRawData(args: PonsOpportunitySyncArgs) {
 export async function syncPonsOpportunity(
   args: PonsOpportunitySyncArgs,
 ): Promise<void> {
-  const rawData = buildPonsOpportunityRawData(args);
+  const incomingRawData = buildPonsOpportunityRawData(args);
+  const { data: priorRows, error: priorContextError } = await supabase
+    .from('opportunities')
+    .select('raw_data')
+    .eq('asset_id', args.token)
+    .eq('chain', 'robinhood')
+    .order('updated_at', { ascending: false })
+    .limit(20);
+  if (priorContextError) {
+    console.warn('[PonsAlpha] Prior opportunity context lookup failed:', {
+      token: args.token,
+      error: priorContextError.message,
+    });
+  }
+  const priorContext = (priorRows ?? [])
+    .map(row => row.raw_data as Record<string, unknown> | null)
+    .find(hasVerifiedOpportunityIdentity);
+  const rawData = mergePonsLifecycleContext(priorContext, incomingRawData);
 
   /*
    * PONS IGNITION

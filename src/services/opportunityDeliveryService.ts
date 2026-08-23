@@ -399,6 +399,8 @@ export function buildOpportunityMessage(
   const transferred = rawNumber(opportunity, 'otherDevTransferPercent');
   const burned = rawNumber(opportunity, 'totalBurnPercent');
   const transferEvidenceComplete = opportunity.raw_data?.devFlowEvidenceStatus === 'COMPLETE';
+  const transferZeroMeaningful = opportunity.raw_data?.transferZeroConfirmedMeaningful === true;
+  const burnZeroMeaningful = opportunity.raw_data?.burnZeroConfirmedMeaningful === true;
   const market = normalizeNotificationMarketContext(
     opportunity.raw_data,
     opportunity.raw_data?.market as Record<string, unknown> | undefined,
@@ -436,10 +438,10 @@ export function buildOpportunityMessage(
     ],
     specialistMetrics: [
       ...(holding == null ? [] : [{ label: 'Dev holding', value: `${holding.toFixed(2)}%` }]),
-      ...(transferred == null || (transferred === 0 && !transferEvidenceComplete)
+      ...(transferred == null || (transferred === 0 && (!transferEvidenceComplete || !transferZeroMeaningful))
         ? []
         : [{ label: 'Transferred', value: `${transferred.toFixed(2)}%` }]),
-      ...(opportunity.raw_data && Object.prototype.hasOwnProperty.call(opportunity.raw_data, 'totalBurnPercent')
+      ...(burned != null && (burned > 0 || burnZeroMeaningful)
         ? [burnEvidenceMetric(burned)]
         : []),
     ],
@@ -534,6 +536,17 @@ export function mergeOpportunityMarketContext(
     enrichment as Record<string, unknown> | undefined,
     { address: opportunity.asset_id },
   );
+  const observedAt = new Date().toISOString();
+  const verifiedMarketContext = marketIndexState === 'VERIFIED'
+    ? {
+        marketCap: normalized.marketCap,
+        liquidity: normalized.liquidity,
+        volume5m: normalized.volume5m,
+        chartUrl: normalized.chartUrl,
+        observedAt,
+        source: 'ROBINHOOD_MARKET_SNAPSHOT',
+      }
+    : existing.verifiedMarketContext;
   return {
     ...existing,
     ...(normalized.symbol ? { symbol: normalized.symbol } : {}),
@@ -543,6 +556,15 @@ export function mergeOpportunityMarketContext(
     ...(normalized.volume5m != null ? { volume5m: normalized.volume5m } : {}),
     ...(normalized.chartUrl ? { chartUrl: normalized.chartUrl } : {}),
     ...(marketIndexState ? { marketIndexState } : {}),
+    ...(normalized.symbol || normalized.name
+      ? {
+          identityVerifiedAt: existing.identityVerifiedAt ?? observedAt,
+          identitySource: existing.identitySource ?? (
+            marketIndexState === 'VERIFIED' ? 'ROBINHOOD_MARKET_SNAPSHOT' : 'ROBINHOOD_ONCHAIN_METADATA'
+          ),
+        }
+      : {}),
+    ...(verifiedMarketContext ? { verifiedMarketContext } : {}),
   };
 }
 

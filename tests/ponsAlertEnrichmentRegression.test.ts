@@ -2,17 +2,19 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { TokenOpenTarget } from '../src/core/tokenOpenRouter.js';
+import { mergePonsLifecycleContext } from '../src/product/opportunityContext.js';
 
 const address = '0x23e516c1261af6f40e44abbecb29b22e192669cb';
+const rustyAddress = '0xc48e455a4621bce424aa86b8e2d9e66f544e74d1';
 
 async function service() {
   await import('dotenv/config');
   return import('../src/services/opportunityDeliveryService.js');
 }
 
-function opportunity(raw_data: Record<string, unknown>) {
+function opportunity(raw_data: Record<string, unknown>, asset_id = address) {
   return {
-    id: 406, asset_id: address, chain: 'robinhood', strategy_key: 'PONS_BREAKOUT',
+    id: 406, asset_id, chain: 'robinhood', strategy_key: 'PONS_BREAKOUT',
     recommended_action: 'CHECK_ENTRY', status: 'NEW', title: 'PONS entry',
     why: 'Momentum turned positive after an earlier dip.', what_happened: null,
     invalidation: null, risk_reason: null, confidence: 89, risk_score: 22, raw_data,
@@ -89,4 +91,74 @@ test('generic missing data and historical outcomes never claim market indexing',
     symbol: 'YOMOGI', name: 'Yomogi in Hood', address,
   }, 'NOT_INDEXED');
   assert.doesNotMatch(buildOpportunityMessage(historical), /INDEXING|still indexing/i);
+});
+
+test('RUSTY identity survives Entry Ready persistence and a symbol-less Exit transition', async () => {
+  const { buildOpportunityMessage, mergeOpportunityMarketContext } = await service();
+  const entry = opportunity({ elapsedSec: 75, currentRoi: 6.13, roiChange: 5.62 }, rustyAddress);
+  entry.raw_data = mergeOpportunityMarketContext(entry, {
+    symbol: 'RUSTY', name: 'Rusty', address: rustyAddress,
+  }, 'NOT_INDEXED');
+  assert.match(buildOpportunityMessage(entry), /<b>RUSTY<\/b>/);
+  assert.match(buildOpportunityMessage(entry), /Market\s+<b>INDEXING<\/b>/);
+
+  const exitRaw = mergePonsLifecycleContext(entry.raw_data, {
+    symbol: null, name: null, marketCap: null, liquidity: null, volume5m: null,
+    elapsedSec: 215, currentRoi: -29.67, roiChange: -34,
+    ponsAlphaState: 'FADING', source: 'PONS_ALPHA_CLASSIFIER',
+  });
+  const exit = { ...opportunity(exitRaw, rustyAddress), recommended_action: 'EXIT', confidence: 80, risk_score: 90 };
+  const message = buildOpportunityMessage(exit);
+  assert.match(message, /<b>RUSTY<\/b> · <code>0xc48e…e74d1<\/code>/);
+  assert.doesNotMatch(message, /INDEXING|still indexing/i);
+});
+
+test('lifecycle merge protects verified identity but accepts a stronger verified replacement', () => {
+  const existing = {
+    symbol: 'RUSTY', name: 'Rusty', identityVerifiedAt: '2026-08-23T13:56:00.000Z',
+    identitySource: 'ROBINHOOD_ONCHAIN_METADATA', marketIndexState: 'NOT_INDEXED',
+  };
+  const missing = mergePonsLifecycleContext(existing, { symbol: 'UNKNOWN', name: '', currentRoi: -2 });
+  assert.equal(missing.symbol, 'RUSTY');
+  assert.equal(missing.name, 'Rusty');
+
+  const replacement = mergePonsLifecycleContext(existing, {
+    symbol: 'RUSTY2', name: 'Rusty Two', identityVerifiedAt: '2026-08-23T13:57:00.000Z',
+    identitySource: 'ROBINHOOD_MARKET_SNAPSHOT',
+  });
+  assert.equal(replacement.symbol, 'RUSTY2');
+  assert.equal(replacement.name, 'Rusty Two');
+});
+
+test('stale market observations remain auditable but are not presented as current', async () => {
+  const { buildOpportunityMessage, mergeOpportunityMarketContext } = await service();
+  const entry = opportunity({ elapsedSec: 75 });
+  entry.raw_data = mergeOpportunityMarketContext(entry, {
+    symbol: 'RUSTY', marketCap: 80_000, liquidity: 20_000, volume5m: 5_000,
+    chartUrl: 'https://dexscreener.com/robinhood/rusty',
+  }, 'VERIFIED');
+  const later = mergePonsLifecycleContext(entry.raw_data, {
+    symbol: null, marketCap: null, liquidity: null, volume5m: null,
+    elapsedSec: 215, currentRoi: -29.67,
+  });
+  assert.ok(later.verifiedMarketContext);
+  const exit = { ...opportunity(later), recommended_action: 'EXIT' };
+  assert.doesNotMatch(buildOpportunityMessage(exit), /Market cap|Liquidity|5m volume/);
+});
+
+test('opportunity specialist zeroes require explicit meaningful confirmation', async () => {
+  const { buildOpportunityMessage } = await service();
+  const unconfirmed = buildOpportunityMessage(opportunity({
+    symbol: 'RUSTY', elapsedSec: 31, otherDevTransferPercent: 0,
+    totalBurnPercent: 0, devFlowEvidenceStatus: 'COMPLETE',
+  }));
+  assert.doesNotMatch(unconfirmed, /Transferred|Burn\s/);
+
+  const confirmed = buildOpportunityMessage(opportunity({
+    symbol: 'RUSTY', elapsedSec: 31, otherDevTransferPercent: 0,
+    totalBurnPercent: 0, devFlowEvidenceStatus: 'COMPLETE',
+    transferZeroConfirmedMeaningful: true, burnZeroConfirmedMeaningful: true,
+  }));
+  assert.match(confirmed, /Transferred\s+<b>0\.00%<\/b>/);
+  assert.match(confirmed, /Burn\s+<b>0 confirmed<\/b>/);
 });
