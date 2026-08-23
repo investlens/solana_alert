@@ -21,6 +21,7 @@ export type ChainMarketSnapshot = {
   priceUsd: number;
 
   marketCapUsd: number;
+  fdvUsd?: number;
   liquidityUsd: number;
 
   volume5mUsd: number;

@@ -33,6 +33,10 @@ import {
   getPonsV2CurveState,
   quotePonsV2Sell,
 } from './ponsV2CurveQuote.js';
+import {
+  resolvePonsV2PreIndexValuation,
+  type VerifiedPonsPreIndexValuation,
+} from './ponsPreIndexValuation.js';
 
 
 
@@ -57,6 +61,7 @@ type PonsOpportunitySyncArgs = {
   volume5m?: number | null;
   chartUrl?: string | null;
   devHoldingPercent?: number | null;
+  preIndexValuation?: VerifiedPonsPreIndexValuation | null;
   state: string;
   reason: string;
   currentRoi: number;
@@ -76,6 +81,7 @@ export function buildPonsOpportunityRawData(args: PonsOpportunitySyncArgs) {
     devHoldingPercent: args.devHoldingPercent ?? null,
     devHoldingEvidence: args.devHoldingPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
     devHoldingSource: args.devHoldingPercent == null ? null : 'PONS_SHADOW_DEV_HOLDING',
+    preIndexValuation: args.preIndexValuation ?? null,
     ponsAlphaState:
       args.state,
 
@@ -1855,6 +1861,17 @@ async function updateShadowRow(
             0
         ) {
           try {
+            let preIndexValuation: VerifiedPonsPreIndexValuation | null = null;
+            if (!validNumber(row.entry_market_cap) || row.entry_market_cap <= 0) {
+              try {
+                preIndexValuation = await resolvePonsV2PreIndexValuation(curveState);
+              } catch (error) {
+                console.warn('[PonsValuation] Pre-index V2 valuation unavailable:', {
+                  token: row.token_address,
+                  error: error instanceof Error ? error.message : String(error),
+                });
+              }
+            }
             await syncPonsOpportunity({
               token:
                 row.token_address,
@@ -1867,6 +1884,8 @@ async function updateShadowRow(
 
               devHoldingPercent:
                 row.dev_holding_percent,
+
+              preIndexValuation,
 
               state:
                 alphaClassification.state,

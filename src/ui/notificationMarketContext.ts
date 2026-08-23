@@ -6,6 +6,7 @@ export type NotificationMarketContext = {
   name: string | null;
   address: string | null;
   marketCap: number | null;
+  fdv: number | null;
   liquidity: number | null;
   volume5m: number | null;
   chartUrl: string | null;
@@ -86,8 +87,9 @@ export function normalizeNotificationMarketContext(
     address: text(sources, ['address', 'tokenAddress', 'token_address', 'mint', 'asset_id']),
     marketCap: positiveNumber(sources, [
       'marketCap', 'marketCapUsd', 'market_cap', 'currentMarketCap', 'current_market_cap',
-      'entryMarketCap', 'entry_market_cap', 'fdv',
+      'entryMarketCap', 'entry_market_cap',
     ]),
+    fdv: positiveNumber(sources, ['fdv', 'fdvUsd', 'fdv_usd']),
     liquidity: positiveNumber(sources, [
       'liquidity', 'liquidityUsd', 'liquidity_usd', 'currentLiquidity', 'current_liquidity',
       'entryLiquidity', 'entry_liquidity',
@@ -100,10 +102,11 @@ export function normalizeNotificationMarketContext(
 }
 
 export function marketContextMetrics(
-  context: Pick<NotificationMarketContext, 'marketCap' | 'liquidity' | 'volume5m'>,
+  context: Pick<NotificationMarketContext, 'marketCap' | 'fdv' | 'liquidity' | 'volume5m'>,
 ): AlphaNotificationMetric[] {
   return [
     ...(context.marketCap == null ? [] : [{ label: 'Market cap', value: formatUsd(context.marketCap) }]),
+    ...(context.marketCap != null || context.fdv == null ? [] : [{ label: 'FDV', value: formatUsd(context.fdv) }]),
     ...(context.liquidity == null ? [] : [{ label: 'Liquidity', value: formatUsd(context.liquidity) }]),
     ...(context.volume5m == null ? [] : [{ label: '5m volume', value: formatUsd(context.volume5m) }]),
   ];

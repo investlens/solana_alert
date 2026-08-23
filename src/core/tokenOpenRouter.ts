@@ -93,6 +93,7 @@ export async function resolveTokenOpenTarget(
             name: snapshot.name,
             address: tokenAddress,
             marketCap: snapshot.marketCapUsd,
+            fdv: snapshot.fdvUsd,
             liquidity: snapshot.liquidityUsd,
             volume5m: snapshot.volume5mUsd,
             chartUrl: snapshot.chartUrl,

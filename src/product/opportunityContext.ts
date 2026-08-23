@@ -41,6 +41,12 @@ export function mergePonsLifecycleContext(
   const burnVerified = incomingEvidence.burnEvidence === 'VERIFIED'
     ? incomingEvidence
     : priorEvidence.burnEvidence === 'VERIFIED' ? priorEvidence : null;
+  const incomingValuation = incoming.preIndexValuation && typeof incoming.preIndexValuation === 'object'
+    ? incoming.preIndexValuation
+    : null;
+  const priorValuation = existing?.preIndexValuation && typeof existing.preIndexValuation === 'object'
+    ? existing.preIndexValuation
+    : null;
 
   return {
     ...incoming,
@@ -54,6 +60,9 @@ export function mergePonsLifecycleContext(
       : {}),
     ...(existing?.verifiedMarketContext && !incoming.verifiedMarketContext
       ? { verifiedMarketContext: existing.verifiedMarketContext }
+      : {}),
+    ...((incomingValuation ?? priorValuation)
+      ? { preIndexValuation: incomingValuation ?? priorValuation }
       : {}),
     ...(devHoldingVerified
       ? {
