@@ -406,6 +406,15 @@ export function buildOpportunityMessage(
     { address: opportunity.asset_id },
   );
   const symbol = market.symbol;
+  const earlyMarketIndexing = (
+    ['robinhood', 'pons'].includes(String(opportunity.chain ?? '').toLowerCase()) &&
+    String(opportunity.strategy_key ?? '').toUpperCase().startsWith('PONS_') &&
+    (action === 'BUY' || action === 'CHECK_ENTRY') &&
+    elapsedSec != null && elapsedSec >= 0 && elapsedSec <= 600 &&
+    Boolean(market.symbol || market.name) &&
+    market.marketCap == null && market.liquidity == null && !market.chartUrl &&
+    opportunity.raw_data?.marketIndexState === 'NOT_INDEXED'
+  );
 
   return renderAlphaNotification({
     category: action === 'EXIT' ? 'risk' : 'opportunity',
@@ -421,6 +430,7 @@ export function buildOpportunityMessage(
     risk: presentation.riskLabel,
     metrics: [
       ...marketContextMetrics(market),
+      ...(earlyMarketIndexing ? [{ label: 'Market', value: 'INDEXING' }] : []),
       ...(currentRoi == null ? [] : [{ label: 'Move', value: signedPercent(currentRoi) }]),
       ...(roiChange == null ? [] : [{ label: 'Momentum', value: signedPercent(roiChange) }]),
     ],
@@ -434,7 +444,9 @@ export function buildOpportunityMessage(
         : []),
     ],
     reason,
-    recommendedAction: presentation.action,
+    recommendedAction: earlyMarketIndexing
+      ? 'Market data is still indexing.'
+      : presentation.action,
   });
 }
 
@@ -513,6 +525,7 @@ export function buildButtons(
 export function mergeOpportunityMarketContext(
   opportunity: OpportunityRow,
   enrichment: Partial<NotificationMarketContext> | null | undefined,
+  marketIndexState?: 'VERIFIED' | 'NOT_INDEXED',
 ): Record<string, unknown> {
   const existing = opportunity.raw_data ?? {};
   const normalized = normalizeNotificationMarketContext(
@@ -529,6 +542,7 @@ export function mergeOpportunityMarketContext(
     ...(normalized.liquidity != null ? { liquidity: normalized.liquidity } : {}),
     ...(normalized.volume5m != null ? { volume5m: normalized.volume5m } : {}),
     ...(normalized.chartUrl ? { chartUrl: normalized.chartUrl } : {}),
+    ...(marketIndexState ? { marketIndexState } : {}),
   };
 }
 
@@ -778,6 +792,7 @@ async function deliverOpportunity(
   opportunity.raw_data = mergeOpportunityMarketContext(
     opportunity,
     tokenTarget.marketContext,
+    tokenTarget.marketIndexState,
   );
 
   if (

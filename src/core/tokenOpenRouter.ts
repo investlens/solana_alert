@@ -10,6 +10,7 @@ export type TokenOpenTarget = {
   chartSource?: 'dexscreener' | 'dexscreener_search';
   tokenSource: 'solscan' | 'blockscout' | 'dexscreener_search';
   marketContext?: Partial<NotificationMarketContext>;
+  marketIndexState?: 'VERIFIED' | 'NOT_INDEXED';
 };
 
 type TokenOpenInput = {
@@ -71,6 +72,7 @@ export async function resolveTokenOpenTarget(
     chain === 'robinhood' ||
     chain === 'pons'
   ) {
+    let marketLookupCompletedWithoutSnapshot = false;
     try {
       const snapshot =
         await getRobinhoodMarketSnapshot(
@@ -95,8 +97,10 @@ export async function resolveTokenOpenTarget(
             volume5m: snapshot.volume5mUsd,
             chartUrl: snapshot.chartUrl,
           },
+          marketIndexState: 'VERIFIED',
         };
       }
+      marketLookupCompletedWithoutSnapshot = snapshot == null;
     } catch (error) {
       console.warn(
         '[TOKEN_OPEN_ROUTER] Robinhood market lookup failed; using explorer fallback',
@@ -125,6 +129,9 @@ export async function resolveTokenOpenTarget(
               name: metadata.name,
               address: tokenAddress,
             },
+            marketIndexState: marketLookupCompletedWithoutSnapshot
+              ? 'NOT_INDEXED'
+              : undefined,
           };
         }
       } catch (error) {
