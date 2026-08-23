@@ -6,10 +6,16 @@ import { mergePonsLifecycleContext } from '../src/product/opportunityContext.js'
 
 const address = '0x23e516c1261af6f40e44abbecb29b22e192669cb';
 const rustyAddress = '0xc48e455a4621bce424aa86b8e2d9e66f544e74d1';
+const sixAddress = '0xa091487033b5f92df82563b26cdc0d9b80a36e9d';
 
 async function service() {
   await import('dotenv/config');
   return import('../src/services/opportunityDeliveryService.js');
+}
+
+async function ponsResolver() {
+  await import('dotenv/config');
+  return import('../src/services/ponsDeliveryContext.js');
 }
 
 function opportunity(raw_data: Record<string, unknown>, asset_id = address) {
@@ -161,4 +167,102 @@ test('opportunity specialist zeroes require explicit meaningful confirmation', a
   }));
   assert.match(confirmed, /Transferred\s+<b>0\.00%<\/b>/);
   assert.match(confirmed, /Burn\s+<b>0 confirmed<\/b>/);
+});
+
+test('production SIX Exit resolves bounded metadata when no Entry identity was persisted', async () => {
+  const { buildOpportunityMessage, mergeOpportunityMarketContext } = await service();
+  const { resolvePonsDeliveryContext } = await ponsResolver();
+  const exit = {
+    ...opportunity({ elapsedSec: 125, currentRoi: -4.63, roiChange: -28.29 }, sixAddress),
+    recommended_action: 'EXIT', confidence: 80, risk_score: 90,
+  };
+  let metadataFallbackRequested = false;
+  const resolved = await resolvePonsDeliveryContext(exit, {
+    loadLifecycleIdentity: async () => null,
+    loadObservationIdentity: async () => null,
+    resolveTarget: async input => {
+      metadataFallbackRequested = input.includeMetadataFallback === true;
+      return {
+        tokenUrl: `https://robinhoodchain.blockscout.com/token/${sixAddress}`,
+        tokenSource: 'blockscout',
+        marketContext: { symbol: 'SIX', name: '6-EYES', address: sixAddress },
+      };
+    },
+  });
+  assert.equal(metadataFallbackRequested, true);
+  exit.raw_data = mergeOpportunityMarketContext(exit, resolved.target.marketContext);
+  const message = buildOpportunityMessage(exit);
+  assert.match(message, /<b>SIX<\/b> · <code>0xa091…36e9d<\/code>/);
+  assert.doesNotMatch(message, /INDEXING|Market cap|Liquidity|5m volume/);
+});
+
+test('metadata failure safely leaves Exit address-only', async () => {
+  const { resolvePonsDeliveryContext } = await ponsResolver();
+  const exit = {
+    ...opportunity({ elapsedSec: 125, currentRoi: -4.63 }, sixAddress),
+    recommended_action: 'EXIT',
+  };
+  const resolved = await resolvePonsDeliveryContext(exit, {
+    loadLifecycleIdentity: async () => null,
+    loadObservationIdentity: async () => null,
+    resolveTarget: async () => ({
+      tokenUrl: `https://robinhoodchain.blockscout.com/token/${sixAddress}`,
+      tokenSource: 'blockscout',
+    }),
+  });
+  assert.equal(resolved.rawData.symbol, undefined);
+  const { buildOpportunityMessage } = await service();
+  assert.match(buildOpportunityMessage(exit), /<b>0xa091…36e9d<\/b>/);
+});
+
+test('persisted lifecycle identity prevents unnecessary metadata fallback', async () => {
+  const { resolvePonsDeliveryContext } = await ponsResolver();
+  const exit = {
+    ...opportunity({ elapsedSec: 125, symbol: null, name: null }, sixAddress),
+    recommended_action: 'EXIT',
+  };
+  let includeMetadataFallback: boolean | undefined;
+  const resolved = await resolvePonsDeliveryContext(exit, {
+    loadLifecycleIdentity: async () => ({
+      symbol: 'SIX', name: '6-EYES', identityVerifiedAt: '2026-08-23T14:20:20.000Z',
+      identitySource: 'ROBINHOOD_ONCHAIN_METADATA',
+    }),
+    loadObservationIdentity: async () => { throw new Error('observation lookup should be skipped'); },
+    resolveTarget: async input => {
+      includeMetadataFallback = input.includeMetadataFallback;
+      return {
+        tokenUrl: `https://robinhoodchain.blockscout.com/token/${sixAddress}`,
+        tokenSource: 'blockscout',
+      };
+    },
+  });
+  assert.equal(includeMetadataFallback, false);
+  assert.equal(resolved.rawData.symbol, 'SIX');
+});
+
+test('Exit uses only a verified current market snapshot for metrics and Chart', async () => {
+  const { buildButtons, buildOpportunityMessage, mergeOpportunityMarketContext } = await service();
+  const exit = {
+    ...opportunity({ elapsedSec: 125 }, sixAddress), recommended_action: 'EXIT',
+  };
+  const target: TokenOpenTarget = {
+    chartUrl: 'https://dexscreener.com/robinhood/six',
+    tokenUrl: `https://robinhoodchain.blockscout.com/token/${sixAddress}`,
+    chartSource: 'dexscreener', tokenSource: 'blockscout', marketIndexState: 'VERIFIED',
+    marketContext: { symbol: 'SIX', name: '6-EYES', address: sixAddress,
+      marketCap: 70_000, liquidity: 18_000, volume5m: 4_500,
+      chartUrl: 'https://dexscreener.com/robinhood/six' },
+  };
+  exit.raw_data = mergeOpportunityMarketContext(exit, target.marketContext, 'VERIFIED');
+  const message = buildOpportunityMessage(exit);
+  assert.match(message, /Market cap\s+<b>\$70\.0K<\/b>/);
+  assert.match(message, /Liquidity\s+<b>\$18\.0K<\/b>/);
+  assert.match(message, /5m volume\s+<b>\$4\.5K<\/b>/);
+  assert.doesNotMatch(message, /INDEXING/);
+  const buttons = buildButtons(exit, target, { telegram_id: '1', tier: 'paid', is_admin: false } as any);
+  assert.deepEqual(buttons[0].map(button => button.text), ['📊 Chart', '🔎 Token']);
+  assert.equal(buttons.flat().some(button => button.text.includes('Trade')), false);
+  for (const button of buttons.flat()) {
+    if (button.callback_data) assert.ok(Buffer.byteLength(button.callback_data, 'utf8') <= 64);
+  }
 });

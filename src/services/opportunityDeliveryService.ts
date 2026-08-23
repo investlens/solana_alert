@@ -43,6 +43,7 @@ import {
 import { deliverReservedTelegram } from './telegramDeliveryContract.js';
 import { createLeaseToken, DELIVERY_LEASE_SECONDS } from './reservationLease.js';
 import { marketContextMetrics, normalizeNotificationMarketContext, type NotificationMarketContext } from '../ui/notificationMarketContext.js';
+import { resolvePonsDeliveryContext } from './ponsDeliveryContext.js';
 
 type DeliverableAction =
   | 'BUY'
@@ -536,25 +537,41 @@ export function mergeOpportunityMarketContext(
     enrichment as Record<string, unknown> | undefined,
     { address: opportunity.asset_id },
   );
+  const currentMarket = marketIndexState === 'VERIFIED'
+    ? normalizeNotificationMarketContext(
+        enrichment as Record<string, unknown> | undefined,
+        { address: opportunity.asset_id },
+      )
+    : normalized;
   const observedAt = new Date().toISOString();
   const verifiedMarketContext = marketIndexState === 'VERIFIED'
     ? {
-        marketCap: normalized.marketCap,
-        liquidity: normalized.liquidity,
-        volume5m: normalized.volume5m,
-        chartUrl: normalized.chartUrl,
+        marketCap: currentMarket.marketCap,
+        liquidity: currentMarket.liquidity,
+        volume5m: currentMarket.volume5m,
+        chartUrl: currentMarket.chartUrl,
         observedAt,
         source: 'ROBINHOOD_MARKET_SNAPSHOT',
       }
     : existing.verifiedMarketContext;
+  const currentMarketFields = marketIndexState === 'VERIFIED'
+    ? {
+        marketCap: currentMarket.marketCap,
+        liquidity: currentMarket.liquidity,
+        volume5m: currentMarket.volume5m,
+        chartUrl: currentMarket.chartUrl,
+      }
+    : {
+        ...(currentMarket.marketCap != null ? { marketCap: currentMarket.marketCap } : {}),
+        ...(currentMarket.liquidity != null ? { liquidity: currentMarket.liquidity } : {}),
+        ...(currentMarket.volume5m != null ? { volume5m: currentMarket.volume5m } : {}),
+        ...(currentMarket.chartUrl ? { chartUrl: currentMarket.chartUrl } : {}),
+      };
   return {
     ...existing,
     ...(normalized.symbol ? { symbol: normalized.symbol } : {}),
     ...(normalized.name ? { name: normalized.name } : {}),
-    ...(normalized.marketCap != null ? { marketCap: normalized.marketCap } : {}),
-    ...(normalized.liquidity != null ? { liquidity: normalized.liquidity } : {}),
-    ...(normalized.volume5m != null ? { volume5m: normalized.volume5m } : {}),
-    ...(normalized.chartUrl ? { chartUrl: normalized.chartUrl } : {}),
+    ...currentMarketFields,
     ...(marketIndexState ? { marketIndexState } : {}),
     ...(normalized.symbol || normalized.name
       ? {
@@ -799,17 +816,16 @@ async function deliverOpportunity(
   }
 
 
-  const tokenTarget =
-    await resolveTokenOpenTarget({
-      chain:
-        opportunity.chain,
-
-      tokenAddress:
-        opportunity.asset_id,
-
-      includeMetadataFallback:
-        action !== 'EXIT',
-    });
+  const isPons = ['robinhood', 'pons'].includes(String(opportunity.chain ?? '').toLowerCase()) &&
+    String(opportunity.strategy_key ?? '').toUpperCase().startsWith('PONS_');
+  const resolvedPons = isPons
+    ? await resolvePonsDeliveryContext(opportunity)
+    : null;
+  if (resolvedPons) opportunity.raw_data = resolvedPons.rawData;
+  const tokenTarget = resolvedPons?.target ?? await resolveTokenOpenTarget({
+    chain: opportunity.chain,
+    tokenAddress: opportunity.asset_id,
+  });
 
   opportunity.raw_data = mergeOpportunityMarketContext(
     opportunity,

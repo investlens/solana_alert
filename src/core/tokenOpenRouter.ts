@@ -145,6 +145,9 @@ export async function resolveTokenOpenTarget(
     return {
       tokenUrl: resolveTokenExplorerUrl(chain, tokenAddress),
       tokenSource: 'blockscout',
+      marketIndexState: marketLookupCompletedWithoutSnapshot
+        ? 'NOT_INDEXED'
+        : undefined,
     };
   }
 
