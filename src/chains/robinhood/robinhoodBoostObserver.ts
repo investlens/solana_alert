@@ -277,7 +277,7 @@ async function saveBoostEvent(args: {
 }
 
 
-function buildBoostMessage(args: {
+export function buildBoostMessage(args: {
   symbol: string;
   tokenAddress: string;
 

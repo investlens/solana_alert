@@ -49,6 +49,9 @@ function ponsConfidence(
 
 type PonsOpportunitySyncArgs = {
   token: string;
+  symbol?: string | null;
+  marketCap?: number | null;
+  liquidity?: number | null;
   state: string;
   reason: string;
   currentRoi: number;
@@ -61,6 +64,9 @@ export async function syncPonsOpportunity(
   args: PonsOpportunitySyncArgs,
 ): Promise<void> {
   const rawData = {
+    symbol: args.symbol ?? null,
+    marketCap: args.marketCap ?? null,
+    liquidity: args.liquidity ?? null,
     ponsAlphaState:
       args.state,
 
@@ -1820,6 +1826,12 @@ async function updateShadowRow(
             await syncPonsOpportunity({
               token:
                 row.token_address,
+
+              marketCap:
+                row.entry_market_cap,
+
+              liquidity:
+                row.entry_liquidity,
 
               state:
                 alphaClassification.state,

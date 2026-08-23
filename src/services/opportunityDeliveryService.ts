@@ -42,7 +42,7 @@ import {
 } from '../ui/alphaNotification.js';
 import { deliverReservedTelegram } from './telegramDeliveryContract.js';
 import { createLeaseToken, DELIVERY_LEASE_SECONDS } from './reservationLease.js';
-import { formatUsd } from '../ui/alphaAlert/index.js';
+import { marketContextMetrics, normalizeNotificationMarketContext } from '../ui/notificationMarketContext.js';
 
 type DeliverableAction =
   | 'BUY'
@@ -172,30 +172,6 @@ function rawNumber(
   )
     ? value
     : null;
-}
-
-function rawText(opportunity: OpportunityRow, ...keys: string[]): string | null {
-  for (const key of keys) {
-    const value = opportunity.raw_data?.[key];
-    if (typeof value === 'string' && value.trim()) return value.trim();
-  }
-  return null;
-}
-
-function rawPositiveNumber(opportunity: OpportunityRow, ...keys: string[]): number | null {
-  const containers = [
-    opportunity.raw_data,
-    opportunity.raw_data?.market,
-    opportunity.raw_data?.intelligence,
-  ];
-  for (const container of containers) {
-    if (!container || typeof container !== 'object' || Array.isArray(container)) continue;
-    for (const key of keys) {
-      const value = Number((container as Record<string, unknown>)[key]);
-      if (Number.isFinite(value) && value > 0) return value;
-    }
-  }
-  return null;
 }
 
 function devEvidenceLines(
@@ -422,13 +398,13 @@ export function buildOpportunityMessage(
   const holding = rawNumber(opportunity, 'devHoldingPercent');
   const transferred = rawNumber(opportunity, 'otherDevTransferPercent');
   const burned = rawNumber(opportunity, 'totalBurnPercent');
-  const symbol = rawText(opportunity, 'symbol', 'tokenSymbol', 'token_symbol');
-  const marketCap = rawPositiveNumber(
-    opportunity, 'marketCap', 'marketCapUsd', 'currentMarketCap', 'market_cap',
+  const market = normalizeNotificationMarketContext(
+    opportunity.raw_data,
+    opportunity.raw_data?.market as Record<string, unknown> | undefined,
+    opportunity.raw_data?.intelligence as Record<string, unknown> | undefined,
+    { address: opportunity.asset_id },
   );
-  const liquidity = rawPositiveNumber(
-    opportunity, 'liquidity', 'liquidityUsd', 'currentLiquidity', 'current_liquidity',
-  );
+  const symbol = market.symbol;
 
   return renderAlphaNotification({
     category: action === 'EXIT' ? 'risk' : 'opportunity',
@@ -443,8 +419,7 @@ export function buildOpportunityMessage(
     confidence: opportunity.confidence,
     risk: presentation.riskLabel,
     metrics: [
-      ...(marketCap == null ? [] : [{ label: 'Market cap', value: formatUsd(marketCap) }]),
-      ...(liquidity == null ? [] : [{ label: 'Liquidity', value: formatUsd(liquidity) }]),
+      ...marketContextMetrics(market),
       ...(currentRoi == null ? [] : [{ label: 'Move', value: signedPercent(currentRoi) }]),
       ...(roiChange == null ? [] : [{ label: 'Momentum', value: signedPercent(roiChange) }]),
       ...(holding == null ? [] : [{ label: 'Dev holding', value: `${holding.toFixed(2)}%` }]),

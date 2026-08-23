@@ -1,6 +1,7 @@
 import type { CreatorProfile } from '../profiles/creatorProfile.js';
 import { compactAlphaAddress, renderAlphaNotification } from './alphaNotification.js';
 import { formatUsd } from './alphaAlert/index.js';
+import { marketContextMetrics, normalizeNotificationMarketContext } from './notificationMarketContext.js';
 
 export function buildPumpfunEarlyMessage(args: {
   symbol?: string | null;
@@ -19,20 +20,25 @@ export function buildPumpfunEarlyMessage(args: {
   const creator = args.creatorProfile;
   const score = args.launchScore;
   const risk = score == null ? 'REVIEW' : score >= 80 ? 'ELEVATED' : 'HIGH';
+  const market = normalizeNotificationMarketContext({
+    symbol: args.symbol, name: args.name, mint: args.mint, marketCapUsd: args.marketCapUsd,
+  });
   return renderAlphaNotification({
     category: 'creator',
     severity: (score ?? 0) >= 80 ? 'positive' : 'watch',
     state: 'CREATOR_EVENT',
-    symbol: args.symbol || 'UNKNOWN',
-    subtitle: args.name,
-    address: args.mint,
+    symbol: market.symbol,
+    subtitle: market.name,
+    address: market.address,
     confidence: score,
     risk,
     metrics: [
-      { label: 'Market cap', value: formatUsd(args.marketCapUsd) },
-      { label: 'Volume', value: formatUsd(args.volumeUsd) },
+      ...marketContextMetrics(market),
+      ...(args.volumeUsd != null && Number.isFinite(args.volumeUsd) && args.volumeUsd > 0
+        ? [{ label: 'Volume', value: formatUsd(args.volumeUsd) }] : []),
       { label: 'Curve', value: args.progressPct == null ? 'Data unavailable' : `${args.progressPct.toFixed(1)}%` },
-      { label: 'Buys / sells', value: `${args.buyCount ?? 0}/${args.sellCount ?? 0}` },
+      ...(args.buyCount != null || args.sellCount != null
+        ? [{ label: 'Buys / sells', value: `${args.buyCount ?? '–'}/${args.sellCount ?? '–'}` }] : []),
       { label: 'Creator', value: compactAlphaAddress(args.creator) || 'Data unavailable' },
       { label: 'Reputation', value: creator?.hasData ? `${creator.rating} · ${creator.trustScore}/100` : 'Data unavailable' },
     ],

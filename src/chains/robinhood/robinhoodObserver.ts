@@ -271,7 +271,7 @@ function buildExplorerUrl(
   );
 }
 
-function buildWatchMessage(args: {
+export function buildWatchMessage(args: {
   token:
     RobinhoodDiscoveredToken;
 

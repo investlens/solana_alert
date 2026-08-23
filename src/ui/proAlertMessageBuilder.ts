@@ -1,5 +1,6 @@
 import type { DexPair, RiskResult, TokenState } from '../types.js';
 import { renderAlphaNotification } from './alphaNotification.js';
+import { marketContextMetrics, normalizeNotificationMarketContext } from './notificationMarketContext.js';
 import { formatUsd } from './alphaAlert/index.js';
 
 function ratio(buys: number, sells: number): string {
@@ -17,19 +18,23 @@ export function buildProAlertMessage(args: {
   const highPriority = bucket === 'HIGH_BUY';
   const warning = [...(result.checksBad ?? []), ...(result.checksWarn ?? [])]
     .map(value => String(value ?? '').trim()).find(Boolean);
+  const market = normalizeNotificationMarketContext(
+    pair.baseToken as Record<string, unknown>,
+    { marketCap: result.marketCap, fdv: result.fdv, liquidityUsd: result.liquidityUsd },
+  );
   return renderAlphaNotification({
     category: 'market',
     severity: highPriority ? 'positive' : 'watch',
     state: 'ENTRY_READY',
-    symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
-    subtitle: pair.baseToken?.name,
-    address: pair.baseToken?.address,
+    symbol: market.symbol,
+    subtitle: market.name,
+    address: market.address,
+    age: Number.isFinite(result.ageMin) && result.ageMin >= 0 ? `${Math.round(result.ageMin)}m` : undefined,
     confidence: result.score,
     risk: `${result.marketSafetyLabel ?? result.risk ?? 'REVIEW'} · ${result.marketSafetyScore}/100`,
     metrics: [
-      { label: 'Market cap', value: formatUsd(result.marketCap > 0 ? result.marketCap : result.fdv) },
-      { label: 'Liquidity', value: formatUsd(result.liquidityUsd) },
-      { label: '5m volume', value: formatUsd(result.volume5m) },
+      ...marketContextMetrics(market),
+      ...(result.volume5m > 0 ? [{ label: '5m volume', value: formatUsd(result.volume5m) }] : []),
       { label: 'Buy / sell', value: ratio(result.buys5m, result.sells5m) },
     ],
     evidence: warning ? [warning] : [],

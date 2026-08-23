@@ -716,7 +716,7 @@ function escapeHtml(
 }
 
 
-function buildMicroBreakoutMessage(args: {
+export function buildMicroBreakoutMessage(args: {
   row: ObservationRow;
 
   currentRoi: number;
