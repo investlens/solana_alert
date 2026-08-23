@@ -7,6 +7,25 @@ import { mergePonsLifecycleContext } from '../src/product/opportunityContext.js'
 const address = '0x23e516c1261af6f40e44abbecb29b22e192669cb';
 const rustyAddress = '0xc48e455a4621bce424aa86b8e2d9e66f544e74d1';
 const sixAddress = '0xa091487033b5f92df82563b26cdc0d9b80a36e9d';
+const spurdoAddress = '0x26de761468a48b2f939d60755fe5413ee4a9c03e';
+
+function spurdoValuation() {
+  return {
+    tokenAddress: spurdoAddress,
+    valueUsd: 4577.85761979312,
+    valuationType: 'FDV',
+    source: 'PONS_V2_CURVE_RESERVE_SPOT',
+    tokenPriceUsd: 0.00000457785761979312,
+    tokenPriceSource: 'PONS_V2_CURVE_RESERVE_RATIO',
+    quoteAsset: '0x4200000000000000000000000000000000000006',
+    quoteUsd: 2441.93,
+    quoteUsdSource: 'DEXSCREENER_ROBINHOOD_BASE_TOKEN_PRICE',
+    observedAt: new Date().toISOString(),
+    indexed: false,
+    feeBps: 100,
+    creatorTaxBps: 0,
+  };
+}
 
 async function service() {
   await import('dotenv/config');
@@ -287,4 +306,88 @@ test('Exit uses only a verified current market snapshot for metrics and Chart', 
   for (const button of buttons.flat()) {
     if (button.callback_data) assert.ok(Buffer.byteLength(button.callback_data, 'utf8') <= 64);
   }
+});
+
+test('SPURDO persisted lifecycle data reaches final Exit rendering and Copy CA actions', async () => {
+  const { buildButtons, buildOpportunityMessage } = await service();
+  const exit = {
+    ...opportunity({
+      symbol: 'SPURDO', name: 'SPURDO', elapsedSec: 180,
+      currentRoi: -18.4, roiChange: -26.2,
+      marketCap: null, liquidity: null, volume5m: null,
+      marketIndexState: 'NOT_INDEXED', preIndexValuation: spurdoValuation(),
+      devHoldingEvidence: 'VERIFIED', devHoldingPercent: 0,
+      burnEvidence: 'VERIFIED', totalBurnPercent: 0,
+      otherDevTransferPercent: 3.62, devFlowEvidenceStatus: 'COMPLETE',
+    }, spurdoAddress),
+    recommended_action: 'EXIT', confidence: 80, risk_score: 90,
+  };
+  const target: TokenOpenTarget = {
+    tokenUrl: `https://robinhoodchain.blockscout.com/token/${spurdoAddress}`,
+    tokenSource: 'blockscout',
+  };
+  const message = buildOpportunityMessage(exit);
+  assert.match(message, /<b>SPURDO<\/b>/);
+  assert.match(message, /FDV\s+<b>\$4\.58K<\/b>/);
+  assert.match(message, /Dev holding\s+<b>0%<\/b>/);
+  assert.match(message, /Burned\s+<b>0%<\/b>/);
+  assert.doesNotMatch(message, /Market INDEXING|Market cap|Liquidity|5m volume/);
+
+  const buttons = buildButtons(exit, target, { telegram_id: '1', tier: 'paid', is_admin: false } as any);
+  assert.equal(buttons.flat().some(button => button.text.includes('Trade')), false);
+  assert.deepEqual(buttons[0].map(button => button.text), ['🔎 Token']);
+  const copy = buttons.flat().find(button => button.text === '📋 Copy CA');
+  assert.equal(copy?.callback_data, `COPY_CA_${spurdoAddress}`);
+  assert.ok(Buffer.byteLength(copy!.callback_data!, 'utf8') <= 64);
+});
+
+test('PONS Entry Ready and Watching render verified FDV while indexed market replaces it', async () => {
+  const { buildOpportunityMessage } = await service();
+  for (const action of ['CHECK_ENTRY', 'TRACK', 'WATCH']) {
+    const row = {
+      ...opportunity({ symbol: 'SPURDO', elapsedSec: 60, marketIndexState: 'NOT_INDEXED',
+        preIndexValuation: spurdoValuation() }, spurdoAddress),
+      recommended_action: action,
+    };
+    assert.match(buildOpportunityMessage(row), /FDV\s+<b>\$4\.58K<\/b>/);
+    assert.doesNotMatch(buildOpportunityMessage(row), /Market\s+<b>INDEXING<\/b>/);
+  }
+
+  const indexed = {
+    ...opportunity({
+      symbol: 'SPURDO', elapsedSec: 60, marketIndexState: 'VERIFIED',
+      marketCap: 8_200, liquidity: 3_100, volume5m: 900,
+      chartUrl: 'https://dexscreener.com/robinhood/spurdo',
+      preIndexValuation: spurdoValuation(),
+    }, spurdoAddress),
+    recommended_action: 'EXIT',
+  };
+  const message = buildOpportunityMessage(indexed);
+  assert.match(message, /Market cap\s+<b>\$8\.2K<\/b>/);
+  assert.doesNotMatch(message, /FDV|verified launch curve|INDEXING/);
+});
+
+test('same-token lifecycle valuation is recovered even when Exit identity is already complete', async () => {
+  const { resolvePonsDeliveryContext } = await ponsResolver();
+  const exit = {
+    ...opportunity({ symbol: 'SPURDO', name: 'SPURDO', elapsedSec: 180 }, spurdoAddress),
+    recommended_action: 'EXIT',
+  };
+  let lifecycleLookedUp = false;
+  const resolved = await resolvePonsDeliveryContext(exit, {
+    loadLifecycleIdentity: async () => {
+      lifecycleLookedUp = true;
+      return { symbol: 'SPURDO', preIndexValuation: spurdoValuation() };
+    },
+    loadObservationIdentity: async () => null,
+    resolveTarget: async () => ({
+      tokenUrl: `https://robinhoodchain.blockscout.com/token/${spurdoAddress}`,
+      tokenSource: 'blockscout',
+    }),
+  });
+  assert.equal(lifecycleLookedUp, true);
+  assert.ok(resolved.rawData.preIndexValuation);
+  const { buildOpportunityMessage } = await service();
+  exit.raw_data = resolved.rawData;
+  assert.match(buildOpportunityMessage(exit), /FDV\s+<b>\$4\.58K<\/b>/);
 });

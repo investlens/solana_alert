@@ -47,7 +47,6 @@ import { deliverReservedTelegram } from './telegramDeliveryContract.js';
 import { createLeaseToken, DELIVERY_LEASE_SECONDS } from './reservationLease.js';
 import { coreDecisionEvidenceMetrics, marketContextMetrics, normalizeCoreDecisionMetrics, normalizeNotificationMarketContext, type NotificationMarketContext } from '../ui/notificationMarketContext.js';
 import { resolvePonsDeliveryContext } from './ponsDeliveryContext.js';
-import { formatUsd } from '../ui/alphaAlert/index.js';
 
 type DeliverableAction =
   | 'BUY'
@@ -411,29 +410,7 @@ export function buildOpportunityMessage(
     { address: opportunity.asset_id },
   );
   const symbol = market.symbol;
-  const preIndexValuation = (() => {
-    const value = opportunity.raw_data?.preIndexValuation;
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-    const record = value as Record<string, unknown>;
-    const observedAt = new Date(String(record.observedAt ?? '')).getTime();
-    const valueUsd = Number(record.valueUsd);
-    const valuationType = String(record.valuationType ?? '');
-    const validAction = action === 'BUY' || action === 'CHECK_ENTRY';
-    const validProvenance = (
-      record.indexed === false &&
-      record.source === 'PONS_V2_CURVE_RESERVE_SPOT' &&
-      record.tokenPriceSource === 'PONS_V2_CURVE_RESERVE_RATIO' &&
-      typeof record.quoteAsset === 'string' && Boolean(record.quoteAsset) &&
-      typeof record.quoteUsdSource === 'string' && Boolean(record.quoteUsdSource) &&
-      String(record.tokenAddress ?? '').toLowerCase() === opportunity.asset_id.toLowerCase()
-    );
-    const fresh = Number.isFinite(observedAt) && Date.now() - observedAt >= 0 &&
-      Date.now() - observedAt <= 2 * 60 * 1000;
-    if (!validAction || !validProvenance || !fresh || !Number.isFinite(valueUsd) || valueUsd <= 0) return null;
-    if (valuationType !== 'MARKET_CAP' && valuationType !== 'FDV') return null;
-    if (opportunity.raw_data?.marketIndexState === 'VERIFIED' || market.marketCap != null || market.fdv != null) return null;
-    return { label: valuationType === 'MARKET_CAP' ? 'Market cap' : 'FDV', value: formatUsd(valueUsd) };
-  })();
+  const hasPreIndexValuation = market.preIndexValuation != null;
   const earlyMarketIndexing = (
     ['robinhood', 'pons'].includes(String(opportunity.chain ?? '').toLowerCase()) &&
     String(opportunity.strategy_key ?? '').toUpperCase().startsWith('PONS_') &&
@@ -441,7 +418,7 @@ export function buildOpportunityMessage(
     elapsedSec != null && elapsedSec >= 0 && elapsedSec <= 600 &&
     Boolean(market.symbol || market.name) &&
     market.marketCap == null && market.fdv == null && market.liquidity == null && !market.chartUrl &&
-    preIndexValuation == null &&
+    !hasPreIndexValuation &&
     opportunity.raw_data?.marketIndexState === 'NOT_INDEXED'
   );
 
@@ -459,7 +436,6 @@ export function buildOpportunityMessage(
     risk: presentation.riskLabel,
     metrics: [
       ...marketContextMetrics(market),
-      ...(preIndexValuation ? [preIndexValuation] : []),
       ...(earlyMarketIndexing ? [{ label: 'Market', value: 'INDEXING' }] : []),
       ...(currentRoi == null ? [] : [{ label: 'Move', value: signedPercent(currentRoi) }]),
       ...(roiChange == null ? [] : [{ label: 'Momentum', value: signedPercent(roiChange) }]),
@@ -473,7 +449,7 @@ export function buildOpportunityMessage(
     reason,
     recommendedAction: earlyMarketIndexing
       ? 'Market data is still indexing.'
-      : preIndexValuation
+      : hasPreIndexValuation
         ? 'Market indexing · valuation from verified launch curve.'
       : presentation.action,
   });
@@ -531,6 +507,13 @@ export function buildButtons(
   }
   marketActions.push({ text: '🔎 Token', url: tokenTarget.tokenUrl });
   rows.push(marketActions);
+
+  if (/^0x[a-fA-F0-9]{40}$/.test(opportunity.asset_id)) {
+    rows.push([{
+      text: '📋 Copy CA',
+      callback_data: `COPY_CA_${opportunity.asset_id}`,
+    }]);
+  }
 
   const preferenceActions: InlineButton[] = [{
     text: '👀 Track',

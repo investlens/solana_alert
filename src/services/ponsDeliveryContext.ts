@@ -1,6 +1,9 @@
 import { resolveTokenOpenTarget, type TokenOpenTarget } from '../core/tokenOpenRouter.js';
 import { hasVerifiedOpportunityIdentity, mergePonsLifecycleContext } from '../product/opportunityContext.js';
-import { normalizeNotificationMarketContext } from '../ui/notificationMarketContext.js';
+import {
+  normalizeNotificationMarketContext,
+  verifiedPonsPreIndexValuation,
+} from '../ui/notificationMarketContext.js';
 import { supabase } from './supabase.js';
 
 type DeliveryOpportunity = {
@@ -15,7 +18,7 @@ type ResolverDependencies = {
   resolveTarget: typeof resolveTokenOpenTarget;
 };
 
-async function loadLifecycleIdentity(opportunity: DeliveryOpportunity) {
+async function loadLifecycleContext(opportunity: DeliveryOpportunity) {
   const { data, error } = await supabase
     .from('opportunities')
     .select('raw_data')
@@ -24,9 +27,14 @@ async function loadLifecycleIdentity(opportunity: DeliveryOpportunity) {
     .order('updated_at', { ascending: false })
     .limit(20);
   if (error) throw error;
-  return (data ?? [])
-    .map(row => row.raw_data as Record<string, unknown> | null)
-    .find(hasVerifiedOpportunityIdentity) ?? null;
+  const contexts = (data ?? []).map(row => row.raw_data as Record<string, unknown> | null);
+  const valuation = contexts.find(rawData =>
+    verifiedPonsPreIndexValuation(rawData, opportunity.asset_id) != null) ?? null;
+  const identity = contexts.find(hasVerifiedOpportunityIdentity) ?? null;
+  if (valuation && identity && valuation !== identity) {
+    return mergePonsLifecycleContext(identity, valuation);
+  }
+  return valuation ?? identity;
 }
 
 async function loadObservationIdentity(opportunity: DeliveryOpportunity) {
@@ -47,7 +55,7 @@ async function loadObservationIdentity(opportunity: DeliveryOpportunity) {
 }
 
 const defaults: ResolverDependencies = {
-  loadLifecycleIdentity,
+  loadLifecycleIdentity: loadLifecycleContext,
   loadObservationIdentity,
   resolveTarget: resolveTokenOpenTarget,
 };
@@ -59,7 +67,8 @@ export async function resolvePonsDeliveryContext(
   const deps = { ...defaults, ...dependencies };
   let rawData = opportunity.raw_data ?? {};
 
-  if (!hasVerifiedOpportunityIdentity(rawData)) {
+  if (!hasVerifiedOpportunityIdentity(rawData) ||
+      verifiedPonsPreIndexValuation(rawData, opportunity.asset_id) == null) {
     try {
       const lifecycle = await deps.loadLifecycleIdentity(opportunity);
       if (lifecycle) rawData = mergePonsLifecycleContext(lifecycle, rawData);

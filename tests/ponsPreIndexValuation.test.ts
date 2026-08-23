@@ -160,13 +160,14 @@ test('indexed current market context overrides pre-index valuation', async () =>
   assert.doesNotMatch(message, /verified launch curve/);
 });
 
-test('Exit never shows INDEXING or stale pre-index valuation and keeps core evidence', async () => {
+test('Exit shows a fresh verified lifecycle valuation but never INDEXING', async () => {
   const valuation = derivePonsV2PreIndexValuation({
     curveState, tokenMetadata, quoteUsd: quoteUsd(), now,
   });
   assert.ok(valuation);
   const message = await buildMessage(opportunity({ action: 'EXIT', valuation }));
-  assert.doesNotMatch(message, /INDEXING|FDV|Market cap/);
+  assert.doesNotMatch(message, /INDEXING|Market cap/);
+  assert.match(message, /FDV\s+<b>\$60\.0K<\/b>/);
   assert.match(message, /Dev holding\s+<b>2\.4%<\/b>/);
   assert.match(message, /Burned\s+<b>3\.1%<\/b>/);
 });
