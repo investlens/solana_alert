@@ -45,7 +45,7 @@ import {
 } from '../ui/alphaNotification.js';
 import { deliverReservedTelegram } from './telegramDeliveryContract.js';
 import { createLeaseToken, DELIVERY_LEASE_SECONDS } from './reservationLease.js';
-import { coreDecisionEvidenceMetrics, marketContextMetrics, normalizeCoreDecisionMetrics, normalizeNotificationMarketContext, type NotificationMarketContext } from '../ui/notificationMarketContext.js';
+import { coreDecisionEvidenceMetrics, marketContextMetrics, normalizeCoreDecisionMetrics, normalizeNotificationMarketContext, verifiedPonsPreIndexValuation, type NotificationMarketContext } from '../ui/notificationMarketContext.js';
 import { resolvePonsDeliveryContext } from './ponsDeliveryContext.js';
 
 type DeliverableAction =
@@ -953,7 +953,8 @@ async function deliverOpportunity(
     }
   }
 
-  if (tokenTarget.marketContext || devEvidenceEnriched) {
+  if (tokenTarget.marketContext || devEvidenceEnriched ||
+      verifiedPonsPreIndexValuation(opportunity.raw_data, opportunity.asset_id) != null) {
     const { error } = await supabase
       .from('opportunities')
       .update({ raw_data: opportunity.raw_data })

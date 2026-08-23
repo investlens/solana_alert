@@ -8,6 +8,7 @@ const address = '0x23e516c1261af6f40e44abbecb29b22e192669cb';
 const rustyAddress = '0xc48e455a4621bce424aa86b8e2d9e66f544e74d1';
 const sixAddress = '0xa091487033b5f92df82563b26cdc0d9b80a36e9d';
 const spurdoAddress = '0x26de761468a48b2f939d60755fe5413ee4a9c03e';
+const ofyAddress = '0x6267b4147a553aa777c0fbd03112fbfd4dcb3106';
 
 function spurdoValuation() {
   return {
@@ -24,6 +25,17 @@ function spurdoValuation() {
     indexed: false,
     feeBps: 100,
     creatorTaxBps: 0,
+  };
+}
+
+function ofyValuation() {
+  return {
+    ...spurdoValuation(),
+    tokenAddress: ofyAddress,
+    valueUsd: 4109.5152,
+    tokenPriceUsd: 0.0000041095152,
+    quoteAsset: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73',
+    creatorTaxBps: 200,
   };
 }
 
@@ -221,6 +233,7 @@ test('production SIX Exit resolves bounded metadata when no Entry identity was p
   const resolved = await resolvePonsDeliveryContext(exit, {
     loadLifecycleIdentity: async () => null,
     loadObservationIdentity: async () => null,
+    loadPreIndexValuation: async () => null,
     resolveTarget: async input => {
       metadataFallbackRequested = input.includeMetadataFallback === true;
       return {
@@ -246,6 +259,7 @@ test('metadata failure safely leaves Exit address-only', async () => {
   const resolved = await resolvePonsDeliveryContext(exit, {
     loadLifecycleIdentity: async () => null,
     loadObservationIdentity: async () => null,
+    loadPreIndexValuation: async () => null,
     resolveTarget: async () => ({
       tokenUrl: `https://robinhoodchain.blockscout.com/token/${sixAddress}`,
       tokenSource: 'blockscout',
@@ -269,6 +283,7 @@ test('persisted lifecycle identity prevents unnecessary metadata fallback', asyn
       identitySource: 'ROBINHOOD_ONCHAIN_METADATA',
     }),
     loadObservationIdentity: async () => { throw new Error('observation lookup should be skipped'); },
+    loadPreIndexValuation: async () => null,
     resolveTarget: async input => {
       includeMetadataFallback = input.includeMetadataFallback;
       return {
@@ -390,4 +405,84 @@ test('same-token lifecycle valuation is recovered even when Exit identity is alr
   const { buildOpportunityMessage } = await service();
   exit.raw_data = resolved.rawData;
   assert.match(buildOpportunityMessage(exit), /FDV\s+<b>\$4\.58K<\/b>/);
+});
+
+test('OFY V2 Exit retries verified curve FDV when lifecycle and Dex context are empty', async () => {
+  const { resolvePonsDeliveryContext } = await ponsResolver();
+  const { buildButtons, buildOpportunityMessage } = await service();
+  const exit = {
+    ...opportunity({
+      symbol: 'OFY', name: 'OffYield', elapsedSec: 135,
+      currentRoi: -26.930228436484715, roiChange: -22.980829294790144,
+      marketIndexState: 'NOT_INDEXED', preIndexValuation: null,
+      devHoldingPercent: 0, devHoldingEvidence: 'VERIFIED',
+      totalBurnPercent: 0, burnEvidence: 'VERIFIED',
+      otherDevTransferPercent: 3, devFlowEvidenceStatus: 'COMPLETE',
+    }, ofyAddress),
+    strategy_key: 'PONS_RISK', recommended_action: 'EXIT', confidence: 80, risk_score: 90,
+  };
+  const target: TokenOpenTarget = {
+    tokenUrl: `https://robinhoodchain.blockscout.com/token/${ofyAddress}`,
+    tokenSource: 'blockscout', marketIndexState: 'NOT_INDEXED',
+  };
+  const resolved = await resolvePonsDeliveryContext(exit, {
+    loadLifecycleIdentity: async () => ({ symbol: 'OFY', name: 'OffYield' }),
+    loadObservationIdentity: async () => null,
+    loadPreIndexValuation: async () => ({ preIndexValuation: ofyValuation() }),
+    resolveTarget: async () => target,
+  });
+  exit.raw_data = resolved.rawData;
+  const message = buildOpportunityMessage(exit);
+  assert.match(message, /<b>OFY<\/b> · <code>0x6267…b3106<\/code>/);
+  assert.match(message, /FDV\s+<b>\$4\.11K<\/b>/);
+  assert.doesNotMatch(message, /Market cap|Market\s+<b>INDEXING|Liquidity|5m volume/);
+  const buttons = buildButtons(exit, target, { telegram_id: '1', tier: 'paid', is_admin: false } as any);
+  assert.deepEqual(buttons.map(row => row.map(button => button.text)), [
+    ['🔎 Token'], ['📋 Copy CA'], ['👀 Track', '🔕 Mute'],
+  ]);
+  assert.equal(buttons[1][0].callback_data, `COPY_CA_${ofyAddress}`);
+  assert.equal(buttons.flat().some(button => button.text.includes('Trade')), false);
+});
+
+test('OFY lifecycle keeps verified FDV while indexed current market takes precedence', async () => {
+  const { buildOpportunityMessage, mergeOpportunityMarketContext } = await service();
+  let raw: Record<string, unknown> = {
+    symbol: 'OFY', name: 'OffYield', marketIndexState: 'NOT_INDEXED',
+    preIndexValuation: ofyValuation(), elapsedSec: 30,
+  };
+  for (const action of ['CHECK_ENTRY', 'TRACK', 'EXIT']) {
+    const row = { ...opportunity(raw, ofyAddress), recommended_action: action };
+    assert.match(buildOpportunityMessage(row), /FDV\s+<b>\$4\.11K<\/b>/);
+    raw = mergePonsLifecycleContext(raw, { ...raw, elapsedSec: Number(raw.elapsedSec) + 45 });
+  }
+  const indexed = { ...opportunity(raw, ofyAddress), recommended_action: 'EXIT' };
+  indexed.raw_data = mergeOpportunityMarketContext(indexed, {
+    symbol: 'OFY', marketCap: 9_000, fdv: 10_000, liquidity: 3_000, volume5m: 800,
+    chartUrl: 'https://dexscreener.com/robinhood/ofy',
+  }, 'VERIFIED');
+  const message = buildOpportunityMessage(indexed);
+  assert.match(message, /Market cap\s+<b>\$9\.0K<\/b>/);
+  assert.match(message, /Liquidity\s+<b>\$3\.0K<\/b>/);
+  assert.match(message, /5m volume\s+<b>\$800<\/b>/);
+  assert.doesNotMatch(message, /FDV|verified launch curve|INDEXING/);
+});
+
+test('PONS V1 without indexed market or defensible valuation remains truthfully unavailable', async () => {
+  const { resolvePonsDeliveryContext } = await ponsResolver();
+  const { buildOpportunityMessage } = await service();
+  const exit = {
+    ...opportunity({ symbol: 'VONE', elapsedSec: 120, marketIndexState: 'NOT_INDEXED' }, ofyAddress),
+    strategy_key: 'PONS_RISK', recommended_action: 'EXIT',
+  };
+  const resolved = await resolvePonsDeliveryContext(exit, {
+    loadLifecycleIdentity: async () => null,
+    loadObservationIdentity: async () => null,
+    loadPreIndexValuation: async () => null,
+    resolveTarget: async () => ({
+      tokenUrl: `https://robinhoodchain.blockscout.com/token/${ofyAddress}`,
+      tokenSource: 'blockscout', marketIndexState: 'NOT_INDEXED',
+    }),
+  });
+  exit.raw_data = resolved.rawData;
+  assert.doesNotMatch(buildOpportunityMessage(exit), /Market cap|FDV|Liquidity|5m volume|INDEXING/);
 });

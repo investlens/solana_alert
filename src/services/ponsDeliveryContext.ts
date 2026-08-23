@@ -2,8 +2,11 @@ import { resolveTokenOpenTarget, type TokenOpenTarget } from '../core/tokenOpenR
 import { hasVerifiedOpportunityIdentity, mergePonsLifecycleContext } from '../product/opportunityContext.js';
 import {
   normalizeNotificationMarketContext,
+  PONS_PREINDEX_LIFECYCLE_MAX_AGE_MS,
   verifiedPonsPreIndexValuation,
 } from '../ui/notificationMarketContext.js';
+import { getPonsV2CurveState } from '../chains/robinhood/ponsV2CurveQuote.js';
+import { resolvePonsV2PreIndexValuation } from '../chains/robinhood/ponsPreIndexValuation.js';
 import { supabase } from './supabase.js';
 
 type DeliveryOpportunity = {
@@ -15,6 +18,7 @@ type DeliveryOpportunity = {
 type ResolverDependencies = {
   loadLifecycleIdentity: (opportunity: DeliveryOpportunity) => Promise<Record<string, unknown> | null>;
   loadObservationIdentity: (opportunity: DeliveryOpportunity) => Promise<Record<string, unknown> | null>;
+  loadPreIndexValuation: (opportunity: DeliveryOpportunity) => Promise<Record<string, unknown> | null>;
   resolveTarget: typeof resolveTokenOpenTarget;
 };
 
@@ -54,9 +58,28 @@ async function loadObservationIdentity(opportunity: DeliveryOpportunity) {
   };
 }
 
+async function loadCurrentPonsV2Valuation(opportunity: DeliveryOpportunity) {
+  const { data, error } = await supabase
+    .from('pons_shadow_trades')
+    .select('token_address,launch_version,curve_address,detected_at')
+    .ilike('token_address', opportunity.asset_id)
+    .order('detected_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (data?.launch_version !== 'V2' || !data.curve_address) return null;
+  const detectedAt = new Date(String(data.detected_at ?? '')).getTime();
+  const age = Date.now() - detectedAt;
+  if (!Number.isFinite(detectedAt) || age < 0 || age > PONS_PREINDEX_LIFECYCLE_MAX_AGE_MS) return null;
+  const curveState = await getPonsV2CurveState(data.curve_address);
+  const valuation = await resolvePonsV2PreIndexValuation(curveState);
+  return valuation ? { preIndexValuation: valuation } : null;
+}
+
 const defaults: ResolverDependencies = {
   loadLifecycleIdentity: loadLifecycleContext,
   loadObservationIdentity,
+  loadPreIndexValuation: loadCurrentPonsV2Valuation,
   resolveTarget: resolveTokenOpenTarget,
 };
 
@@ -97,5 +120,18 @@ export async function resolvePonsDeliveryContext(
     tokenAddress: opportunity.asset_id,
     includeMetadataFallback: !hasVerifiedOpportunityIdentity(rawData),
   });
+
+  if (target.marketIndexState !== 'VERIFIED' &&
+      verifiedPonsPreIndexValuation(rawData, opportunity.asset_id) == null) {
+    try {
+      const valuation = await deps.loadPreIndexValuation(opportunity);
+      if (valuation) rawData = mergePonsLifecycleContext(valuation, rawData);
+    } catch (error) {
+      console.warn('[PonsDeliveryContext] Pre-index V2 valuation unavailable', {
+        token: opportunity.asset_id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
   return { rawData, target };
 }
