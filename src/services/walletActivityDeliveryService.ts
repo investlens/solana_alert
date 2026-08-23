@@ -27,6 +27,7 @@ import { accessProfileForUser, hasCapability } from '../product/capabilities.js'
 import { assertAlphaActions, renderAlphaNotification, type AlphaNotificationState } from '../ui/alphaNotification.js';
 import { deliverReservedTelegram } from './telegramDeliveryContract.js';
 import { createLeaseToken, DELIVERY_LEASE_SECONDS } from './reservationLease.js';
+import { marketContextMetrics, normalizeNotificationMarketContext } from '../ui/notificationMarketContext.js';
 
 type InlineButton = {
   text: string;
@@ -266,6 +267,7 @@ export function buildWalletActivityMessage(args: {
     : event.kind === 'sell'
       ? 'WALLET_SELL'
       : 'WALLET_LAUNCH';
+  const market = normalizeNotificationMarketContext(event as unknown as Record<string, unknown>);
   return renderAlphaNotification({
     category: 'wallet',
     severity: event.kind === 'sell' ? 'warning' : event.kind === 'buy' ? 'positive' : 'watch',
@@ -273,7 +275,10 @@ export function buildWalletActivityMessage(args: {
     symbol: wallet,
     subtitle: event.tokenMint ? shortAddress(event.tokenMint) : undefined,
     address: event.wallet,
-    metrics: event.kind === 'launch' ? [] : [{ label: 'Value', value: formatAmount(event.amountSol) }],
+    metrics: event.kind === 'launch' ? [] : [
+      ...marketContextMetrics(market),
+      { label: 'Value', value: formatAmount(event.amountSol) },
+    ],
     reason: event.kind === 'buy'
       ? 'Watched wallet opened a position.'
       : event.kind === 'sell'

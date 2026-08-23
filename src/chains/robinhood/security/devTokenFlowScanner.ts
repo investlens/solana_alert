@@ -21,6 +21,13 @@ const ZERO_ADDRESS =
 const DEAD_ADDRESS =
   '0x000000000000000000000000000000000000dEaD';
 
+export function classifyDevTransferDestination(destination: string): 'BURN' | 'TRANSFER' {
+  const normalized = destination.toLowerCase();
+  return normalized === ZERO_ADDRESS.toLowerCase() || normalized === DEAD_ADDRESS.toLowerCase()
+    ? 'BURN'
+    : 'TRANSFER';
+}
+
 const TRANSFER_TOPIC =
   '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 
@@ -300,12 +307,7 @@ async function scanRecentDevTransfers(
       continue;
     }
 
-    if (
-      destination ===
-        ZERO_ADDRESS.toLowerCase() ||
-      destination ===
-        DEAD_ADDRESS.toLowerCase()
-    ) {
+    if (classifyDevTransferDestination(destination) === 'BURN') {
       burned += amount;
     } else {
       transferred += amount;

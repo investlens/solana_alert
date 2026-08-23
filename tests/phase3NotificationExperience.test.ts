@@ -38,6 +38,28 @@ test('representative Wallet Buy, Sell, and Launch snapshots', () => {
   assert.match(buy, /A&amp;B &lt;WHALE&gt;/);
 });
 
+test('wallet buy reuses verified market enrichment without fabricating absent values', () => {
+  const common = {
+    signature: 'sig-market', wallet: 'wallet-address', tokenMint: 'mint-address',
+    type: 'buy', amountSol: 3.2,
+  };
+  const enriched = buildWalletActivityMessage({
+    event: {
+      ...common, kind: 'buy', tokenSymbol: 'ALPHA',
+      marketCap: 48_200, liquidity: 12_500, volume5m: 6_830,
+    },
+    label: null,
+  });
+  assert.match(enriched, /Market cap\s+<b>\$48\.2K<\/b>/);
+  assert.match(enriched, /Liquidity\s+<b>\$12\.5K<\/b>/);
+  assert.match(enriched, /5m volume\s+<b>\$6\.8K<\/b>/);
+
+  const unavailable = buildWalletActivityMessage({
+    event: { ...common, kind: 'buy' }, label: null,
+  });
+  assert.doesNotMatch(unavailable, /Market cap|Liquidity|5m volume|\$0/);
+});
+
 test('Creator positive and developer risk snapshots', () => {
   const positive = buildCreatorNotification({ symbol: 'GOOD', address: '0x123', reputation: 'Trusted', reason: 'Creator history improved.' });
   const risk = buildCreatorNotification({ symbol: 'RISK', address: '0x456', risk: true, transferredAmount: 2, reason: 'Developer moved tokens.' });
@@ -50,8 +72,8 @@ test('Creator positive and developer risk snapshots', () => {
 test('burn evidence distinguishes confirmed zero from unavailable', () => {
   assert.deepEqual(burnEvidenceMetric(0), { label: 'Burn', value: '0 confirmed' });
   assert.deepEqual(burnEvidenceMetric(null), { label: 'Burn', value: 'Data unavailable' });
-  assert.match(buildCreatorNotification({ symbol: 'BURN', address: 'x', burnObserved: true, burnedAmount: 0, reason: 'Checked.' }), /0 confirmed/);
-  assert.match(buildCreatorNotification({ symbol: 'BURN', address: 'x', burnObserved: true, burnedAmount: null, reason: 'Checked.' }), /Data unavailable/);
+  assert.match(buildCreatorNotification({ symbol: 'BURN', address: 'x', burnObserved: true, burnedAmount: 0, reason: 'Checked.' }), /Burned\s+<b>0%<\/b>/);
+  assert.doesNotMatch(buildCreatorNotification({ symbol: 'BURN', address: 'x', burnObserved: true, burnedAmount: null, reason: 'Checked.' }), /Burned|Data unavailable/);
 });
 
 test('execution snapshots cover success, failure, pause and resume', () => {

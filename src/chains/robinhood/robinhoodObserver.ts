@@ -7,6 +7,7 @@ import {
 } from '../../services/telegram.js';
 import { renderAlphaNotification } from '../../ui/alphaNotification.js';
 import { buildAlphaMarketActions } from '../../ui/alphaNotificationActions.js';
+import { coreDecisionEvidenceMetrics, marketContextMetrics, normalizeCoreDecisionMetrics, normalizeNotificationMarketContext } from '../../ui/notificationMarketContext.js';
 
 import {
   startPostAlertDevWatch,
@@ -439,18 +440,21 @@ if (
   }
 }
 
+  const marketContext = normalizeNotificationMarketContext(market);
+  const decisionEvidence = normalizeCoreDecisionMetrics({
+    devHoldingPercent: args.devHoldingPercent,
+    devHoldingEvidence: args.devHoldingPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
+  });
   return renderAlphaNotification({
     category: 'market', severity: 'watch', state: 'WATCHING',
     symbol, subtitle: name, address: token.tokenAddress, risk: holderText,
     confidence: args.contractScore,
     metrics: [
-      { label: 'Market cap', value: formatUsd(market.marketCapUsd) },
-      { label: 'Liquidity', value: formatUsd(market.liquidityUsd) },
-      { label: '5m volume', value: formatUsd(market.volume5mUsd) },
+      ...marketContextMetrics(marketContext),
       { label: 'Exit impact', value: impactText },
-      { label: 'Dev holding', value: args.devHoldingPercent == null ? 'Data unavailable' : `${args.devHoldingPercent.toFixed(2)}%` },
       { label: 'Creator', value: args.creatorStatus && args.creatorStatus !== 'UNKNOWN' ? `${args.creatorStatus}${args.creatorScore == null ? '' : ` · ${args.creatorScore}/100`}` : 'Data unavailable' },
     ],
+    specialistMetrics: coreDecisionEvidenceMetrics(decisionEvidence),
     evidence: args.warnings,
     reason: 'Early market quality passed initial checks.',
     recommendedAction: 'Waiting for entry confirmation.',

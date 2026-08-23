@@ -1,9 +1,9 @@
 import {
-  burnEvidenceMetric,
   renderAlphaNotification,
   type AlphaNotificationMetric,
   type AlphaNotificationState,
 } from './alphaNotification.js';
+import { coreDecisionEvidenceMetrics, normalizeCoreDecisionMetrics } from './notificationMarketContext.js';
 
 export function buildCreatorNotification(args: {
   symbol: string;
@@ -17,10 +17,14 @@ export function buildCreatorNotification(args: {
   reason: string;
 }): string {
   const metrics: AlphaNotificationMetric[] = [];
-  if (args.holdingPercent != null) metrics.push({ label: 'Dev holding', value: `${args.holdingPercent.toFixed(2)}%` });
   if (args.transferredAmount != null) metrics.push({ label: 'Transferred', value: args.transferredAmount });
-  if (args.burnObserved) metrics.push(burnEvidenceMetric(args.burnedAmount));
   if (args.reputation) metrics.push({ label: 'Reputation', value: args.reputation });
+  const decisionEvidence = normalizeCoreDecisionMetrics({
+    devHoldingPercent: args.holdingPercent,
+    devHoldingEvidence: args.holdingPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
+    burnedPercent: args.burnedAmount,
+    burnEvidence: args.burnObserved && args.burnedAmount != null ? 'VERIFIED' : 'UNAVAILABLE',
+  });
   return renderAlphaNotification({
     category: args.risk ? 'risk' : 'creator',
     severity: args.risk ? 'critical' : 'positive',
@@ -29,6 +33,7 @@ export function buildCreatorNotification(args: {
     address: args.address,
     risk: args.risk ? 'HIGH' : 'REVIEW',
     metrics,
+    specialistMetrics: coreDecisionEvidenceMetrics(decisionEvidence),
     reason: args.reason,
     recommendedAction: args.risk ? 'Protect capital · review now.' : 'Review creator evidence and market conditions.',
   });

@@ -42,6 +42,10 @@ export type WalletWatchEvent =
       tokenMint: string | null;
       amountSol: number | null;
       type: string;
+      tokenSymbol?: string | null;
+      marketCap?: number | null;
+      liquidity?: number | null;
+      volume5m?: number | null;
     }
   | {
       kind: 'sell';
@@ -313,6 +317,12 @@ try {
     Number.isFinite(Number(result.liquidityUsd))
       ? Number(result.liquidityUsd)
       : null;
+  buyEvent.tokenSymbol = pair?.baseToken?.symbol ?? null;
+  buyEvent.marketCap = marketCapAtAction;
+  buyEvent.liquidity = entryLiquidity;
+  buyEvent.volume5m = result?.volume5m != null && Number.isFinite(Number(result.volume5m))
+    ? Number(result.volume5m)
+    : null;
 } catch (error) {
   console.log('wallet buy enrichment failed:', {
     wallet,

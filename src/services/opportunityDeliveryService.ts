@@ -35,14 +35,13 @@ import {
 import { accessProfileForUser, hasCapability } from '../product/capabilities.js';
 import {
   assertAlphaActions,
-  burnEvidenceMetric,
   compactAlphaAddress,
   renderAlphaNotification,
   type AlphaNotificationState,
 } from '../ui/alphaNotification.js';
 import { deliverReservedTelegram } from './telegramDeliveryContract.js';
 import { createLeaseToken, DELIVERY_LEASE_SECONDS } from './reservationLease.js';
-import { marketContextMetrics, normalizeNotificationMarketContext, type NotificationMarketContext } from '../ui/notificationMarketContext.js';
+import { coreDecisionEvidenceMetrics, marketContextMetrics, normalizeCoreDecisionMetrics, normalizeNotificationMarketContext, type NotificationMarketContext } from '../ui/notificationMarketContext.js';
 import { resolvePonsDeliveryContext } from './ponsDeliveryContext.js';
 
 type DeliverableAction =
@@ -396,12 +395,10 @@ export function buildOpportunityMessage(
       : action === 'TRACK'
         ? 'BUILDING'
         : 'WATCHING';
-  const holding = rawNumber(opportunity, 'devHoldingPercent');
   const transferred = rawNumber(opportunity, 'otherDevTransferPercent');
-  const burned = rawNumber(opportunity, 'totalBurnPercent');
   const transferEvidenceComplete = opportunity.raw_data?.devFlowEvidenceStatus === 'COMPLETE';
   const transferZeroMeaningful = opportunity.raw_data?.transferZeroConfirmedMeaningful === true;
-  const burnZeroMeaningful = opportunity.raw_data?.burnZeroConfirmedMeaningful === true;
+  const decisionEvidence = normalizeCoreDecisionMetrics(opportunity.raw_data);
   const market = normalizeNotificationMarketContext(
     opportunity.raw_data,
     opportunity.raw_data?.market as Record<string, unknown> | undefined,
@@ -438,13 +435,10 @@ export function buildOpportunityMessage(
       ...(roiChange == null ? [] : [{ label: 'Momentum', value: signedPercent(roiChange) }]),
     ],
     specialistMetrics: [
-      ...(holding == null ? [] : [{ label: 'Dev holding', value: `${holding.toFixed(2)}%` }]),
+      ...coreDecisionEvidenceMetrics(decisionEvidence),
       ...(transferred == null || (transferred === 0 && (!transferEvidenceComplete || !transferZeroMeaningful))
         ? []
         : [{ label: 'Transferred', value: `${transferred.toFixed(2)}%` }]),
-      ...(burned != null && (burned > 0 || burnZeroMeaningful)
-        ? [burnEvidenceMetric(burned)]
-        : []),
     ],
     reason,
     recommendedAction: earlyMarketIndexing
@@ -833,6 +827,7 @@ async function deliverOpportunity(
     tokenTarget.marketIndexState,
   );
 
+  let devEvidenceEnriched = false;
   if (
     String(
       opportunity.chain ??
@@ -855,8 +850,26 @@ async function deliverOpportunity(
         devHoldingPercent:
           devFlow.devHoldingPercent,
 
+        devHoldingEvidence:
+          devFlow.devHoldingPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
+
+        devHoldingSource:
+          'ROBINHOOD_DEV_TOKEN_FLOW',
+
+        devHoldingObservedAt:
+          new Date(devFlow.scannedAt).toISOString(),
+
         totalBurnPercent:
           devFlow.totalBurnPercent,
+
+        burnEvidence:
+          devFlow.totalBurnPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
+
+        burnSource:
+          'ROBINHOOD_DEAD_AND_ZERO_BALANCES',
+
+        burnObservedAt:
+          new Date(devFlow.scannedAt).toISOString(),
 
         confirmedDevBurnPercent:
           devFlow.confirmedDevBurnPercent,
@@ -870,6 +883,7 @@ async function deliverOpportunity(
         deployerAddress:
           devFlow.deployerAddress,
       };
+      devEvidenceEnriched = devFlow.devHoldingPercent != null || devFlow.totalBurnPercent != null;
 
       console.log(
         '[OpportunityDelivery] Developer flow enriched:',
@@ -903,7 +917,7 @@ async function deliverOpportunity(
     }
   }
 
-  if (tokenTarget.marketContext) {
+  if (tokenTarget.marketContext || devEvidenceEnriched) {
     const { error } = await supabase
       .from('opportunities')
       .update({ raw_data: opportunity.raw_data })

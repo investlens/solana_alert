@@ -15,6 +15,7 @@ import {
 } from '../../services/telegram.js';
 import { renderAlphaNotification } from '../../ui/alphaNotification.js';
 import { buildAlphaMarketActions } from '../../ui/alphaNotificationActions.js';
+import { coreDecisionEvidenceMetrics, marketContextMetrics, normalizeCoreDecisionMetrics, normalizeNotificationMarketContext } from '../../ui/notificationMarketContext.js';
 
 import {
   scanRobinhoodSellability,
@@ -750,17 +751,24 @@ export function buildMicroBreakoutMessage(args: {
       1000,
     );
 
+  const market = normalizeNotificationMarketContext({
+    marketCap: args.currentMarketCap,
+    liquidity: args.currentLiquidity,
+  });
+  const decisionEvidence = normalizeCoreDecisionMetrics({
+    devHoldingPercent: args.devHolding,
+    devHoldingEvidence: args.devHolding == null ? 'UNAVAILABLE' : 'VERIFIED',
+  });
   return renderAlphaNotification({
     category: 'market', severity: 'positive', state: 'ENTRY_READY',
     symbol, address: args.row.token_address, age: `${ageSeconds}s`, risk: 'REVIEW',
     metrics: [
       { label: 'Momentum', value: `+${args.currentRoi.toFixed(2)}%` },
-      { label: 'Market cap', value: `$${Math.round(args.currentMarketCap).toLocaleString()}` },
-      { label: 'Liquidity', value: `$${Math.round(args.currentLiquidity).toLocaleString()}` },
+      ...marketContextMetrics(market),
       { label: 'Exit impact', value: args.sellImpact == null ? 'Data unavailable' : `${args.sellImpact.toFixed(3)}%` },
       { label: 'Top holder', value: args.top1 == null ? 'Data unavailable' : `${args.top1.toFixed(2)}%` },
-      { label: 'Dev holding', value: args.devHolding == null ? 'Data unavailable' : `${args.devHolding.toFixed(2)}%` },
     ],
+    specialistMetrics: coreDecisionEvidenceMetrics(decisionEvidence),
     reason: `A clean early launch reached ${getMicroBreakoutLabel(args.elapsed)} momentum.`,
     recommendedAction: 'Review live conditions before acting.',
     access: 'ADMIN',

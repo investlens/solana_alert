@@ -1,4 +1,4 @@
-import { normalizeNotificationMarketContext } from '../ui/notificationMarketContext.js';
+import { normalizeCoreDecisionMetrics, normalizeNotificationMarketContext } from '../ui/notificationMarketContext.js';
 
 type RawContext = Record<string, unknown> | null | undefined;
 
@@ -33,6 +33,14 @@ export function mergePonsLifecycleContext(
   const incomingIdentity = normalizeNotificationMarketContext(incoming);
   const symbol = incomingIdentity.symbol ?? priorIdentity.symbol;
   const name = incomingIdentity.name ?? priorIdentity.name;
+  const priorEvidence = normalizeCoreDecisionMetrics(existing);
+  const incomingEvidence = normalizeCoreDecisionMetrics(incoming);
+  const devHoldingVerified = incomingEvidence.devHoldingEvidence === 'VERIFIED'
+    ? incomingEvidence
+    : priorEvidence.devHoldingEvidence === 'VERIFIED' ? priorEvidence : null;
+  const burnVerified = incomingEvidence.burnEvidence === 'VERIFIED'
+    ? incomingEvidence
+    : priorEvidence.burnEvidence === 'VERIFIED' ? priorEvidence : null;
 
   return {
     ...incoming,
@@ -46,6 +54,30 @@ export function mergePonsLifecycleContext(
       : {}),
     ...(existing?.verifiedMarketContext && !incoming.verifiedMarketContext
       ? { verifiedMarketContext: existing.verifiedMarketContext }
+      : {}),
+    ...(devHoldingVerified
+      ? {
+          devHoldingPercent: devHoldingVerified.devHoldingPercent,
+          devHoldingEvidence: 'VERIFIED',
+          devHoldingSource: incomingEvidence.devHoldingEvidence === 'VERIFIED'
+            ? incoming.devHoldingSource
+            : existing?.devHoldingSource,
+          devHoldingObservedAt: incomingEvidence.devHoldingEvidence === 'VERIFIED'
+            ? incoming.devHoldingObservedAt
+            : existing?.devHoldingObservedAt,
+        }
+      : {}),
+    ...(burnVerified
+      ? {
+          totalBurnPercent: burnVerified.burnedPercent,
+          burnEvidence: 'VERIFIED',
+          burnSource: incomingEvidence.burnEvidence === 'VERIFIED'
+            ? incoming.burnSource
+            : existing?.burnSource,
+          burnObservedAt: incomingEvidence.burnEvidence === 'VERIFIED'
+            ? incoming.burnObservedAt
+            : existing?.burnObservedAt,
+        }
       : {}),
   };
 }

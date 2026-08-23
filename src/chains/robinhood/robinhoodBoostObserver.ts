@@ -11,6 +11,7 @@ import {
 } from '../../services/telegram.js';
 import { renderAlphaNotification } from '../../ui/alphaNotification.js';
 import { buildAlphaMarketActions } from '../../ui/alphaNotificationActions.js';
+import { coreDecisionEvidenceMetrics, marketContextMetrics, normalizeCoreDecisionMetrics, normalizeNotificationMarketContext } from '../../ui/notificationMarketContext.js';
 
 import {
   fetchRobinhoodBoosts,
@@ -308,16 +309,6 @@ export function buildBoostMessage(args: {
       ? 'NEW BOOST'
       : 'BOOST INCREASE';
 
-  const dev =
-    args.devHoldingPercent ==
-    null
-      ? 'Unknown'
-      : (
-          args.devHoldingPercent
-            .toFixed(2) +
-          '%'
-        );
-
   const top1 =
     args.holderTop1Percent ==
     null
@@ -328,17 +319,22 @@ export function buildBoostMessage(args: {
           '%'
         );
 
+  const market = normalizeNotificationMarketContext({
+    marketCap: args.marketCap, liquidity: args.liquidity, volume5m: args.volume5m,
+  });
+  const decisionEvidence = normalizeCoreDecisionMetrics({
+    devHoldingPercent: args.devHoldingPercent,
+    devHoldingEvidence: args.devHoldingPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
+  });
   return renderAlphaNotification({
     category: 'market', severity: 'watch', state: 'BUILDING',
     symbol: args.symbol, address: args.tokenAddress, risk: 'REVIEW',
     metrics: [
       { label: 'Event', value: eventLabel },
       { label: 'Boost', value: `+${args.boostAmount} / ${args.totalBoostAmount}` },
-      { label: 'Market cap', value: formatUsd(args.marketCap) },
-      { label: 'Liquidity', value: formatUsd(args.liquidity) },
-      { label: '5m volume', value: formatUsd(args.volume5m) },
-      { label: 'Dev holding', value: dev },
+      ...marketContextMetrics(market),
     ],
+    specialistMetrics: coreDecisionEvidenceMetrics(decisionEvidence),
     evidence: [`Top holder ${top1}`, `Buys / sells ${args.buys5m}/${args.sells5m}`],
     reason: 'A new or increased market boost was detected.',
     recommendedAction: 'Monitor for sustained market confirmation.',

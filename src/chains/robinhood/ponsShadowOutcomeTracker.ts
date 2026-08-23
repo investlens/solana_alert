@@ -56,6 +56,7 @@ type PonsOpportunitySyncArgs = {
   liquidity?: number | null;
   volume5m?: number | null;
   chartUrl?: string | null;
+  devHoldingPercent?: number | null;
   state: string;
   reason: string;
   currentRoi: number;
@@ -72,6 +73,9 @@ export function buildPonsOpportunityRawData(args: PonsOpportunitySyncArgs) {
     liquidity: args.liquidity ?? null,
     volume5m: args.volume5m ?? null,
     chartUrl: args.chartUrl ?? null,
+    devHoldingPercent: args.devHoldingPercent ?? null,
+    devHoldingEvidence: args.devHoldingPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
+    devHoldingSource: args.devHoldingPercent == null ? null : 'PONS_SHADOW_DEV_HOLDING',
     ponsAlphaState:
       args.state,
 
@@ -1860,6 +1864,9 @@ async function updateShadowRow(
 
               liquidity:
                 row.entry_liquidity,
+
+              devHoldingPercent:
+                row.dev_holding_percent,
 
               state:
                 alphaClassification.state,

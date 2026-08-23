@@ -156,17 +156,39 @@ test('opportunity specialist zeroes require explicit meaningful confirmation', a
   const { buildOpportunityMessage } = await service();
   const unconfirmed = buildOpportunityMessage(opportunity({
     symbol: 'RUSTY', elapsedSec: 31, otherDevTransferPercent: 0,
-    totalBurnPercent: 0, devFlowEvidenceStatus: 'COMPLETE',
+    devHoldingPercent: 0, totalBurnPercent: 0,
   }));
-  assert.doesNotMatch(unconfirmed, /Transferred|Burn\s/);
+  assert.doesNotMatch(unconfirmed, /Transferred|Dev holding|Burned\s/);
 
   const confirmed = buildOpportunityMessage(opportunity({
     symbol: 'RUSTY', elapsedSec: 31, otherDevTransferPercent: 0,
-    totalBurnPercent: 0, devFlowEvidenceStatus: 'COMPLETE',
-    transferZeroConfirmedMeaningful: true, burnZeroConfirmedMeaningful: true,
+    devHoldingPercent: 0, totalBurnPercent: 0, devFlowEvidenceStatus: 'COMPLETE',
+    transferZeroConfirmedMeaningful: true,
   }));
   assert.match(confirmed, /Transferred\s+<b>0\.00%<\/b>/);
-  assert.match(confirmed, /Burn\s+<b>0 confirmed<\/b>/);
+  assert.match(confirmed, /Dev holding\s+<b>0%<\/b>/);
+  assert.match(confirmed, /Burned\s+<b>0%<\/b>/);
+});
+
+test('Entry to Exit preserves verified developer holding and burn but not stale market cap', async () => {
+  const { buildOpportunityMessage } = await service();
+  const entryEvidence = {
+    symbol: 'RUSTY', identityVerifiedAt: '2026-08-23T13:56:00.000Z',
+    devHoldingPercent: 2.86, devHoldingEvidence: 'VERIFIED',
+    devHoldingSource: 'ROBINHOOD_DEV_TOKEN_FLOW', devHoldingObservedAt: '2026-08-23T13:56:01.000Z',
+    totalBurnPercent: 12.4, burnEvidence: 'VERIFIED',
+    burnSource: 'ROBINHOOD_DEAD_AND_ZERO_BALANCES', burnObservedAt: '2026-08-23T13:56:01.000Z',
+    marketCap: 80_000, marketIndexState: 'VERIFIED',
+  };
+  const exitRaw = mergePonsLifecycleContext(entryEvidence, {
+    symbol: null, devHoldingPercent: null, totalBurnPercent: null, marketCap: null,
+    elapsedSec: 215, currentRoi: -29.67, roiChange: -34,
+  });
+  const exit = { ...opportunity(exitRaw, rustyAddress), recommended_action: 'EXIT' };
+  const message = buildOpportunityMessage(exit);
+  assert.match(message, /Dev holding\s+<b>2\.86%<\/b>/);
+  assert.match(message, /Burned\s+<b>12\.4%<\/b>/);
+  assert.doesNotMatch(message, /Market cap/);
 });
 
 test('production SIX Exit resolves bounded metadata when no Entry identity was persisted', async () => {

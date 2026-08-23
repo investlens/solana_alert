@@ -85,8 +85,8 @@ test('Robinhood early watch and boost preserve snapshot identity and market cont
     creatorHit1m: 0, creatorBestPeakMarketCap: 0, warnings: [],
   } as any);
   assert.match(watch, /<b>HOOD<\/b>/);
-  assert.match(watch, /Market cap\s+<b>\$25\.50K<\/b>/);
-  assert.match(watch, /Liquidity\s+<b>\$23\.07K<\/b>/);
+  assert.match(watch, /Market cap\s+<b>\$25\.5K<\/b>/);
+  assert.match(watch, /Liquidity\s+<b>\$23\.1K<\/b>/);
 
   const boost = buildBoostMessage({
     symbol: 'hood', tokenAddress: address, boostAmount: 5, totalBoostAmount: 10,
@@ -94,8 +94,8 @@ test('Robinhood early watch and boost preserve snapshot identity and market cont
     buys5m: 40, sells5m: 10, devHoldingPercent: 2, holderTop1Percent: 8, eventType: 'NEW',
   });
   assert.match(boost, /<b>HOOD<\/b>/);
-  assert.match(boost, /Market cap\s+<b>\$25\.50K<\/b>/);
-  assert.match(boost, /Liquidity\s+<b>\$23\.07K<\/b>/);
+  assert.match(boost, /Market cap\s+<b>\$25\.5K<\/b>/);
+  assert.match(boost, /Liquidity\s+<b>\$23\.1K<\/b>/);
 });
 
 test('Pump.fun renders known symbol and market cap without fabricating missing values', () => {
