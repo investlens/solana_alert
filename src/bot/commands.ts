@@ -61,9 +61,10 @@ async function sendMainMenu(ctx: any) {
   const user = await getUserByTelegramId(telegramId);
   const tier = String(user?.tier ?? 'free').toUpperCase();
 
-  await ctx.reply(
+  await renderScreen(
+    ctx,
     [
-      '🧠 <b>AlphaOS AI</b>',
+      '🧠 <b>AlphaOS</b>',
       '',
       '<b>AI Crypto Research Terminal</b>',
       '',
@@ -74,12 +75,12 @@ async function sendMainMenu(ctx: any) {
       '',
       'AlphaOS investigates crypto opportunities using AI, creator intelligence, smart wallet activity, liquidity, market structure, and risk evidence.',
       '',
-      'This is not a signal bot.',
+      'Live intelligence. Clear decisions. Fast action.',
       '<b>Evidence before execution.</b>',
       '',
       '━━━━━━━━━━━━━━━━━━━━━━',
       '',
-      '<b>Choose your workspace</b>',
+      '<b>What would you like to do?</b>',
     ].filter(Boolean).join('\n'),
     {
       parse_mode: 'HTML',
@@ -390,7 +391,26 @@ bot.action('AUTO_TRADE_STATUS', async (ctx) => {
         '• Multiple wallets buying same token',
         '• Early smart-money entries',
       ].join('\n'),
-      { parse_mode: 'HTML', ...backToMainMenu() }
+      {
+        parse_mode: 'HTML',
+
+        reply_markup:
+          Markup.inlineKeyboard([
+            [
+              Markup.button.callback(
+                '⬅️ Research',
+                'ALPHA_FEED',
+              ),
+            ],
+
+            [
+              Markup.button.callback(
+                '🏠 Main Menu',
+                'MAIN_MENU',
+              ),
+            ],
+          ]).reply_markup,
+      }
     );
   });
 
@@ -400,14 +420,33 @@ bot.action('AUTO_TRADE_STATUS', async (ctx) => {
       [
         '🧠 <b>Creator Intel</b>',
         '',
-        'Future premium engine:',
+        'Review creator history and launch quality.',
         '',
-        '• Creators with past $1M+ launches',
-        '• Repeat winner wallets',
-        '• Creator reputation score',
-        '• Rug/farm creator blacklist',
+        '• Previous launch outcomes',
+        '• Repeat winner behaviour',
+        '• Creator reputation',
+        '• Risk / farm history',
       ].join('\n'),
-      { parse_mode: 'HTML', ...backToMainMenu() }
+      {
+        parse_mode: 'HTML',
+
+        reply_markup:
+          Markup.inlineKeyboard([
+            [
+              Markup.button.callback(
+                '⬅️ Research',
+                'ALPHA_FEED',
+              ),
+            ],
+
+            [
+              Markup.button.callback(
+                '🏠 Main Menu',
+                'MAIN_MENU',
+              ),
+            ],
+          ]).reply_markup,
+      }
     );
   });
 
@@ -466,14 +505,33 @@ bot.action('AUTO_TRADE_STATUS', async (ctx) => {
       [
         '📈 <b>Positions</b>',
         '',
-        'Coming soon:',
+        'Current status:',
         '• Open positions',
         '• Entry price',
         '• Current value',
         '• PnL',
         '• Exit buttons',
       ].join('\n'),
-      { parse_mode: 'HTML', ...backToMainMenu() }
+      {
+        parse_mode: 'HTML',
+
+        reply_markup:
+          Markup.inlineKeyboard([
+            [
+              Markup.button.callback(
+                '⬅️ Trade',
+                'TRADE_MENU',
+              ),
+            ],
+
+            [
+              Markup.button.callback(
+                '🏠 Main Menu',
+                'MAIN_MENU',
+              ),
+            ],
+          ]).reply_markup,
+      }
     );
   });
 
@@ -483,7 +541,7 @@ bot.action('AUTO_TRADE_STATUS', async (ctx) => {
       [
         '🎯 <b>Sniper</b>',
         '',
-        'Planned modules:',
+        'Available / upcoming tools:',
         '• Creator sniper',
         '• DEX paid sniper',
         '• Wallet copy-watch',
@@ -499,7 +557,7 @@ bot.action('AUTO_TRADE_STATUS', async (ctx) => {
       [
         '🛡 <b>Risk Controls</b>',
         '',
-        'Planned:',
+        'Risk controls:',
         '• 20% stop loss',
         '• Trailing stop',
         '• Take profit ladder',
@@ -609,44 +667,240 @@ bot.action('AUTO_TRADE_STATUS', async (ctx) => {
 
   bot.action('PREMIUM', async (ctx) => {
     await ctx.answerCbQuery();
-    await ctx.reply(
+
+    await renderScreen(
+      ctx,
       [
-        '👑 <b>Alpha Radar Premium</b>',
+        '⭐ <b>ALPHAOS ACCESS</b>',
+        '━━━━━━━━━━━━━━━━',
         '',
         '<b>Free</b>',
-        '• Delayed / limited signals',
-        '• 1x future Alpha Points',
+        '• Limited / delayed intelligence',
+        '• Core opportunity access',
         '',
         '<b>Pro</b>',
-        '• Faster signals',
-        '• Whale Radar',
-        '• Creator Intel',
-        '• Higher points multiplier',
+        '• Faster actionable alerts',
+        '• Wallet tracking',
+        '• Smart-money intelligence',
+        '• Creator intelligence',
         '',
-        '<b>VIP</b>',
-        '• Highest conviction feed',
-        '• Advanced tools',
-        '• Priority alpha access',
+        '<b>Admin</b>',
+        '• Priority delivery',
+        '• Trading controls',
+        '• Advanced system tools',
         '',
-        'Use /upgrade to activate paid access.',
+        'Choose an option below.',
       ].join('\n'),
-      { parse_mode: 'HTML', ...backToMainMenu() }
+      {
+        parse_mode:
+          'HTML',
+
+        reply_markup:
+          Markup.inlineKeyboard([
+            [
+              Markup.button.callback(
+                '⭐ View Plans',
+                'PREMIUM_PLANS',
+              ),
+            ],
+            [
+              Markup.button.callback(
+                '📋 My Status',
+                'USER_STATUS',
+              ),
+
+              Markup.button.callback(
+                '⬅️ Main Menu',
+                'MAIN_MENU',
+              ),
+            ],
+          ]).reply_markup,
+      },
+    );
+  });
+
+  bot.action('PREMIUM_PLANS', async (ctx) => {
+    await ctx.answerCbQuery();
+
+    await renderScreen(
+      ctx,
+      [
+        '⭐ <b>ALPHAOS PLANS</b>',
+        '',
+        '<b>15 Days</b> · 0.1 SOL',
+        '<b>30 Days</b> · 0.15 SOL',
+        '',
+        'Select a plan to continue.',
+      ].join('\n'),
+      {
+        parse_mode:
+          'HTML',
+
+        reply_markup:
+          Markup.inlineKeyboard([
+            [
+              Markup.button.callback(
+                '15 Days · 0.1 SOL',
+                'PLAN_15',
+              ),
+            ],
+            [
+              Markup.button.callback(
+                '30 Days · 0.15 SOL',
+                'PLAN_30',
+              ),
+            ],
+            [
+              Markup.button.callback(
+                '⬅️ Access',
+                'PREMIUM',
+              ),
+
+              Markup.button.callback(
+                '🏠 Main Menu',
+                'MAIN_MENU',
+              ),
+            ],
+          ]).reply_markup,
+      },
+    );
+  });
+
+  bot.action('USER_STATUS', async (ctx) => {
+    await ctx.answerCbQuery();
+
+    const telegramId =
+      String(
+        ctx.from?.id ??
+        '',
+      );
+
+    const user =
+      await getUserByTelegramId(
+        telegramId,
+      );
+
+    if (!user) {
+      await ctx.reply(
+        'No user record found. Send /start first.',
+      );
+
+      return;
+    }
+
+    const lines = [
+      '📋 <b>MY ALPHAOS STATUS</b>',
+      '',
+      `Tier: <b>${String(
+        user.tier,
+      ).toUpperCase()}</b>`,
+    ];
+
+    if (
+      user.tier ===
+      'admin'
+    ) {
+      lines.push(
+        'Access: <b>Admin</b>',
+        'Priority: <b>Immediate</b>',
+        'Subscription: <b>Active</b>',
+      );
+    } else {
+      lines.push(
+        `Subscription: <b>${String(
+          user.subscription_status,
+        ).toUpperCase()}</b>`,
+
+        `Trial Used: <b>${user.free_trial_used}/${user.free_trial_limit}</b>`,
+
+        `Plan Days: <b>${user.paid_plan_days ??
+          'n/a'}</b>`,
+      );
+    }
+
+    await renderScreen(
+      ctx,
+      lines.join('\n'),
+      {
+        parse_mode:
+          'HTML',
+
+        reply_markup:
+          Markup.inlineKeyboard([
+            [
+              Markup.button.callback(
+                '⬅️ Access',
+                'PREMIUM',
+              ),
+
+              Markup.button.callback(
+                '🏠 Main Menu',
+                'MAIN_MENU',
+              ),
+            ],
+          ]).reply_markup,
+      },
     );
   });
 
   bot.action('SETTINGS', async (ctx) => {
     await ctx.answerCbQuery();
-    await ctx.reply(
+
+    await renderScreen(
+      ctx,
       [
-        '⚙ <b>Settings</b>',
+        '⚙️ <b>ALPHAOS CONTROLS</b>',
+        '━━━━━━━━━━━━━━━━',
         '',
-        'Coming soon:',
-        '• Alert sensitivity',
-        '• Signal categories',
-        '• Wallet watchlist',
-        '• Risk profile',
+        'Manage what AlphaOS watches and how you use it.',
+        '',
+        '🎯 <b>Strategies</b>',
+        'Turn individual intelligence engines ON or OFF.',
+        '',
+        '🐋 <b>Wallet Tracking</b>',
+        'Add, pause or remove tracked wallets.',
+        '',
+        '📈 <b>Trade</b>',
+        'Review execution and risk controls.',
+        '',
+        '⭐ <b>Access</b>',
+        'View your AlphaOS membership options.',
       ].join('\n'),
-      { parse_mode: 'HTML', ...backToMainMenu() }
+      {
+        parse_mode: 'HTML',
+
+        reply_markup:
+          Markup.inlineKeyboard([
+            [
+              Markup.button.callback(
+                '🎯 Strategies',
+                'STRATEGY_SETTINGS',
+              ),
+
+              Markup.button.callback(
+                '🐋 Wallets',
+                'WALLET_TRACKING',
+              ),
+            ],
+            [
+              Markup.button.callback(
+                '📈 Trade',
+                'TRADE_MENU',
+              ),
+
+              Markup.button.callback(
+                '⭐ Premium',
+                'PREMIUM',
+              ),
+            ],
+            [
+              Markup.button.callback(
+                '⬅️ Main Menu',
+                'MAIN_MENU',
+              ),
+            ],
+          ]).reply_markup,
+      },
     );
   });
 
@@ -658,7 +912,7 @@ bot.action('AUTO_TRADE_STATUS', async (ctx) => {
         '',
         'Public wallet linking is not enabled yet.',
         '',
-        'For safety, Alpha Radar will not ask public users to paste private keys in Telegram chat.',
+        'For safety, AlphaOS will not ask public users to paste private keys in Telegram chat.',
         '',
         'Admin trading uses a separate configured trading wallet only.',
       ].join('\n'),
@@ -669,7 +923,7 @@ bot.action('AUTO_TRADE_STATUS', async (ctx) => {
   bot.command('plans', async (ctx) => {
     await ctx.reply(
       [
-        '👑 *Alpha Radar Plans*',
+        '👑 *AlphaOS Plans*',
         '',
         '*15 Days* — `0.1 SOL`',
         '*30 Days* — `0.15 SOL`',
@@ -700,7 +954,7 @@ bot.action('AUTO_TRADE_STATUS', async (ctx) => {
 
     await ctx.reply(
       [
-        '👑 *Upgrade Alpha Radar*',
+        '👑 *Upgrade AlphaOS*',
         '',
         '*15 Days* — `0.1 SOL`',
         '*30 Days* — `0.15 SOL`',
@@ -732,7 +986,7 @@ bot.action('AUTO_TRADE_STATUS', async (ctx) => {
     }
 
     const tier = String(user.tier).toUpperCase();
-    const lines = ['📋 *Alpha Radar Status*', '', `*Tier:* ${tier}`];
+    const lines = ['📋 *AlphaOS Status*', '', `*Tier:* ${tier}`];
 
     if (user.tier === 'admin') {
       lines.push(`*Access:* Full Alpha Terminal`);
@@ -762,7 +1016,7 @@ bot.action('AUTO_TRADE_STATUS', async (ctx) => {
 
     await ctx.reply(
       [
-        '📊 *Alpha Radar Stats*',
+        '📊 *AlphaOS Stats*',
         '',
         `*Total Users:* ${counts?.total_users ?? 0}`,
         `*Admin Users:* ${counts?.admin_users ?? 0}`,
@@ -835,7 +1089,7 @@ bot.action('AUTO_TRADE_STATUS', async (ctx) => {
       await bot.telegram.sendMessage(
         Number(targetTelegramId),
         [
-          '✅ Your Alpha Radar membership is now active.',
+          '✅ Your AlphaOS membership is now active.',
           '',
           `Plan: ${planDays} days`,
           `Active Until: ${formatDate(result.paidActiveUntil)}`,

@@ -652,7 +652,6 @@ async function renderOpportunity(
 
   const text = [
     '⚡ <b>ALPHAOS · OPPORTUNITY</b>',
-    '━━━━━━━━━━━━━━━━━━━━━━',
     '',
     `<b>${escapeHtml(title)}</b>`,
     `<code>${escapeHtml(
@@ -661,58 +660,29 @@ async function renderOpportunity(
       ),
     )}</code>`,
     '',
-    `🎯 Action  <b>${escapeHtml(
+    `Action      <b>${escapeHtml(
       action,
     )}</b>`,
-    `🧠 Strategy  <b>${escapeHtml(
+    `Strategy    <b>${escapeHtml(
       opportunity.strategy_key ??
         'UNKNOWN',
     )}</b>`,
-    `⛓ Chain  <b>${escapeHtml(
-      opportunity.chain ??
-        'Unknown',
-    )}</b>`,
-    '',
-    '❓ <b>WHY NOW</b>',
-    escapeHtml(
-      opportunity.why ??
-        'AlphaOS detected a strategy-qualified market change.',
-    ),
-    '',
-    '📈 <b>WHAT HAPPENED</b>',
-    escapeHtml(
-      opportunity.what_happened ??
-        'The strategy detected a material change in market state.',
-    ),
-    '',
-    '🛑 <b>INVALIDATION</b>',
-    escapeHtml(
-      opportunity.invalidation ??
-        'The thesis becomes invalid if qualifying conditions no longer hold.',
-    ),
-    '',
-    '⚠️ <b>RISK</b>',
-    escapeHtml(
-      opportunity.risk_reason ??
-        'Crypto markets can reverse quickly.',
-    ),
-    '',
     `Confidence  <b>${confidence}</b>`,
-    `Risk Score  <b>${risk}</b>`,
-    `Observations  <b>${Math.max(
-      1,
-      Number(
-        opportunity.observation_count ??
-          1,
-      ),
-    )}</b>`,
-    `Last observed  <b>${escapeHtml(
+    `Risk        <b>${risk}</b>`,
+    '',
+    `🧠 ${escapeHtml(
+      opportunity.why ??
+        opportunity.what_happened ??
+        'AlphaOS detected a strategy-qualified market change.',
+    )}`,
+    '',
+    `Last seen   <b>${escapeHtml(
       relativeTime(
         observedAt,
       ),
     )}</b>`,
     '',
-    '<i>Manual execution only · verify live price, liquidity and momentum before acting.</i>',
+    '<i>Verify live market conditions before execution.</i>',
   ].join('\n');
 
   const tokenTarget =
@@ -729,31 +699,61 @@ async function renderOpportunity(
       ? `OPP_BUCKET_${bucket}`
       : 'OPPORTUNITY_CENTER';
 
+  const actionRows: any[][] = [];
+
+  if (
+    String(
+      opportunity.chain ??
+      '',
+    ).toLowerCase() ===
+    'solana'
+  ) {
+    actionRows.push([
+      Markup.button.callback(
+        '⚡ TRADE',
+        `OPP_TRADE_${opportunity.id}`,
+      ),
+    ]);
+  }
+
+  actionRows.push([
+    Markup.button.callback(
+      '👀 TRACK',
+      `OPP_TRACK_${opportunity.id}`,
+    ),
+
+    Markup.button.url(
+      tokenTarget.source ===
+      'dexscreener'
+        ? '📊 CHART'
+        : '🔎 TOKEN',
+      tokenTarget.url,
+    ),
+  ]);
+
+  actionRows.push([
+    Markup.button.callback(
+      '⬅️ Back',
+      backCallback,
+    ),
+
+    Markup.button.callback(
+      '🔄 Refresh',
+      `OPP_VIEW_${opportunity.id}`,
+    ),
+  ]);
+
+  actionRows.push([
+    Markup.button.callback(
+      '🏠 Main Menu',
+      'MAIN_MENU',
+    ),
+  ]);
+
   const keyboard =
-    Markup.inlineKeyboard([
-      [
-        Markup.button.url(
-          tokenTarget.label,
-          tokenTarget.url,
-        ),
-      ],
-      [
-        Markup.button.callback(
-          '⬅️ Back',
-          backCallback,
-        ),
-        Markup.button.callback(
-          '🔄 Refresh',
-          `OPP_VIEW_${opportunity.id}`,
-        ),
-      ],
-      [
-        Markup.button.callback(
-          '🏠 Main Menu',
-          'MAIN_MENU',
-        ),
-      ],
-    ]).reply_markup;
+    Markup.inlineKeyboard(
+      actionRows,
+    ).reply_markup;
 
   await renderScreen(
     ctx,

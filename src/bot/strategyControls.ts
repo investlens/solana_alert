@@ -50,10 +50,10 @@ async function renderStrategies(
     '🎯 <b>ALPHAOS STRATEGIES</b>',
     '━━━━━━━━━━━━━━━━━━',
     '',
-    'Choose which intelligence engines should send you alerts.',
+    'Tap any strategy below to turn its alerts ON or OFF.',
     '',
-    '✅ Enabled',
-    '⭕ Muted',
+    '✅ ON · alerts enabled',
+    '⭕ OFF · alerts muted',
     '',
   ];
 
@@ -105,6 +105,11 @@ async function renderStrategies(
     Markup.button.callback(
       '🔄 Refresh',
       'STRATEGY_SETTINGS',
+    ),
+
+    Markup.button.callback(
+      '🏠 Main Menu',
+      'MAIN_MENU',
     ),
   ]);
 

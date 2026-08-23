@@ -147,7 +147,7 @@ async function renderWalletCenter(
 
       Markup.button.callback(
         '🗑',
-        `WALLET_REMOVE_${wallet.id}`,
+        `WALLET_REMOVE_CONFIRM_${wallet.id}`,
       ),
     ]);
   }
@@ -234,7 +234,46 @@ registerWalletTracking(
         {
           parse_mode:
             'HTML',
+
+          reply_markup:
+            Markup.inlineKeyboard([
+              [
+                Markup.button.callback(
+                  '✖️ Cancel',
+                  'WALLET_ADD_CANCEL',
+                ),
+
+                Markup.button.callback(
+                  '⬅️ Wallets',
+                  'WALLET_TRACKING',
+                ),
+              ],
+            ]).reply_markup,
         },
+      );
+    },
+  );
+
+  bot.action(
+    'WALLET_ADD_CANCEL',
+    async ctx => {
+      const telegramId =
+        userId(
+          ctx,
+        );
+
+      if (telegramId) {
+        pendingWalletAdds.delete(
+          telegramId,
+        );
+      }
+
+      await ctx.answerCbQuery(
+        'Cancelled',
+      );
+
+      await renderWalletCenter(
+        ctx,
       );
     },
   );
@@ -406,6 +445,75 @@ registerWalletTracking(
           error,
         );
       }
+    },
+  );
+
+  bot.action(
+    /^WALLET_REMOVE_CONFIRM_(\d+)$/,
+    async ctx => {
+      const telegramId =
+        userId(
+          ctx,
+        );
+
+      if (!telegramId) {
+        return;
+      }
+
+      const wallet =
+        await getTrackedWalletByIdForUser({
+          telegramId,
+
+          id:
+            Number(
+              ctx.match[1],
+            ),
+        });
+
+      if (!wallet) {
+        await ctx.answerCbQuery(
+          'Wallet not found',
+        );
+
+        return;
+      }
+
+      await ctx.answerCbQuery();
+
+      await ctx.reply(
+        [
+          '🗑 <b>REMOVE WALLET?</b>',
+          '',
+          wallet.label
+            ? `<b>${wallet.label}</b>`
+            : 'Tracked wallet',
+          `<code>${wallet.wallet_address}</code>`,
+          '',
+          'This stops AlphaOS wallet activity tracking for this address.',
+        ].join(
+          '\n',
+        ),
+        {
+          parse_mode:
+            'HTML',
+
+          reply_markup:
+            Markup.inlineKeyboard([
+              [
+                Markup.button.callback(
+                  '🗑 Yes, Remove',
+                  `WALLET_REMOVE_${wallet.id}`,
+                ),
+              ],
+              [
+                Markup.button.callback(
+                  '⬅️ Keep Wallet',
+                  'WALLET_TRACKING',
+                ),
+              ],
+            ]).reply_markup,
+        },
+      );
     },
   );
 
