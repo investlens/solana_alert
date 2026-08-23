@@ -56,54 +56,236 @@ async function renderScreen(ctx: any, text: string, options: any) {
   }
 }
 
-async function sendMainMenu(ctx: any) {
-  const telegramId = String(ctx.from?.id ?? '');
-  const user = await getUserByTelegramId(telegramId);
-  const tier = String(user?.tier ?? 'free').toUpperCase();
+async function sendMainMenu(
+  ctx: any,
+) {
+  const telegramId =
+    String(
+      ctx.from?.id ??
+      '',
+    );
+
+  const user =
+    await getUserByTelegramId(
+      telegramId,
+    );
+
+  const tier =
+    String(
+      user?.tier ??
+      'free',
+    ).toUpperCase();
+
+  const role =
+    tier ===
+    'ADMIN'
+      ? '👑 ADMIN'
+      : tier ===
+        'PAID'
+        ? '⭐ PRO'
+        : '⚪ FREE';
 
   await renderScreen(
     ctx,
     [
-      '🧠 <b>AlphaOS</b>',
+      '🧠 <b>ALPHAOS</b>',
+      `${role}`,
       '',
-      '<b>AI Crypto Research Terminal</b>',
+      '<b>Live crypto intelligence</b>',
+      'Opportunities · Wallets · Risk · Research',
       '',
-      `Plan: <b>${tier}</b>`,
-      user?.tier === 'admin'
-        ? 'Access: <b>Admin Research Terminal</b>'
-        : '🎁 <b>48 Hour Research Trial Active</b>',
+      '⚡ <b>Opportunities</b> — what needs attention now',
+      '🐋 <b>Wallets</b> — tracked-wallet activity',
+      '🎯 <b>Strategies</b> — choose what AlphaOS monitors',
       '',
-      'AlphaOS investigates crypto opportunities using AI, creator intelligence, smart wallet activity, liquidity, market structure, and risk evidence.',
-      '',
-      'Live intelligence. Clear decisions. Fast action.',
-      '<b>Evidence before execution.</b>',
-      '',
-      '━━━━━━━━━━━━━━━━━━━━━━',
-      '',
-      '<b>What would you like to do?</b>',
-    ].filter(Boolean).join('\n'),
+      '<i>Evidence before execution.</i>',
+    ].join(
+      '\n',
+    ),
     {
-      parse_mode: 'HTML',
-      ...mainAlphaMenu(),
-    }
+      parse_mode:
+        'HTML',
+
+      reply_markup:
+        mainAlphaMenu()
+          .reply_markup,
+    },
+  );
+}
+
+async function sendFirstRunWelcome(
+  ctx: any,
+) {
+  const firstName =
+    String(
+      ctx.from?.first_name ??
+      '',
+    ).trim();
+
+  await ctx.reply(
+    [
+      '🧠 <b>WELCOME TO ALPHAOS</b>',
+      '',
+      firstName
+        ? `Hi ${firstName} 👋`
+        : 'Welcome 👋',
+      '',
+      'AlphaOS watches the market continuously and surfaces what actually needs your attention.',
+      '',
+      '⚡ Opportunities',
+      '🐋 Smart-wallet activity',
+      '👨‍💻 Developer behaviour',
+      '📈 Momentum & market risk',
+      '',
+      '<b>You control what gets monitored.</b>',
+      '',
+      '<i>No noise. Evidence before execution.</i>',
+    ].join(
+      '\n',
+    ),
+    {
+      parse_mode:
+        'HTML',
+
+      reply_markup:
+        Markup.inlineKeyboard([
+          [
+            Markup.button.callback(
+              '🚀 Set Up AlphaOS',
+              'ONBOARD_START',
+            ),
+          ],
+          [
+            Markup.button.callback(
+              '👀 Explore First',
+              'MAIN_MENU',
+            ),
+          ],
+        ]).reply_markup,
+    },
+  );
+}
+
+async function sendQuickSetup(
+  ctx: any,
+) {
+  await renderScreen(
+    ctx,
+    [
+      '🚀 <b>QUICK SETUP</b>',
+      '',
+      'AlphaOS is ready.',
+      'Choose what you want to configure first.',
+      '',
+      '🎯 <b>Strategies</b>',
+      'Turn intelligence engines ON or OFF.',
+      '',
+      '🐋 <b>Wallets</b>',
+      'Track public wallets and receive activity alerts.',
+      '',
+      'You can change everything later from Controls.',
+    ].join(
+      '\n',
+    ),
+    {
+      parse_mode:
+        'HTML',
+
+      reply_markup:
+        Markup.inlineKeyboard([
+          [
+            Markup.button.callback(
+              '🎯 Choose Strategies',
+              'STRATEGY_SETTINGS',
+            ),
+          ],
+          [
+            Markup.button.callback(
+              '🐋 Track a Wallet',
+              'WALLET_TRACKING',
+            ),
+          ],
+          [
+            Markup.button.callback(
+              '✅ Open AlphaOS',
+              'MAIN_MENU',
+            ),
+          ],
+        ]).reply_markup,
+    },
   );
 }
 
 export function registerBotCommands(bot: Telegraf<any>) {
   registerAdminTerminal(bot);
   bot.start(async (ctx) => {
-    const telegramId = String(ctx.from?.id ?? '');
-    const username = ctx.from?.username;
-    const firstName = ctx.from?.first_name;
+    const telegramId =
+      String(
+        ctx.from?.id ??
+        '',
+      );
 
-    await upsertUser({ telegramId, username, firstName });
-    await sendMainMenu(ctx);
+    const username =
+      ctx.from?.username;
+
+    const firstName =
+      ctx.from?.first_name;
+
+    /*
+     * Read before upsert so AlphaOS can distinguish
+     * a genuine first visit from a returning user.
+     */
+    const existingUser =
+      await getUserByTelegramId(
+        telegramId,
+      );
+
+    await upsertUser({
+      telegramId,
+      username,
+      firstName,
+    });
+
+    if (!existingUser) {
+      await sendFirstRunWelcome(
+        ctx,
+      );
+
+      return;
+    }
+
+    await sendMainMenu(
+      ctx,
+    );
   });
 
   bot.action('MAIN_MENU', async (ctx) => {
     await ctx.answerCbQuery();
     await sendMainMenu(ctx);
   });
+
+
+  bot.action(
+    'ONBOARD_START',
+    async ctx => {
+      await ctx.answerCbQuery();
+
+      await sendQuickSetup(
+        ctx,
+      );
+    },
+  );
+
+  bot.action(
+    'INTRO',
+    async ctx => {
+      await ctx.answerCbQuery();
+
+      await sendFirstRunWelcome(
+        ctx,
+      );
+    },
+  );
 
  bot.action('ALPHA_FEED', async (ctx) => {
   await ctx.answerCbQuery();
@@ -891,6 +1073,12 @@ bot.action('AUTO_TRADE_STATUS', async (ctx) => {
               Markup.button.callback(
                 '⭐ Premium',
                 'PREMIUM',
+              ),
+            ],
+            [
+              Markup.button.callback(
+                'ℹ️ How AlphaOS Works',
+                'INTRO',
               ),
             ],
             [

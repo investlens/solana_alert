@@ -188,165 +188,158 @@ function formatItem(
   return `• ${escaped}`;
 }
 
-export function buildAlphaAlert(
+function isInternalNoise(
+  value: string,
+): boolean {
+  const text =
+    value.toLowerCase();
+
+  return (
+    text.includes(
+      'alpha memory',
+    ) ||
+    text.includes(
+      'outcome monitoring',
+    ) ||
+    text.includes(
+      'tracking active',
+    ) ||
+    text.includes(
+      'event recorded',
+    )
+  );
+}
+
+function compactMetricLines(
   card: AlphaAlertCard,
-): string {
+): string[] {
   const lines: string[] = [];
 
-  const tone = card.tone ?? 'NEUTRAL';
-  const access = card.access ?? 'PREMIUM';
-
-  /*
-   * Header
-   */
-  lines.push('✦ <b>ALPHAOS</b>');
-  lines.push(
-    `<i>${escapeHtml(accessLabel(access))}</i>`,
-  );
-
-  lines.push('');
-
-  /*
-   * Alert Title
-   */
-  lines.push(
-    `${toneIcon(tone)} <b>${escapeHtml(card.title)}</b>`,
-  );
-
-  if (card.subtitle) {
-    lines.push(
-      `<i>${escapeHtml(card.subtitle)}</i>`,
-    );
-  }
-
-  lines.push(DIVIDER);
-
-  /*
-   * Token Information
-   */
   if (
-    card.symbol ||
-    card.name ||
-    card.address
-  ) {
-    const symbol =
-      card.symbol ||
-      card.name ||
-      'UNKNOWN';
-
-    const showName =
-      card.name &&
-      card.name !== symbol;
-
-    lines.push('');
-
-    lines.push(
-      `🪙 <b>${escapeHtml(symbol)}</b>${
-        showName
-          ? ` · ${escapeHtml(card.name)}`
-          : ''
-      }`,
-    );
-
-    if (card.address) {
-      lines.push(
-        `<code>${escapeHtml(
-          compactAddress(card.address),
-        )}</code>`,
-      );
-    }
-  }
-
-  /*
-   * AI Summary
-   */
-  const hasSummary =
-    hasValue(card.score) ||
-    hasValue(card.confidence) ||
-    hasValue(card.risk) ||
-    hasValue(card.status);
-
-  if (hasSummary) {
-    lines.push('');
-    lines.push('🧠 <b>AI SUMMARY</b>');
-
-    if (
-      card.score != null &&
-      Number.isFinite(card.score)
-    ) {
-      lines.push(
-        `Alpha Score  <b>${Math.round(
-          card.score,
-        )}/100</b>`,
-      );
-    }
-
-    if (
-      card.confidence != null &&
-      Number.isFinite(card.confidence)
-    ) {
-      lines.push(
-        `Confidence  <b>${Math.round(
-          card.confidence,
-        )}%</b>`,
-      );
-
-      lines.push(
-        `<code>${confidenceBar(
-          card.confidence,
-        )}</code>`,
-      );
-    }
-
-    if (card.risk) {
-      lines.push(
-        `Risk  <b>${escapeHtml(
-          card.risk,
-        )}</b>`,
-      );
-    }
-
-    if (card.status) {
-      lines.push(
-        `Action  <b>${escapeHtml(
-          card.status,
-        )}</b>`,
-      );
-    }
-  }
-
-  /*
-   * Evidence Sections
-   */
-  for (const section of card.sections ?? []) {
-    const metrics = (
-      section.metrics ?? []
+    card.score != null &&
+    Number.isFinite(
+      card.score,
     )
-      .filter((metric) =>
-        hasValue(metric.value),
-      )
-      .slice(0, 6);
-
-    const items = cleanItems(
-      section.items,
+  ) {
+    lines.push(
+      `Score       <b>${Math.round(
+        card.score,
+      )}</b>`,
     );
+  }
+
+  if (
+    card.confidence != null &&
+    Number.isFinite(
+      card.confidence,
+    )
+  ) {
+    lines.push(
+      `Confidence  <b>${Math.round(
+        card.confidence,
+      )}</b>`,
+    );
+  }
+
+  if (card.risk) {
+    lines.push(
+      `Risk        <b>${escapeHtml(
+        card.risk,
+      )}</b>`,
+    );
+  }
+
+  if (card.status) {
+    lines.push(
+      `Action      <b>${escapeHtml(
+        card.status,
+      )}</b>`,
+    );
+  }
+
+  return lines.slice(
+    0,
+    4,
+  );
+}
+
+function compactEvidenceLines(
+  card: AlphaAlertCard,
+): string[] {
+  const lines: string[] = [];
+
+  for (
+    const section
+    of card.sections ??
+    []
+  ) {
+    const metrics =
+      (
+        section.metrics ??
+        []
+      )
+        .filter(
+          metric =>
+            hasValue(
+              metric.value,
+            ),
+        )
+        .slice(
+          0,
+          3,
+        );
+
+    const meaningfulItems =
+      (
+        section.items ??
+        []
+      )
+        .map(
+          item =>
+            String(
+              item,
+            ).trim(),
+        )
+        .filter(
+          item =>
+            Boolean(
+              item,
+            ) &&
+            !isInternalNoise(
+              item,
+            ),
+        )
+        .slice(
+          0,
+          1,
+        );
 
     if (
-      !metrics.length &&
-      !items.length
+      metrics.length ===
+      0 &&
+      meaningfulItems.length ===
+      0
     ) {
       continue;
     }
 
-    lines.push('');
+    if (
+      lines.length ===
+      0
+    ) {
+      lines.push(
+        '',
+        `${section.icon ??
+          '📊'} <b>${escapeHtml(
+          section.title,
+        )}</b>`,
+      );
+    }
 
-    lines.push(
-      `${section.icon ?? '◆'} <b>${escapeHtml(
-        section.title,
-      )}</b>`,
-    );
-
-    for (const metric of metrics) {
+    for (
+      const metric
+      of metrics
+    ) {
       lines.push(
         `${escapeHtml(
           metric.label,
@@ -356,71 +349,155 @@ export function buildAlphaAlert(
       );
     }
 
-    for (const item of items) {
+    for (
+      const item
+      of meaningfulItems
+    ) {
       lines.push(
-        formatItem(item),
+        escapeHtml(
+          item,
+        ),
+      );
+    }
+
+    /*
+     * One evidence section is enough for the
+     * compact Telegram card. Deeper evidence
+     * belongs in Research / Opportunity Detail.
+     */
+    break;
+  }
+
+  return lines;
+}
+
+export function buildAlphaAlert(
+  card: AlphaAlertCard,
+): string {
+  const tone =
+    card.tone ??
+    'NEUTRAL';
+
+  const icon =
+    toneIcon(
+      tone,
+    );
+
+  const title =
+    String(
+      card.title ??
+      'INTELLIGENCE',
+    )
+      .replace(
+        /^ALPHAOS\s*·?\s*/i,
+        '',
+      )
+      .trim();
+
+  const lines: string[] = [
+    `${icon} <b>ALPHAOS · ${escapeHtml(
+      title,
+    )}</b>`,
+  ];
+
+  if (card.subtitle) {
+    lines.push(
+      escapeHtml(
+        card.subtitle,
+      ),
+    );
+  }
+
+  if (
+    card.symbol ||
+    card.address
+  ) {
+    lines.push(
+      '',
+    );
+
+    if (card.symbol) {
+      lines.push(
+        `<b>${escapeHtml(
+          card.symbol,
+        )}</b>`,
+      );
+    }
+
+    if (card.address) {
+      lines.push(
+        `<code>${escapeHtml(
+          compactAddress(
+            card.address,
+          ),
+        )}</code>`,
       );
     }
   }
 
-    /*
-   * AI Verdict
-   */
-  if (card.verdictTitle || card.verdict) {
-    lines.push('');
-    lines.push('🤖 <b>AI VERDICT</b>');
+  const summary =
+    compactMetricLines(
+      card,
+    );
 
-    if (card.verdictTitle) {
+  if (
+    summary.length >
+    0
+  ) {
+    lines.push(
+      '',
+      ...summary,
+    );
+  }
+
+  lines.push(
+    ...compactEvidenceLines(
+      card,
+    ),
+  );
+
+  if (
+    card.verdictTitle ||
+    card.verdict
+  ) {
+    lines.push(
+      '',
+      '🧠 <b>AlphaOS</b>',
+    );
+
+    if (
+      card.verdictTitle
+    ) {
       lines.push(
-        `<b>${escapeHtml(card.verdictTitle)}</b>`,
+        `<b>${escapeHtml(
+          card.verdictTitle,
+        )}</b>`,
       );
     }
 
-    if (card.verdict) {
+    if (
+      card.verdict
+    ) {
       lines.push(
-        escapeHtml(card.verdict),
+        escapeHtml(
+          card.verdict,
+        ),
       );
     }
   }
 
   /*
-   * Footer
+   * Keep Telegram alerts actionable.
+   * Research history and engine bookkeeping
+   * remain in Alpha Memory rather than being
+   * exposed in every notification.
    */
-  lines.push('');
-  lines.push(DIVIDER);
+  lines.push(
+    '',
+    '<i>Verify live market conditions before acting.</i>',
+  );
 
-  if (card.tracking) {
-    lines.push(
-      `📚 <b>${escapeHtml(
-        card.tracking,
-      )}</b>`,
-    );
-  }
-
-  if (access === 'FREE') {
-    lines.push(
-      '',
-      '🔒 <b>Premium Intelligence Locked</b>',
-      'Unlock Creator Intelligence',
-      'Unlock Smart Wallet Tracking',
-      'Unlock Holder Analysis',
-      'Unlock Advanced Risk Intelligence',
-    );
-  }
-
-  lines.push('');
-
-  if (card.disclaimer) {
-    lines.push(
-      `<i>${escapeHtml(
-        card.disclaimer,
-      )}</i>`,
-    );
-  } else {
-    lines.push(
-      '<i>AI-generated intelligence for research purposes only. Always perform your own due diligence before trading.</i>',
-    );
-  }
-
-  return lines.join('\n');
+  return lines.join(
+    '\n',
+  );
 }
