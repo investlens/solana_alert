@@ -64,7 +64,7 @@ export type AlphaNotificationAction = {
 const STATE_LABELS: Record<AlphaNotificationState, string> = {
   ENTRY_READY: '🔥 ENTRY READY',
   BUILDING: '📈 BUILDING',
-  RUNNER: '🏃 RUNNER',
+  RUNNER: '🔥 RUNNER',
   WATCHING: '👀 WATCHING',
   BOOSTED_OPPORTUNITY: '🚀 BOOSTED OPPORTUNITY',
   EXIT_AVOID: '🔴 EXIT / AVOID',

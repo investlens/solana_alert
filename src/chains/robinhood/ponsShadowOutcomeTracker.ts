@@ -33,6 +33,13 @@ import { config } from '../../config.js';
 import { renderAlphaNotification } from '../../ui/alphaNotification.js';
 import { buildAlphaMarketActions } from '../../ui/alphaNotificationActions.js';
 import { hasVerifiedOpportunityIdentity, mergePonsLifecycleContext } from '../../product/opportunityContext.js';
+import { resolvePonsDeliveryContext } from '../../services/ponsDeliveryContext.js';
+import {
+  coreDecisionEvidenceMetrics,
+  marketContextMetrics,
+  normalizeCoreDecisionMetrics,
+  normalizeNotificationMarketContext,
+} from '../../ui/notificationMarketContext.js';
 
 import {
   getPonsV2CurveState,
@@ -973,20 +980,143 @@ async function recordPonsRuntimeTransition(args: { row: ShadowRow; classifiedSta
   const type = ['BUILDING', 'RUNNER', 'COOLING', 'WEAKENING', 'DANGER'].includes(nextState)
     ? nextState as 'BUILDING' | 'RUNNER' | 'COOLING' | 'WEAKENING' | 'DANGER' : null;
   if (!type) return;
+  const baseSnapshot: Record<string, unknown> = { currentRoi: args.currentRoi,
+    peakRoi: args.peakRoi, classifiedState: args.classifiedState, observedAt: args.observedAt };
+  const presentation = ['BUILDING', 'RUNNER'].includes(nextState)
+    ? await resolvePonsSustainedPresentation({ row: args.row, state: nextState as 'BUILDING' | 'RUNNER',
+        currentRoi: args.currentRoi, peakRoi: args.peakRoi, observedAt: args.observedAt })
+    : null;
   const inserted = await persistAlphaSemanticEvent({ identity: `${args.row.id}:${nextState}`,
     type, assetId: args.row.token_address, chain: 'robinhood', intelligenceState: nextState,
-    strategyKey: 'PONS_SUSTAINED', rawSnapshot: { currentRoi: args.currentRoi,
-      peakRoi: args.peakRoi, classifiedState: args.classifiedState, observedAt: args.observedAt } });
-  if (inserted && ['BUILDING', 'RUNNER'].includes(nextState)) {
-    await sendTelegram(config.adminTelegramId, renderAlphaNotification({ category: 'market',
-      severity: nextState === 'RUNNER' ? 'positive' : 'watch', state: nextState as 'BUILDING' | 'RUNNER',
-      address: args.row.token_address, risk: 'MEASURED',
-      metrics: [{ label: 'Current ROI', value: `${args.currentRoi >= 0 ? '+' : ''}${args.currentRoi.toFixed(1)}%` },
-        ...(args.peakRoi == null ? [] : [{ label: 'Peak ROI', value: `+${args.peakRoi.toFixed(1)}%` }])],
-      reason: nextState === 'RUNNER' ? 'Confirmation survived a later observation with retained positive structure.' : 'Positive structure is persisting across observations.',
-      recommendedAction: nextState === 'RUNNER' ? 'Continuation remains constructive; verify live conditions.' : 'AlphaOS is waiting for sustained confirmation.',
-    }), buildAlphaMarketActions({ tokenUrl: `https://robinhoodchain.blockscout.com/token/${args.row.token_address}` }));
+    strategyKey: 'PONS_SUSTAINED', symbol: presentation?.snapshot.symbol as string | null | undefined,
+    rawSnapshot: presentation?.snapshot ?? baseSnapshot });
+  if (inserted && presentation) {
+    await sendTelegram(config.adminTelegramId, presentation.message, presentation.actions);
   }
+}
+
+type SustainedOpportunity = {
+  id: number; asset_id: string; chain: string | null; strategy_key: string | null;
+  risk_score: number | null; raw_data: Record<string, unknown> | null;
+};
+
+function signedMove(value: number): string {
+  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
+}
+
+function meaningfulTokenName(name: string | null, symbol: string | null, address: string): string | null {
+  const clean = String(name ?? '').trim();
+  if (!clean || /^unknown(?: token)?$/i.test(clean) || clean.toLowerCase() === address.toLowerCase() ||
+      clean.toLowerCase() === String(symbol ?? '').trim().toLowerCase()) return null;
+  return clean;
+}
+
+function sustainedRiskLabel(opportunity: SustainedOpportunity | null): string | null {
+  const explicit = String(opportunity?.raw_data?.riskLabel ?? opportunity?.raw_data?.risk ?? '').toUpperCase();
+  if (['LOW', 'MEDIUM', 'HIGH', 'CRITICAL', 'REVIEW'].includes(explicit)) return explicit;
+  if (opportunity?.risk_score == null) return null;
+  const score = Number(opportunity?.risk_score);
+  if (!Number.isFinite(score)) return null;
+  return score >= 80 ? 'HIGH' : score >= 55 ? 'MEDIUM' : 'LOW';
+}
+
+export function buildPonsSustainedPresentation(args: {
+  state: 'BUILDING' | 'RUNNER'; tokenAddress: string; detectedAt: string; currentRoi: number;
+  peakRoi: number | null; observedAt: string; opportunity: SustainedOpportunity | null;
+  rawData: Record<string, unknown>; target: { tokenUrl: string; chartUrl?: string };
+}) {
+  const market = normalizeNotificationMarketContext(
+    args.target.chartUrl ? { ...args.rawData, chartUrl: args.target.chartUrl, marketIndexState: 'VERIFIED' } : args.rawData,
+    { address: args.tokenAddress },
+  );
+  const evidence = normalizeCoreDecisionMetrics(args.rawData);
+  const peakRoi = args.peakRoi == null ? null : Math.max(args.currentRoi, args.peakRoi);
+  const retained = peakRoi != null && peakRoi > 0 ? Math.round((args.currentRoi / peakRoi) * 100) : null;
+  const elapsedSec = Math.max(0, (Date.parse(args.observedAt) - Date.parse(args.detectedAt)) / 1000);
+  const age = Number.isFinite(elapsedSec) ? elapsedSec < 60 ? `${Math.round(elapsedSec)}s` : `${Math.round(elapsedSec / 60)}m` : null;
+  const name = meaningfulTokenName(market.name, market.symbol, args.tokenAddress);
+  const risk = sustainedRiskLabel(args.opportunity);
+  const snapshot = {
+    ...args.rawData, tokenAddress: args.tokenAddress, symbol: market.symbol, name,
+    marketCap: market.marketCap, fdv: market.marketCap == null ? market.fdv : null,
+    liquidity: market.liquidity, volume5m: market.volume5m, chartUrl: args.target.chartUrl ?? null,
+    currentRoi: args.currentRoi, peakRoi, retainedPeakPercent: retained, elapsedSec,
+    intelligenceState: args.state, riskLabel: risk, observedAt: args.observedAt,
+  };
+  const message = renderAlphaNotification({
+    category: 'market', severity: args.state === 'RUNNER' ? 'positive' : 'watch', state: args.state,
+    symbol: market.symbol, token: market.symbol ? undefined : name ?? undefined, subtitle: name,
+    address: args.tokenAddress, age, risk,
+    metrics: [
+      ...marketContextMetrics(market),
+      { label: 'Move', value: signedMove(args.currentRoi) },
+      ...(peakRoi == null ? [] : [{ label: 'Peak move', value: signedMove(peakRoi) }]),
+      ...(retained == null ? [] : [{ label: 'Peak retained', value: `${retained}%` }]),
+    ],
+    specialistMetrics: coreDecisionEvidenceMetrics(evidence),
+    reason: args.state === 'RUNNER'
+      ? 'Confirmation survived a later observation and momentum remains constructive.'
+      : 'Positive structure is holding across multiple observations.',
+    recommendedAction: args.state === 'RUNNER'
+      ? 'Continuation remains strong · verify live conditions.'
+      : 'Watching for sustained confirmation.',
+  });
+  const opportunityId = args.opportunity?.id;
+  const strategyKey = args.opportunity?.strategy_key;
+  const actions = buildAlphaMarketActions({
+    chartUrl: args.target.chartUrl, tokenUrl: args.target.tokenUrl,
+    copyContractCallback: /^0x[a-fA-F0-9]{40}$/.test(args.tokenAddress) ? `COPY_CA_${args.tokenAddress}` : null,
+    trackCallback: opportunityId == null ? null : `OPP_TRACK_${opportunityId}`,
+    muteCallback: strategyKey && Buffer.byteLength(`STRAT_TOGGLE_${strategyKey}`, 'utf8') <= 64
+      ? `STRAT_TOGGLE_${strategyKey}` : null,
+  });
+  return { message, actions, snapshot };
+}
+
+async function resolvePonsSustainedPresentation(args: {
+  row: ShadowRow; state: 'BUILDING' | 'RUNNER'; currentRoi: number; peakRoi: number | null; observedAt: string;
+}) {
+  const { data, error } = await supabase.from('opportunities')
+    .select('id,asset_id,chain,strategy_key,risk_score,raw_data')
+    .eq('asset_id', args.row.token_address).eq('chain', 'robinhood')
+    .eq('strategy_key', args.state === 'RUNNER' ? 'PONS_BREAKOUT' : 'PONS_IGNITION')
+    .order('updated_at', { ascending: false }).limit(1).maybeSingle();
+  if (error) console.warn('[PonsSustained] Opportunity context lookup failed:', error.message);
+  const opportunity = (data as SustainedOpportunity | null) ?? null;
+  const baseRawData = mergePonsLifecycleContext(opportunity?.raw_data, {
+    address: args.row.token_address, devHoldingPercent: args.row.dev_holding_percent,
+    devHoldingEvidence: args.row.dev_holding_percent == null ? 'UNAVAILABLE' : 'VERIFIED',
+  });
+  let resolved;
+  try {
+    resolved = await resolvePonsDeliveryContext({
+      asset_id: args.row.token_address, chain: 'robinhood', raw_data: baseRawData,
+    });
+  } catch (error) {
+    console.warn('[PonsSustained] Bounded context recovery failed:', {
+      token: args.row.token_address,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    resolved = {
+      rawData: baseRawData,
+      target: { tokenUrl: `https://robinhoodchain.blockscout.com/token/${args.row.token_address}` },
+    };
+  }
+  const {
+    marketCap: _staleMarketCap, fdv: _staleFdv, liquidity: _staleLiquidity,
+    volume5m: _staleVolume5m, chartUrl: _staleChartUrl, ...lifecycleRawData
+  } = resolved.rawData;
+  const indexed = resolved.target.marketIndexState === 'VERIFIED';
+  const rawData = {
+    ...lifecycleRawData,
+    ...(indexed ? (resolved.target.marketContext ?? {}) : {}),
+    marketIndexState: resolved.target.marketIndexState ?? resolved.rawData.marketIndexState,
+  };
+  return buildPonsSustainedPresentation({ state: args.state, tokenAddress: args.row.token_address,
+    detectedAt: args.row.detected_at, currentRoi: args.currentRoi, peakRoi: args.peakRoi,
+    observedAt: args.observedAt, opportunity, rawData,
+    target: { tokenUrl: resolved.target.tokenUrl, chartUrl: resolved.target.chartUrl },
+  });
 }
 
 
@@ -1865,10 +1995,6 @@ async function updateShadowRow(
               : null,
         });
 
-      await recordPonsRuntimeTransition({ row, classifiedState: alphaClassification.state,
-        currentRoi, peakRoi: alphaClassification.recentPeakRoi, observedAt: nowIso });
-
-
       /*
        * ==================================================
        * PERSISTED ALPHA STATE
@@ -2123,6 +2249,9 @@ async function updateShadowRow(
           }
         }
       }
+
+      await recordPonsRuntimeTransition({ row, classifiedState: alphaClassification.state,
+        currentRoi, peakRoi: alphaClassification.recentPeakRoi, observedAt: nowIso });
 
 
       console.log(
