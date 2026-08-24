@@ -27,6 +27,11 @@ import {
 import {
   recordOpportunityAndEmit,
 } from '../../services/opportunityService.js';
+import { persistAlphaSemanticEvent } from '../../services/alphaSemanticEventService.js';
+import { sendTelegram } from '../../services/telegram.js';
+import { config } from '../../config.js';
+import { renderAlphaNotification } from '../../ui/alphaNotification.js';
+import { buildAlphaMarketActions } from '../../ui/alphaNotificationActions.js';
 import { hasVerifiedOpportunityIdentity, mergePonsLifecycleContext } from '../../product/opportunityContext.js';
 
 import {
@@ -850,6 +855,12 @@ type ShadowRow = {
 
   alpha_exit_alert_sent:
     boolean | null;
+
+  intelligence_state:
+    string | null;
+
+  intelligence_state_observed_at:
+    string | null;
 };
 
 
@@ -928,6 +939,54 @@ function validNumber(
       value,
     )
   );
+}
+
+export function nextPonsRuntimeIntelligenceState(args: {
+  classifiedState: string; priorState: string | null; priorObservedAt: string | null;
+  observedAt: string; currentRoi: number; peakRoi: number | null; confirmedDevMovement: boolean;
+}) {
+  const normalized = ponsIntelligenceState(args.classifiedState);
+  const laterObservation = args.priorObservedAt != null && Date.parse(args.observedAt) > Date.parse(args.priorObservedAt);
+  const retention = args.peakRoi != null && args.peakRoi > 0 ? args.currentRoi / args.peakRoi : 0;
+  if (args.priorState === 'RUNNER' && normalized === 'CONFIRMED' &&
+      args.currentRoi > 0 && retention >= 0.5 && !args.confirmedDevMovement) return 'RUNNER' as const;
+  if (args.priorState === 'CONFIRMED' && normalized === 'CONFIRMED' && laterObservation &&
+      args.currentRoi > 0 && retention >= 0.5 && !args.confirmedDevMovement) return 'RUNNER' as const;
+  return normalized;
+}
+
+async function recordPonsRuntimeTransition(args: { row: ShadowRow; classifiedState: string; currentRoi: number; peakRoi: number | null; observedAt: string }) {
+  const nextState = nextPonsRuntimeIntelligenceState({ classifiedState: args.classifiedState,
+    priorState: args.row.intelligence_state, priorObservedAt: args.row.intelligence_state_observed_at,
+    observedAt: args.observedAt, currentRoi: args.currentRoi, peakRoi: args.peakRoi,
+    confirmedDevMovement: Boolean(args.row.dev_first_movement_at) });
+  if (nextState === args.row.intelligence_state) return;
+  let transition = supabase.from('pons_shadow_trades')
+    .update({ intelligence_state: nextState, intelligence_state_observed_at: args.observedAt })
+    .eq('id', args.row.id);
+  transition = args.row.intelligence_state_observed_at == null
+    ? transition.is('intelligence_state_observed_at', null)
+    : transition.eq('intelligence_state_observed_at', args.row.intelligence_state_observed_at);
+  const { data, error } = await transition.select('id').maybeSingle();
+  if (error) throw error; if (!data) return;
+  if (['DISCOVERED', 'FORMING', 'CONFIRMED'].includes(nextState)) return;
+  const type = ['BUILDING', 'RUNNER', 'COOLING', 'WEAKENING', 'DANGER'].includes(nextState)
+    ? nextState as 'BUILDING' | 'RUNNER' | 'COOLING' | 'WEAKENING' | 'DANGER' : null;
+  if (!type) return;
+  const inserted = await persistAlphaSemanticEvent({ identity: `${args.row.id}:${nextState}`,
+    type, assetId: args.row.token_address, chain: 'robinhood', intelligenceState: nextState,
+    strategyKey: 'PONS_SUSTAINED', rawSnapshot: { currentRoi: args.currentRoi,
+      peakRoi: args.peakRoi, classifiedState: args.classifiedState, observedAt: args.observedAt } });
+  if (inserted && ['BUILDING', 'RUNNER'].includes(nextState)) {
+    await sendTelegram(config.adminTelegramId, renderAlphaNotification({ category: 'market',
+      severity: nextState === 'RUNNER' ? 'positive' : 'watch', state: nextState as 'BUILDING' | 'RUNNER',
+      address: args.row.token_address, risk: 'MEASURED',
+      metrics: [{ label: 'Current ROI', value: `${args.currentRoi >= 0 ? '+' : ''}${args.currentRoi.toFixed(1)}%` },
+        ...(args.peakRoi == null ? [] : [{ label: 'Peak ROI', value: `+${args.peakRoi.toFixed(1)}%` }])],
+      reason: nextState === 'RUNNER' ? 'Confirmation survived a later observation with retained positive structure.' : 'Positive structure is persisting across observations.',
+      recommendedAction: nextState === 'RUNNER' ? 'Continuation remains constructive; verify live conditions.' : 'AlphaOS is waiting for sustained confirmation.',
+    }), buildAlphaMarketActions({ tokenUrl: `https://robinhoodchain.blockscout.com/token/${args.row.token_address}` }));
+  }
 }
 
 
@@ -1806,6 +1865,9 @@ async function updateShadowRow(
               : null,
         });
 
+      await recordPonsRuntimeTransition({ row, classifiedState: alphaClassification.state,
+        currentRoi, peakRoi: alphaClassification.recentPeakRoi, observedAt: nowIso });
+
 
       /*
        * ==================================================
@@ -2569,6 +2631,8 @@ Promise<void> {
             alpha_entry_alert_sent,
             alpha_breakout_alert_sent,
             alpha_exit_alert_sent
+            ,intelligence_state
+            ,intelligence_state_observed_at
           `,
         )
         .eq(

@@ -24,6 +24,7 @@ const tokenLaunchedV2Event = parseAbiItem(
 const PONS_V2_LIVE_EMITTER = '0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e' as const;
 
 const MAX_BLOCKS_PER_CYCLE = 250n;
+export const MAX_HEALTHY_WALLET_CURSOR_LAG = 500n;
 const ADDRESS_BATCH_SIZE = 50;
 const metadataCache = new Map<string, Awaited<ReturnType<typeof getRobinhoodTokenMetadata>>>();
 
@@ -203,17 +204,35 @@ async function initializeMissingCursors(wallets: Address[], latest: bigint): Pro
       { onConflict: 'chain,wallet_address' },
     );
     if (insertError) throw insertError;
+    for (const wallet of missing) cursors.set(wallet.toLowerCase(), latest);
   }
   return cursors;
 }
 
+export type WalletCursorHealth = 'HEALTHY' | 'CATCHING_UP' | 'STALE' | 'BLOCKED';
+export function walletCursorRecoveryDecision(args: { cursor: bigint; chainHead: bigint; unresolvedDeliveries: number }) {
+  const lag = args.chainHead > args.cursor ? args.chainHead - args.cursor : 0n;
+  if (lag <= MAX_HEALTHY_WALLET_CURSOR_LAG) return { health: 'HEALTHY' as const, rebase: false, lag };
+  if (args.unresolvedDeliveries > 0) return { health: 'BLOCKED' as const, rebase: false, lag };
+  return { health: 'STALE' as const, rebase: true, lag };
+}
+
+async function unresolvedWalletDeliveries(wallets: Address[]): Promise<Map<string, number>> {
+  const { data, error } = await supabase.from('wallet_activity_deliveries')
+    .select('wallet_address').in('wallet_address', wallets).contains('metadata', { state: 'RESERVED' });
+  if (error) throw error;
+  const counts = new Map<string, number>();
+  for (const row of data ?? []) { const key = String(row.wallet_address).toLowerCase(); counts.set(key, (counts.get(key) ?? 0) + 1); }
+  return counts;
+}
+
 export async function pollRobinhoodTrackedWallets(): Promise<{
   events: WalletWatchEvent[];
-  checkpointBlock: bigint | null;
+  checkpointBlocks: Map<string, bigint>;
   wallets: Address[];
 }> {
   const allWallets = (await getTrackedWalletAddressesForChain('robinhood')).map(value => getAddress(value));
-  if (!allWallets.length) return { events: [], checkpointBlock: null, wallets: [] };
+  if (!allWallets.length) return { events: [], checkpointBlocks: new Map(), wallets: [] };
   const wallets = (await getActiveTrackedWalletAddresses('robinhood')).map(value => getAddress(value));
   const latest = await robinhoodPublicClient.getBlockNumber();
   const cursors = await initializeMissingCursors(allWallets, latest);
@@ -221,19 +240,27 @@ export async function pollRobinhoodTrackedWallets(): Promise<{
   const pausedWallets = allWallets.filter(wallet => !activeKeys.has(wallet.toLowerCase()));
   if (pausedWallets.length) await commitRobinhoodWalletCheckpoints(pausedWallets, latest);
   const existingWallets = wallets.filter(wallet => cursors.has(wallet.toLowerCase()));
-  if (!existingWallets.length) return { events: [], checkpointBlock: null, wallets: [] };
-  const earliest = existingWallets.reduce((minimum, wallet) => {
-    const cursor = cursors.get(wallet.toLowerCase())!;
-    return cursor < minimum ? cursor : minimum;
-  }, latest);
-  const fromBlock = earliest + 1n;
-  const toBlock = fromBlock + MAX_BLOCKS_PER_CYCLE - 1n < latest
-    ? fromBlock + MAX_BLOCKS_PER_CYCLE - 1n
-    : latest;
-  const checkpointWallets = walletsEligibleForCheckpoint(existingWallets, cursors, toBlock);
-  const events = (await scanRobinhoodWalletActivity({ wallets: checkpointWallets, fromBlock, toBlock }))
-    .filter(event => eventIsAfterWalletCursor(event, cursors));
-  return { events, checkpointBlock: toBlock, wallets: checkpointWallets };
+  if (!existingWallets.length) return { events: [], checkpointBlocks: new Map(), wallets: [] };
+  const unresolved = await unresolvedWalletDeliveries(existingWallets);
+  const events: WalletWatchEvent[] = [];
+  const checkpointBlocks = new Map<string, bigint>();
+  const scannedWallets: Address[] = [];
+  for (const wallet of existingWallets) {
+    const key = wallet.toLowerCase(); const cursor = cursors.get(key)!;
+    const recovery = walletCursorRecoveryDecision({ cursor, chainHead: latest, unresolvedDeliveries: unresolved.get(key) ?? 0 });
+    if (recovery.rebase) {
+      await commitRobinhoodWalletCheckpoints([wallet], latest);
+      console.warn('[RobinhoodWalletWatcher] Rebased stale cursor without historical replay', { wallet, previousCursor: cursor.toString(), chainHead: latest.toString(), lag: recovery.lag.toString() });
+      continue;
+    }
+    if (cursor >= latest) continue;
+    const fromBlock = cursor + 1n;
+    const toBlock = fromBlock + MAX_BLOCKS_PER_CYCLE - 1n < latest ? fromBlock + MAX_BLOCKS_PER_CYCLE - 1n : latest;
+    const walletEvents = (await scanRobinhoodWalletActivity({ wallets: [wallet], fromBlock, toBlock }))
+      .filter(event => eventIsAfterWalletCursor(event, cursors));
+    events.push(...walletEvents); checkpointBlocks.set(key, toBlock); scannedWallets.push(wallet);
+  }
+  return { events, checkpointBlocks, wallets: scannedWallets };
 }
 
 export function eventIsAfterWalletCursor(event: WalletWatchEvent, cursors: Map<string, bigint>): boolean {

@@ -11,6 +11,8 @@ import {
 } from './devMovementScanner.js';
 import { buildCreatorNotification } from '../../../ui/alphaNotificationPresets.js';
 import { buildAlphaMarketActions } from '../../../ui/alphaNotificationActions.js';
+import { persistAlphaSemanticEvent } from '../../../services/alphaSemanticEventService.js';
+import { developerEvent } from '../../../intelligence/tokenIntelligenceState.js';
 
 
 const DEV_WATCH_DELAYS_MS =
@@ -139,6 +141,23 @@ export function startPostAlertDevWatch(args: {
           );
 
 
+          const classification = developerEvent({
+            transferredPercent: movement.burned ? null : movement.movedPercentOfSupply,
+            burnedPercent: movement.burned ? movement.movedPercentOfSupply : null,
+            soldPercent: movement.sold ? movement.movedPercentOfSupply : null,
+            evidence: movement.movedPercentOfSupply == null ? 'UNAVAILABLE' : 'VERIFIED',
+          });
+          const inserted = classification.type === 'NONE' || classification.type === 'DEV_HOLDING'
+            ? false
+            : await persistAlphaSemanticEvent({
+                identity: `${args.tokenAddress.toLowerCase()}:${classification.type}:${movement.totalMovedRaw}`,
+                type: classification.type, assetId: args.tokenAddress, chain: 'robinhood', symbol: args.symbol,
+                rawSnapshot: { movedPercentOfSupply: movement.movedPercentOfSupply,
+                  totalMovedRaw: movement.totalMovedRaw.toString(), destinations: movement.destinations,
+                  transferCount: movement.transferCount, sold: movement.sold, burned: movement.burned,
+                  notificationEligible: classification.notify },
+              });
+          if (!inserted || !classification.notify) return;
           const message =
             buildWarningMessage({
               symbol:

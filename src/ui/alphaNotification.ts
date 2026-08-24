@@ -13,6 +13,7 @@ export type AlphaNotificationSeverity = 'info' | 'watch' | 'positive' | 'warning
 export type AlphaNotificationState =
   | 'ENTRY_READY'
   | 'BUILDING'
+  | 'RUNNER'
   | 'WATCHING'
   | 'BOOSTED_OPPORTUNITY'
   | 'EXIT_AVOID'
@@ -63,6 +64,7 @@ export type AlphaNotificationAction = {
 const STATE_LABELS: Record<AlphaNotificationState, string> = {
   ENTRY_READY: '🔥 ENTRY READY',
   BUILDING: '📈 BUILDING',
+  RUNNER: '🏃 RUNNER',
   WATCHING: '👀 WATCHING',
   BOOSTED_OPPORTUNITY: '🚀 BOOSTED OPPORTUNITY',
   EXIT_AVOID: '🔴 EXIT / AVOID',

@@ -177,6 +177,21 @@ async function getLastStoredBoostTotal(
   );
 }
 
+async function getPreviousBoostMarket(tokenAddress: string): Promise<{ price: number; volume5m: number } | null> {
+  const { data, error } = await supabase.from('robinhood_boost_events')
+    .select('price_at_boost,volume_5m_at_boost').ilike('token_address', tokenAddress)
+    .order('detected_at', { ascending: false }).limit(1).maybeSingle();
+  if (error) throw error;
+  const price = Number(data?.price_at_boost); const volume5m = Number(data?.volume_5m_at_boost);
+  return Number.isFinite(price) && price > 0 && Number.isFinite(volume5m) && volume5m > 0 ? { price, volume5m } : null;
+}
+
+export function isMaterialVolumeSurge(args: { previousVolume5m: number | null; currentVolume5m: number | null; previousPrice: number | null; currentPrice: number | null }) {
+  return args.previousVolume5m != null && args.previousVolume5m > 0 && args.currentVolume5m != null &&
+    args.currentVolume5m >= args.previousVolume5m * 1.5 && args.previousPrice != null && args.previousPrice > 0 &&
+    args.currentPrice != null && args.currentPrice >= args.previousPrice * 0.5;
+}
+
 type BoostOpportunityContext = {
   id: number;
   strategyKey: string | null;
@@ -533,6 +548,7 @@ async function processBoost(
     await getRobinhoodMarketSnapshot(
       boost.tokenAddress,
     );
+  const previousBoostMarket = await getPreviousBoostMarket(boost.tokenAddress).catch(() => null);
 
   const opportunity = await getBoostOpportunityContext(boost.tokenAddress);
   const opportunityMarket = normalizeNotificationMarketContext(
@@ -651,6 +667,17 @@ async function processBoost(
       liquidity: market?.liquidityUsd ?? null, volume5m: market?.volume5mUsd ?? null,
       buys5m: market?.buys5m ?? null, sells5m: market?.sells5m ?? null,
       devHoldingPercent, burnedPercent, chartUrl: market?.chartUrl ?? null },
+  });
+  const volumeSurge = isMaterialVolumeSurge({ previousVolume5m: previousBoostMarket?.volume5m ?? null,
+    currentVolume5m: market?.volume5mUsd ?? null, previousPrice: previousBoostMarket?.price ?? null,
+    currentPrice: market?.priceUsd ?? null });
+  if (volumeSurge) await persistAlphaSemanticEvent({ identity: `${eventId}:volume-surge`,
+    type: 'VOLUME_SURGE', assetId: boost.tokenAddress, chain: 'robinhood',
+    intelligenceState: 'BUILDING', strategyKey: opportunity?.strategyKey,
+    symbol: market?.symbol ?? opportunityMarket.symbol,
+    rawSnapshot: { previousVolume5m: previousBoostMarket?.volume5m, currentVolume5m: market?.volume5mUsd,
+      previousPrice: previousBoostMarket?.price, currentPrice: market?.priceUsd,
+      comparisonWindow: 'DEXSCREENER_M5_TO_DEXSCREENER_M5', includedInBoostNotification: true },
   });
 
 

@@ -661,12 +661,12 @@ async function startWalletWatch() {
       );
 
       const robinhood = await pollRobinhoodTrackedWallets();
-      if (robinhood.checkpointBlock != null) {
+      if (robinhood.checkpointBlocks.size > 0) {
         const delivery = await deliverTrackedWalletActivity(robinhood.events);
-        const completedWallets = robinhood.wallets.filter(
-          wallet => !delivery.failedWallets.has(wallet.toLowerCase()),
-        );
-        await commitRobinhoodWalletCheckpoints(completedWallets, robinhood.checkpointBlock);
+        for (const wallet of robinhood.wallets) {
+          const key = wallet.toLowerCase(); const checkpoint = robinhood.checkpointBlocks.get(key);
+          if (checkpoint != null && !delivery.failedWallets.has(key)) await commitRobinhoodWalletCheckpoints([wallet], checkpoint);
+        }
       }
 
       /*

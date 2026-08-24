@@ -510,6 +510,8 @@ async function fetchCandidates(): Promise<Candidate[]> {
 }
 
 export async function runDexPaidEngine() {
+  // Robinhood Dex Paid has one canonical producer in robinhoodObserver.
+  if (['robinhood', 'pons'].includes(String(config.discoveryChain).toLowerCase())) return;
   const candidates = await fetchCandidates();
 
   for (const c of candidates) {

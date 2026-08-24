@@ -33,11 +33,17 @@ export type RobinhoodDevMovementResult = {
   sold:
     boolean;
 
+  burned:
+    boolean;
+
   transferCount:
     number;
 
   totalMovedRaw:
     bigint;
+
+  movedPercentOfSupply:
+    number | null;
 
   destinations:
     Address[];
@@ -174,11 +180,17 @@ export async function scanRobinhoodDevMovement(
         sold:
           false,
 
+        burned:
+          false,
+
         transferCount:
           0,
 
         totalMovedRaw:
           0n,
+
+        movedPercentOfSupply:
+          null,
 
         destinations:
           [],
@@ -356,11 +368,17 @@ export async function scanRobinhoodDevMovement(
         sold:
           false,
 
+        burned:
+          false,
+
         transferCount:
           0,
 
         totalMovedRaw:
           0n,
+
+        movedPercentOfSupply:
+          0,
 
         destinations:
           [],
@@ -389,6 +407,9 @@ export async function scanRobinhoodDevMovement(
      * Later we can enrich destinations and
      * promote certain transfers to DEV_SOLD.
      */
+    const burnDestinations = new Set(['0x0000000000000000000000000000000000000000', '0x000000000000000000000000000000000000dead']);
+    const burned = destinations.size > 0 && [...destinations].every(destination => burnDestinations.has(destination.toLowerCase()));
+    const movedPercentOfSupply = launch.supply > 0n ? Number(totalMovedRaw * 1_000_000n / launch.supply) / 10_000 : null;
     return {
       tokenAddress:
         token,
@@ -402,10 +423,14 @@ export async function scanRobinhoodDevMovement(
       sold:
         false,
 
+      burned,
+
       transferCount:
         logs.length,
 
       totalMovedRaw,
+
+      movedPercentOfSupply,
 
       destinations:
         Array.from(
@@ -435,11 +460,17 @@ export async function scanRobinhoodDevMovement(
       sold:
         false,
 
+      burned:
+        false,
+
       transferCount:
         0,
 
       totalMovedRaw:
         0n,
+
+      movedPercentOfSupply:
+        null,
 
       destinations:
         [],

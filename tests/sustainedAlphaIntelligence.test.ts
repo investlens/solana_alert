@@ -64,3 +64,49 @@ test('semantic events, health diagnostic and PAPER scaffold are durable and non-
   assert.match(semantic, /event_identity: `v2:/); assert.match(observer, /type: 'DEX_PAID'/); assert.match(boost, /type: 'BOOST'/);
   assert.doesNotMatch(health, /insert\(|update\(|upsert\(|delete\(/); assert.match(paper, /mode !== 'PAPER'/); assert.match(paper, /intentionally not connected/);
 });
+
+test('exact large stale cursor rebases without replay when no delivery is unresolved', async () => {
+  const { walletCursorRecoveryDecision } = await import('../src/chains/robinhood/robinhoodWalletWatcher.js');
+  const decision = walletCursorRecoveryDecision({ cursor: 44_538_502n, chainHead: 45_026_686n, unresolvedDeliveries: 0 });
+  assert.equal(decision.lag, 488_184n); assert.equal(decision.rebase, true); assert.equal(decision.health, 'STALE');
+});
+test('unresolved delivery prevents unsafe rebase and per-wallet checkpoints prevent starvation', async () => {
+  const { walletCursorRecoveryDecision } = await import('../src/chains/robinhood/robinhoodWalletWatcher.js');
+  assert.equal(walletCursorRecoveryDecision({ cursor: 1n, chainHead: 500_000n, unresolvedDeliveries: 1 }).health, 'BLOCKED');
+  const source = await readFile(new URL('../src/chains/robinhood/robinhoodWalletWatcher.ts', import.meta.url), 'utf8');
+  assert.match(source, /for \(const wallet of existingWallets\)/); assert.match(source, /checkpointBlocks\.set\(key, toBlock\)/);
+  assert.match(source, /Rebased stale cursor without historical replay/);
+});
+test('persisted confirmation needs a later observation before RUNNER', async () => {
+  const { nextPonsRuntimeIntelligenceState } = await import('../src/chains/robinhood/ponsShadowOutcomeTracker.js');
+  const base = { classifiedState: 'ENTRY_WINDOW', priorState: 'CONFIRMED', priorObservedAt: '2026-08-24T00:00:00Z', currentRoi: 12, peakRoi: 15, confirmedDevMovement: false };
+  assert.equal(nextPonsRuntimeIntelligenceState({ ...base, observedAt: '2026-08-24T00:00:00Z' }), 'CONFIRMED');
+  assert.equal(nextPonsRuntimeIntelligenceState({ ...base, observedAt: '2026-08-24T00:00:01Z' }), 'RUNNER');
+  assert.equal(nextPonsRuntimeIntelligenceState({ ...base, priorState: 'RUNNER', observedAt: '2026-08-24T00:00:02Z' }), 'RUNNER');
+  assert.equal(nextPonsRuntimeIntelligenceState({ ...base, observedAt: '2026-08-24T00:00:01Z', confirmedDevMovement: true }), 'CONFIRMED');
+});
+test('runtime state producers expose material transitions while cooling remains quiet', async () => {
+  const { nextPonsRuntimeIntelligenceState } = await import('../src/chains/robinhood/ponsShadowOutcomeTracker.js');
+  assert.equal(nextPonsRuntimeIntelligenceState({ classifiedState: 'MOMENTUM_BUILDING', priorState: null, priorObservedAt: null, observedAt: '2026-08-24T00:00:00Z', currentRoi: 5, peakRoi: 5, confirmedDevMovement: false }), 'BUILDING');
+  assert.equal(nextPonsRuntimeIntelligenceState({ classifiedState: 'ENTRY_WINDOW', priorState: 'BUILDING', priorObservedAt: '2026-08-24T00:00:00Z', observedAt: '2026-08-24T00:00:01Z', currentRoi: 8, peakRoi: 8, confirmedDevMovement: false }), 'CONFIRMED');
+  const source = await readFile(new URL('../src/chains/robinhood/ponsShadowOutcomeTracker.ts', import.meta.url), 'utf8');
+  assert.match(source, /\['BUILDING', 'RUNNER'\]\.includes\(nextState\)/); assert.doesNotMatch(source, /\['BUILDING', 'RUNNER', 'COOLING'\]\.includes\(nextState\)/);
+});
+test('volume surge requires comparable m5 data and deduplicates within one Boost transition', async () => {
+  const { isMaterialVolumeSurge } = await import('../src/chains/robinhood/robinhoodBoostObserver.js');
+  assert.equal(isMaterialVolumeSurge({ previousVolume5m: null, currentVolume5m: 200, previousPrice: 1, currentPrice: 1 }), false);
+  assert.equal(isMaterialVolumeSurge({ previousVolume5m: 100, currentVolume5m: 150, previousPrice: 1, currentPrice: 0.8 }), true);
+  const source = await readFile(new URL('../src/chains/robinhood/robinhoodBoostObserver.ts', import.meta.url), 'utf8');
+  assert.match(source, /comparisonWindow: 'DEXSCREENER_M5_TO_DEXSCREENER_M5'/); assert.match(source, /identity: `\$\{eventId\}:volume-surge`/);
+});
+test('developer burn and transfer materiality preserve internal evidence', () => {
+  assert.equal(developerEvent({ burnedPercent: 0.2, evidence: 'VERIFIED' }).notify, false);
+  assert.equal(developerEvent({ transferredPercent: 0.1, evidence: 'VERIFIED' }).notify, false);
+  assert.equal(developerEvent({ transferredPercent: 1, evidence: 'VERIFIED' }).notify, true);
+  assert.equal(developerEvent({ soldPercent: 0.01, evidence: 'VERIFIED' }).notify, true);
+});
+test('Dex Paid and Boost each have one active semantic producer', async () => {
+  const observer = await readFile(new URL('../src/chains/robinhood/robinhoodObserver.ts', import.meta.url), 'utf8');
+  const boost = await readFile(new URL('../src/chains/robinhood/robinhoodBoostObserver.ts', import.meta.url), 'utf8');
+  assert.equal(observer.match(/type: 'DEX_PAID'/g)?.length, 1); assert.equal(boost.match(/type: 'BOOST'/g)?.length, 1);
+});
