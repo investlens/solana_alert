@@ -8,6 +8,7 @@ import {
 import { renderAlphaNotification } from '../../ui/alphaNotification.js';
 import { buildAlphaMarketActions } from '../../ui/alphaNotificationActions.js';
 import { coreDecisionEvidenceMetrics, marketContextMetrics, normalizeCoreDecisionMetrics, normalizeNotificationMarketContext } from '../../ui/notificationMarketContext.js';
+import { persistAlphaSemanticEvent } from '../../services/alphaSemanticEventService.js';
 
 import {
   startPostAlertDevWatch,
@@ -1139,6 +1140,33 @@ const creatorRisk =
   await evaluateRobinhoodCreatorRisk(
     devHolding.deployerAddress,
   );
+
+if (dexPaid.dexPaid === true && dexPaid.latestPaymentTimestamp != null) {
+  const inserted = await persistAlphaSemanticEvent({
+    identity: `${token.tokenAddress.toLowerCase()}:${dexPaid.latestPaymentTimestamp}`,
+    type: 'DEX_PAID', assetId: token.tokenAddress, chain: 'robinhood',
+    intelligenceState: 'FORMING', symbol: token.symbol ?? market.symbol,
+    rawSnapshot: { paymentTimestamp: dexPaid.latestPaymentTimestamp, orderTypes: dexPaid.orderTypes,
+      marketCap: market.marketCapUsd, fdv: market.fdvUsd, liquidity: market.liquidityUsd,
+      volume5m: market.volume5mUsd, devHoldingPercent: devHolding.devHoldingPercent,
+      burnedPercent: devHolding.totalBurnPercent, chartUrl: market.chartUrl },
+  });
+  if (inserted) {
+    await sendTelegram(config.adminTelegramId, renderAlphaNotification({
+      category: 'market', severity: 'positive', state: 'BUILDING',
+      symbol: token.symbol ?? market.symbol, subtitle: token.name ?? market.name,
+      address: token.tokenAddress, risk: 'MONITORING',
+      metrics: [
+        ...marketContextMetrics(normalizeNotificationMarketContext({ marketCap: market.marketCapUsd, fdv: market.fdvUsd, liquidity: market.liquidityUsd, volume5m: market.volume5mUsd })),
+        ...coreDecisionEvidenceMetrics(normalizeCoreDecisionMetrics({ devHoldingPercent: devHolding.devHoldingPercent, devHoldingEvidence: devHolding.devHoldingPercent == null ? 'UNAVAILABLE' : 'VERIFIED', totalBurnPercent: devHolding.totalBurnPercent, burnEvidence: devHolding.totalBurnPercent == null ? 'UNAVAILABLE' : 'VERIFIED' })),
+      ],
+      reason: 'Dex visibility/promotion payment detected.',
+      recommendedAction: 'AlphaOS is watching for sustained confirmation.',
+    }), buildAlphaMarketActions({ chartUrl: market.chartUrl,
+      tokenUrl: `https://robinhoodchain.blockscout.com/token/${token.tokenAddress}`,
+      copyContractCallback: `COPY_CA_${token.tokenAddress}` }));
+  }
+}
 
 
 if (

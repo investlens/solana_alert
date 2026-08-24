@@ -37,6 +37,7 @@ export function buildAlphaAlertEvent(opportunity: AlphaLedgerOpportunity, alerte
     asset_id: opportunity.asset_id, chain: String(opportunity.chain ?? 'unknown').toLowerCase(),
     strategy_key: opportunity.strategy_key, lifecycle_action: action, lifecycle_state: opportunity.status,
     alert_type: action === 'EXIT' ? 'RISK' : action === 'BUY' ? 'ENTRY' : 'CHECK_ENTRY',
+    intelligence_state: text(raw.intelligenceState), semantic_event_type: text(raw.semanticEventType),
     delivery_identity: opportunityDeliveryIdentity({ action, status: opportunity.status }),
     symbol: market.symbol, token_name: market.name, confidence: opportunity.confidence,
     risk_score: opportunity.risk_score, risk_label: text(raw.riskLabel ?? raw.risk),

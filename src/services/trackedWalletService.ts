@@ -89,6 +89,16 @@ getTrackedWalletsForUser(
   ) as TrackedWallet[];
 }
 
+export async function getLatestWalletActivityForUser(telegramId: string): Promise<Map<string, string>> {
+  const { data, error } = await supabase.from('wallet_activity_deliveries')
+    .select('wallet_address,created_at').eq('telegram_id', telegramId)
+    .order('created_at', { ascending: false }).limit(250);
+  if (error) throw error;
+  const latest = new Map<string, string>();
+  for (const row of data ?? []) { const key = String(row.wallet_address).toLowerCase(); if (!latest.has(key)) latest.set(key, String(row.created_at)); }
+  return latest;
+}
+
 export async function
 getActiveTrackedWalletAddresses(
   chain:

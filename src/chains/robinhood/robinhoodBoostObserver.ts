@@ -28,6 +28,7 @@ import {
 } from './market.js';
 
 import { scanRobinhoodDevTokenFlow } from './security/devTokenFlowScanner.js';
+import { persistAlphaSemanticEvent } from '../../services/alphaSemanticEventService.js';
 
 import {
   scanRobinhoodHolderRisk,
@@ -640,6 +641,17 @@ async function processBoost(
   if (!eventId) {
     return false;
   }
+
+  await persistAlphaSemanticEvent({
+    identity: String(eventId), type: 'BOOST', assetId: boost.tokenAddress, chain: 'robinhood',
+    intelligenceState: boostNotificationState(boost.totalAmount) === 'BUILDING' ? 'BUILDING' : null,
+    strategyKey: opportunity?.strategyKey, symbol: market?.symbol ?? opportunityMarket.symbol,
+    rawSnapshot: { boostIncrement: boostAdded, boostTotal: boost.totalAmount, eventType,
+      marketCap: market?.marketCapUsd ?? null, fdv: market?.fdvUsd ?? null,
+      liquidity: market?.liquidityUsd ?? null, volume5m: market?.volume5mUsd ?? null,
+      buys5m: market?.buys5m ?? null, sells5m: market?.sells5m ?? null,
+      devHoldingPercent, burnedPercent, chartUrl: market?.chartUrl ?? null },
+  });
 
 
   const message =

@@ -52,6 +52,19 @@ function ponsConfidence(
   );
 }
 
+export function ponsIntelligenceState(state: string) {
+  switch (state) {
+    case 'MOMENTUM_BUILDING': return 'BUILDING' as const;
+    case 'ENTRY_WINDOW': return 'CONFIRMED' as const;
+    case 'FAST_BREAKOUT': return 'CONFIRMED' as const;
+    case 'DO_NOT_CHASE': return 'COOLING' as const;
+    case 'FADING': return 'WEAKENING' as const;
+    case 'FLAT_DEAD': return 'DANGER' as const;
+    case 'WATCHING': return 'FORMING' as const;
+    default: return 'DISCOVERED' as const;
+  }
+}
+
 type PonsOpportunitySyncArgs = {
   token: string;
   symbol?: string | null;
@@ -84,6 +97,9 @@ export function buildPonsOpportunityRawData(args: PonsOpportunitySyncArgs) {
     preIndexValuation: args.preIndexValuation ?? null,
     ponsAlphaState:
       args.state,
+
+    intelligenceState:
+      ponsIntelligenceState(args.state),
 
     currentRoi:
       args.currentRoi,

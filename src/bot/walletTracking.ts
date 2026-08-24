@@ -10,6 +10,7 @@ import {
   getRecentWalletActivityForUser,
   getTrackedWalletByIdForUser,
   getTrackedWalletsForUser,
+  getLatestWalletActivityForUser,
   removeTrackedWallet,
   setTrackedWalletActive,
 } from '../services/trackedWalletService.js';
@@ -107,6 +108,7 @@ async function renderWalletCenter(
     await getTrackedWalletsForUser(
       telegramId,
     );
+  const latestActivity = await getLatestWalletActivityForUser(telegramId);
 
   const lines = [
     '🐋 <b>WALLETS</b>',
@@ -134,6 +136,7 @@ async function renderWalletCenter(
         wallet.wallet_address,
       ))}</code>`,
       `<i>${walletCoverageText(wallet.chain, wallet.is_active)}</i>`,
+      `<i>Monitoring ${liveMonitoring && wallet.is_active ? 'ON' : 'OFF'} · Last activity ${latestActivity.get(wallet.wallet_address.toLowerCase()) ?? 'not detected'}</i>`,
     );
   }
 
