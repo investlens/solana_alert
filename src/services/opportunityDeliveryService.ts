@@ -47,6 +47,8 @@ import { deliverReservedTelegram } from './telegramDeliveryContract.js';
 import { createLeaseToken, DELIVERY_LEASE_SECONDS } from './reservationLease.js';
 import { coreDecisionEvidenceMetrics, marketContextMetrics, normalizeCoreDecisionMetrics, normalizeNotificationMarketContext, verifiedPonsPreIndexValuation, type NotificationMarketContext } from '../ui/notificationMarketContext.js';
 import { resolvePonsDeliveryContext } from './ponsDeliveryContext.js';
+import { persistAlphaAlertEvent } from './alphaAlertLedger.js';
+import { criticalAvoidReason, shouldDeliverExit, userHasExitRelevance } from './alphaExitRelevance.js';
 
 type DeliverableAction =
   | 'BUY'
@@ -585,6 +587,12 @@ export function mergeOpportunityMarketContext(
     ...(normalized.name ? { name: normalized.name } : {}),
     ...currentMarketFields,
     ...(marketIndexState ? { marketIndexState } : {}),
+    ...(marketIndexState === 'VERIFIED' && typeof (enrichment as Record<string, unknown> | null | undefined)?.priceUsd === 'number'
+      ? {
+          priceWhenVerified: (enrichment as Record<string, unknown>).priceUsd,
+          priceProvenance: (enrichment as Record<string, unknown>).priceProvenance ?? 'VERIFIED_MARKET_INDEX',
+        }
+      : {}),
     ...(normalized.symbol || normalized.name
       ? {
           identityVerifiedAt: existing.identityVerifiedAt ?? observedAt,
@@ -967,6 +975,10 @@ async function deliverOpportunity(
     }
   }
 
+  // Final normalized context, before user-specific filtering or Telegram retries.
+  await persistAlphaAlertEvent(opportunity);
+  const criticalReason = action === 'EXIT' ? criticalAvoidReason(opportunity.raw_data) : null;
+
   const users =
     (
       await getDeliverableUsers()
@@ -1017,6 +1029,14 @@ async function deliverOpportunity(
       )
     ) {
       continue;
+    }
+
+    if (action === 'EXIT') {
+      const relevant = await userHasExitRelevance({
+        telegramId: user.telegram_id, assetId: opportunity.asset_id,
+        chain: opportunity.chain, opportunityId: opportunity.id,
+      });
+      if (!shouldDeliverExit({ action, relevant, criticalReason })) continue;
     }
 
     if (

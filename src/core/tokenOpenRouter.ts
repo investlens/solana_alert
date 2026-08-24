@@ -9,7 +9,7 @@ export type TokenOpenTarget = {
   tokenUrl: string;
   chartSource?: 'dexscreener' | 'dexscreener_search';
   tokenSource: 'solscan' | 'blockscout' | 'dexscreener_search';
-  marketContext?: Partial<NotificationMarketContext>;
+  marketContext?: Partial<NotificationMarketContext> & { priceUsd?: number; priceProvenance?: string };
   marketIndexState?: 'VERIFIED' | 'NOT_INDEXED';
 };
 
@@ -97,6 +97,8 @@ export async function resolveTokenOpenTarget(
             liquidity: snapshot.liquidityUsd,
             volume5m: snapshot.volume5mUsd,
             chartUrl: snapshot.chartUrl,
+            priceUsd: snapshot.priceUsd,
+            priceProvenance: 'DEXSCREENER_VERIFIED_BASE_PAIR',
           },
           marketIndexState: 'VERIFIED',
         };
