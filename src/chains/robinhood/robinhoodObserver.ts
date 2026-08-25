@@ -9,6 +9,7 @@ import { renderAlphaNotification } from '../../ui/alphaNotification.js';
 import { buildAlphaMarketActions } from '../../ui/alphaNotificationActions.js';
 import { coreDecisionEvidenceMetrics, marketContextMetrics, normalizeCoreDecisionMetrics, normalizeNotificationMarketContext } from '../../ui/notificationMarketContext.js';
 import { persistAlphaSemanticEvent } from '../../services/alphaSemanticEventService.js';
+import { buildPremiumTokenNotification } from '../../ui/premiumTokenNotification.js';
 
 import {
   startPostAlertDevWatch,
@@ -1147,21 +1148,23 @@ if (dexPaid.dexPaid === true && dexPaid.latestPaymentTimestamp != null) {
     type: 'DEX_PAID', assetId: token.tokenAddress, chain: 'robinhood',
     intelligenceState: 'FORMING', symbol: token.symbol ?? market.symbol,
     rawSnapshot: { paymentTimestamp: dexPaid.latestPaymentTimestamp, orderTypes: dexPaid.orderTypes,
+      price: market.priceUsd, priceProvenance: 'DEXSCREENER_VERIFIED_BASE_PAIR',
       marketCap: market.marketCapUsd, fdv: market.fdvUsd, liquidity: market.liquidityUsd,
       volume5m: market.volume5mUsd, devHoldingPercent: devHolding.devHoldingPercent,
       burnedPercent: devHolding.totalBurnPercent, chartUrl: market.chartUrl },
   });
   if (inserted) {
-    await sendTelegram(config.adminTelegramId, renderAlphaNotification({
-      category: 'market', severity: 'positive', state: 'BUILDING',
-      symbol: token.symbol ?? market.symbol, subtitle: token.name ?? market.name,
-      address: token.tokenAddress, risk: 'MONITORING',
-      metrics: [
-        ...marketContextMetrics(normalizeNotificationMarketContext({ marketCap: market.marketCapUsd, fdv: market.fdvUsd, liquidity: market.liquidityUsd, volume5m: market.volume5mUsd })),
-        ...coreDecisionEvidenceMetrics(normalizeCoreDecisionMetrics({ devHoldingPercent: devHolding.devHoldingPercent, devHoldingEvidence: devHolding.devHoldingPercent == null ? 'UNAVAILABLE' : 'VERIFIED', totalBurnPercent: devHolding.totalBurnPercent, burnEvidence: devHolding.totalBurnPercent == null ? 'UNAVAILABLE' : 'VERIFIED' })),
-      ],
-      reason: 'Dex visibility/promotion payment detected.',
-      recommendedAction: 'AlphaOS is watching for sustained confirmation.',
+    await sendTelegram(config.adminTelegramId, buildPremiumTokenNotification({
+      state: 'DEX_PAID', symbol: token.symbol ?? market.symbol, name: token.name ?? market.name,
+      address: token.tokenAddress,
+      market: normalizeNotificationMarketContext({ marketCap: market.marketCapUsd, fdv: market.fdvUsd,
+        liquidity: market.liquidityUsd, volume5m: market.volume5mUsd, chartUrl: market.chartUrl }),
+      evidence: normalizeCoreDecisionMetrics({ devHoldingPercent: devHolding.devHoldingPercent,
+        devHoldingEvidence: devHolding.devHoldingPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
+        totalBurnPercent: devHolding.totalBurnPercent,
+        burnEvidence: devHolding.totalBurnPercent == null ? 'UNAVAILABLE' : 'VERIFIED' }),
+      insightTitle: 'VERIFIED EVENT', insight: ['A verified Dex visibility payment was detected.'],
+      statusTitle: '💎 STATUS', status: 'Dex Paid confirmed · evaluate live market conditions.',
     }), buildAlphaMarketActions({ chartUrl: market.chartUrl,
       tokenUrl: `https://robinhoodchain.blockscout.com/token/${token.tokenAddress}`,
       copyContractCallback: `COPY_CA_${token.tokenAddress}` }));
@@ -2110,11 +2113,9 @@ if (!observationId) {
   return false;
 }
 
-  await sendTelegram(
-    config.adminTelegramId,
-    message,
-    buttons,
-  );
+  console.log('[RobinhoodObserver] Qualified launch retained as internal intelligence; no standalone launch Telegram.', {
+    token: token.tokenAddress,
+  });
 
   startPostAlertDevWatch({
   tokenAddress:

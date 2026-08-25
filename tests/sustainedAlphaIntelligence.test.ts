@@ -129,7 +129,7 @@ test('volume surge requires comparable m5 data and deduplicates within one Boost
 test('developer burn and transfer materiality preserve internal evidence', () => {
   assert.equal(developerEvent({ burnedPercent: 0.2, evidence: 'VERIFIED' }).notify, false);
   assert.equal(developerEvent({ transferredPercent: 0.1, evidence: 'VERIFIED' }).notify, false);
-  assert.equal(developerEvent({ transferredPercent: 1, evidence: 'VERIFIED' }).notify, true);
+  assert.equal(developerEvent({ transferredPercent: 1, evidence: 'VERIFIED' }).notify, false);
   assert.equal(developerEvent({ soldPercent: 0.01, evidence: 'VERIFIED' }).notify, true);
 });
 test('Dex Paid and Boost each have one active semantic producer', async () => {

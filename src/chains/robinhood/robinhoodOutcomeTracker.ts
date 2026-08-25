@@ -6,15 +6,7 @@ import {
   getRobinhoodMarketSnapshot,
 } from './market.js';
 
-import {
-  config,
-} from '../../config.js';
-
-import {
-  sendTelegram,
-} from '../../services/telegram.js';
 import { renderAlphaNotification } from '../../ui/alphaNotification.js';
-import { buildAlphaMarketActions } from '../../ui/alphaNotificationActions.js';
 import { coreDecisionEvidenceMetrics, marketContextMetrics, normalizeCoreDecisionMetrics, normalizeNotificationMarketContext } from '../../ui/notificationMarketContext.js';
 
 import {
@@ -1142,18 +1134,13 @@ if (
 }
 
 
-  await sendTelegram(
-    config.adminTelegramId,
-    message,
-    buildAlphaMarketActions({
-      chartUrl: `https://dexscreener.com/robinhood/${row.token_address}`,
-      tokenUrl: `https://robinhoodchain.blockscout.com/token/${row.token_address}`,
-    }),
-  );
+  console.log('[RobinhoodMicroBreakout] Internal-only lifecycle evidence recorded.', {
+    token: row.token_address,
+  });
 
 
   console.log(
-    '[RobinhoodMicroBreakout] ALERT SENT:',
+    '[RobinhoodMicroBreakout] INTERNAL EVENT RECORDED:',
     {
       symbol:
         row.symbol,

@@ -51,7 +51,7 @@ test('BUILDING renders enriched verified pre-index context and mature PONS actio
   assert.match(result.message, /🧠 <b>STRUCTURE<\/b>/);
   assert.match(result.message, /⏳ <b>STATUS<\/b>/);
   assert.deepEqual(result.actions.map(row => row.map(action => action.text)),
-    [['🔎 Token'], ['📋 Copy CA'], ['👀 Track', '🔕 Mute']]);
+    [['🔎 Token'], ['📋 Copy CA'], ['⭐ Track', '🔕 Mute']]);
   assert.equal(result.actions.flat().find(action => action.text === '📋 Copy CA')?.callback_data,
     `COPY_CA_${address}`);
   assert.equal(result.actions.flat().some(action => /Trade/.test(action.text)), false);
@@ -143,10 +143,11 @@ test('an unchanged BUILDING state can mature once and then exits through semanti
   assert.match(source, /else if \(nextState !== 'BUILDING'\) return/);
   assert.match(source, /event_identity.*v2:BUILDING:/s);
   assert.match(source, /if \(existing\) return/);
-  assert.match(source, /if \(inserted && presentation\)/);
+  assert.match(source, /await persistAlphaSemanticEvent/);
+  assert.doesNotMatch(source, /sendTelegram/);
 });
 
-test('PONS CHECK_ENTRY renders premium CONFIRMED semantics without changing classification', async () => {
+test('PONS CHECK_ENTRY renders the premium OPPORTUNITY category without changing classification', async () => {
   const { buildOpportunityMessage } = await import('../src/services/opportunityDeliveryService.js');
   const message = buildOpportunityMessage({
     id: 407, asset_id: address, chain: 'robinhood', strategy_key: 'PONS_BREAKOUT',
@@ -158,9 +159,9 @@ test('PONS CHECK_ENTRY renders premium CONFIRMED semantics without changing clas
       liquidity: 12_000, volume5m: 8_000, devHoldingPercent: 1.15,
       devHoldingEvidence: 'VERIFIED', totalBurnPercent: 0, burnEvidence: 'VERIFIED' },
   });
-  assert.match(message, /🔥 <b>ALPHAOS · CONFIRMED<\/b>/);
-  assert.match(message, /🧠 <b>CONFIRMATION<\/b>/);
-  assert.match(message, /Multiple checkpoints continue to support the setup/);
-  assert.match(message, /🎯 <b>STATUS<\/b>/);
+  assert.match(message, /<b>ALPHAOS · 🎯 OPPORTUNITY<\/b>/);
+  assert.match(message, /🧠 <b>WHY NOW<\/b>/);
+  assert.match(message, /Volume and price structure remain constructive/);
+  assert.match(message, /<b>🎯 STATUS<\/b>/);
   assert.doesNotMatch(message, /ROI|Trade/);
 });

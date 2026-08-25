@@ -50,11 +50,11 @@ export function assessTokenIntelligence(args: { observations: IntelligenceObserv
 }
 
 export const DEFAULT_DEV_TRANSFER_NOTIFY_PERCENT = 1;
-export const DEFAULT_DEV_BURN_NOTIFY_PERCENT: number | null = null;
+export const DEFAULT_DEV_BURN_NOTIFY_PERCENT: number | null = 1;
 export function developerEvent(args: { transferredPercent?: number | null; soldPercent?: number | null; burnedPercent?: number | null; evidence: 'VERIFIED' | 'UNCONFIRMED' | 'UNAVAILABLE'; transferNotifyPercent?: number; burnNotifyPercent?: number | null }) {
   if (args.evidence !== 'VERIFIED') return { type: 'NONE' as const, priority: 'INTERNAL' as const, notify: false };
   if (finite(args.soldPercent) && args.soldPercent > 0) return { type: 'DEV_SELL' as const, priority: 'IMMEDIATE' as const, notify: true };
-  if (finite(args.transferredPercent) && args.transferredPercent > 0) { const threshold = args.transferNotifyPercent ?? DEFAULT_DEV_TRANSFER_NOTIFY_PERCENT; const notify = args.transferredPercent >= threshold; return { type: 'DEV_TRANSFER' as const, priority: notify ? 'IMMEDIATE' as const : 'INTERNAL' as const, notify }; }
+  if (finite(args.transferredPercent) && args.transferredPercent > 0) { return { type: 'DEV_TRANSFER' as const, priority: 'INTERNAL' as const, notify: false }; }
   if (finite(args.burnedPercent) && args.burnedPercent > 0) { const threshold = args.burnNotifyPercent === undefined ? DEFAULT_DEV_BURN_NOTIFY_PERCENT : args.burnNotifyPercent; const notify = threshold != null && args.burnedPercent >= threshold; return { type: 'DEV_BURN' as const, priority: notify ? 'IMMEDIATE' as const : 'INTERNAL' as const, notify }; }
   return { type: 'DEV_HOLDING' as const, priority: 'INTERNAL' as const, notify: false };
 }

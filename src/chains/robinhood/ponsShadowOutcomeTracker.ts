@@ -28,8 +28,6 @@ import {
   recordOpportunityAndEmit,
 } from '../../services/opportunityService.js';
 import { persistAlphaSemanticEvent } from '../../services/alphaSemanticEventService.js';
-import { sendTelegram } from '../../services/telegram.js';
-import { config } from '../../config.js';
 import { buildAlphaMarketActions } from '../../ui/alphaNotificationActions.js';
 import { hasVerifiedOpportunityIdentity, mergePonsLifecycleContext } from '../../product/opportunityContext.js';
 import { resolvePonsDeliveryContext } from '../../services/ponsDeliveryContext.js';
@@ -43,6 +41,7 @@ import {
   type IntelligenceObservation,
 } from '../../intelligence/tokenIntelligenceState.js';
 import { renderPonsPremiumIntelligence } from '../../ui/ponsPremiumIntelligence.js';
+import { evaluateRobinhoodCreatorRisk, type RobinhoodCreatorRiskResult } from './robinhoodCreatorRisk.js';
 
 import {
   getPonsV2CurveState,
@@ -90,6 +89,7 @@ type PonsOpportunitySyncArgs = {
   chartUrl?: string | null;
   devHoldingPercent?: number | null;
   preIndexValuation?: VerifiedPonsPreIndexValuation | null;
+  creatorRisk?: RobinhoodCreatorRiskResult | null;
   state: string;
   reason: string;
   currentRoi: number;
@@ -110,6 +110,12 @@ export function buildPonsOpportunityRawData(args: PonsOpportunitySyncArgs) {
     devHoldingEvidence: args.devHoldingPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
     devHoldingSource: args.devHoldingPercent == null ? null : 'PONS_SHADOW_DEV_HOLDING',
     preIndexValuation: args.preIndexValuation ?? null,
+    creatorEvidence: args.creatorRisk ? {
+      creatorWallet: args.creatorRisk.creatorWallet, launches: args.creatorRisk.launches,
+      severeCrashes: args.creatorRisk.severeCrashes, catastrophicCrashes: args.creatorRisk.catastrophicCrashes,
+      status: args.creatorRisk.status, historyPenalty: args.creatorRisk.historyPenalty,
+      negativeHistoryEvidence: args.creatorRisk.negativeHistoryEvidence,
+    } : null,
     ponsAlphaState:
       args.state,
 
@@ -258,7 +264,7 @@ export async function syncPonsOpportunity(
                   args.currentRoi,
                 ),
             ),
-          ),
+          ) - (args.creatorRisk?.historyPenalty ?? 0),
         ),
 
       riskScore:
@@ -376,7 +382,7 @@ export async function syncPonsOpportunity(
                     0,
                 ),
             ),
-          ),
+          ) - (args.creatorRisk?.historyPenalty ?? 0),
         ),
 
       riskScore:
@@ -1000,13 +1006,10 @@ async function recordPonsRuntimeTransition(args: { row: ShadowRow; classifiedSta
         currentRoi: args.currentRoi, peakRoi: args.peakRoi, observedAt: args.observedAt })
     : null;
   if (nextState === 'BUILDING' && !presentation?.eligibleForBuilding) return;
-  const inserted = await persistAlphaSemanticEvent({ identity: `${args.row.id}:${nextState}`,
+  await persistAlphaSemanticEvent({ identity: `${args.row.id}:${nextState}`,
     type, assetId: args.row.token_address, chain: 'robinhood', intelligenceState: nextState,
     strategyKey: 'PONS_SUSTAINED', symbol: presentation?.snapshot.symbol as string | null | undefined,
     rawSnapshot: presentation?.snapshot ?? baseSnapshot });
-  if (inserted && presentation) {
-    await sendTelegram(config.adminTelegramId, presentation.message, presentation.actions);
-  }
 }
 
 function checkpointObservation(entryMs: number, seconds: number, roi: number | null): IntelligenceObservation | null {
@@ -2122,6 +2125,8 @@ async function updateShadowRow(
                 row.dev_holding_percent,
 
               preIndexValuation,
+
+              creatorRisk: await evaluateRobinhoodCreatorRisk(row.deployer_address),
 
               state:
                 alphaClassification.state,

@@ -1,9 +1,6 @@
 import { supabase } from '../services/supabase.js';
 import { enrichTokenByMintAddress } from '../services/dexscreener.js';
 import { recordTokenMemoryEvent } from '../memory/tokenMemoryEvents.js';
-import { sendTelegram } from '../services/telegram.js';
-import { getAlertDeliveries } from '../core/delivery.js';
-import { renderAlphaNotification } from '../ui/alphaNotification.js';
 
 type CheckpointKey = '5M' | '15M' | '30M' | '1H' | '6H' | '24H';
 
@@ -115,48 +112,6 @@ function formatPct(value: number): string {
   const sign = value > 0 ? '+' : '';
 
   return `${sign}${value.toFixed(1)}%`;
-}
-
-function buildOutcomeMessage(args: {
-  symbol: string;
-  checkpoint: string;
-  returnPct: number;
-  maxReturnPct: number;
-  drawdownFromPeakPct: number;
-  outcome: string;
-  currentMarketCap: number;
-  alertMarketCap: number;
-}) {
-  const cleanSymbol = args.symbol.replace(/^\$/, '');
-
-  const recovered =
-    args.drawdownFromPeakPct > -15
-      ? '🟢 Holding gains well'
-      : '🟡 Healthy pullback after strong move';
-
-  return renderAlphaNotification({
-    category: 'market', severity: 'success', state: 'POSITION_UPDATE',
-    symbol: cleanSymbol, risk: 'MEASURED OUTCOME',
-    metrics: [
-      { label: 'Peak ROI', value: formatPct(args.maxReturnPct) },
-      { label: 'Current ROI', value: formatPct(args.returnPct) },
-      { label: 'Alert MC', value: `$${Math.round(args.alertMarketCap).toLocaleString()}` },
-      { label: 'Current MC', value: `$${Math.round(args.currentMarketCap).toLocaleString()}` },
-      { label: 'Outcome', value: args.outcome.replace(/_/g, ' ') },
-    ],
-    reason: recovered.replace(/^[^ ]+ /, ''),
-    recommendedAction: 'Measured 1-hour performance update.',
-  });
-}
-
-function shouldSendOutcomeNotification(args: {
-  checkpoint: CheckpointKey;
-  maxReturnPct: number;
-}) {
-  return (
-    args.checkpoint === '1H' &&
-    args.maxReturnPct >= 50
-  );
 }
 
 function numberOrNull(value: unknown) {
@@ -570,107 +525,13 @@ async function processCheckpoint(
   });
 
   if (alertId) {
-  const outcomeText =
-    finalOutcome ?? interimOutcome;
-
-  const shouldNotify =
-    shouldSendOutcomeNotification({
-      checkpoint: checkpoint.key,
-      maxReturnPct,
-    });
-
-  console.log("outcome notification decision:", {
-    token: row.token,
-    symbol:
-      pair.baseToken?.symbol ?? row.symbol,
-    checkpoint: checkpoint.key,
-    returnPct: Number(returnPct.toFixed(2)),
-    maxReturnPct:
-      Number(maxReturnPct.toFixed(2)),
-    drawdownFromPeakPct:
-      Number(drawdownFromPeakPct.toFixed(2)),
-    outcome: outcomeText,
-    shouldNotify,
-  });
-
-  if (!shouldNotify) {
-    console.log(
-      "[OutcomeCheckpoint] Outcome stored silently.",
-      {
-        token: row.token,
-        symbol:
-          pair.baseToken?.symbol ??
-          row.symbol,
-        checkpoint: checkpoint.key,
-        returnPct:
-          Number(returnPct.toFixed(2)),
-        maxReturnPct:
-          Number(maxReturnPct.toFixed(2)),
-        outcome: outcomeText,
-      },
-    );
-  }
-
-  if (shouldNotify) {
-    const deliveries =
-      await getAlertDeliveries(alertId);
-
-    console.log("outcome deliveries found:", {
+    console.log('[OutcomeCheckpoint] Outcome stored silently.', {
       alertId,
       token: row.token,
-      deliveries: deliveries.length,
-    });
-
-    const message = buildOutcomeMessage({
-      symbol:
-        pair.baseToken?.symbol ??
-        row.symbol ??
-        "Unknown",
       checkpoint: checkpoint.key,
-      returnPct,
-      maxReturnPct,
-      drawdownFromPeakPct,
-      outcome: outcomeText,
-      currentMarketCap,
-      alertMarketCap,
+      outcome: finalOutcome ?? interimOutcome,
     });
-
-    for (const delivery of deliveries) {
-      try {
-        await sendTelegram(
-          delivery.telegram_id,
-          message,
-        );
-
-        console.log(
-          "outcome Telegram delivered:",
-          {
-            alertId,
-            telegramId:
-              delivery.telegram_id,
-            checkpoint: checkpoint.key,
-            returnPct:
-              Number(returnPct.toFixed(2)),
-          },
-        );
-      } catch (error) {
-        console.log(
-          "outcome Telegram delivery failed:",
-          {
-            alertId,
-            telegramId:
-              delivery.telegram_id,
-            checkpoint: checkpoint.key,
-            error:
-              error instanceof Error
-                ? error.message
-                : String(error),
-          },
-        );
-      }
-    }
   }
-}
 
   console.log('outcome checkpoint completed:', {
     token: row.token,

@@ -48,7 +48,7 @@ test('PONS watching, entry and exit snapshots follow one commercial contract', (
 test('Robinhood early watch and boost sources use shared renderer and action preset', async () => {
   for (const path of ['../src/chains/robinhood/robinhoodObserver.ts', '../src/chains/robinhood/robinhoodBoostObserver.ts']) {
     const source = await readFile(new URL(path, import.meta.url), 'utf8');
-    assert.match(source, /renderAlphaNotification/);
+    assert.match(source, /(?:renderAlphaNotification|buildPremiumTokenNotification)/);
     assert.match(source, /buildAlphaMarketActions/);
     assert.doesNotMatch(source, /📋 Copy Contract|Direct execution is unavailable/);
   }
@@ -60,7 +60,7 @@ test('Solana opportunity and wallet action snapshots use the final grammar', () 
     tokenUrl: 'https://solscan.io/token/mint', trackCallback: 'OPP_TRACK_1', muteCallback: 'STRAT_TOGGLE_SOL_MOMENTUM',
   });
   assert.deepEqual(opportunity.map(row => row.map(item => item.text)), [
-    ['⚡ Trade'], ['📊 Chart', '🔎 Token'], ['👀 Track', '🔕 Mute'],
+    ['⚡ Trade'], ['📊 Chart', '🔎 Token'], ['⭐ Track', '🔕 Mute'],
   ]);
   const wallet = buildAlphaMarketActions({
     chartUrl: 'https://dexscreener.com/solana/mint', tokenUrl: 'https://solscan.io/token/mint',

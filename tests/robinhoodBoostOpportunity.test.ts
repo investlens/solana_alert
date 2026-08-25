@@ -53,14 +53,12 @@ test('>=200 indexed boost renders high-attention state and verified current mark
     },
     rawData: { preIndexValuation: preIndexValuation(), marketIndexState: 'VERIFIED' },
   });
-  assert.match(message, /ALPHAOS · 🚀 BOOSTED OPPORTUNITY/);
+  assert.match(message, /ALPHAOS · 🚀 BOOST/);
   assert.match(message, /Boost\s+<b>200 total \(\+50\)<\/b>/);
   assert.match(message, /Market cap\s+<b>\$25\.5K<\/b>/);
   assert.match(message, /Liquidity\s+<b>\$23\.1K<\/b>/);
   assert.match(message, /5m volume\s+<b>\$6\.8K<\/b>/);
-  assert.match(message, /Momentum\s+<b>\+12\.40%<\/b>/);
-  assert.match(message, /Confidence\s+<b>82\/100<\/b>/);
-  assert.match(message, /Risk\s+<b>MEDIUM<\/b>/);
+  assert.match(message, /Move\s+<b>\+12\.4%<\/b>/);
   assert.match(message, /Dev holding\s+<b>0%<\/b>/);
   assert.match(message, /Burned\s+<b>0%<\/b>/);
   assert.doesNotMatch(message, /FDV|INDEXING/);
@@ -74,9 +72,8 @@ test('>=200 pre-index PONS V2 boost renders verified FDV without fabricated mark
       preIndexValuation: preIndexValuation(),
     },
   });
-  assert.match(message, /ALPHAOS · 🚀 BOOSTED OPPORTUNITY/);
-  assert.match(message, /FDV\s+<b>\$4\.58K<\/b>/);
-  assert.match(message, /verified launch valuation/);
+  assert.match(message, /ALPHAOS · 🚀 BOOST/);
+  assert.match(message, /FDV\s+<b>\$4\.6K<\/b>/);
   assert.doesNotMatch(message, /Market cap|Liquidity|5m volume|INDEXING/);
 });
 
@@ -85,7 +82,7 @@ test('boost action grammar uses direct verified Chart, full Copy CA, Track and M
     tokenAddress: address, chartUrl, opportunityId: 406, strategyKey: 'PONS_BREAKOUT',
   });
   assert.deepEqual(actions.map(row => row.map(action => action.text)), [
-    ['📊 Chart', '🔎 Token'], ['📋 Copy CA'], ['👀 Track', '🔕 Mute'],
+    ['📊 Chart', '🔎 Token'], ['📋 Copy CA'], ['⭐ Track', '🔕 Mute'],
   ]);
   assert.equal(actions[0][0].url, chartUrl);
   assert.equal(actions[1][0].callback_data, `COPY_CA_${address}`);
@@ -113,6 +110,6 @@ test('unverified Chart and genuinely missing metrics are omitted', () => {
     confidence: null, risk: null, devHoldingPercent: null, burnedPercent: null,
     buys5m: null, sells5m: null,
   });
-  assert.match(message, /ALPHAOS · 📈 BUILDING/);
+  assert.match(message, /ALPHAOS · 🚀 BOOST/);
   assert.doesNotMatch(message, /Market cap|FDV|Liquidity|5m volume|Momentum|Dev holding|Burned|\$0/);
 });

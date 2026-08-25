@@ -193,8 +193,7 @@ async function initializeMissingCursors(wallets: Address[], latest: bigint): Pro
   const { data, error } = await supabase
     .from('wallet_monitor_cursors')
     .select('wallet_address,last_processed_block')
-    .eq('chain', 'robinhood')
-    .in('wallet_address', wallets);
+    .eq('chain', 'robinhood');
   if (error) throw error;
   const cursors = new Map((data ?? []).map(row => [String(row.wallet_address).toLowerCase(), BigInt(row.last_processed_block)]));
   const missing = wallets.filter(wallet => !cursors.has(wallet.toLowerCase()));
@@ -219,10 +218,12 @@ export function walletCursorRecoveryDecision(args: { cursor: bigint; chainHead: 
 
 async function unresolvedWalletDeliveries(wallets: Address[]): Promise<Map<string, number>> {
   const { data, error } = await supabase.from('wallet_activity_deliveries')
-    .select('wallet_address').in('wallet_address', wallets).contains('metadata', { state: 'RESERVED' });
+    .select('wallet_address').contains('metadata', { state: 'RESERVED' });
   if (error) throw error;
+  const monitored = new Set(wallets.map(wallet => wallet.toLowerCase()));
   const counts = new Map<string, number>();
-  for (const row of data ?? []) { const key = String(row.wallet_address).toLowerCase(); counts.set(key, (counts.get(key) ?? 0) + 1); }
+  for (const row of data ?? []) { const key = String(row.wallet_address).toLowerCase();
+    if (monitored.has(key)) counts.set(key, (counts.get(key) ?? 0) + 1); }
   return counts;
 }
 
@@ -231,9 +232,11 @@ export async function pollRobinhoodTrackedWallets(): Promise<{
   checkpointBlocks: Map<string, bigint>;
   wallets: Address[];
 }> {
-  const allWallets = (await getTrackedWalletAddressesForChain('robinhood')).map(value => getAddress(value));
+  const allWallets = [...new Map((await getTrackedWalletAddressesForChain('robinhood'))
+    .map(value => getAddress(value)).map(wallet => [wallet.toLowerCase(), wallet])).values()];
   if (!allWallets.length) return { events: [], checkpointBlocks: new Map(), wallets: [] };
-  const wallets = (await getActiveTrackedWalletAddresses('robinhood')).map(value => getAddress(value));
+  const wallets = [...new Map((await getActiveTrackedWalletAddresses('robinhood'))
+    .map(value => getAddress(value)).map(wallet => [wallet.toLowerCase(), wallet])).values()];
   const latest = await robinhoodPublicClient.getBlockNumber();
   const cursors = await initializeMissingCursors(allWallets, latest);
   const activeKeys = new Set(wallets.map(wallet => wallet.toLowerCase()));

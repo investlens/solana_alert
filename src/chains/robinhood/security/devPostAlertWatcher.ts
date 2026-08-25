@@ -9,10 +9,13 @@ import {
 import {
   scanRobinhoodDevMovement,
 } from './devMovementScanner.js';
-import { buildCreatorNotification } from '../../../ui/alphaNotificationPresets.js';
 import { buildAlphaMarketActions } from '../../../ui/alphaNotificationActions.js';
 import { persistAlphaSemanticEvent } from '../../../services/alphaSemanticEventService.js';
 import { developerEvent } from '../../../intelligence/tokenIntelligenceState.js';
+import { buildPremiumTokenNotification } from '../../../ui/premiumTokenNotification.js';
+import { normalizeCoreDecisionMetrics, normalizeNotificationMarketContext } from '../../../ui/notificationMarketContext.js';
+import { resolveTokenOpenTarget } from '../../../core/tokenOpenRouter.js';
+import { supabase } from '../../../services/supabase.js';
 
 
 const DEV_WATCH_DELAYS_MS =
@@ -50,21 +53,22 @@ function sleep(
 }
 
 
-function buildWarningMessage(args: {
-  symbol: string;
-  tokenAddress: string;
-  transferCount: number;
-  destinations: string[];
-}): string {
-  return buildCreatorNotification({
-    symbol: args.symbol,
-    address: args.tokenAddress,
-    risk: true,
-    transferredAmount: args.transferCount,
-    reason: args.destinations.length
-      ? `Developer tokens moved after alert toward ${args.destinations[0]}.`
-      : 'Developer tokens moved after the AlphaOS alert.',
-  });
+export function developerSellHasUserRelevance(events: Array<{ semantic_event_type?: string | null; alert_type?: string | null }>) {
+  const relevant = new Set(['CONFIRMED', 'DEX_PAID', 'BOOST', 'DEV_BURN', 'VOLUME_SURGE']);
+  return events.some(event => relevant.has(String(event.semantic_event_type ?? '').toUpperCase()) ||
+    ['ENTRY', 'CHECK_ENTRY', 'OPPORTUNITY'].includes(String(event.alert_type ?? '').toUpperCase()));
+}
+
+async function hasPriorPremiumRelevance(tokenAddress: string): Promise<boolean> {
+  const { data, error } = await supabase.from('alpha_alert_events')
+    .select('semantic_event_type,alert_type').ilike('asset_id', tokenAddress)
+    .order('alerted_at', { ascending: false }).limit(100);
+  if (error) throw error;
+  if (developerSellHasUserRelevance(data ?? [])) return true;
+  const { data: wallet, error: walletError } = await supabase.from('wallet_activity_deliveries')
+    .select('id').ilike('token_address', tokenAddress).limit(1).maybeSingle();
+  if (walletError) throw walletError;
+  return Boolean(wallet);
 }
 
 
@@ -157,29 +161,32 @@ export function startPostAlertDevWatch(args: {
                   transferCount: movement.transferCount, sold: movement.sold, burned: movement.burned,
                   notificationEligible: classification.notify },
               });
-          if (!inserted || !classification.notify) return;
-          const message =
-            buildWarningMessage({
-              symbol:
-                args.symbol,
-
-              tokenAddress:
-                args.tokenAddress,
-
-              transferCount:
-                movement.transferCount,
-
-              destinations:
-                movement.destinations,
-            });
+          const relevantSell = classification.type !== 'DEV_SELL' || await hasPriorPremiumRelevance(args.tokenAddress);
+          if (!inserted || !classification.notify || !relevantSell) return;
+          const target = await resolveTokenOpenTarget({ chain: 'robinhood', tokenAddress: args.tokenAddress });
+          const market = normalizeNotificationMarketContext(target.marketContext as Record<string, unknown> | undefined,
+            { address: args.tokenAddress });
+          const isBurn = classification.type === 'DEV_BURN';
+          const message = buildPremiumTokenNotification({
+            state: isBurn ? 'DEV_BURN' : 'DEV_SOLD', symbol: args.symbol, address: args.tokenAddress,
+            market, evidence: normalizeCoreDecisionMetrics({
+              burnedPercent: isBurn ? movement.movedPercentOfSupply : null,
+              burnEvidence: isBurn ? 'VERIFIED' : 'UNAVAILABLE',
+            }),
+            insightTitle: isBurn ? 'VERIFIED EVENT' : 'CRITICAL EVIDENCE',
+            insight: [isBurn ? 'A verified burn transaction removed developer-held supply.' : 'A confirmed developer sale was detected for a previously relevant token.'],
+            statusTitle: isBurn ? '🔥 STATUS' : '🚨 STATUS',
+            status: isBurn ? 'Material supply burn confirmed.' : 'Developer sold · reassess current exposure.',
+          });
 
 
           await sendTelegram(
             config.adminTelegramId,
             message,
             buildAlphaMarketActions({
-              chartUrl: `https://dexscreener.com/robinhood/${args.tokenAddress}`,
-              tokenUrl: `https://robinhoodchain.blockscout.com/token/${args.tokenAddress}`,
+              chartUrl: target.chartUrl,
+              tokenUrl: target.tokenUrl,
+              copyContractCallback: `COPY_CA_${args.tokenAddress}`,
             }),
           );
 

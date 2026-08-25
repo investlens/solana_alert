@@ -49,7 +49,7 @@ import { coreDecisionEvidenceMetrics, marketContextMetrics, normalizeCoreDecisio
 import { resolvePonsDeliveryContext } from './ponsDeliveryContext.js';
 import { persistAlphaAlertEvent } from './alphaAlertLedger.js';
 import { criticalAvoidReason, shouldDeliverExit, userHasExitRelevance } from './alphaExitRelevance.js';
-import { renderPonsPremiumIntelligence } from '../ui/ponsPremiumIntelligence.js';
+import { buildPremiumTokenNotification } from '../ui/premiumTokenNotification.js';
 
 type DeliverableAction =
   | 'BUY'
@@ -79,6 +79,30 @@ const ACTIONABLE =
     'CHECK_ENTRY',
     'EXIT',
   ]);
+
+export function qualifyPremiumOpportunity(raw: Record<string, unknown> | null, action: string, assetId?: string) {
+  if (!['BUY', 'CHECK_ENTRY'].includes(action.toUpperCase())) return { eligible: false, reason: 'NOT_OPPORTUNITY' };
+  const data = raw ?? {};
+  const age = Number(data.elapsedSec); const move = Number(data.currentRoi ?? data.roi);
+  const peak = Number(data.recentPeakRoi ?? data.peakRoi ?? move);
+  const retention = Number.isFinite(move) && Number.isFinite(peak) && peak > 0 ? move / peak : 0;
+  const currentVolume = Number(data.volume5m); const previousVolume = Number(data.previousVolume5m);
+  const volumeMultiple = Number.isFinite(currentVolume) && currentVolume > 0 && Number.isFinite(previousVolume) && previousVolume > 0
+    ? currentVolume / previousVolume : Number(data.volumeMultiple);
+  const critical = data.confirmedDevSell === true || data.criticalSecurity === true || data.liquidityCritical === true;
+  if (!Number.isFinite(age) || !Number.isFinite(move) || move <= 0 || retention < 0.5 || critical) {
+    return { eligible: false, reason: 'INSUFFICIENT_HEALTHY_STRUCTURE', volumeMultiple };
+  }
+  const unusualEarly = age < 120 && volumeMultiple >= 3 && move >= 10;
+  if (age < 120) return { eligible: unusualEarly, reason: unusualEarly ? 'UNUSUALLY_STRONG_EARLY_EVIDENCE' : 'EARLY_OBSERVATION_WINDOW', volumeMultiple };
+  if (age < 900) {
+    const curve = verifiedPonsPreIndexValuation(data, assetId ?? String(data.address ?? data.tokenAddress ?? data.asset_id ?? '')) != null;
+    const strong = volumeMultiple >= 1.5 || (curve && move >= 8);
+    return { eligible: strong, reason: strong ? 'SUSTAINED_STRONG_EVIDENCE' : 'MORE_PARTICIPATION_REQUIRED', volumeMultiple };
+  }
+  const survivedWithVolume = volumeMultiple >= 1.5;
+  return { eligible: survivedWithVolume, reason: survivedWithVolume ? 'SURVIVAL_AND_VOLUME_ACCELERATION' : 'SURVIVAL_WITHOUT_IGNITION', volumeMultiple };
+}
 
 
 
@@ -433,14 +457,20 @@ export function buildOpportunityMessage(
     const peakMove = currentRoi == null ? peakMoveRaw : Math.max(currentRoi, peakMoveRaw ?? currentRoi);
     const retainedPeakPercent = currentRoi != null && peakMove != null && peakMove > 0
       ? Math.round((currentRoi / peakMove) * 100) : null;
-    return renderPonsPremiumIntelligence({
-      state: 'CONFIRMED', symbol, name: market.name, address: opportunity.asset_id,
+    const creatorEvidence = opportunity.raw_data?.creatorEvidence as Record<string, unknown> | null | undefined;
+    const launches = Number(creatorEvidence?.launches);
+    return buildPremiumTokenNotification({
+      state: 'OPPORTUNITY', symbol, name: market.name, address: opportunity.asset_id,
       age: elapsedSec == null ? null : age, market, evidence: decisionEvidence,
       move: currentRoi, peakMove, retainedPeakPercent, risk: presentation.riskLabel,
-      confidence: opportunity.confidence, marketIndexing: earlyMarketIndexing,
-      transferredPercent: transferred == null ||
-        (transferred === 0 && (!transferEvidenceComplete || !transferZeroMeaningful)) ? null : transferred,
-      confirmedDevSell: opportunity.raw_data?.confirmedDevSell === true,
+      confidence: opportunity.confidence, devLaunches: Number.isFinite(launches) ? launches : null,
+      insightTitle: 'WHY NOW',
+      insight: market.volume5m != null && market.liquidity != null
+        ? ['Volume and price structure remain constructive with verified liquidity.']
+        : market.preIndexValuation
+          ? ['Sustained PONS curve evidence reached the existing confirmed entry conditions.']
+          : ['Multiple checkpoints continue to support the setup.'],
+      statusTitle: '🎯 STATUS', status: 'Sustained activity detected · review opportunity.',
     });
   }
 
@@ -538,7 +568,7 @@ export function buildButtons(
   }
 
   const preferenceActions: InlineButton[] = [{
-    text: '👀 Track',
+    text: '⭐ Track',
     callback_data: `OPP_TRACK_${opportunity.id}`,
   }];
 
@@ -993,6 +1023,13 @@ async function deliverOpportunity(
         error: error.message,
       });
     }
+  }
+
+  if (isPons && !qualifyPremiumOpportunity(opportunity.raw_data, action, opportunity.asset_id).eligible) {
+    console.log('[OpportunityDelivery] PONS opportunity retained internally pending premium qualification', {
+      opportunityId: opportunity.id,
+    });
+    return;
   }
 
   // Final normalized context, before user-specific filtering or Telegram retries.

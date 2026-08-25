@@ -12,6 +12,14 @@ export type AlphaNotificationSeverity = 'info' | 'watch' | 'positive' | 'warning
 
 export type AlphaNotificationState =
   | 'ENTRY_READY'
+  | 'OPPORTUNITY'
+  | 'VOLUME_IGNITION'
+  | 'DEX_PAID'
+  | 'BOOST'
+  | 'MAJOR_BOOST'
+  | 'DEV_BURN'
+  | 'DEV_SOLD'
+  | 'CRITICAL_RISK'
   | 'BUILDING'
   | 'RUNNER'
   | 'WATCHING'
@@ -32,6 +40,7 @@ export type AlphaNotificationState =
 export type AlphaNotificationMetric = {
   label: string;
   value: string | number | null | undefined;
+  icon?: string;
 };
 
 export type AlphaNotification = {
@@ -52,6 +61,10 @@ export type AlphaNotification = {
   evidence?: string[];
   reason?: string | null;
   recommendedAction?: string | null;
+  insightTitle?: string | null;
+  insight?: string[];
+  statusTitle?: string | null;
+  status?: string | null;
   access?: 'FREE' | 'PRO' | 'ADMIN';
 };
 
@@ -63,6 +76,14 @@ export type AlphaNotificationAction = {
 
 const STATE_LABELS: Record<AlphaNotificationState, string> = {
   ENTRY_READY: '🔥 ENTRY READY',
+  OPPORTUNITY: '🎯 OPPORTUNITY',
+  VOLUME_IGNITION: '🔥 VOLUME IGNITION',
+  DEX_PAID: '💎 DEX PAID',
+  BOOST: '🚀 BOOST',
+  MAJOR_BOOST: '🚀 MAJOR BOOST',
+  DEV_BURN: '🔥 DEV BURN',
+  DEV_SOLD: '🚨 DEV SOLD',
+  CRITICAL_RISK: '🚨 CRITICAL RISK',
   BUILDING: '📈 BUILDING',
   RUNNER: '🔥 RUNNER',
   WATCHING: '👀 WATCHING',
@@ -159,7 +180,8 @@ export function renderAlphaNotification(alert: AlphaNotification): string {
   if (metrics.length) {
     lines.push('');
     for (const metric of metrics) {
-      lines.push(`${escapeAlphaHtml(metric.label).padEnd(11)} <b>${escapeAlphaHtml(metric.value)}</b>`);
+      const prefix = metric.icon ? `${escapeAlphaHtml(metric.icon)} ` : '';
+      lines.push(`${prefix}${escapeAlphaHtml(metric.label).padEnd(11)} <b>${escapeAlphaHtml(metric.value)}</b>`);
     }
   }
 
@@ -170,6 +192,13 @@ export function renderAlphaNotification(alert: AlphaNotification): string {
   }
 
   if (alert.recommendedAction) lines.push('', `<b>${escapeAlphaHtml(alert.recommendedAction)}</b>`);
+  const insight = (alert.insight ?? []).map(value => String(value).trim()).filter(Boolean);
+  if (alert.insightTitle && insight.length) {
+    lines.push('', `🧠 <b>${escapeAlphaHtml(alert.insightTitle)}</b>`, ...insight.map(escapeAlphaHtml));
+  }
+  if (alert.statusTitle && alert.status) {
+    lines.push('', `<b>${escapeAlphaHtml(alert.statusTitle)}</b>`, escapeAlphaHtml(alert.status));
+  }
   if (alert.access === 'FREE') lines.push('', '<i>Free intelligence may be delayed.</i>');
 
   return lines.join('\n');

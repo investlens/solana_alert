@@ -9,11 +9,8 @@ import {
 import {
   sendTelegram,
 } from '../../services/telegram.js';
-import { renderAlphaNotification } from '../../ui/alphaNotification.js';
 import { buildAlphaMarketActions } from '../../ui/alphaNotificationActions.js';
 import {
-  coreDecisionEvidenceMetrics,
-  marketContextMetrics,
   normalizeCoreDecisionMetrics,
   normalizeNotificationMarketContext,
   type NotificationMarketContext,
@@ -29,6 +26,7 @@ import {
 
 import { scanRobinhoodDevTokenFlow } from './security/devTokenFlowScanner.js';
 import { persistAlphaSemanticEvent } from '../../services/alphaSemanticEventService.js';
+import { buildPremiumTokenNotification } from '../../ui/premiumTokenNotification.js';
 
 import {
   scanRobinhoodHolderRisk,
@@ -39,11 +37,16 @@ const BOOST_INTERVAL_MS =
   15_000;
 
 export const BOOSTED_OPPORTUNITY_THRESHOLD = 200;
+export const MAJOR_BOOST_THRESHOLD = 500;
 
 export function boostNotificationState(totalBoostAmount: number) {
   return totalBoostAmount >= BOOSTED_OPPORTUNITY_THRESHOLD
     ? 'BOOSTED_OPPORTUNITY' as const
     : 'BUILDING' as const;
+}
+
+export function boostPresentationState(totalBoostAmount: number) {
+  return totalBoostAmount >= MAJOR_BOOST_THRESHOLD ? 'MAJOR_BOOST' as const : 'BOOST' as const;
 }
 
 
@@ -190,6 +193,23 @@ export function isMaterialVolumeSurge(args: { previousVolume5m: number | null; c
   return args.previousVolume5m != null && args.previousVolume5m > 0 && args.currentVolume5m != null &&
     args.currentVolume5m >= args.previousVolume5m * 1.5 && args.previousPrice != null && args.previousPrice > 0 &&
     args.currentPrice != null && args.currentPrice >= args.previousPrice * 0.5;
+}
+
+export function volumeIgnitionDecision(args: {
+  previousVolume5m: number | null; currentVolume5m: number | null;
+  previousPrice: number | null; currentPrice: number | null;
+  previousLiquidity?: number | null; currentLiquidity?: number | null;
+  buys5m?: number | null; sells5m?: number | null;
+}) {
+  const multiple = args.previousVolume5m != null && args.previousVolume5m > 0 && args.currentVolume5m != null
+    ? args.currentVolume5m / args.previousVolume5m : null;
+  const priceConstructive = args.previousPrice != null && args.previousPrice > 0 && args.currentPrice != null &&
+    args.currentPrice >= args.previousPrice * 0.5;
+  const liquidityStable = args.previousLiquidity == null || args.currentLiquidity == null || args.previousLiquidity <= 0 ||
+    args.currentLiquidity >= args.previousLiquidity * 0.85;
+  const flowConstructive = args.buys5m == null || args.sells5m == null || args.buys5m >= args.sells5m;
+  return { eligible: multiple != null && multiple >= 1.5 && priceConstructive && liquidityStable && flowConstructive,
+    volumeMultiple: multiple };
 }
 
 type BoostOpportunityContext = {
@@ -390,16 +410,6 @@ export function buildBoostMessage(args: {
     | 'NEW'
     | 'INCREASE';
 }): string {
-  const top1 =
-    args.holderTop1Percent ==
-    null
-      ? 'Unknown'
-      : (
-          args.holderTop1Percent
-            .toFixed(2) +
-          '%'
-        );
-
   const market = normalizeNotificationMarketContext(
     args.marketContext as Record<string, unknown> | null,
     args.rawData,
@@ -412,32 +422,17 @@ export function buildBoostMessage(args: {
     burnedPercent: args.burnedPercent,
     burnEvidence: args.burnedPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
   });
-  return renderAlphaNotification({
-    category: 'market', severity: args.totalBoostAmount >= BOOSTED_OPPORTUNITY_THRESHOLD ? 'warning' : 'watch',
-    state: boostNotificationState(args.totalBoostAmount),
-    symbol: args.symbol, subtitle: args.name, address: args.tokenAddress,
+  return buildPremiumTokenNotification({
+    state: boostPresentationState(args.totalBoostAmount),
+    symbol: args.symbol, name: args.name, address: args.tokenAddress, age: args.age,
+    market, evidence: decisionEvidence, move: args.momentum ?? args.move,
+    boostTotal: args.totalBoostAmount, boostIncrement: args.boostAmount,
     confidence: args.confidence, risk: args.risk ?? 'REVIEW',
-    metrics: [
-      { label: 'Boost', value: `${args.totalBoostAmount} total (+${args.boostAmount})` },
-      ...(args.age ? [{ label: 'Age', value: args.age }] : []),
-      ...marketContextMetrics(market),
-      ...(args.momentum != null
-        ? [{ label: 'Momentum', value: `${args.momentum >= 0 ? '+' : ''}${args.momentum.toFixed(2)}%` }]
-        : args.move != null
-          ? [{ label: 'Move', value: `${args.move >= 0 ? '+' : ''}${args.move.toFixed(2)}%` }]
-          : []),
-    ],
-    specialistMetrics: coreDecisionEvidenceMetrics(decisionEvidence),
-    evidence: [
-      ...(args.holderTop1Percent == null ? [] : [`Top holder ${top1}`]),
-      ...(args.buys5m == null || args.sells5m == null ? [] : [`Buys / sells ${args.buys5m}/${args.sells5m}`]),
-    ],
-    reason: args.totalBoostAmount >= BOOSTED_OPPORTUNITY_THRESHOLD
-      ? 'Boost activity reached a high-attention level.'
-      : 'Market attention increased.',
-    recommendedAction: market.preIndexValuation
-      ? 'Market indexing · review verified launch valuation.'
-      : 'Review market quality and momentum.',
+    insightTitle: args.totalBoostAmount >= MAJOR_BOOST_THRESHOLD ? 'HIGH ATTENTION' : 'VERIFIED EVENT',
+    insight: [args.totalBoostAmount >= MAJOR_BOOST_THRESHOLD
+      ? 'Cumulative Dex boost activity crossed the major-attention threshold.'
+      : 'A material new Dex booster increment was verified.'],
+    statusTitle: '🚀 STATUS', status: 'Boost is attention evidence, not a buy recommendation.',
   });
 }
 
@@ -663,22 +658,41 @@ async function processBoost(
     intelligenceState: boostNotificationState(boost.totalAmount) === 'BUILDING' ? 'BUILDING' : null,
     strategyKey: opportunity?.strategyKey, symbol: market?.symbol ?? opportunityMarket.symbol,
     rawSnapshot: { boostIncrement: boostAdded, boostTotal: boost.totalAmount, eventType,
+      price: market?.priceUsd ?? null, priceProvenance: market ? 'DEXSCREENER_VERIFIED_BASE_PAIR' : null,
       marketCap: market?.marketCapUsd ?? null, fdv: market?.fdvUsd ?? null,
       liquidity: market?.liquidityUsd ?? null, volume5m: market?.volume5mUsd ?? null,
       buys5m: market?.buys5m ?? null, sells5m: market?.sells5m ?? null,
       devHoldingPercent, burnedPercent, chartUrl: market?.chartUrl ?? null },
   });
-  const volumeSurge = isMaterialVolumeSurge({ previousVolume5m: previousBoostMarket?.volume5m ?? null,
+  const volumeDecision = volumeIgnitionDecision({ previousVolume5m: previousBoostMarket?.volume5m ?? null,
     currentVolume5m: market?.volume5mUsd ?? null, previousPrice: previousBoostMarket?.price ?? null,
-    currentPrice: market?.priceUsd ?? null });
-  if (volumeSurge) await persistAlphaSemanticEvent({ identity: `${eventId}:volume-surge`,
+    currentPrice: market?.priceUsd ?? null, currentLiquidity: market?.liquidityUsd ?? null,
+    buys5m: market?.buys5m ?? null, sells5m: market?.sells5m ?? null });
+  if (volumeDecision.eligible) {
+    const volumeInserted = await persistAlphaSemanticEvent({ identity: `${eventId}:volume-surge`,
     type: 'VOLUME_SURGE', assetId: boost.tokenAddress, chain: 'robinhood',
     intelligenceState: 'BUILDING', strategyKey: opportunity?.strategyKey,
     symbol: market?.symbol ?? opportunityMarket.symbol,
     rawSnapshot: { previousVolume5m: previousBoostMarket?.volume5m, currentVolume5m: market?.volume5mUsd,
       previousPrice: previousBoostMarket?.price, currentPrice: market?.priceUsd,
-      comparisonWindow: 'DEXSCREENER_M5_TO_DEXSCREENER_M5', includedInBoostNotification: true },
+      price: market?.priceUsd, priceProvenance: 'DEXSCREENER_VERIFIED_BASE_PAIR',
+      volumeMultiple: volumeDecision.volumeMultiple,
+      comparisonWindow: 'DEXSCREENER_M5_TO_DEXSCREENER_M5', includedInBoostNotification: false },
   });
+    if (volumeInserted && market) {
+      await sendTelegram(config.adminTelegramId, buildPremiumTokenNotification({
+        state: 'VOLUME_IGNITION', symbol: market.symbol, name: market.name, address: boost.tokenAddress,
+        market: normalizeNotificationMarketContext({ marketCap: market.marketCapUsd, fdv: market.fdvUsd,
+          liquidity: market.liquidityUsd, volume5m: market.volume5mUsd, chartUrl: market.chartUrl }),
+        evidence: normalizeCoreDecisionMetrics({ devHoldingPercent, devHoldingEvidence: devHoldingPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
+          burnedPercent, burnEvidence: burnedPercent == null ? 'UNAVAILABLE' : 'VERIFIED' }),
+        volumeMultiple: volumeDecision.volumeMultiple,
+        insightTitle: 'WHY NOW', insight: ['Comparable 5-minute volume accelerated while price and liquidity avoided collapse.'],
+        statusTitle: '🔥 STATUS', status: 'Abnormal activity detected · review current participation.',
+      }), buildBoostActions({ tokenAddress: boost.tokenAddress, chartUrl: market.chartUrl,
+        opportunityId: opportunity?.id, strategyKey: opportunity?.strategyKey }));
+    }
+  }
 
 
   const message =

@@ -127,7 +127,7 @@ test('missing, stale, or mismatched quote/USD evidence cannot produce valuation'
   }), null);
 
   const indexing = await buildMessage(opportunity({ valuation: null }));
-  assert.match(indexing, /Market\s+<b>INDEXING<\/b>/);
+  assert.doesNotMatch(indexing, /Market\s+<b>INDEXING<\/b>/);
 });
 
 test('quote/USD selection rejects a pair whose base token is not the requested quote asset', () => {

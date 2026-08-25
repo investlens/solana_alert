@@ -46,7 +46,15 @@ export type RobinhoodCreatorRiskResult = {
 
   reasons:
     string[];
+
+  historyPenalty: number;
+  negativeHistoryEvidence: boolean;
 };
+
+export function creatorHistoryPenalty(args: { launches: number; severeCrashes: number; catastrophicCrashes: number }) {
+  if (args.launches <= 3) return 0;
+  return Math.min(25, 5 + (args.launches - 4) * 2 + args.severeCrashes * 2 + args.catastrophicCrashes * 3);
+}
 
 
 function num(
@@ -270,7 +278,6 @@ export async function evaluateRobinhoodCreatorRisk(
     );
   }
 
-
   else if (
     launches >= 10 &&
     hit50k === 0
@@ -345,6 +352,12 @@ export async function evaluateRobinhoodCreatorRisk(
     );
   }
 
+  const historyPenalty = creatorHistoryPenalty({ launches, severeCrashes, catastrophicCrashes });
+  if (historyPenalty > 0) {
+    score = Math.max(0, score - historyPenalty);
+    reasons.push(`${launches} prior launches increase execution-history risk`);
+  }
+
 
   return {
     creatorWallet:
@@ -375,5 +388,8 @@ export async function evaluateRobinhoodCreatorRisk(
     priorityAlert,
 
     reasons,
+
+    historyPenalty,
+    negativeHistoryEvidence: historyPenalty > 0,
   };
 }

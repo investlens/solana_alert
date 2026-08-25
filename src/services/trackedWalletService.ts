@@ -406,7 +406,7 @@ getTrackedWalletSubscribersForAddress(args: {
         created_at,
         updated_at
       `)
-      .eq(
+      .ilike(
         'wallet_address',
         args.walletAddress,
       )

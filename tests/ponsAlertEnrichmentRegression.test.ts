@@ -97,7 +97,7 @@ test('production-case delivery enrichment renders identity, market metrics and v
   assert.equal(buttons.flat().some(button => button.text.includes('Trade')), false);
 });
 
-test('fresh verified PONS identity with confirmed market miss renders INDEXING without fake values', async () => {
+test('fresh verified PONS identity with confirmed market miss omits unavailable market values', async () => {
   const { buildButtons, buildOpportunityMessage, mergeOpportunityMarketContext } = await service();
   const row = opportunity({ elapsedSec: 31, currentRoi: 9.89 });
   row.raw_data = mergeOpportunityMarketContext(row, {
@@ -109,8 +109,8 @@ test('fresh verified PONS identity with confirmed market miss renders INDEXING w
   };
   const message = buildOpportunityMessage(row);
   assert.match(message, /<b>YOMOGI<\/b> · <code>0x23e5…669cb<\/code>/);
-  assert.match(message, /Market\s+<b>INDEXING<\/b>/);
-  assert.match(message, /Market data is still indexing\./);
+  assert.doesNotMatch(message, /Market\s+<b>INDEXING<\/b>/);
+  assert.doesNotMatch(message, /still indexing/i);
   assert.doesNotMatch(message, /Market cap|Liquidity|5m volume|\$0/);
   const buttons = buildButtons(row, target, { telegram_id: '1', tier: 'paid', is_admin: false } as any);
   assert.deepEqual(buttons[0].map(button => button.text), ['🔎 Token']);
@@ -137,7 +137,7 @@ test('RUSTY identity survives Entry Ready persistence and a symbol-less Exit tra
     symbol: 'RUSTY', name: 'Rusty', address: rustyAddress,
   }, 'NOT_INDEXED');
   assert.match(buildOpportunityMessage(entry), /<b>RUSTY<\/b>/);
-  assert.match(buildOpportunityMessage(entry), /Market\s+<b>INDEXING<\/b>/);
+  assert.doesNotMatch(buildOpportunityMessage(entry), /Market\s+<b>INDEXING<\/b>/);
 
   const exitRaw = mergePonsLifecycleContext(entry.raw_data, {
     symbol: null, name: null, marketCap: null, liquidity: null, volume5m: null,
@@ -196,7 +196,7 @@ test('opportunity specialist zeroes require explicit meaningful confirmation', a
     devHoldingPercent: 0, totalBurnPercent: 0, devFlowEvidenceStatus: 'COMPLETE',
     transferZeroConfirmedMeaningful: true,
   }));
-  assert.match(confirmed, /Transferred\s+<b>0\.00%<\/b>/);
+  assert.doesNotMatch(confirmed, /Transferred/);
   assert.match(confirmed, /Dev holding\s+<b>0%<\/b>/);
   assert.match(confirmed, /Burned\s+<b>0%<\/b>/);
 });
@@ -343,7 +343,7 @@ test('SPURDO persisted lifecycle data reaches final Exit rendering and Copy CA a
   };
   const message = buildOpportunityMessage(exit);
   assert.match(message, /<b>SPURDO<\/b>/);
-  assert.match(message, /FDV\s+<b>\$4\.58K<\/b>/);
+  assert.match(message, /FDV\s+<b>\$4\.(?:58|6)K<\/b>/);
   assert.match(message, /Dev holding\s+<b>0%<\/b>/);
   assert.match(message, /Burned\s+<b>0%<\/b>/);
   assert.doesNotMatch(message, /Market INDEXING|Market cap|Liquidity|5m volume/);
@@ -364,7 +364,7 @@ test('PONS Entry Ready and Watching render verified FDV while indexed market rep
         preIndexValuation: spurdoValuation() }, spurdoAddress),
       recommended_action: action,
     };
-    assert.match(buildOpportunityMessage(row), /FDV\s+<b>\$4\.58K<\/b>/);
+    assert.match(buildOpportunityMessage(row), /FDV\s+<b>\$4\.(?:58|6)K<\/b>/);
     assert.doesNotMatch(buildOpportunityMessage(row), /Market\s+<b>INDEXING<\/b>/);
   }
 
@@ -404,7 +404,7 @@ test('same-token lifecycle valuation is recovered even when Exit identity is alr
   assert.ok(resolved.rawData.preIndexValuation);
   const { buildOpportunityMessage } = await service();
   exit.raw_data = resolved.rawData;
-  assert.match(buildOpportunityMessage(exit), /FDV\s+<b>\$4\.58K<\/b>/);
+  assert.match(buildOpportunityMessage(exit), /FDV\s+<b>\$4\.(?:58|6)K<\/b>/);
 });
 
 test('OFY V2 Exit retries verified curve FDV when lifecycle and Dex context are empty', async () => {
@@ -434,11 +434,11 @@ test('OFY V2 Exit retries verified curve FDV when lifecycle and Dex context are 
   exit.raw_data = resolved.rawData;
   const message = buildOpportunityMessage(exit);
   assert.match(message, /<b>OFY<\/b> · <code>0x6267…b3106<\/code>/);
-  assert.match(message, /FDV\s+<b>\$4\.11K<\/b>/);
+  assert.match(message, /FDV\s+<b>\$4\.(?:11|1)K<\/b>/);
   assert.doesNotMatch(message, /Market cap|Market\s+<b>INDEXING|Liquidity|5m volume/);
   const buttons = buildButtons(exit, target, { telegram_id: '1', tier: 'paid', is_admin: false } as any);
   assert.deepEqual(buttons.map(row => row.map(button => button.text)), [
-    ['🔎 Token'], ['📋 Copy CA'], ['👀 Track', '🔕 Mute'],
+    ['🔎 Token'], ['📋 Copy CA'], ['⭐ Track', '🔕 Mute'],
   ]);
   assert.equal(buttons[1][0].callback_data, `COPY_CA_${ofyAddress}`);
   assert.equal(buttons.flat().some(button => button.text.includes('Trade')), false);
@@ -452,7 +452,7 @@ test('OFY lifecycle keeps verified FDV while indexed current market takes preced
   };
   for (const action of ['CHECK_ENTRY', 'TRACK', 'EXIT']) {
     const row = { ...opportunity(raw, ofyAddress), recommended_action: action };
-    assert.match(buildOpportunityMessage(row), /FDV\s+<b>\$4\.11K<\/b>/);
+    assert.match(buildOpportunityMessage(row), /FDV\s+<b>\$4\.(?:11|1)K<\/b>/);
     raw = mergePonsLifecycleContext(raw, { ...raw, elapsedSec: Number(raw.elapsedSec) + 45 });
   }
   const indexed = { ...opportunity(raw, ofyAddress), recommended_action: 'EXIT' };

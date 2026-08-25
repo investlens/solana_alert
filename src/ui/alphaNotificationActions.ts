@@ -26,7 +26,7 @@ export function buildAlphaMarketActions(input: AlphaMarketActionInput): AlphaNot
   }
 
   const preferences: AlphaNotificationAction[] = [];
-  if (input.trackCallback) preferences.push({ text: '👀 Track', callback_data: input.trackCallback });
+  if (input.trackCallback) preferences.push({ text: '⭐ Track', callback_data: input.trackCallback });
   if (input.muteCallback) preferences.push({ text: '🔕 Mute', callback_data: input.muteCallback });
   if (preferences.length) rows.push(preferences);
   if (input.walletActivityCallback) {
