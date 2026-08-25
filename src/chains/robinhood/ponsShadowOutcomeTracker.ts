@@ -30,16 +30,19 @@ import {
 import { persistAlphaSemanticEvent } from '../../services/alphaSemanticEventService.js';
 import { sendTelegram } from '../../services/telegram.js';
 import { config } from '../../config.js';
-import { renderAlphaNotification } from '../../ui/alphaNotification.js';
 import { buildAlphaMarketActions } from '../../ui/alphaNotificationActions.js';
 import { hasVerifiedOpportunityIdentity, mergePonsLifecycleContext } from '../../product/opportunityContext.js';
 import { resolvePonsDeliveryContext } from '../../services/ponsDeliveryContext.js';
 import {
-  coreDecisionEvidenceMetrics,
-  marketContextMetrics,
   normalizeCoreDecisionMetrics,
   normalizeNotificationMarketContext,
 } from '../../ui/notificationMarketContext.js';
+import {
+  assessTokenIntelligence,
+  DEFAULT_SUSTAINED_INTELLIGENCE_CONFIG,
+  type IntelligenceObservation,
+} from '../../intelligence/tokenIntelligenceState.js';
+import { renderPonsPremiumIntelligence } from '../../ui/ponsPremiumIntelligence.js';
 
 import {
   getPonsV2CurveState,
@@ -967,25 +970,36 @@ async function recordPonsRuntimeTransition(args: { row: ShadowRow; classifiedSta
     priorState: args.row.intelligence_state, priorObservedAt: args.row.intelligence_state_observed_at,
     observedAt: args.observedAt, currentRoi: args.currentRoi, peakRoi: args.peakRoi,
     confirmedDevMovement: Boolean(args.row.dev_first_movement_at) });
-  if (nextState === args.row.intelligence_state) return;
-  let transition = supabase.from('pons_shadow_trades')
-    .update({ intelligence_state: nextState, intelligence_state_observed_at: args.observedAt })
-    .eq('id', args.row.id);
-  transition = args.row.intelligence_state_observed_at == null
-    ? transition.is('intelligence_state_observed_at', null)
-    : transition.eq('intelligence_state_observed_at', args.row.intelligence_state_observed_at);
-  const { data, error } = await transition.select('id').maybeSingle();
-  if (error) throw error; if (!data) return;
+  const changed = nextState !== args.row.intelligence_state;
+  if (changed) {
+    let transition = supabase.from('pons_shadow_trades')
+      .update({ intelligence_state: nextState, intelligence_state_observed_at: args.observedAt })
+      .eq('id', args.row.id);
+    transition = args.row.intelligence_state_observed_at == null
+      ? transition.is('intelligence_state_observed_at', null)
+      : transition.eq('intelligence_state_observed_at', args.row.intelligence_state_observed_at);
+    const { data, error } = await transition.select('id').maybeSingle();
+    if (error) throw error; if (!data) return;
+  } else if (nextState !== 'BUILDING') return;
   if (['DISCOVERED', 'FORMING', 'CONFIRMED'].includes(nextState)) return;
   const type = ['BUILDING', 'RUNNER', 'COOLING', 'WEAKENING', 'DANGER'].includes(nextState)
     ? nextState as 'BUILDING' | 'RUNNER' | 'COOLING' | 'WEAKENING' | 'DANGER' : null;
   if (!type) return;
+  if (nextState === 'BUILDING') {
+    const gate = assessPonsBuildingGate({ row: args.row, currentRoi: args.currentRoi,
+      peakRoi: args.peakRoi, observedAt: args.observedAt });
+    if (!gate.sustained || !gate.ageEligible || !gate.positiveRetainedStructure) return;
+    const { data: existing } = await supabase.from('alpha_alert_events').select('id')
+      .eq('event_identity', `v2:BUILDING:${args.row.id}:BUILDING`).maybeSingle();
+    if (existing) return;
+  }
   const baseSnapshot: Record<string, unknown> = { currentRoi: args.currentRoi,
     peakRoi: args.peakRoi, classifiedState: args.classifiedState, observedAt: args.observedAt };
   const presentation = ['BUILDING', 'RUNNER'].includes(nextState)
     ? await resolvePonsSustainedPresentation({ row: args.row, state: nextState as 'BUILDING' | 'RUNNER',
         currentRoi: args.currentRoi, peakRoi: args.peakRoi, observedAt: args.observedAt })
     : null;
+  if (nextState === 'BUILDING' && !presentation?.eligibleForBuilding) return;
   const inserted = await persistAlphaSemanticEvent({ identity: `${args.row.id}:${nextState}`,
     type, assetId: args.row.token_address, chain: 'robinhood', intelligenceState: nextState,
     strategyKey: 'PONS_SUSTAINED', symbol: presentation?.snapshot.symbol as string | null | undefined,
@@ -995,14 +1009,40 @@ async function recordPonsRuntimeTransition(args: { row: ShadowRow; classifiedSta
   }
 }
 
+function checkpointObservation(entryMs: number, seconds: number, roi: number | null): IntelligenceObservation | null {
+  return validNumber(roi) ? { roi, observedAt: new Date(entryMs + seconds * 1000).toISOString() } : null;
+}
+
+export function assessPonsBuildingGate(args: {
+  row: Pick<ShadowRow, 'would_buy_at' | 'detected_at' | 'roi_5s_percent' | 'roi_10s_percent' |
+    'roi_30s_percent' | 'roi_1m_percent' | 'roi_2m_percent' | 'roi_5m_percent'>;
+  currentRoi: number; peakRoi: number | null; observedAt: string;
+}) {
+  const entryMs = Date.parse(args.row.would_buy_at ?? args.row.detected_at);
+  const observedMs = Date.parse(args.observedAt);
+  const checkpoints = [
+    checkpointObservation(entryMs, 0, 0), checkpointObservation(entryMs, 5, args.row.roi_5s_percent),
+    checkpointObservation(entryMs, 10, args.row.roi_10s_percent), checkpointObservation(entryMs, 30, args.row.roi_30s_percent),
+    checkpointObservation(entryMs, 60, args.row.roi_1m_percent), checkpointObservation(entryMs, 120, args.row.roi_2m_percent),
+    checkpointObservation(entryMs, 300, args.row.roi_5m_percent),
+  ].filter((row): row is IntelligenceObservation => row != null && Date.parse(row.observedAt) <= observedMs);
+  checkpoints.push({ roi: args.currentRoi, observedAt: args.observedAt });
+  const assessment = assessTokenIntelligence({ observations: checkpoints });
+  const elapsedSeconds = Number.isFinite(entryMs) && Number.isFinite(observedMs)
+    ? Math.max(0, (observedMs - entryMs) / 1000) : 0;
+  const retained = args.peakRoi != null && args.peakRoi > 0 ? args.currentRoi / args.peakRoi : 0;
+  return {
+    sustained: assessment.sustained,
+    elapsedSeconds,
+    ageEligible: elapsedSeconds >= DEFAULT_SUSTAINED_INTELLIGENCE_CONFIG.minimumSustainedSeconds,
+    positiveRetainedStructure: args.currentRoi > 0 && retained >= DEFAULT_SUSTAINED_INTELLIGENCE_CONFIG.retainedMoveRatio,
+  };
+}
+
 type SustainedOpportunity = {
   id: number; asset_id: string; chain: string | null; strategy_key: string | null;
   risk_score: number | null; raw_data: Record<string, unknown> | null;
 };
-
-function signedMove(value: number): string {
-  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
-}
 
 function meaningfulTokenName(name: string | null, symbol: string | null, address: string): string | null {
   const clean = String(name ?? '').trim();
@@ -1043,23 +1083,15 @@ export function buildPonsSustainedPresentation(args: {
     currentRoi: args.currentRoi, peakRoi, retainedPeakPercent: retained, elapsedSec,
     intelligenceState: args.state, riskLabel: risk, observedAt: args.observedAt,
   };
-  const message = renderAlphaNotification({
-    category: 'market', severity: args.state === 'RUNNER' ? 'positive' : 'watch', state: args.state,
-    symbol: market.symbol, token: market.symbol ? undefined : name ?? undefined, subtitle: name,
-    address: args.tokenAddress, age, risk,
-    metrics: [
-      ...marketContextMetrics(market),
-      { label: 'Move', value: signedMove(args.currentRoi) },
-      ...(peakRoi == null ? [] : [{ label: 'Peak move', value: signedMove(peakRoi) }]),
-      ...(retained == null ? [] : [{ label: 'Peak retained', value: `${retained}%` }]),
-    ],
-    specialistMetrics: coreDecisionEvidenceMetrics(evidence),
-    reason: args.state === 'RUNNER'
-      ? 'Confirmation survived a later observation and momentum remains constructive.'
-      : 'Positive structure is holding across multiple observations.',
-    recommendedAction: args.state === 'RUNNER'
-      ? 'Continuation remains strong · verify live conditions.'
-      : 'Watching for sustained confirmation.',
+  const confirmedDevSell = args.rawData.confirmedDevSell === true;
+  const criticalRisk = args.rawData.criticalSecurity === true || args.rawData.liquidityCritical === true ||
+    args.rawData.criticalLiquidityRisk === true;
+  const eligibleForBuilding = Boolean(market.symbol || name) && args.currentRoi > 0 &&
+    retained != null && retained >= DEFAULT_SUSTAINED_INTELLIGENCE_CONFIG.retainedMoveRatio * 100 &&
+    !confirmedDevSell && !criticalRisk;
+  const message = renderPonsPremiumIntelligence({
+    state: args.state, symbol: market.symbol, name, address: args.tokenAddress, age, market, evidence,
+    move: args.currentRoi, peakMove: peakRoi, retainedPeakPercent: retained, risk, confirmedDevSell,
   });
   const opportunityId = args.opportunity?.id;
   const strategyKey = args.opportunity?.strategy_key;
@@ -1070,7 +1102,7 @@ export function buildPonsSustainedPresentation(args: {
     muteCallback: strategyKey && Buffer.byteLength(`STRAT_TOGGLE_${strategyKey}`, 'utf8') <= 64
       ? `STRAT_TOGGLE_${strategyKey}` : null,
   });
-  return { message, actions, snapshot };
+  return { message, actions, snapshot, eligibleForBuilding };
 }
 
 async function resolvePonsSustainedPresentation(args: {

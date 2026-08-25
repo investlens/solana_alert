@@ -35,18 +35,21 @@ function build(overrides: Record<string, unknown> = {}) {
 
 test('BUILDING renders enriched verified pre-index context and mature PONS actions', () => {
   const result = build();
-  assert.match(result.message, /ALPHAOS · 📈 BUILDING/);
+  assert.equal(result.eligibleForBuilding, true);
+  assert.match(result.message, /📈 <b>ALPHAOS · BUILDING<\/b>/);
   assert.match(result.message, /<b>TOKEN<\/b> · <code>0x2570…8444e<\/code>/);
   assert.match(result.message, /Token Name/);
-  assert.match(result.message, /Age\s+<b>45s<\/b>/);
-  assert.match(result.message, /FDV\s+<b>\$4\.30K<\/b>/);
-  assert.match(result.message, /Move\s+<b>\+6\.4%<\/b>/);
-  assert.match(result.message, /Peak move\s+<b>\+8\.2%<\/b>/);
-  assert.match(result.message, /Peak retained\s+<b>78%<\/b>/);
+  assert.match(result.message, /⏱ Age\s+<b>45s<\/b>/);
+  assert.match(result.message, /💰 FDV\s+<b>\$4\.30K<\/b>/);
+  assert.match(result.message, /📈 Move\s+<b>\+6\.4%<\/b>/);
+  assert.match(result.message, /🏔 Peak\s+<b>\+8\.2%<\/b>/);
+  assert.match(result.message, /🛡 Retained\s+<b>78%<\/b>/);
   assert.match(result.message, /Dev holding\s+<b>0%<\/b>/);
   assert.match(result.message, /Burned\s+<b>0%<\/b>/);
   assert.match(result.message, /Risk\s+<b>LOW<\/b>/);
   assert.doesNotMatch(result.message, /Current ROI|Peak ROI|MEASURED|Market cap|Liquidity|5m volume/);
+  assert.match(result.message, /🧠 <b>STRUCTURE<\/b>/);
+  assert.match(result.message, /⏳ <b>STATUS<\/b>/);
   assert.deepEqual(result.actions.map(row => row.map(action => action.text)),
     [['🔎 Token'], ['📋 Copy CA'], ['👀 Track', '🔕 Mute']]);
   assert.equal(result.actions.flat().find(action => action.text === '📋 Copy CA')?.callback_data,
@@ -60,9 +63,9 @@ test('BUILDING renders enriched verified pre-index context and mature PONS actio
 test('indexed market replaces pre-index FDV and exposes only a verified direct chart', () => {
   const result = build({ marketIndexState: 'VERIFIED', marketCap: 18_400, fdv: 21_000,
     liquidity: 11_600, volume5m: 7_200, chartUrl: 'https://dexscreener.com/robinhood/pair' });
-  assert.match(result.message, /Market cap\s+<b>\$18\.4K<\/b>/);
-  assert.match(result.message, /Liquidity\s+<b>\$11\.6K<\/b>/);
-  assert.match(result.message, /5m volume\s+<b>\$7\.2K<\/b>/);
+  assert.match(result.message, /💵 Market cap\s+<b>\$18\.4K<\/b>/);
+  assert.match(result.message, /💧 Liquidity\s+<b>\$11\.6K<\/b>/);
+  assert.match(result.message, /📊 5m volume\s+<b>\$7\.2K<\/b>/);
   assert.doesNotMatch(result.message, /FDV/);
   assert.equal(result.actions[0]?.[0]?.text, '🔎 Token');
 
@@ -86,6 +89,7 @@ test('meaningless names and provenance-only risk are omitted while valid risk re
     target: { tokenUrl: `https://robinhoodchain.blockscout.com/token/${address}` },
   });
   assert.doesNotMatch(measured.message, /MEASURED|Risk/);
+  assert.equal(measured.eligibleForBuilding, true);
   assert.equal(measured.message.match(/TOKEN/g)?.length, 1);
   const high = buildPonsSustainedPresentation({
     state: 'BUILDING', tokenAddress: address, detectedAt: observedAt, currentRoi: 2.6,
@@ -95,6 +99,15 @@ test('meaningless names and provenance-only risk are omitted while valid risk re
     target: { tokenUrl: `https://robinhoodchain.blockscout.com/token/${address}` },
   });
   assert.match(high.message, /Risk\s+<b>HIGH<\/b>/);
+
+  const unidentified = buildPonsSustainedPresentation({
+    state: 'BUILDING', tokenAddress: address, detectedAt: observedAt, currentRoi: 2.6,
+    peakRoi: 2.6, observedAt, opportunity: null, rawData: {},
+    target: { tokenUrl: `https://robinhoodchain.blockscout.com/token/${address}` },
+  });
+  assert.equal(unidentified.eligibleForBuilding, false);
+  const critical = build({ criticalSecurity: true });
+  assert.equal(critical.eligibleForBuilding, false);
 });
 
 test('RUNNER uses enriched factual continuation language and ledger snapshot context', () => {
@@ -111,8 +124,10 @@ test('RUNNER uses enriched factual continuation language and ledger snapshot con
     target: { tokenUrl: `https://robinhoodchain.blockscout.com/token/${address}`,
       chartUrl: 'https://dexscreener.com/robinhood/pair' },
   });
-  assert.match(result.message, /ALPHAOS · 🔥 RUNNER/);
-  assert.match(result.message, /Confirmation survived a later observation/);
+  assert.match(result.message, /🔥 <b>ALPHAOS · RUNNER<\/b>/);
+  assert.match(result.message, /🧠 <b>CONTINUATION<\/b>/);
+  assert.match(result.message, /Confirmation survived a later checkpoint and price retained 95%/);
+  assert.match(result.message, /🚀 <b>STATUS<\/b>/);
   assert.doesNotMatch(result.message, /BUY|Trade|Current ROI|Peak ROI/);
   assert.deepEqual({ symbol: result.snapshot.symbol, name: result.snapshot.name,
     marketCap: result.snapshot.marketCap, liquidity: result.snapshot.liquidity,
@@ -122,11 +137,30 @@ test('RUNNER uses enriched factual continuation language and ledger snapshot con
     volume5m: 22_800, chartUrl: 'https://dexscreener.com/robinhood/pair', retainedPeakPercent: 95 });
 });
 
-test('an unchanged BUILDING state exits before ledger persistence or delivery', async () => {
+test('an unchanged BUILDING state can mature once and then exits through semantic dedup', async () => {
   const source = await readFile(
     new URL('../src/chains/robinhood/ponsShadowOutcomeTracker.ts', import.meta.url), 'utf8');
-  const unchanged = source.indexOf("if (nextState === args.row.intelligence_state) return;");
-  const persistence = source.indexOf('persistAlphaSemanticEvent', unchanged);
-  const delivery = source.indexOf('sendTelegram', unchanged);
-  assert.ok(unchanged >= 0 && persistence > unchanged && delivery > unchanged);
+  assert.match(source, /else if \(nextState !== 'BUILDING'\) return/);
+  assert.match(source, /event_identity.*v2:BUILDING:/s);
+  assert.match(source, /if \(existing\) return/);
+  assert.match(source, /if \(inserted && presentation\)/);
+});
+
+test('PONS CHECK_ENTRY renders premium CONFIRMED semantics without changing classification', async () => {
+  const { buildOpportunityMessage } = await import('../src/services/opportunityDeliveryService.js');
+  const message = buildOpportunityMessage({
+    id: 407, asset_id: address, chain: 'robinhood', strategy_key: 'PONS_BREAKOUT',
+    recommended_action: 'CHECK_ENTRY', status: 'NEW', title: 'PONS entry',
+    why: 'Existing classifier confirmed entry.', what_happened: null, invalidation: null,
+    risk_reason: null, confidence: 88, risk_score: 22,
+    raw_data: { symbol: 'TOKEN', name: 'Token Name', elapsedSec: 35, currentRoi: 12,
+      recentPeakRoi: 13, marketIndexState: 'VERIFIED', marketCap: 20_000,
+      liquidity: 12_000, volume5m: 8_000, devHoldingPercent: 1.15,
+      devHoldingEvidence: 'VERIFIED', totalBurnPercent: 0, burnEvidence: 'VERIFIED' },
+  });
+  assert.match(message, /🔥 <b>ALPHAOS · CONFIRMED<\/b>/);
+  assert.match(message, /🧠 <b>CONFIRMATION<\/b>/);
+  assert.match(message, /Multiple checkpoints continue to support the setup/);
+  assert.match(message, /🎯 <b>STATUS<\/b>/);
+  assert.doesNotMatch(message, /ROI|Trade/);
 });

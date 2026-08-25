@@ -29,6 +29,16 @@ test('volume acceleration is transitional and runner requires prior confirmation
   assert.notEqual(assessTokenIntelligence({ observations: observations([3, 7, 9]), config: { volumeAccelerationRatio: 3 } }).state, 'RUNNER');
   assert.equal(assessTokenIntelligence({ priorState: 'CONFIRMED', observations: observations([8, 10, 12]) }).state, 'RUNNER');
 });
+test('sustained intelligence requires the configured observation span as well as counts', () => {
+  const short = (seconds: number[]) => seconds.map((second, index) => ({
+    roi: index + 1, observedAt: new Date(second * 1000).toISOString(),
+  }));
+  assert.equal(assessTokenIntelligence({ observations: short([0, 2, 5]) }).sustained, false);
+  assert.equal(assessTokenIntelligence({ observations: short([0, 5, 10]) }).sustained, false);
+  assert.equal(assessTokenIntelligence({ observations: short([0, 10, 30]) }).sustained, true);
+  assert.equal(assessTokenIntelligence({ observations: short([0, 5, 10]),
+    config: { minimumSustainedSeconds: 10 } }).sustained, true);
+});
 test('liquidity direction distinguishes increasing, stable, falling and explicit critical', () => {
   assert.equal(assessTokenIntelligence({ observations: observations([2, 3, 4], undefined, [10_000, 13_000, 16_000]) }).liquidityTrend, 'BUILDING');
   assert.equal(assessTokenIntelligence({ observations: observations([2, 3, 4], undefined, [10_000, 10_200, 9_900]) }).liquidityTrend, 'STABLE');
@@ -91,6 +101,23 @@ test('runtime state producers expose material transitions while cooling remains 
   assert.equal(nextPonsRuntimeIntelligenceState({ classifiedState: 'ENTRY_WINDOW', priorState: 'BUILDING', priorObservedAt: '2026-08-24T00:00:00Z', observedAt: '2026-08-24T00:00:01Z', currentRoi: 8, peakRoi: 8, confirmedDevMovement: false }), 'CONFIRMED');
   const source = await readFile(new URL('../src/chains/robinhood/ponsShadowOutcomeTracker.ts', import.meta.url), 'utf8');
   assert.match(source, /\['BUILDING', 'RUNNER'\]\.includes\(nextState\)/); assert.doesNotMatch(source, /\['BUILDING', 'RUNNER', 'COOLING'\]\.includes\(nextState\)/);
+});
+test('PONS BUILDING Telegram gate rejects 5s and 10s screenshots and opens after 30s', async () => {
+  const { assessPonsBuildingGate } = await import('../src/chains/robinhood/ponsShadowOutcomeTracker.js');
+  const detectedAt = '2026-08-25T00:00:00.000Z';
+  const base = { would_buy_at: detectedAt, detected_at: detectedAt, roi_5s_percent: 5,
+    roi_10s_percent: 7, roi_30s_percent: null, roi_1m_percent: null,
+    roi_2m_percent: null, roi_5m_percent: null };
+  assert.equal(assessPonsBuildingGate({ row: { ...base, roi_5s_percent: null, roi_10s_percent: null },
+    currentRoi: 5, peakRoi: 5, observedAt: '2026-08-25T00:00:05.000Z' }).sustained, false);
+  assert.equal(assessPonsBuildingGate({ row: { ...base, roi_10s_percent: null },
+    currentRoi: 7, peakRoi: 7, observedAt: '2026-08-25T00:00:10.000Z' }).ageEligible, false);
+  const eligible = assessPonsBuildingGate({ row: base, currentRoi: 10, peakRoi: 12,
+    observedAt: '2026-08-25T00:00:30.000Z' });
+  assert.equal(eligible.sustained, true); assert.equal(eligible.ageEligible, true);
+  assert.equal(eligible.positiveRetainedStructure, true);
+  assert.equal(assessPonsBuildingGate({ row: base, currentRoi: 4, peakRoi: 10,
+    observedAt: '2026-08-25T00:00:30.000Z' }).positiveRetainedStructure, false);
 });
 test('volume surge requires comparable m5 data and deduplicates within one Boost transition', async () => {
   const { isMaterialVolumeSurge } = await import('../src/chains/robinhood/robinhoodBoostObserver.js');

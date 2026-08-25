@@ -49,6 +49,7 @@ import { coreDecisionEvidenceMetrics, marketContextMetrics, normalizeCoreDecisio
 import { resolvePonsDeliveryContext } from './ponsDeliveryContext.js';
 import { persistAlphaAlertEvent } from './alphaAlertLedger.js';
 import { criticalAvoidReason, shouldDeliverExit, userHasExitRelevance } from './alphaExitRelevance.js';
+import { renderPonsPremiumIntelligence } from '../ui/ponsPremiumIntelligence.js';
 
 type DeliverableAction =
   | 'BUY'
@@ -423,6 +424,25 @@ export function buildOpportunityMessage(
     !hasPreIndexValuation &&
     opportunity.raw_data?.marketIndexState === 'NOT_INDEXED'
   );
+
+  const isPonsConfirmed = ['robinhood', 'pons'].includes(String(opportunity.chain ?? '').toLowerCase()) &&
+    String(opportunity.strategy_key ?? '').toUpperCase().startsWith('PONS_') &&
+    (action === 'BUY' || action === 'CHECK_ENTRY');
+  if (isPonsConfirmed) {
+    const peakMoveRaw = rawNumber(opportunity, 'recentPeakRoi') ?? rawNumber(opportunity, 'peakRoi');
+    const peakMove = currentRoi == null ? peakMoveRaw : Math.max(currentRoi, peakMoveRaw ?? currentRoi);
+    const retainedPeakPercent = currentRoi != null && peakMove != null && peakMove > 0
+      ? Math.round((currentRoi / peakMove) * 100) : null;
+    return renderPonsPremiumIntelligence({
+      state: 'CONFIRMED', symbol, name: market.name, address: opportunity.asset_id,
+      age: elapsedSec == null ? null : age, market, evidence: decisionEvidence,
+      move: currentRoi, peakMove, retainedPeakPercent, risk: presentation.riskLabel,
+      confidence: opportunity.confidence, marketIndexing: earlyMarketIndexing,
+      transferredPercent: transferred == null ||
+        (transferred === 0 && (!transferEvidenceComplete || !transferZeroMeaningful)) ? null : transferred,
+      confirmedDevSell: opportunity.raw_data?.confirmedDevSell === true,
+    });
+  }
 
   return renderAlphaNotification({
     category: action === 'EXIT' ? 'risk' : 'opportunity',

@@ -3,11 +3,13 @@ export type IntelligenceObservation = { roi: number; volume5m?: number | null; b
 export type IntelligenceRisk = { criticalSecurity?: boolean; confirmedDevSell?: boolean; meaningfulDevTransfer?: boolean; liquidityCritical?: boolean; severeFlowCollapse?: boolean; developerHoldingPercent?: number | null };
 export type SustainedIntelligenceConfig = {
   minimumObservations: number; minimumPositiveObservations: number; retainedMoveRatio: number;
-  volumeAccelerationRatio: number; liquidityStableTolerance: number; adverseFactorsForDanger: number;
+  minimumSustainedSeconds: number; volumeAccelerationRatio: number;
+  liquidityStableTolerance: number; adverseFactorsForDanger: number;
 };
 export const DEFAULT_SUSTAINED_INTELLIGENCE_CONFIG: SustainedIntelligenceConfig = {
   minimumObservations: 3, minimumPositiveObservations: 2, retainedMoveRatio: 0.5,
-  volumeAccelerationRatio: 1.5, liquidityStableTolerance: 0.15, adverseFactorsForDanger: 2,
+  minimumSustainedSeconds: 30, volumeAccelerationRatio: 1.5,
+  liquidityStableTolerance: 0.15, adverseFactorsForDanger: 2,
 };
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 
@@ -20,7 +22,13 @@ export function assessTokenIntelligence(args: { observations: IntelligenceObserv
   const peak = Math.max(...rows.map(row => row.roi)); const current = rows[rows.length - 1].roi;
   const positiveCount = rows.filter(row => row.roi > 0).length;
   const retained = peak > 0 ? current / peak : 0;
-  const sustained = rows.length >= config.minimumObservations && positiveCount >= config.minimumPositiveObservations && current > 0 && retained >= config.retainedMoveRatio;
+  const oldestAt = Date.parse(rows[0].observedAt); const newestAt = Date.parse(rows[rows.length - 1].observedAt);
+  const observationSpanSeconds = Number.isFinite(oldestAt) && Number.isFinite(newestAt)
+    ? Math.max(0, (newestAt - oldestAt) / 1000) : 0;
+  const sustained = rows.length >= config.minimumObservations &&
+    positiveCount >= config.minimumPositiveObservations &&
+    observationSpanSeconds >= config.minimumSustainedSeconds &&
+    current > 0 && retained >= config.retainedMoveRatio;
   const firstVolume = rows.find(row => finite(row.volume5m) && row.volume5m! > 0)?.volume5m ?? null;
   const currentVolume = rows[rows.length - 1].volume5m;
   const volumeSurge = sustained && finite(firstVolume) && finite(currentVolume) && currentVolume >= firstVolume * config.volumeAccelerationRatio;
