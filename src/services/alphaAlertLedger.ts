@@ -1,6 +1,7 @@
 import { normalizeCoreDecisionMetrics, normalizeNotificationMarketContext, verifiedPonsPreIndexValuation } from '../ui/notificationMarketContext.js';
 import { opportunityDeliveryIdentity } from './opportunityDeliveryIdentity.js';
 import { supabase } from './supabase.js';
+import { resolveVerifiedSemanticEntryPrice } from './alphaSemanticEventService.js';
 
 export type AlphaLedgerOpportunity = {
   id: number; asset_id: string; chain: string | null; strategy_key: string | null;
@@ -28,7 +29,7 @@ export function buildAlphaAlertEvent(opportunity: AlphaLedgerOpportunity, alerte
   const preIndex = verifiedPonsPreIndexValuation(raw, opportunity.asset_id);
   const indexed = String(raw.marketIndexState ?? '') === 'VERIFIED';
   const action = String(opportunity.recommended_action ?? '').toUpperCase();
-  const price = finite(raw.priceWhenVerified ?? raw.priceUsd ?? raw.currentPrice ?? raw.price);
+  const entryPrice = resolveVerifiedSemanticEntryPrice(raw, opportunity.asset_id);
   const valuationType = market.marketCap != null ? 'MARKET_CAP' : market.fdv != null ? 'FDV' : null;
   const created = new Date(String(raw.createdAt ?? raw.detectedAt ?? raw.firstSeenAt ?? '')).getTime();
   const elapsed = Number.isFinite(created) ? Math.max(0, Math.floor((new Date(alertedAt).getTime() - created) / 1000)) : null;
@@ -43,7 +44,7 @@ export function buildAlphaAlertEvent(opportunity: AlphaLedgerOpportunity, alerte
     risk_score: opportunity.risk_score, risk_label: text(raw.riskLabel ?? raw.risk),
     reason: opportunity.why ?? opportunity.risk_reason ?? opportunity.what_happened,
     current_roi: finite(raw.currentRoi ?? raw.roi), roi_change: finite(raw.roiChange ?? raw.momentum),
-    price, price_provenance: text(raw.priceProvenance ?? raw.priceSource ?? raw.tokenPriceSource),
+    price: entryPrice.price, price_provenance: entryPrice.provenance,
     market_cap: market.marketCap, fdv: market.fdv, valuation_type: valuationType,
     valuation_provenance: indexed ? text((raw.verifiedMarketContext as Record<string, unknown> | undefined)?.source) ?? 'VERIFIED_MARKET_INDEX' : preIndex ? 'PONS_V2_CURVE_RESERVE_SPOT' : null,
     liquidity: market.liquidity, volume_5m: market.volume5m,

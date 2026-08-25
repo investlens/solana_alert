@@ -151,6 +151,8 @@ export function startPostAlertDevWatch(args: {
             soldPercent: movement.sold ? movement.movedPercentOfSupply : null,
             evidence: movement.movedPercentOfSupply == null ? 'UNAVAILABLE' : 'VERIFIED',
           });
+          const target = await resolveTokenOpenTarget({ chain: 'robinhood', tokenAddress: args.tokenAddress });
+          const targetMarket = target.marketContext as Record<string, unknown> | undefined;
           const inserted = classification.type === 'NONE' || classification.type === 'DEV_HOLDING'
             ? false
             : await persistAlphaSemanticEvent({
@@ -159,12 +161,18 @@ export function startPostAlertDevWatch(args: {
                 rawSnapshot: { movedPercentOfSupply: movement.movedPercentOfSupply,
                   totalMovedRaw: movement.totalMovedRaw.toString(), destinations: movement.destinations,
                   transferCount: movement.transferCount, sold: movement.sold, burned: movement.burned,
-                  notificationEligible: classification.notify },
+                  notificationEligible: classification.notify,
+                  ...(typeof targetMarket?.priceUsd === 'number' ? {
+                    price: targetMarket.priceUsd,
+                    priceProvenance: targetMarket.priceProvenance,
+                  } : {}),
+                  marketCap: targetMarket?.marketCap, fdv: targetMarket?.fdv,
+                  liquidity: targetMarket?.liquidity, volume5m: targetMarket?.volume5m,
+                  chartUrl: target.chartUrl },
               });
           const relevantSell = classification.type !== 'DEV_SELL' || await hasPriorPremiumRelevance(args.tokenAddress);
           if (!inserted || !classification.notify || !relevantSell) return;
-          const target = await resolveTokenOpenTarget({ chain: 'robinhood', tokenAddress: args.tokenAddress });
-          const market = normalizeNotificationMarketContext(target.marketContext as Record<string, unknown> | undefined,
+          const market = normalizeNotificationMarketContext(targetMarket,
             { address: args.tokenAddress });
           const isBurn = classification.type === 'DEV_BURN';
           const message = buildPremiumTokenNotification({

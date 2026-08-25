@@ -104,8 +104,43 @@ test('premium outcomes cover all horizons and unavailable prices carry a reason'
   assert.equal(premiumEventNeedsOutcome({ semantic_event_type: 'BOOST' }), true);
   assert.equal(premiumEventNeedsOutcome({ semantic_event_type: 'BUILDING' }), false);
   const row = buildAlphaOutcomeCheckpoint({ event: { id: 1, asset_id: 'token', chain: 'robinhood',
-    price: null, alerted_at: new Date().toISOString() }, checkpointSeconds: 30, currentPrice: null,
+    price: 0.00042, alerted_at: new Date().toISOString() }, checkpointSeconds: 30, currentPrice: null,
     source: null, provenance: null, prior: [], unavailableReason: 'ROBINHOOD_MARKET_UNAVAILABLE' });
   assert.equal(row.status, 'UNAVAILABLE');
   assert.equal((row.completeness as Record<string, unknown>).reason, 'ROBINHOOD_MARKET_UNAVAILABLE');
+  const missingEntry = buildAlphaOutcomeCheckpoint({ event: { id: 2, asset_id: 'token', chain: 'robinhood',
+    price: null, alerted_at: new Date().toISOString() }, checkpointSeconds: 30, currentPrice: null,
+    source: null, provenance: null, prior: [], unavailableReason: 'ROBINHOOD_MARKET_UNAVAILABLE' });
+  assert.equal((missingEntry.completeness as Record<string, unknown>).reason, 'MISSING_ENTRY_PRICE');
+});
+
+test('premium semantic entry price requires provenance and accepts canonical PONS V2 price', async () => {
+  const { buildAlphaSemanticEvent, resolveVerifiedSemanticEntryPrice } = await import('../src/services/alphaSemanticEventService.js');
+  const { buildAlphaAlertEvent } = await import('../src/services/alphaAlertLedger.js');
+  const token = '0x257012345678901234567890123456789008444e';
+  const now = new Date().toISOString();
+  assert.deepEqual(resolveVerifiedSemanticEntryPrice({ price: 0.00042 }, token),
+    { price: null, provenance: null });
+  assert.deepEqual(resolveVerifiedSemanticEntryPrice({ price: 0.00042,
+    priceProvenance: 'DEXSCREENER_VERIFIED_BASE_PAIR' }, token),
+  { price: 0.00042, provenance: 'DEXSCREENER_VERIFIED_BASE_PAIR' });
+  const event = buildAlphaSemanticEvent({ identity: 'boost:500', type: 'BOOST', assetId: token,
+    chain: 'robinhood', rawSnapshot: { price: 0.00042,
+      priceProvenance: 'DEXSCREENER_VERIFIED_BASE_PAIR' } }, now);
+  assert.equal(event.price, 0.00042);
+  assert.equal(event.price_provenance, 'DEXSCREENER_VERIFIED_BASE_PAIR');
+  const preIndexValuation = {
+    tokenAddress: token, valueUsd: 42_000, valuationType: 'FDV', source: 'PONS_V2_CURVE_RESERVE_SPOT',
+    tokenPriceUsd: 0.0000042, tokenPriceSource: 'PONS_V2_CURVE_RESERVE_RATIO', quoteAsset: 'WETH',
+    quoteUsd: 4_000, quoteUsdSource: 'DEXSCREENER_VERIFIED_BASE_PAIR', observedAt: now,
+    indexed: false, feeBps: 100, creatorTaxBps: 100,
+  };
+  assert.deepEqual(resolveVerifiedSemanticEntryPrice({ preIndexValuation }, token),
+    { price: 0.0000042, provenance: 'PONS_V2_CURVE_RESERVE_RATIO' });
+  const opportunityEvent = buildAlphaAlertEvent({ id: 42, asset_id: token, chain: 'robinhood',
+    strategy_key: 'PONS_BREAKOUT', recommended_action: 'CHECK_ENTRY', status: 'NEW', title: null,
+    why: null, what_happened: null, invalidation: null, risk_reason: null, confidence: 80,
+    risk_score: 20, raw_data: { preIndexValuation } }, now);
+  assert.equal(opportunityEvent.price, 0.0000042);
+  assert.equal(opportunityEvent.price_provenance, 'PONS_V2_CURVE_RESERVE_RATIO');
 });
