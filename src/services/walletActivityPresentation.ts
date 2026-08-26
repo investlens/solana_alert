@@ -30,6 +30,14 @@ export function walletActivityMetadata(event: WalletWatchEvent): Record<string, 
   };
 }
 
+export function reservedWalletActivityMetadata(event: WalletWatchEvent, leaseToken: string, reservedAt: string): Record<string, unknown> {
+  return { ...walletActivityMetadata(event), state: 'RESERVED', reserved_at: reservedAt, lease_token: leaseToken };
+}
+
+export function deliveredWalletActivityMetadata(event: WalletWatchEvent): Record<string, unknown> {
+  return { ...walletActivityMetadata(event), state: 'DELIVERED' };
+}
+
 export function normalizeWalletActivityRow(row: Record<string, unknown>): WalletActivityView {
   const metadata = (row.metadata as Record<string, unknown> | null) ?? {};
   const epoch = finite(metadata.timestamp);
@@ -61,8 +69,10 @@ export function shortWalletValue(value: string): string {
 
 export function activityTokenLabel(activity: WalletActivityView): string {
   const fallback = activity.tokenContract ? shortWalletValue(activity.tokenContract) : 'Unknown token';
-  if (activity.tokenName && activity.tokenSymbol) return `${activity.tokenName} (${activity.tokenSymbol})`;
-  return activity.tokenSymbol ?? activity.tokenName ?? fallback;
+  const name = activity.tokenName?.slice(0, 32) ?? null;
+  const symbol = activity.tokenSymbol?.slice(0, 12) ?? null;
+  if (name && symbol) return `${name} (${symbol})`;
+  return symbol ?? name ?? fallback;
 }
 
 export function formatActivityAmount(value: number | null): string | null {

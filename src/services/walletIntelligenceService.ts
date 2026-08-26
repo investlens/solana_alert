@@ -196,7 +196,7 @@ export async function getWalletIntelligenceProfile(args: { walletAddress: string
   const wallet = args.walletAddress.toLowerCase();
   const [launchResult, analysisResult, activityCountResult] = await Promise.all([
     supabase.from('creator_launches').select('*').eq('chain', 'robinhood').ilike('creator_wallet', wallet).order('launched_at', { ascending: false }).limit(100),
-    supabase.from('wallet_intelligence_analyses').select('result').eq('chain', 'robinhood').ilike('wallet_address', wallet).eq('status', 'COMPLETE').maybeSingle(),
+    supabase.from('wallet_intelligence_analyses').select('result').eq('chain', 'robinhood').eq('wallet_address', wallet).eq('status', 'COMPLETE').maybeSingle(),
     supabase.from('wallet_activity_deliveries').select('id', { count: 'exact', head: true }).ilike('wallet_address', wallet),
   ]);
   const { data: launches, error: launchError } = launchResult;

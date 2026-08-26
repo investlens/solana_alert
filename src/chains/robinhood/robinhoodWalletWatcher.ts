@@ -248,12 +248,13 @@ export function walletCursorRecoveryDecision(args: {
 
 async function unresolvedWalletDeliveries(wallets: Address[]): Promise<Map<string, number>> {
   const { data, error } = await supabase.from('wallet_activity_deliveries')
-    .select('wallet_address').contains('metadata', { state: 'RESERVED' });
+    .select('wallet_address,metadata').in('metadata->>state', ['RESERVED', 'SENT_UNCONFIRMED']);
   if (error) throw error;
   const monitored = new Set(wallets.map(wallet => wallet.toLowerCase()));
   const counts = new Map<string, number>();
   for (const row of data ?? []) { const key = String(row.wallet_address).toLowerCase();
-    if (monitored.has(key)) counts.set(key, (counts.get(key) ?? 0) + 1); }
+    const state = (row.metadata as Record<string, unknown> | null)?.state;
+    if (monitored.has(key) && (state === 'RESERVED' || state === 'SENT_UNCONFIRMED')) counts.set(key, (counts.get(key) ?? 0) + 1); }
   return counts;
 }
 

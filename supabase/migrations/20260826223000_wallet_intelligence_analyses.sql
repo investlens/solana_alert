@@ -12,5 +12,8 @@ create table if not exists public.wallet_intelligence_analyses (
 
 alter table public.wallet_intelligence_analyses enable row level security;
 
+revoke all on table public.wallet_intelligence_analyses from public, anon, authenticated, service_role;
+grant select, insert, update on table public.wallet_intelligence_analyses to service_role;
+
 comment on table public.wallet_intelligence_analyses is
   'Bounded read-only historical wallet investigation coverage and verified evidence cache; never drives alerts, cursors, or trading.';

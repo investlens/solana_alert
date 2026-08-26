@@ -158,7 +158,7 @@ export function renderWalletIntelligenceLaunches(profile: WalletIntelligenceProf
       intelligenceUsd(launch.peakValuation) ? `Peak ${intelligenceUsd(launch.peakValuation)}` : null,
       intelligenceUsd(launch.currentValuation) ? `Current ${intelligenceUsd(launch.currentValuation)}` : null,
     ].filter(Boolean).join(' · ');
-    lines.push(`${index + 1}. <b>${escapeTelegramHtml(launch.symbol ?? launch.name ?? 'Unknown token')}</b>`,
+    lines.push(`${index + 1}. <b>${escapeTelegramHtml((launch.symbol ?? launch.name ?? 'Unknown token').slice(0, 64))}</b>`,
       `<code>${escapeTelegramHtml(launch.token)}</code>`,
       launch.launchedAt ? `Launched ${escapeTelegramHtml(launch.launchedAt)}` : 'Launch time unavailable',
       ...(launch.launchVersion ? [`Platform ${escapeTelegramHtml(launch.launchVersion)}`] : []),
@@ -200,7 +200,7 @@ export function renderWalletActivityV2(walletAddress: string, activities: Wallet
     const presentation = activityPresentation[activity.type] ?? activityPresentation.RECEIVE;
     const amount = formatActivityAmount(activity.normalizedTokenAmount);
     lines.push(`${presentation.icon} <b>${presentation.verb}</b> · ${escapeTelegramHtml(activityTokenLabel(activity))}`);
-    if (amount) lines.push(`${amount} ${escapeTelegramHtml(activity.tokenSymbol ?? 'tokens')}`);
+    if (amount) lines.push(`${amount} ${escapeTelegramHtml(activity.tokenSymbol?.slice(0, 12) ?? 'tokens')}`);
     if (activity.nativeAmount != null && activity.quoteSymbol) lines.push(`${activity.type === 'BUY' ? 'Spent' : 'Received'}       ${activity.nativeAmount.toFixed(3)} ${escapeTelegramHtml(activity.quoteSymbol)}`);
     if (activity.counterparty && activity.type === 'SEND') lines.push(`To          ${escapeTelegramHtml(shortWalletValue(activity.counterparty))}`);
     if (activity.counterparty && activity.type === 'RECEIVE') lines.push(`From        ${escapeTelegramHtml(shortWalletValue(activity.counterparty))}`);
@@ -213,7 +213,7 @@ export function renderWalletActivityDetail(activity: WalletActivityView, now = n
   const presentation = activityPresentation[activity.type] ?? activityPresentation.RECEIVE;
   const amount = formatActivityAmount(activity.normalizedTokenAmount);
   const lines = ['⚡ <b>WALLET TRANSACTION</b>', '', `${presentation.icon} <b>${presentation.verb}</b>`, escapeTelegramHtml(activityTokenLabel(activity)), ''];
-  if (amount) lines.push(`Amount       ${amount} ${escapeTelegramHtml(activity.tokenSymbol ?? 'tokens')}`);
+  if (amount) lines.push(`Amount       ${amount} ${escapeTelegramHtml(activity.tokenSymbol?.slice(0, 12) ?? 'tokens')}`);
   if (activity.nativeAmount != null && activity.quoteSymbol) lines.push(`${activity.type === 'BUY' ? 'Spent' : 'Received'}        ${activity.nativeAmount.toFixed(3)} ${escapeTelegramHtml(activity.quoteSymbol)}`);
   if (activity.counterparty) lines.push(`${activity.type === 'SEND' ? 'To' : activity.type === 'RECEIVE' ? 'From' : 'Counterparty'}          ${escapeTelegramHtml(shortWalletValue(activity.counterparty))}`);
   lines.push(`When         ${humanAge(activity.timestamp, now)}`, `Wallet       ${escapeTelegramHtml(shortWalletValue(activity.wallet))}`);

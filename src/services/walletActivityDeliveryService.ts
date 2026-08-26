@@ -29,7 +29,7 @@ import { buildAlphaMarketActions } from '../ui/alphaNotificationActions.js';
 import { deliverReservedTelegram } from './telegramDeliveryContract.js';
 import { createLeaseToken, DELIVERY_LEASE_SECONDS } from './reservationLease.js';
 import { coreDecisionEvidenceMetrics, marketContextMetrics, normalizeCoreDecisionMetrics, normalizeNotificationMarketContext } from '../ui/notificationMarketContext.js';
-import { walletActivityMetadata } from './walletActivityPresentation.js';
+import { deliveredWalletActivityMetadata, reservedWalletActivityMetadata } from './walletActivityPresentation.js';
 
 type InlineButton = {
   text: string;
@@ -145,7 +145,16 @@ async function reserveDelivery(args: {
     p_lease_seconds: DELIVERY_LEASE_SECONDS,
   });
   if (error) throw error;
-  return data === true ? leaseToken : null;
+  if (data !== true) return null;
+  const { data: attached, error: attachError } = await supabase.from('wallet_activity_deliveries')
+    .update({ metadata: reservedWalletActivityMetadata(args.event, leaseToken, new Date().toISOString()) })
+    .eq('telegram_id', args.telegramId).ilike('wallet_address', args.event.wallet)
+    .eq('transaction_signature', args.event.signature)
+    .contains('metadata', { state: 'RESERVED', lease_token: leaseToken })
+    .select('id').maybeSingle();
+  if (attachError) throw attachError;
+  if (!attached) throw new Error('Wallet delivery lease was lost before metadata attachment');
+  return leaseToken;
 }
 
 async function markDelivered(args: {
@@ -162,11 +171,7 @@ async function markDelivered(args: {
       delivered_at:
         new Date().toISOString(),
 
-      metadata: {
-        ...walletActivityMetadata(args.event),
-        state:
-          'DELIVERED',
-      },
+      metadata: deliveredWalletActivityMetadata(args.event),
     })
     .eq(
       'telegram_id',
@@ -193,11 +198,16 @@ async function releaseDelivery(args: {
   event: WalletWatchEvent;
   leaseToken: string;
 }) {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from(
       'wallet_activity_deliveries',
     )
-    .delete()
+    .update({
+      metadata: {
+        ...reservedWalletActivityMetadata(args.event, args.leaseToken, new Date(0).toISOString()),
+        retry_pending: true,
+      },
+    })
     .eq(
       'telegram_id',
       args.telegramId,
@@ -210,8 +220,22 @@ async function releaseDelivery(args: {
       'transaction_signature',
       args.event.signature,
     )
-    .contains('metadata', { state: 'RESERVED', lease_token: args.leaseToken });
+    .contains('metadata', { state: 'RESERVED', lease_token: args.leaseToken })
+    .select('id')
+    .maybeSingle();
   if (error) throw error;
+  if (!data) throw new Error('Wallet delivery lease was lost before retry release');
+}
+
+async function markSentUnconfirmed(args: { telegramId: string; event: WalletWatchEvent; leaseToken: string }) {
+  const { data, error } = await supabase.from('wallet_activity_deliveries').update({
+    metadata: { ...deliveredWalletActivityMetadata(args.event), state: 'SENT_UNCONFIRMED' },
+  }).eq('telegram_id', args.telegramId).ilike('wallet_address', args.event.wallet)
+    .eq('transaction_signature', args.event.signature)
+    .contains('metadata', { state: 'RESERVED', lease_token: args.leaseToken })
+    .select('id').maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error('Wallet delivery lease was lost after Telegram accepted the message');
 }
 
 async function buildButtons(
@@ -523,6 +547,11 @@ deliverTrackedWalletActivity(
           );
         } else if (delivery.error) {
           failedWallets.add(event.wallet.toLowerCase());
+          if (delivery.sent) {
+            await markSentUnconfirmed({ telegramId: subscriber.telegram_id, event, leaseToken }).catch(error => {
+              console.error('[WalletActivity] Could not preserve sent-unconfirmed state:', error);
+            });
+          }
           const error = delivery.error;
           console.error(
             delivery.sent
