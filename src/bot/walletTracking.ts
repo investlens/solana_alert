@@ -7,6 +7,7 @@ import {
   addTrackedWallet,
   enableRobinhoodMonitoringForSavedWallet,
   getRecentTrackedWalletActivity,
+  getTrackedWalletActivityById,
   getRecentWalletActivityForUser,
   getTrackedWalletByIdForUser,
   getTrackedWalletsForUser,
@@ -29,6 +30,9 @@ import { hasCapability } from '../product/capabilities.js';
 import { initializeRobinhoodWalletCursorAtCurrentBlock } from '../chains/robinhood/robinhoodWalletWatcher.js';
 import { getAddress } from 'viem';
 import { getWalletIntelligenceProfile, type WalletIntelligenceProfile } from '../services/walletIntelligenceService.js';
+import { activityTokenLabel, formatActivityAmount, humanAge, normalizeWalletActivityRow, shortWalletValue, type WalletActivityView } from '../services/walletActivityPresentation.js';
+import { resolveTokenOpenTarget } from '../core/tokenOpenRouter.js';
+import { analyzeRobinhoodWallet } from '../services/walletHistoricalAnalysisService.js';
 
 function userId(
   ctx: any,
@@ -101,14 +105,21 @@ export function renderWalletIntelligence(profile: WalletIntelligenceProfile): st
   const lines = [
     '🧠 <b>ALPHAOS · WALLET INTELLIGENCE</b>', '',
     `<code>${escapeTelegramHtml(shortAddress(profile.wallet))}</code>`, 'Robinhood', '',
-    '📊 <b>LAUNCH HISTORY</b>',
+    '📊 <b>ALPHAOS COVERAGE</b>',
+    `First observed         <b>${profile.walletAge.firstObservedAt ? humanAge(profile.walletAge.firstObservedAt) : 'Unknown'}</b>`,
+    `Activities recorded    <b>${profile.coverage.activitiesRecorded}</b>`,
+    `Historical analysis   <b>${profile.coverage.historicalAnalysis === 'COMPLETE' ? 'Bounded scan complete' : 'Not run'}</b>`, '',
+  ];
+  if (profile.coverage.historicalAnalysis === 'COMPLETE' || profile.launches.total > 0) lines.push(
+    '🚀 <b>LAUNCH HISTORY</b>',
     `Verified launches      <b>${profile.launches.total}</b>`,
     `Last 30d               <b>${profile.launches.recent30d}</b>`,
-    `Severe failures        <b>${performance.severeCrashes}</b>`,
-    `Catastrophic failures  <b>${performance.catastrophicCrashes}</b>`,
-    `Reached $50K           <b>${performance.crossed50k}</b>`,
-    `Reached $100K          <b>${performance.crossed100k}</b>`, '',
-  ];
+    `Severe failures        <b>${performance.measuredLaunches ? performance.severeCrashes : 'Unknown'}</b>`,
+    `Catastrophic failures  <b>${performance.measuredLaunches ? performance.catastrophicCrashes : 'Unknown'}</b>`,
+    `Reached $50K           <b>${performance.measuredLaunches ? performance.crossed50k : 'Unknown'}</b>`,
+    `Reached $100K          <b>${performance.measuredLaunches ? performance.crossed100k : 'Unknown'}</b>`, '',
+  ); else lines.push('🚀 <b>LAUNCH HISTORY</b>', 'Creator history      <b>Not established</b>', '',
+    '<i>Historical on-chain discovery has not yet been performed for this wallet.</i>', '');
   if (performance.measuredLaunches > 0) lines.push(
     '📈 <b>PERFORMANCE</b>',
     `Measured launches      <b>${performance.measuredLaunches}</b>`,
@@ -129,14 +140,12 @@ export function renderWalletIntelligence(profile: WalletIntelligenceProfile): st
     ...(behavior.currentHoldingPercent == null ? [] : [`Developer holding      <b>${behavior.currentHoldingPercent.toFixed(2)}%</b>`]),
     ...(behavior.verifiedBurnPercent == null ? [] : [`Largest verified burn   <b>${behavior.verifiedBurnPercent.toFixed(2)}%</b>`]), '',
   );
-  if (profile.walletAge.firstObservedAt) lines.push(
-    `<i>First observed by AlphaOS: ${escapeTelegramHtml(profile.walletAge.firstObservedAt)} · ${profile.walletAge.daysActive ?? 0}d</i>`, '',
-  );
+  if (profile.walletAge.firstObservedAt) lines.push(`<i>First observed by AlphaOS · ${humanAge(profile.walletAge.firstObservedAt)}</i>`, '');
   if (profile.reputationEvidence.negativeSignals.length || profile.reputationEvidence.positiveSignals.length) {
     lines.push('⚠️ <b>HISTORY</b>');
     for (const signal of [...profile.reputationEvidence.negativeSignals, ...profile.reputationEvidence.positiveSignals]) lines.push(`• ${escapeTelegramHtml(signal)}`);
   }
-  if (!profile.launches.total) lines.push('No verified creator launch history is recorded for this wallet.');
+  if (!profile.launches.total && profile.coverage.historicalAnalysis === 'COMPLETE') lines.push('No verified launches were found within the bounded known-PONS-emitter coverage.');
   return lines.join('\n');
 }
 
@@ -165,13 +174,51 @@ export function renderWalletIntelligenceLaunches(profile: WalletIntelligenceProf
 }
 
 export function renderWalletIntelligenceLinks(profile: WalletIntelligenceProfile): string {
-  const lines = ['🔗 <b>ASSOCIATED WALLETS</b>', '', '<i>Evidence means verified developer-token transfers; it does not establish ownership.</i>', ''];
+  const lines = ['🔗 <b>REPEATED COUNTERPARTIES</b>', '', '<i>Evidence means verified developer-token transfers; it does not establish ownership.</i>', ''];
   if (!profile.developerBehavior.associatedWallets.length) lines.push('No repeated developer-transfer counterparties are recorded.');
   for (const link of profile.developerBehavior.associatedWallets.slice(0, 10)) lines.push(
     `<code>${escapeTelegramHtml(shortAddress(link.wallet))}</code>`,
-    `Observed across ${link.distinctLaunches} developer launch${link.distinctLaunches === 1 ? '' : 'es'}`,
-    `${link.transferEvents} verified token transfer${link.transferEvents === 1 ? '' : 's'}`, '',
+    `Developer transfers    ${link.transferEvents}`,
+    `Across launches        ${link.distinctLaunches}`,
+    `First seen             ${humanAge(link.firstSeen)}`,
+    `Last seen              ${humanAge(link.lastSeen)}`,
+    'Evidence: Repeated destination of verified developer transfers.', '',
   );
+  return lines.join('\n');
+}
+
+const activityPresentation = {
+  BUY: { icon: '🟢', verb: 'BOUGHT' }, SELL: { icon: '🔴', verb: 'SOLD' },
+  SEND: { icon: '➡️', verb: 'SENT' }, RECEIVE: { icon: '⬅️', verb: 'RECEIVED' },
+  LAUNCH: { icon: '🚀', verb: 'LAUNCHED' },
+} as const;
+
+export function renderWalletActivityV2(walletAddress: string, activities: WalletActivityView[], now = new Date()): string {
+  const lines = ['⚡ <b>WALLET ACTIVITY</b>', '', `<code>${escapeTelegramHtml(shortWalletValue(walletAddress))}</code>`, 'Robinhood', ''];
+  if (!activities.length) lines.push('No recorded wallet activity yet.');
+  for (const activity of activities) {
+    const presentation = activityPresentation[activity.type] ?? activityPresentation.RECEIVE;
+    const amount = formatActivityAmount(activity.normalizedTokenAmount);
+    lines.push(`${presentation.icon} <b>${presentation.verb}</b> · ${escapeTelegramHtml(activityTokenLabel(activity))}`);
+    if (amount) lines.push(`${amount} ${escapeTelegramHtml(activity.tokenSymbol ?? 'tokens')}`);
+    if (activity.nativeAmount != null && activity.quoteSymbol) lines.push(`${activity.type === 'BUY' ? 'Spent' : 'Received'}       ${activity.nativeAmount.toFixed(3)} ${escapeTelegramHtml(activity.quoteSymbol)}`);
+    if (activity.counterparty && activity.type === 'SEND') lines.push(`To          ${escapeTelegramHtml(shortWalletValue(activity.counterparty))}`);
+    if (activity.counterparty && activity.type === 'RECEIVE') lines.push(`From        ${escapeTelegramHtml(shortWalletValue(activity.counterparty))}`);
+    lines.push(`When        ${humanAge(activity.timestamp, now)}`, '');
+  }
+  return lines.join('\n');
+}
+
+export function renderWalletActivityDetail(activity: WalletActivityView, now = new Date()): string {
+  const presentation = activityPresentation[activity.type] ?? activityPresentation.RECEIVE;
+  const amount = formatActivityAmount(activity.normalizedTokenAmount);
+  const lines = ['⚡ <b>WALLET TRANSACTION</b>', '', `${presentation.icon} <b>${presentation.verb}</b>`, escapeTelegramHtml(activityTokenLabel(activity)), ''];
+  if (amount) lines.push(`Amount       ${amount} ${escapeTelegramHtml(activity.tokenSymbol ?? 'tokens')}`);
+  if (activity.nativeAmount != null && activity.quoteSymbol) lines.push(`${activity.type === 'BUY' ? 'Spent' : 'Received'}        ${activity.nativeAmount.toFixed(3)} ${escapeTelegramHtml(activity.quoteSymbol)}`);
+  if (activity.counterparty) lines.push(`${activity.type === 'SEND' ? 'To' : activity.type === 'RECEIVE' ? 'From' : 'Counterparty'}          ${escapeTelegramHtml(shortWalletValue(activity.counterparty))}`);
+  lines.push(`When         ${humanAge(activity.timestamp, now)}`, `Wallet       ${escapeTelegramHtml(shortWalletValue(activity.wallet))}`);
+  if (activity.tokenContract) lines.push('', '<b>Token</b>', `<code>${escapeTelegramHtml(activity.tokenContract)}</code>`);
+  if (activity.transactionHash) lines.push('', '<b>Transaction</b>', `<code>${escapeTelegramHtml(shortWalletValue(activity.transactionHash))}</code>`);
   return lines.join('\n');
 }
 
@@ -897,6 +944,7 @@ registerWalletTracking(
         await ctx.reply(renderWalletIntelligence(profile), {
           parse_mode: 'HTML',
           reply_markup: Markup.inlineKeyboard([
+            [Markup.button.callback('🔍 Analyze Wallet', `WALLET_INTEL_ANALYZE_${wallet.id}`)],
             [Markup.button.callback('📜 Launches', `WALLET_INTEL_LAUNCHES_${wallet.id}`), Markup.button.callback('🔗 Associated Wallets', `WALLET_INTEL_LINKS_${wallet.id}`)],
             [Markup.button.callback('⚡ Activity', `WALLET_ACTIVITY_${wallet.id}`)],
             [Markup.button.callback('⬅️ Wallets', 'WALLET_TRACKING'), Markup.button.callback('🏠 Home', 'MAIN_MENU')],
@@ -905,6 +953,29 @@ registerWalletTracking(
       } catch (error) {
         console.error('[WalletTracking] Intelligence failed:', error);
         await ctx.answerCbQuery('Could not load wallet intelligence', { show_alert: true }).catch(() => {});
+      }
+    },
+  );
+
+  bot.action(
+    /^WALLET_INTEL_ANALYZE_(\d+)$/,
+    async ctx => {
+      const telegramId = userId(ctx);
+      if (!telegramId) return;
+      try {
+        const wallet = await getTrackedWalletByIdForUser({ telegramId, id: Number(ctx.match[1]) });
+        if (!wallet || wallet.chain !== 'robinhood') return void await ctx.answerCbQuery('Analyze Wallet is available for Robinhood wallets only', { show_alert: true });
+        await ctx.answerCbQuery('Running bounded read-only analysis…');
+        await analyzeRobinhoodWallet(wallet.wallet_address);
+        const profile = await getWalletIntelligenceProfile({ walletAddress: wallet.wallet_address, chain: 'robinhood' });
+        await ctx.reply(renderWalletIntelligence(profile), { parse_mode: 'HTML', reply_markup: Markup.inlineKeyboard([
+          [Markup.button.callback('📜 Launches', `WALLET_INTEL_LAUNCHES_${wallet.id}`), Markup.button.callback('🔗 Associated Wallets', `WALLET_INTEL_LINKS_${wallet.id}`)],
+          [Markup.button.callback('⚡ Activity', `WALLET_ACTIVITY_${wallet.id}`)],
+          [Markup.button.callback('⬅️ Wallets', 'WALLET_TRACKING'), Markup.button.callback('🏠 Home', 'MAIN_MENU')],
+        ]).reply_markup });
+      } catch (error) {
+        console.error('[WalletTracking] Analyze wallet failed:', error);
+        await ctx.reply('Wallet analysis could not be completed. No monitoring or alerts were changed.');
       }
     },
   );
@@ -952,6 +1023,37 @@ registerWalletTracking(
   );
 
   bot.action(
+    /^WALLET_ACTIVITY_DETAIL_(\d+)_(\d+)$/,
+    async ctx => {
+      const telegramId = userId(ctx);
+      if (!telegramId) return;
+      try {
+        const wallet = await getTrackedWalletByIdForUser({ telegramId, id: Number(ctx.match[1]) });
+        if (!wallet || wallet.chain !== 'robinhood') return void await ctx.answerCbQuery('Robinhood wallet not found', { show_alert: true });
+        const row = await getTrackedWalletActivityById({ telegramId, walletAddress: wallet.wallet_address, id: Number(ctx.match[2]) });
+        if (!row) return void await ctx.answerCbQuery('Activity not found', { show_alert: true });
+        const activity = normalizeWalletActivityRow(row);
+        const target = activity.tokenContract ? await resolveTokenOpenTarget({ chain: 'robinhood', tokenAddress: activity.tokenContract }) : null;
+        const actions: any[][] = [];
+        const marketRow = [];
+        if (target?.chartUrl) marketRow.push(Markup.button.url('📊 Chart', target.chartUrl));
+        if (target?.tokenUrl) marketRow.push(Markup.button.url('🔎 Token', target.tokenUrl));
+        if (marketRow.length) actions.push(marketRow);
+        const contractRow = [];
+        if (activity.tokenContract) contractRow.push(Markup.button.callback('📋 Copy CA', `COPY_CA_${activity.tokenContract}`));
+        if (activity.transactionHash) contractRow.push(Markup.button.url('🔗 Explorer', `https://robinhoodchain.blockscout.com/tx/${activity.transactionHash}`));
+        if (contractRow.length) actions.push(contractRow);
+        actions.push([Markup.button.callback('⬅️ Activity', `WALLET_ACTIVITY_${wallet.id}`), Markup.button.callback('🏠 Home', 'MAIN_MENU')]);
+        await ctx.answerCbQuery();
+        await ctx.reply(renderWalletActivityDetail(activity), { parse_mode: 'HTML', reply_markup: Markup.inlineKeyboard(actions).reply_markup });
+      } catch (error) {
+        console.error('[WalletTracking] Activity detail failed:', error);
+        await ctx.answerCbQuery('Could not load activity detail', { show_alert: true }).catch(() => {});
+      }
+    },
+  );
+
+  bot.action(
     /^WALLET_ACTIVITY_(\d+)$/,
     async ctx => {
       try {
@@ -993,7 +1095,7 @@ registerWalletTracking(
           return;
         }
 
-        const activity =
+        const rows =
           await getRecentTrackedWalletActivity(
             wallet.wallet_address,
             8,
@@ -1001,87 +1103,22 @@ registerWalletTracking(
             wallet.chain,
           );
 
-        const lines = [
-          '⚡ <b>WALLET ACTIVITY</b>',
-          '',
-          wallet.label
-            ? `<b>${escapeTelegramHtml(wallet.label)}</b>`
-            : `<code>${escapeTelegramHtml(shortAddress(
-                wallet.wallet_address,
-              ))}</code>`,
-          '',
-        ];
-
-        if (
-          activity.length ===
-          0
-        ) {
-          lines.push(
-            'No recorded buy/sell activity yet.',
-          );
-        }
-
-        for (
-          const row
-          of activity
-        ) {
-          const action =
-            String(
-              row.action ??
-              '',
-            ).toUpperCase();
-
-          const icon =
-            action ===
-            'BUY'
-              ? '🟢'
-              : action ===
-                'SELL'
-                ? '🔴'
-                : '⚪';
-
-          const token =
-            shortAddress(
-              String(
-                row.token ??
-                '-',
-              ),
-            );
-
-          const amount =
-            Number(
-              row.amount_sol,
-            );
-
-          const amountText =
-            Number.isFinite(
-              amount,
-            ) &&
-            amount >
-            0
-              ? ` · ${amount.toFixed(
-                  3,
-                )} SOL`
-              : '';
-
-          lines.push(
-            `${icon} <b>${escapeTelegramHtml(action ||
-              'ACTIVITY')}</b> ${escapeTelegramHtml(token)}${amountText}`,
-          );
-        }
+        const activity = rows.map(row => normalizeWalletActivityRow(row));
 
         await ctx.answerCbQuery();
 
         await ctx.reply(
-          lines.join(
-            '\n',
-          ),
+          renderWalletActivityV2(wallet.wallet_address, activity),
           {
             parse_mode:
               'HTML',
 
             reply_markup:
               Markup.inlineKeyboard([
+                ...activity.filter(row => row.id != null).map(row => [Markup.button.callback(
+                  `${activityPresentation[row.type]?.icon ?? '⚡'} ${activityTokenLabel(row).slice(0, 24)}`,
+                  `WALLET_ACTIVITY_DETAIL_${wallet.id}_${row.id}`,
+                )]),
                 [
                   Markup.button.callback(
                     '⬅️ Wallets',

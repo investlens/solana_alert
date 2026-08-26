@@ -20,6 +20,7 @@ export type LaunchSummary = {
 
 export type WalletIntelligenceProfile = {
   wallet: string; chain: 'robinhood';
+  coverage: { historicalAnalysis: 'NOT_RUN' | 'COMPLETE'; analyzedAt: string | null; fromBlock: string | null; toBlock: string | null; activitiesRecorded: number };
   walletAge: { firstObservedAt: string | null; daysActive: number | null; source: string | null };
   launches: { total: number; recent30d: number; recent7d: number; tokens: LaunchSummary[] };
   launchPerformance: {
@@ -70,7 +71,7 @@ export function launchHasMeaningfulPerformance(launch: LaunchSummary): boolean {
 
 export function buildWalletIntelligenceProfile(args: {
   walletAddress: string; launches: LaunchRow[]; shadows: ShadowRow[]; flows: FlowRow[];
-  walletActivityObservedAt?: string[]; now?: Date;
+  walletActivityObservedAt?: string[]; activitiesRecorded?: number; analysis?: Record<string, unknown> | null; now?: Date;
 }): WalletIntelligenceProfile {
   const wallet = args.walletAddress.toLowerCase();
   const shadowByToken = new Map(args.shadows.map(row => [lower(row.token_address), row]));
@@ -101,7 +102,7 @@ export function buildWalletIntelligenceProfile(args: {
     const holdingValues = [finite(shadow?.dev_holding_percent), finite(row.dev_holding_percent)].filter((value): value is number => value != null);
     return {
       token, symbol: text(row.symbol), name: text(row.name), launchedAt,
-      launchVersion: text(shadow?.launch_version), initialValuation: finite(row.initial_market_cap),
+      launchVersion: text(shadow?.launch_version) ?? text(row.launch_version), initialValuation: finite(row.initial_market_cap),
       peakValuation: finite(row.peak_market_cap), currentValuation: finite(row.current_market_cap),
       return5m: finite(row.return_5m_pct), return15m: finite(row.return_15m_pct), maxReturn: finite(row.max_return_pct),
       severeCrash: bool(row.severe_crash), catastrophicCrash: bool(row.catastrophic_crash),
@@ -170,6 +171,10 @@ export function buildWalletIntelligenceProfile(args: {
 
   return {
     wallet, chain: 'robinhood',
+    coverage: {
+      historicalAnalysis: args.analysis ? 'COMPLETE' : 'NOT_RUN', analyzedAt: text(args.analysis?.analyzedAt),
+      fromBlock: text(args.analysis?.fromBlock), toBlock: text(args.analysis?.toBlock), activitiesRecorded: args.activitiesRecorded ?? (args.walletActivityObservedAt?.length ?? 0),
+    },
     walletAge: { firstObservedAt: first?.at ?? null, daysActive: first ? Math.max(0, Math.floor((now.getTime() - Date.parse(first.at)) / 86_400_000)) : null, source: first?.source ?? null },
     launches: { total: launches.length, recent30d: launches.filter(row => row.launchedAt && now.getTime() - Date.parse(row.launchedAt) <= 30 * 86_400_000).length, recent7d: launches.filter(row => row.launchedAt && now.getTime() - Date.parse(row.launchedAt) <= 7 * 86_400_000).length, tokens: launches },
     launchPerformance: { measuredLaunches: measured.length, successfulLaunches: successful.length, severeCrashes: severe, catastrophicCrashes: catastrophic,
@@ -189,10 +194,21 @@ export function buildWalletIntelligenceProfile(args: {
 
 export async function getWalletIntelligenceProfile(args: { walletAddress: string; chain: 'robinhood' }): Promise<WalletIntelligenceProfile> {
   const wallet = args.walletAddress.toLowerCase();
-  const { data: launches, error: launchError } = await supabase.from('creator_launches').select('*')
-    .eq('chain', 'robinhood').ilike('creator_wallet', wallet).order('launched_at', { ascending: false }).limit(100);
+  const [launchResult, analysisResult, activityCountResult] = await Promise.all([
+    supabase.from('creator_launches').select('*').eq('chain', 'robinhood').ilike('creator_wallet', wallet).order('launched_at', { ascending: false }).limit(100),
+    supabase.from('wallet_intelligence_analyses').select('result').eq('chain', 'robinhood').ilike('wallet_address', wallet).eq('status', 'COMPLETE').maybeSingle(),
+    supabase.from('wallet_activity_deliveries').select('id', { count: 'exact', head: true }).ilike('wallet_address', wallet),
+  ]);
+  const { data: launches, error: launchError } = launchResult;
   if (launchError) throw launchError;
-  const tokens = (launches ?? []).map(row => lower(row.token)).filter(Boolean);
+  if (analysisResult.error) throw analysisResult.error;
+  if (activityCountResult.error) throw activityCountResult.error;
+  const analysis = (analysisResult.data?.result as Record<string, unknown> | null) ?? null;
+  const discovered = Array.isArray(analysis?.launches) ? analysis.launches as Array<Record<string, unknown>> : [];
+  const mergedLaunches = [...(launches ?? [])];
+  const known = new Set(mergedLaunches.map(row => lower(row.token)));
+  for (const row of discovered) if (!known.has(lower(row.token))) mergedLaunches.push({ token: row.token, launch_version: row.launchVersion, launched_at: row.launchedAt ?? null });
+  const tokens = mergedLaunches.map(row => lower(row.token)).filter(Boolean);
   const tokenSet = new Set(tokens);
   const [shadowResult, flowResult, activityResult] = await Promise.all([
     tokens.length ? supabase.from('pons_shadow_trades').select('token_address,launch_version,detected_at,dev_holding_percent,dev_first_movement_at').ilike('deployer_address', wallet).limit(200) : Promise.resolve({ data: [], error: null }),
@@ -202,5 +218,5 @@ export async function getWalletIntelligenceProfile(args: { walletAddress: string
   if (shadowResult.error) throw shadowResult.error;
   if (flowResult.error) throw flowResult.error;
   if (activityResult.error) throw activityResult.error;
-  return buildWalletIntelligenceProfile({ walletAddress: wallet, launches: launches ?? [], shadows: (shadowResult.data ?? []).filter(row => tokenSet.has(lower(row.token_address))), flows: (flowResult.data ?? []).filter(row => tokenSet.has(lower(row.asset_id))), walletActivityObservedAt: (activityResult.data ?? []).map(row => String(row.created_at)) });
+  return buildWalletIntelligenceProfile({ walletAddress: wallet, launches: mergedLaunches, shadows: (shadowResult.data ?? []).filter(row => tokenSet.has(lower(row.token_address))), flows: (flowResult.data ?? []).filter(row => tokenSet.has(lower(row.asset_id))), walletActivityObservedAt: (activityResult.data ?? []).map(row => String(row.created_at)), activitiesRecorded: activityCountResult.count ?? 0, analysis });
 }

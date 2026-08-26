@@ -174,6 +174,14 @@ export async function scanRobinhoodWalletActivity(args: {
       });
       if (!classification) continue;
       const metadata = await tokenMetadata(classification.token).catch(() => null);
+      const assetTransfer = transfers.find(transfer => sameAddress(transfer.token, classification.token) &&
+        (sameAddress(transfer.to, wallet) || sameAddress(transfer.from, wallet)));
+      const quoteTransfer = transfers.find(transfer => isQuoteToken(transfer.token) &&
+        (sameAddress(transfer.to, wallet) || sameAddress(transfer.from, wallet)));
+      const nativeAmount = (classification.kind === 'buy' && sameAddress(transaction.from, wallet) && transaction.value > 0n)
+        ? Number(transaction.value) / 1e18
+        : null;
+      const quoteAmount = quoteTransfer ? Number(quoteTransfer.value) / 1e18 : null;
       events.push({
         kind: classification.kind,
         chain: 'robinhood',
@@ -183,8 +191,15 @@ export async function scanRobinhoodWalletActivity(args: {
         blockNumber: Number(receipt.blockNumber),
         tokenMint: classification.token,
         tokenAmount: normalizedAmount(classification.amountRaw, metadata?.decimals ?? null),
+        tokenAmountRaw: classification.amountRaw?.toString() ?? null,
+        tokenDecimals: metadata?.decimals ?? null,
         tokenSymbol: metadata?.symbol ?? null,
         tokenName: metadata?.name ?? null,
+        nativeAmount: nativeAmount ?? quoteAmount,
+        quoteSymbol: nativeAmount != null ? 'ETH' : quoteTransfer ? 'WETH' : null,
+        counterparty: assetTransfer
+          ? (sameAddress(assetTransfer.to, wallet) ? assetTransfer.from : assetTransfer.to)
+          : null,
         type: classification.evidence,
         ...(classification.kind === 'buy' || classification.kind === 'sell' ? { amountSol: null } : {}),
       } as WalletWatchEvent);

@@ -489,13 +489,14 @@ getRecentTrackedWalletActivity(
   if (chain.toLowerCase() === 'robinhood' && telegramId) {
     const { data, error } = await supabase
       .from('wallet_activity_deliveries')
-      .select('activity_type,token_address,created_at')
+      .select('id,wallet_address,transaction_signature,activity_type,token_address,created_at,metadata')
       .eq('telegram_id', telegramId)
-      .eq('wallet_address', walletAddress)
+      .ilike('wallet_address', walletAddress)
       .order('created_at', { ascending: false })
       .limit(Math.max(1, Math.min(25, limit)));
     if (error) throw error;
     return (data ?? []).map(row => ({
+      ...row,
       action: row.activity_type,
       token: row.token_address,
       created_at: row.created_at,
@@ -539,6 +540,14 @@ getRecentTrackedWalletActivity(
     data ??
     []
   ) as Array<Record<string, any>>;
+}
+
+export async function getTrackedWalletActivityById(args: { telegramId: string; walletAddress: string; id: number }) {
+  const { data, error } = await supabase.from('wallet_activity_deliveries')
+    .select('id,wallet_address,transaction_signature,activity_type,token_address,created_at,metadata')
+    .eq('id', args.id).eq('telegram_id', args.telegramId).ilike('wallet_address', args.walletAddress).maybeSingle();
+  if (error) throw error;
+  return data as Record<string, unknown> | null;
 }
 
 export async function getRecentWalletActivityForUser(

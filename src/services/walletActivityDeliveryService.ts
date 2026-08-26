@@ -29,6 +29,7 @@ import { buildAlphaMarketActions } from '../ui/alphaNotificationActions.js';
 import { deliverReservedTelegram } from './telegramDeliveryContract.js';
 import { createLeaseToken, DELIVERY_LEASE_SECONDS } from './reservationLease.js';
 import { coreDecisionEvidenceMetrics, marketContextMetrics, normalizeCoreDecisionMetrics, normalizeNotificationMarketContext } from '../ui/notificationMarketContext.js';
+import { walletActivityMetadata } from './walletActivityPresentation.js';
 
 type InlineButton = {
   text: string;
@@ -162,6 +163,7 @@ async function markDelivered(args: {
         new Date().toISOString(),
 
       metadata: {
+        ...walletActivityMetadata(args.event),
         state:
           'DELIVERED',
       },

@@ -29,6 +29,19 @@ test('wallet intelligence keeps empty history factual and unknown', () => {
   assert.equal(profile.launchPerformance.medianMaxReturn, null);
   assert.equal(profile.dataCompleteness.outcomeHistory, false);
   assert.match(profile.reputationEvidence.unknowns.join(' '), /No verified creator launches/);
+  const rendered = renderWalletIntelligence(profile);
+  assert.match(rendered, /Historical analysis\s+<b>Not run/);
+  assert.match(rendered, /Creator history\s+<b>Not established/);
+  assert.doesNotMatch(rendered, /Verified launches\s+<b>0/);
+});
+
+test('completed bounded coverage may truthfully establish verified zero launches', () => {
+  const profile = buildWalletIntelligenceProfile({ walletAddress: wallet, launches: [], shadows: [], flows: [], analysis: {
+    analyzedAt: '2026-08-26T00:00:00Z', fromBlock: '100', toBlock: '50100', launches: [],
+  }, now });
+  assert.equal(profile.coverage.historicalAnalysis, 'COMPLETE');
+  assert.match(renderWalletIntelligence(profile), /Verified launches\s+<b>0/);
+  assert.match(renderWalletIntelligence(profile), /bounded known-PONS-emitter coverage/);
 });
 test('one measured launch uses conservative success, medians, best and worst', () => {
   const profile = buildWalletIntelligenceProfile({ walletAddress: wallet, launches: [launch(1, { max_return_pct: 50 })], shadows: [], flows: [], now });
