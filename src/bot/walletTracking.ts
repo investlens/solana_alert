@@ -28,6 +28,7 @@ import { getContextAccess, requireCapability } from './accessControl.js';
 import { hasCapability } from '../product/capabilities.js';
 import { initializeRobinhoodWalletCursorAtCurrentBlock } from '../chains/robinhood/robinhoodWalletWatcher.js';
 import { getAddress } from 'viem';
+import { getWalletIntelligenceProfile, type WalletIntelligenceProfile } from '../services/walletIntelligenceService.js';
 
 function userId(
   ctx: any,
@@ -83,6 +84,95 @@ function shortAddress(
       -6,
     )
   );
+}
+
+function intelligenceNumber(value: number | null, suffix = ''): string {
+  return value == null ? 'Unknown' : `${value >= 0 ? '+' : ''}${value.toFixed(1)}${suffix}`;
+}
+
+function intelligenceUsd(value: number | null): string | null {
+  if (value == null) return null;
+  return `$${value >= 1_000_000 ? `${(value / 1_000_000).toFixed(2)}M` : value >= 1_000 ? `${(value / 1_000).toFixed(1)}K` : value.toFixed(0)}`;
+}
+
+export function renderWalletIntelligence(profile: WalletIntelligenceProfile): string {
+  const performance = profile.launchPerformance;
+  const behavior = profile.developerBehavior;
+  const lines = [
+    '🧠 <b>ALPHAOS · WALLET INTELLIGENCE</b>', '',
+    `<code>${escapeTelegramHtml(shortAddress(profile.wallet))}</code>`, 'Robinhood', '',
+    '📊 <b>LAUNCH HISTORY</b>',
+    `Verified launches      <b>${profile.launches.total}</b>`,
+    `Last 30d               <b>${profile.launches.recent30d}</b>`,
+    `Severe failures        <b>${performance.severeCrashes}</b>`,
+    `Catastrophic failures  <b>${performance.catastrophicCrashes}</b>`,
+    `Reached $50K           <b>${performance.crossed50k}</b>`,
+    `Reached $100K          <b>${performance.crossed100k}</b>`, '',
+  ];
+  if (performance.measuredLaunches > 0) lines.push(
+    '📈 <b>PERFORMANCE</b>',
+    `Measured launches      <b>${performance.measuredLaunches}</b>`,
+    `Meaningful performance <b>${performance.successfulLaunches}</b>`,
+    `Median 5m              <b>${intelligenceNumber(performance.median5mReturn, '%')}</b>`,
+    `Median 15m             <b>${intelligenceNumber(performance.median15mReturn, '%')}</b>`,
+    `Best observed          <b>${intelligenceNumber(performance.bestLaunch?.maxReturn ?? null, '%')}</b>`, '',
+  );
+  if (profile.dataCompleteness.devFlow) lines.push(
+    '👤 <b>DEVELOPER BEHAVIOR</b>',
+    `Early sells            <b>${behavior.observedEarlySells} launches</b>`,
+    `Burns                  <b>${behavior.launchesWithBurn} launches</b>`,
+    `Transfers              <b>${behavior.observedTransfers} launches</b>`,
+    `Associated wallets     <b>${behavior.associatedWallets.length}</b>`, '',
+  );
+  if (behavior.currentHoldingPercent != null || behavior.verifiedBurnPercent != null) lines.push(
+    '🔎 <b>CURRENT VERIFIED EVIDENCE</b>',
+    ...(behavior.currentHoldingPercent == null ? [] : [`Developer holding      <b>${behavior.currentHoldingPercent.toFixed(2)}%</b>`]),
+    ...(behavior.verifiedBurnPercent == null ? [] : [`Largest verified burn   <b>${behavior.verifiedBurnPercent.toFixed(2)}%</b>`]), '',
+  );
+  if (profile.walletAge.firstObservedAt) lines.push(
+    `<i>First observed by AlphaOS: ${escapeTelegramHtml(profile.walletAge.firstObservedAt)} · ${profile.walletAge.daysActive ?? 0}d</i>`, '',
+  );
+  if (profile.reputationEvidence.negativeSignals.length || profile.reputationEvidence.positiveSignals.length) {
+    lines.push('⚠️ <b>HISTORY</b>');
+    for (const signal of [...profile.reputationEvidence.negativeSignals, ...profile.reputationEvidence.positiveSignals]) lines.push(`• ${escapeTelegramHtml(signal)}`);
+  }
+  if (!profile.launches.total) lines.push('No verified creator launch history is recorded for this wallet.');
+  return lines.join('\n');
+}
+
+export function renderWalletIntelligenceLaunches(profile: WalletIntelligenceProfile): string {
+  const lines = ['📜 <b>DEVELOPER LAUNCHES</b>', ''];
+  if (!profile.launches.tokens.length) lines.push('No verified launches recorded.');
+  for (const [index, launch] of profile.launches.tokens.slice(0, 6).entries()) {
+    const valuations = [
+      intelligenceUsd(launch.initialValuation) ? `Initial ${intelligenceUsd(launch.initialValuation)}` : null,
+      intelligenceUsd(launch.peakValuation) ? `Peak ${intelligenceUsd(launch.peakValuation)}` : null,
+      intelligenceUsd(launch.currentValuation) ? `Current ${intelligenceUsd(launch.currentValuation)}` : null,
+    ].filter(Boolean).join(' · ');
+    lines.push(`${index + 1}. <b>${escapeTelegramHtml(launch.symbol ?? launch.name ?? 'Unknown token')}</b>`,
+      `<code>${escapeTelegramHtml(launch.token)}</code>`,
+      launch.launchedAt ? `Launched ${escapeTelegramHtml(launch.launchedAt)}` : 'Launch time unavailable',
+      ...(launch.launchVersion ? [`Platform ${escapeTelegramHtml(launch.launchVersion)}`] : []),
+      ...(valuations ? [valuations] : []),
+      launch.maxReturn == null ? 'Peak return unavailable' : `Peak ${intelligenceNumber(launch.maxReturn, '%')}`,
+      launch.return15m == null ? '15m return unavailable' : `15m ${intelligenceNumber(launch.return15m, '%')}`,
+      launch.catastrophicCrash ? 'Catastrophic failure evidence' : launch.severeCrash ? 'Severe failure evidence' : 'No severe failure recorded',
+      `Dev sell: ${launch.developerSellObserved ? (launch.firstSellSeconds == null ? 'verified' : `verified at ${Math.round(launch.firstSellSeconds / 60)}m`) : 'none observed'}`,
+      `Dev holding: ${launch.developerHoldingPercent == null ? 'not measured' : `${launch.developerHoldingPercent.toFixed(2)}%`}`,
+      `Burn: ${launch.verifiedBurnPercent == null ? 'not measured' : `${launch.verifiedBurnPercent.toFixed(2)}%`}`, '');
+  }
+  return lines.join('\n');
+}
+
+export function renderWalletIntelligenceLinks(profile: WalletIntelligenceProfile): string {
+  const lines = ['🔗 <b>ASSOCIATED WALLETS</b>', '', '<i>Evidence means verified developer-token transfers; it does not establish ownership.</i>', ''];
+  if (!profile.developerBehavior.associatedWallets.length) lines.push('No repeated developer-transfer counterparties are recorded.');
+  for (const link of profile.developerBehavior.associatedWallets.slice(0, 10)) lines.push(
+    `<code>${escapeTelegramHtml(shortAddress(link.wallet))}</code>`,
+    `Observed across ${link.distinctLaunches} developer launch${link.distinctLaunches === 1 ? '' : 'es'}`,
+    `${link.transferEvents} verified token transfer${link.transferEvents === 1 ? '' : 's'}`, '',
+  );
+  return lines.join('\n');
 }
 
 function isMessageNotModified(error: unknown): boolean {
@@ -186,6 +276,7 @@ async function renderWalletCenter(
         Markup.button.callback('⚡ Activity', `WALLET_ACTIVITY_${wallet.id}`),
       );
     }
+    if (wallet.chain === 'robinhood') row.push(Markup.button.callback('🧠 Intelligence', `WALLET_INTEL_${wallet.id}`));
     row.push(Markup.button.callback('🗑', `WALLET_REMOVE_CONFIRM_${wallet.id}`));
     buttons.push(row);
   }
@@ -789,6 +880,76 @@ registerWalletTracking(
     },
   );
 
+
+  bot.action(
+    /^WALLET_INTEL_(\d+)$/,
+    async ctx => {
+      const telegramId = userId(ctx);
+      if (!telegramId) return;
+      try {
+        const wallet = await getTrackedWalletByIdForUser({ telegramId, id: Number(ctx.match[1]) });
+        if (!wallet || wallet.chain !== 'robinhood') {
+          await ctx.answerCbQuery('Wallet intelligence is currently available for Robinhood wallets only', { show_alert: true });
+          return;
+        }
+        const profile = await getWalletIntelligenceProfile({ walletAddress: wallet.wallet_address, chain: 'robinhood' });
+        await ctx.answerCbQuery();
+        await ctx.reply(renderWalletIntelligence(profile), {
+          parse_mode: 'HTML',
+          reply_markup: Markup.inlineKeyboard([
+            [Markup.button.callback('📜 Launches', `WALLET_INTEL_LAUNCHES_${wallet.id}`), Markup.button.callback('🔗 Associated Wallets', `WALLET_INTEL_LINKS_${wallet.id}`)],
+            [Markup.button.callback('⚡ Activity', `WALLET_ACTIVITY_${wallet.id}`)],
+            [Markup.button.callback('⬅️ Wallets', 'WALLET_TRACKING'), Markup.button.callback('🏠 Home', 'MAIN_MENU')],
+          ]).reply_markup,
+        });
+      } catch (error) {
+        console.error('[WalletTracking] Intelligence failed:', error);
+        await ctx.answerCbQuery('Could not load wallet intelligence', { show_alert: true }).catch(() => {});
+      }
+    },
+  );
+
+  bot.action(
+    /^WALLET_INTEL_LAUNCHES_(\d+)$/,
+    async ctx => {
+      const telegramId = userId(ctx);
+      if (!telegramId) return;
+      try {
+        const wallet = await getTrackedWalletByIdForUser({ telegramId, id: Number(ctx.match[1]) });
+        if (!wallet || wallet.chain !== 'robinhood') return void await ctx.answerCbQuery('Robinhood wallet not found', { show_alert: true });
+        const profile = await getWalletIntelligenceProfile({ walletAddress: wallet.wallet_address, chain: 'robinhood' });
+        await ctx.answerCbQuery();
+        await ctx.reply(renderWalletIntelligenceLaunches(profile), { parse_mode: 'HTML', reply_markup: Markup.inlineKeyboard([
+          [Markup.button.callback('🧠 Summary', `WALLET_INTEL_${wallet.id}`), Markup.button.callback('🔗 Associated Wallets', `WALLET_INTEL_LINKS_${wallet.id}`)],
+          [Markup.button.callback('⬅️ Wallets', 'WALLET_TRACKING'), Markup.button.callback('🏠 Home', 'MAIN_MENU')],
+        ]).reply_markup });
+      } catch (error) {
+        console.error('[WalletTracking] Intelligence launches failed:', error);
+        await ctx.answerCbQuery('Could not load launch history', { show_alert: true }).catch(() => {});
+      }
+    },
+  );
+
+  bot.action(
+    /^WALLET_INTEL_LINKS_(\d+)$/,
+    async ctx => {
+      const telegramId = userId(ctx);
+      if (!telegramId) return;
+      try {
+        const wallet = await getTrackedWalletByIdForUser({ telegramId, id: Number(ctx.match[1]) });
+        if (!wallet || wallet.chain !== 'robinhood') return void await ctx.answerCbQuery('Robinhood wallet not found', { show_alert: true });
+        const profile = await getWalletIntelligenceProfile({ walletAddress: wallet.wallet_address, chain: 'robinhood' });
+        await ctx.answerCbQuery();
+        await ctx.reply(renderWalletIntelligenceLinks(profile), { parse_mode: 'HTML', reply_markup: Markup.inlineKeyboard([
+          [Markup.button.callback('🧠 Summary', `WALLET_INTEL_${wallet.id}`), Markup.button.callback('📜 Launches', `WALLET_INTEL_LAUNCHES_${wallet.id}`)],
+          [Markup.button.callback('⬅️ Wallets', 'WALLET_TRACKING'), Markup.button.callback('🏠 Home', 'MAIN_MENU')],
+        ]).reply_markup });
+      } catch (error) {
+        console.error('[WalletTracking] Intelligence links failed:', error);
+        await ctx.answerCbQuery('Could not load associated wallets', { show_alert: true }).catch(() => {});
+      }
+    },
+  );
 
   bot.action(
     /^WALLET_ACTIVITY_(\d+)$/,
