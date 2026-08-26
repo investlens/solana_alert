@@ -36,6 +36,15 @@ test('wallet intelligence keeps empty history factual and unknown', () => {
   assert.doesNotMatch(rendered, /Verified launches\s+<b>0/);
 });
 
+test('wallet intelligence clearly identifies the tracked wallet name and escapes it', () => {
+  const profile = buildWalletIntelligenceProfile({ walletAddress: wallet, launches: [], shadows: [], flows: [], now });
+  const named = renderWalletIntelligence(profile, '<Main Whale>');
+  assert.match(named, /WALLET NAME/);
+  assert.match(named, /&lt;Main Whale&gt;/);
+  assert.doesNotMatch(named, /<Main Whale>/);
+  assert.match(renderWalletIntelligence(profile), /Unnamed wallet/);
+});
+
 test('completed bounded coverage may truthfully establish verified zero launches', () => {
   const profile = buildWalletIntelligenceProfile({ walletAddress: wallet, launches: [], shadows: [], flows: [], analysis: {
     analyzedAt: '2026-08-26T00:00:00Z', fromBlock: '100', toBlock: '50100', launchSources: ['PONS_V1', 'PONS_V2'], launches: [],

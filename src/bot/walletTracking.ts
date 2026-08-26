@@ -118,11 +118,13 @@ function intelligenceUsd(value: number | null): string | null {
   return `$${value >= 1_000_000 ? `${(value / 1_000_000).toFixed(2)}M` : value >= 1_000 ? `${(value / 1_000).toFixed(1)}K` : value.toFixed(0)}`;
 }
 
-export function renderWalletIntelligence(profile: WalletIntelligenceProfile): string {
+export function renderWalletIntelligence(profile: WalletIntelligenceProfile, walletName: string | null = null): string {
   const performance = profile.launchPerformance;
   const behavior = profile.developerBehavior;
   const lines = [
     '🧠 <b>ALPHAOS · WALLET INTELLIGENCE</b>', '',
+    '🏷 <b>WALLET NAME</b>',
+    `<b>${escapeTelegramHtml(walletName?.trim().slice(0, 64) || 'Unnamed wallet')}</b>`, '',
     `<code>${escapeTelegramHtml(shortAddress(profile.wallet))}</code>`, 'Robinhood', '',
     '📊 <b>ALPHAOS COVERAGE</b>',
     `First observed         <b>${profile.walletAge.firstObservedAt ? humanAge(profile.walletAge.firstObservedAt) : 'Unknown'}</b>`,
@@ -970,7 +972,7 @@ registerWalletTracking(
         }
         const profile = await getWalletIntelligenceProfile({ walletAddress: wallet.wallet_address, chain: 'robinhood' });
         await ctx.answerCbQuery();
-        await ctx.reply(renderWalletIntelligence(profile), {
+        await ctx.reply(renderWalletIntelligence(profile, wallet.label), {
           parse_mode: 'HTML',
           reply_markup: Markup.inlineKeyboard([
             [Markup.button.callback('🔍 Analyze Wallet', `WALLET_INTEL_ANALYZE_${wallet.id}`)],
@@ -1028,7 +1030,7 @@ registerWalletTracking(
           await ctx.reply('Could not load wallet intelligence.').catch(sendError => console.error('[WalletAnalysis]', { event: 'TELEGRAM_SEND_FAILED', ...diagnostics, resultStatus: 'PROFILE_FAILED' }));
           return;
         }
-        await ctx.reply(renderWalletIntelligence(profile), { parse_mode: 'HTML', reply_markup: Markup.inlineKeyboard([
+        await ctx.reply(renderWalletIntelligence(profile, wallet.label), { parse_mode: 'HTML', reply_markup: Markup.inlineKeyboard([
           [Markup.button.callback('📜 Launches', `WALLET_INTEL_LAUNCHES_${wallet.id}`), Markup.button.callback('🔗 Associated Wallets', `WALLET_INTEL_LINKS_${wallet.id}`)],
           [Markup.button.callback('⚡ Activity', `WALLET_ACTIVITY_${wallet.id}`)],
           [Markup.button.callback('⬅️ Wallets', 'WALLET_TRACKING'), Markup.button.callback('🏠 Home', 'MAIN_MENU')],
