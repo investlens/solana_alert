@@ -8,6 +8,7 @@ import { getAddress } from 'viem';
 import {
   classifyRobinhoodWalletTransaction,
   eventIsAfterWalletCursor,
+  walletCursorRecoveryDecision,
   walletsEligibleForCheckpoint,
 } from '../src/chains/robinhood/robinhoodWalletWatcher.js';
 import { PONS_CONTRACTS } from '../src/chains/robinhood/ponsContracts.js';
@@ -78,6 +79,35 @@ test('real AAA purchase fixture is BUY only because native value corroborates th
     transfers: [{ token: aaa, from: settler, to: wallet, value: amount }],
   });
   assert.equal(transferOnly?.kind, 'receive');
+});
+
+test('real STONKATM transaction pattern remains BUY and a recent lag catches up instead of rebasing', () => {
+  const stonkatm = getAddress('0x5571E3b04487438847566a54B59b940e6668A8c6');
+  const purchase = classifyRobinhoodWalletTransaction(wallet, {
+    hash: '0x39c784e648cf05e918570862a3401a0a827325a914d60ec75428fdb27875cba1',
+    from: wallet,
+    value: 20_000_000_000_000_000n,
+    transfers: [{ token: stonkatm, from: other, to: wallet, value: 478_622_728_744_972_325_101_814n }],
+  });
+  assert.deepEqual(purchase, {
+    kind: 'buy', token: stonkatm, amountRaw: 478_622_728_744_972_325_101_814n,
+    evidence: 'Token received with verified native transaction value',
+  });
+  const decision = walletCursorRecoveryDecision({
+    cursor: 46_699_999n, chainHead: 46_719_907n, unresolvedDeliveries: 0,
+    cursorUpdatedAt: new Date('2026-08-24T14:59:00Z'), now: new Date('2026-08-24T15:01:00Z'),
+  });
+  assert.equal(decision.health, 'CATCHING_UP');
+  assert.equal(decision.rebase, false);
+  assert.ok(46_700_244n >= 46_700_000n && 46_700_244n <= 46_700_249n);
+});
+
+test('cursor health distinguishes current, catching up, abandoned and unresolved states', () => {
+  const now = new Date('2026-08-26T00:00:00Z');
+  assert.equal(walletCursorRecoveryDecision({ cursor: 1_000n, chainHead: 1_000n, unresolvedDeliveries: 0, now }).health, 'HEALTHY');
+  assert.equal(walletCursorRecoveryDecision({ cursor: 900n, chainHead: 1_000n, unresolvedDeliveries: 0, cursorUpdatedAt: now, now }).health, 'CATCHING_UP');
+  assert.equal(walletCursorRecoveryDecision({ cursor: 1n, chainHead: 200_000n, unresolvedDeliveries: 0, cursorUpdatedAt: new Date('2026-08-24T00:00:00Z'), now }).health, 'STALE');
+  assert.equal(walletCursorRecoveryDecision({ cursor: 1n, chainHead: 200_000n, unresolvedDeliveries: 1, cursorUpdatedAt: new Date('2026-08-24T00:00:00Z'), now }).health, 'BLOCKED');
 });
 
 test('simple inbound and outbound transfers remain neutral', () => {

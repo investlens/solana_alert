@@ -77,15 +77,15 @@ test('semantic events, health diagnostic and PAPER scaffold are durable and non-
 
 test('exact large stale cursor rebases without replay when no delivery is unresolved', async () => {
   const { walletCursorRecoveryDecision } = await import('../src/chains/robinhood/robinhoodWalletWatcher.js');
-  const decision = walletCursorRecoveryDecision({ cursor: 44_538_502n, chainHead: 45_026_686n, unresolvedDeliveries: 0 });
+  const decision = walletCursorRecoveryDecision({ cursor: 44_538_502n, chainHead: 45_026_686n, unresolvedDeliveries: 0, cursorUpdatedAt: new Date('2026-08-20T00:00:00Z'), now: new Date('2026-08-24T00:00:00Z') });
   assert.equal(decision.lag, 488_184n); assert.equal(decision.rebase, true); assert.equal(decision.health, 'STALE');
 });
 test('unresolved delivery prevents unsafe rebase and per-wallet checkpoints prevent starvation', async () => {
   const { walletCursorRecoveryDecision } = await import('../src/chains/robinhood/robinhoodWalletWatcher.js');
   assert.equal(walletCursorRecoveryDecision({ cursor: 1n, chainHead: 500_000n, unresolvedDeliveries: 1 }).health, 'BLOCKED');
   const source = await readFile(new URL('../src/chains/robinhood/robinhoodWalletWatcher.ts', import.meta.url), 'utf8');
-  assert.match(source, /for \(const wallet of existingWallets\)/); assert.match(source, /checkpointBlocks\.set\(key, toBlock\)/);
-  assert.match(source, /Rebased stale cursor without historical replay/);
+  assert.match(source, /for \(const wallet of pending\)/); assert.match(source, /checkpointBlocks\.set\(key, toBlock\)/);
+  assert.match(source, /Rebased abandoned cursor without historical replay/);
 });
 test('persisted confirmation needs a later observation before RUNNER', async () => {
   const { nextPonsRuntimeIntelligenceState } = await import('../src/chains/robinhood/ponsShadowOutcomeTracker.js');

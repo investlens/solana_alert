@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { robinhoodPublicClient } from '../src/chains/robinhood/rpc.js';
+import { walletCursorRecoveryDecision } from '../src/chains/robinhood/robinhoodWalletWatcher.js';
 import { supabase } from '../src/services/supabase.js';
 
 const [walletsResult, cursorsResult, deliveriesResult] = await Promise.all([
@@ -21,7 +22,14 @@ for (const wallet of wallets) {
   if (lag != null) cursorLags.push(lag);
   const activity = deliveries.find(row => String(row.wallet_address).toLowerCase() === String(wallet.wallet_address).toLowerCase());
   const unresolved = deliveries.filter(row => String(row.wallet_address).toLowerCase() === String(wallet.wallet_address).toLowerCase() && (row.metadata as Record<string, unknown> | null)?.state === 'RESERVED').length;
-  const health = !wallet.is_active ? 'PAUSED' : unresolved > 0 ? 'BLOCKED' : lag == null ? 'STALE' : lag <= 500n ? 'HEALTHY' : 'STALE';
+  const health = !wallet.is_active
+    ? 'PAUSED'
+    : lag == null
+      ? 'STALE'
+      : walletCursorRecoveryDecision({
+        cursor: BigInt(cursor.last_processed_block), chainHead: robinhoodHead!, unresolvedDeliveries: unresolved,
+        cursorUpdatedAt: new Date(String(cursor.updated_at)),
+      }).health;
   healthStates.push(health);
   console.log(`- network=${wallet.chain} wallet=${String(wallet.wallet_address).slice(0, 8)}… active=${wallet.is_active} alerts=${wallet.alerts_enabled} head=${wallet.chain === 'robinhood' ? robinhoodHead ?? 'unavailable' : 'unsupported'} cursor=${cursor?.last_processed_block ?? 'unavailable'} lag=${lag ?? 'unavailable'} health=${health} walletCreated=${wallet.created_at ?? 'unknown'} cursorCreated=${cursor?.created_at ?? 'unknown'} lastCheckpoint=${cursor?.updated_at ?? 'none'} lastDetected=${activity?.created_at ?? 'none'} lastDelivered=${activity?.delivered_at ?? 'none'} unresolved=${unresolved}`);
 }
@@ -31,5 +39,5 @@ const cursorFresh = cursors.filter(row => Date.now() - Date.parse(String(row.upd
 const maximumLag = cursorLags.length ? cursorLags.reduce((maximum, lag) => lag > maximum ? lag : maximum, 0n) : null;
 const lagHealthy = maximumLag != null && maximumLag <= 500n;
 console.log('\nDELIVERY STATE'); console.log(`- reserved: ${reserved.length}`); console.log(`- failed: ${failed.length}`);
-const overall = healthStates.includes('BLOCKED') ? 'BLOCKED' : healthStates.includes('STALE') ? 'DEGRADED' : robinhoodHead == null ? 'UNKNOWN' : 'HEALTHY';
+const overall = healthStates.includes('BLOCKED') ? 'BLOCKED' : healthStates.includes('STALE') ? 'DEGRADED' : healthStates.includes('CATCHING_UP') ? 'CATCHING_UP' : robinhoodHead == null ? 'UNKNOWN' : 'HEALTHY';
 console.log('\nPOLLING'); console.log(`- Robinhood RPC: ${robinhoodHead == null ? 'UNAVAILABLE' : 'OK'}`); console.log(`- fresh cursors (<5m): ${cursorFresh}/${cursors.length}`); console.log(`- maximum block lag: ${maximumLag ?? 'unavailable'}`); console.log(`- low-lag target met: ${lagHealthy ? 'YES' : 'NO'}`); console.log(`- overall status: ${overall}`);

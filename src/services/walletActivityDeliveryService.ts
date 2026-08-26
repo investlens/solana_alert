@@ -465,6 +465,17 @@ deliverTrackedWalletActivity(
           });
 
         if (!leaseToken) {
+          const { data: existing, error: existingError } = await supabase
+            .from('wallet_activity_deliveries')
+            .select('metadata,delivered_at')
+            .eq('telegram_id', subscriber.telegram_id)
+            .ilike('wallet_address', event.wallet)
+            .eq('transaction_signature', event.signature)
+            .maybeSingle();
+          if (existingError) throw existingError;
+          const state = (existing?.metadata as Record<string, unknown> | null)?.state;
+          // A completed idempotency hit is safe. A live/lost reservation must hold the range for retry.
+          if (state !== 'DELIVERED' || !existing?.delivered_at) failedWallets.add(event.wallet.toLowerCase());
           continue;
         }
 
