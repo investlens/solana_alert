@@ -4,7 +4,8 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import { buildWalletIntelligenceProfile, launchHasMeaningfulPerformance, median } from '../src/services/walletIntelligenceService.js';
-import { renderWalletIntelligence, renderWalletIntelligenceLaunches, renderWalletIntelligenceLinks } from '../src/bot/walletTracking.js';
+import { renderWalletAnalysisIncomplete, renderWalletIntelligence, renderWalletIntelligenceLaunches, renderWalletIntelligenceLinks, withWalletAnalysisGuard } from '../src/bot/walletTracking.js';
+import { analyzeRobinhoodWallet, walletAnalysisCacheIsFresh, type HistoricalWalletAnalysis } from '../src/services/walletHistoricalAnalysisService.js';
 
 const wallet = '0xf435ac1926e21d47bfe0916bd1f15c22ca6ceb4b';
 const linked = '0x1111111111111111111111111111111111111111';
@@ -37,11 +38,62 @@ test('wallet intelligence keeps empty history factual and unknown', () => {
 
 test('completed bounded coverage may truthfully establish verified zero launches', () => {
   const profile = buildWalletIntelligenceProfile({ walletAddress: wallet, launches: [], shadows: [], flows: [], analysis: {
-    analyzedAt: '2026-08-26T00:00:00Z', fromBlock: '100', toBlock: '50100', launches: [],
+    analyzedAt: '2026-08-26T00:00:00Z', fromBlock: '100', toBlock: '50100', launchSources: ['PONS_V1', 'PONS_V2'], launches: [],
   }, now });
   assert.equal(profile.coverage.historicalAnalysis, 'COMPLETE');
-  assert.match(renderWalletIntelligence(profile), /Verified launches\s+<b>0/);
-  assert.match(renderWalletIntelligence(profile), /bounded known-PONS-emitter coverage/);
+  const rendered = renderWalletIntelligence(profile);
+  assert.match(rendered, /No verified PONS launches found/);
+  assert.match(rendered, /Coverage\s+Last 50,000 blocks/);
+  assert.match(rendered, /Sources\s+PONS V1 · PONS V2/);
+  assert.doesNotMatch(rendered, /Verified launches|Severe failures|Catastrophic failures|Reached \$50K|Reached \$100K/);
+});
+
+test('expired COMPLETE is historical and a failed fresh scan cannot become zero or overwrite it', async () => {
+  const previous: HistoricalWalletAnalysis = { status: 'COMPLETE', analyzedAt: '2026-08-24T00:00:00Z', fromBlock: '1', toBlock: '50000',
+    coverage: 'KNOWN_PONS_EMITTERS_BOUNDED', launchSources: ['PONS_V1', 'PONS_V2'], launches: [] };
+  assert.equal(walletAnalysisCacheIsFresh(previous.analyzedAt, now.getTime()), false);
+  let writes = 0;
+  const result = await analyzeRobinhoodWallet(wallet, { now, diagnostics: { invocationId: 'inv-expired-failure' },
+    cache: { read: async () => ({ status: 'COMPLETE', result: previous, analyzed_at: previous.analyzedAt }), write: async () => { writes += 1; } },
+    rpc: { getBlockNumber: async () => 100_000n, getLogs: async () => { throw new Error('RPC timeout'); }, getBlock: async () => ({ timestamp: 0n }) } as any });
+  assert.equal(result.status, 'FAILED');
+  assert.equal(result.source, 'FRESH');
+  assert.equal(result.errorStage, 'GET_LOGS');
+  assert.equal(result.launchesFound, null);
+  assert.equal(writes, 0);
+  assert.doesNotMatch(renderWalletAnalysisIncomplete(), /Verified launches|0 verified/);
+});
+
+test('duplicate Analyze guard runs one invocation and reports the concurrent attempt', async () => {
+  let starts = 0; let duplicates = 0; let release!: () => void;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  const first = withWalletAnalysisGuard('42:7', async () => { duplicates += 1; }, async () => { starts += 1; await blocked; });
+  const second = withWalletAnalysisGuard('42:7', async () => { duplicates += 1; }, async () => { starts += 1; });
+  await second; release(); await first;
+  assert.equal(starts, 1); assert.equal(duplicates, 1);
+});
+
+test('Analyze diagnostics carry the invocation correlation ID', async () => {
+  const cached: HistoricalWalletAnalysis = { status: 'COMPLETE', analyzedAt: now.toISOString(), fromBlock: '1', toBlock: '50000',
+    coverage: 'KNOWN_PONS_EMITTERS_BOUNDED', launchSources: ['PONS_V1', 'PONS_V2'], launches: [] };
+  const records: unknown[] = [];
+  const original = console.log;
+  console.log = (...args: unknown[]) => { if (args[0] === '[WalletAnalysis]') records.push(args[1]); };
+  try {
+    const result = await analyzeRobinhoodWallet(wallet, { now, diagnostics: { invocationId: 'inv-correlation-1', telegramId: '42', walletId: 7 },
+      cache: { read: async () => ({ status: 'COMPLETE', result: cached, analyzed_at: cached.analyzedAt }), write: async () => assert.fail('cache hit must not write') } });
+    assert.equal(result.status, 'COMPLETE'); assert.equal(result.source, 'CACHE');
+  } finally { console.log = original; }
+  assert.ok(records.length >= 3);
+  assert.ok(records.every(record => (record as Record<string, unknown>).invocationId === 'inv-correlation-1'));
+});
+
+test('Analyze error boundaries keep profile and Telegram failures distinct from analysis failure', async () => {
+  const source = await readFile(new URL('../src/bot/walletTracking.ts', import.meta.url), 'utf8');
+  assert.match(source, /event: 'PROFILE_FAILED'/);
+  assert.match(source, /event: 'TELEGRAM_SEND_FAILED'/);
+  assert.match(source, /Wallet analysis is already running/);
+  assert.doesNotMatch(source, /Analyze wallet failed:[\s\S]{0,200}Wallet analysis could not be completed/);
 });
 test('one measured launch uses conservative success, medians, best and worst', () => {
   const profile = buildWalletIntelligenceProfile({ walletAddress: wallet, launches: [launch(1, { max_return_pct: 50 })], shadows: [], flows: [], now });

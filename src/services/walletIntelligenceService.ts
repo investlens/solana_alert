@@ -1,4 +1,5 @@
 import { supabase } from './supabase.js';
+import { walletAnalysisCacheIsFresh, type HistoricalWalletAnalysis, type WalletAnalysisInvocationResult } from './walletHistoricalAnalysisService.js';
 
 export type AssociatedWalletEvidence = {
   wallet: string;
@@ -20,7 +21,8 @@ export type LaunchSummary = {
 
 export type WalletIntelligenceProfile = {
   wallet: string; chain: 'robinhood';
-  coverage: { historicalAnalysis: 'NOT_RUN' | 'COMPLETE'; analyzedAt: string | null; fromBlock: string | null; toBlock: string | null; activitiesRecorded: number };
+  coverage: { historicalAnalysis: 'NOT_RUN' | 'COMPLETE' | 'EXPIRED' | 'FAILED'; analyzedAt: string | null; fromBlock: string | null; toBlock: string | null;
+    sourcesChecked: string[]; activitiesRecorded: number };
   walletAge: { firstObservedAt: string | null; daysActive: number | null; source: string | null };
   launches: { total: number; recent30d: number; recent7d: number; tokens: LaunchSummary[] };
   launchPerformance: {
@@ -71,7 +73,8 @@ export function launchHasMeaningfulPerformance(launch: LaunchSummary): boolean {
 
 export function buildWalletIntelligenceProfile(args: {
   walletAddress: string; launches: LaunchRow[]; shadows: ShadowRow[]; flows: FlowRow[];
-  walletActivityObservedAt?: string[]; activitiesRecorded?: number; analysis?: Record<string, unknown> | null; now?: Date;
+  walletActivityObservedAt?: string[]; activitiesRecorded?: number; analysis?: Record<string, unknown> | null;
+  analysisState?: 'NOT_RUN' | 'COMPLETE' | 'EXPIRED' | 'FAILED'; now?: Date;
 }): WalletIntelligenceProfile {
   const wallet = args.walletAddress.toLowerCase();
   const shadowByToken = new Map(args.shadows.map(row => [lower(row.token_address), row]));
@@ -169,11 +172,16 @@ export function buildWalletIntelligenceProfile(args: {
   const countMilestone = (value: number) => launches.filter(launch => launch.milestones.includes(value)).length;
   const byMax = launches.filter(launch => launch.maxReturn != null).sort((a, b) => b.maxReturn! - a.maxReturn!);
 
+  const inferredAnalysisState = args.analysisState ?? (args.analysis
+    ? walletAnalysisCacheIsFresh(args.analysis.analyzedAt, now.getTime()) ? 'COMPLETE' : 'EXPIRED'
+    : 'NOT_RUN');
   return {
     wallet, chain: 'robinhood',
     coverage: {
-      historicalAnalysis: args.analysis ? 'COMPLETE' : 'NOT_RUN', analyzedAt: text(args.analysis?.analyzedAt),
-      fromBlock: text(args.analysis?.fromBlock), toBlock: text(args.analysis?.toBlock), activitiesRecorded: args.activitiesRecorded ?? (args.walletActivityObservedAt?.length ?? 0),
+      historicalAnalysis: inferredAnalysisState, analyzedAt: text(args.analysis?.analyzedAt),
+      fromBlock: text(args.analysis?.fromBlock), toBlock: text(args.analysis?.toBlock),
+      sourcesChecked: Array.isArray(args.analysis?.launchSources) ? args.analysis.launchSources.map(String) : [],
+      activitiesRecorded: args.activitiesRecorded ?? (args.walletActivityObservedAt?.length ?? 0),
     },
     walletAge: { firstObservedAt: first?.at ?? null, daysActive: first ? Math.max(0, Math.floor((now.getTime() - Date.parse(first.at)) / 86_400_000)) : null, source: first?.source ?? null },
     launches: { total: launches.length, recent30d: launches.filter(row => row.launchedAt && now.getTime() - Date.parse(row.launchedAt) <= 30 * 86_400_000).length, recent7d: launches.filter(row => row.launchedAt && now.getTime() - Date.parse(row.launchedAt) <= 7 * 86_400_000).length, tokens: launches },
@@ -192,18 +200,25 @@ export function buildWalletIntelligenceProfile(args: {
   };
 }
 
-export async function getWalletIntelligenceProfile(args: { walletAddress: string; chain: 'robinhood' }): Promise<WalletIntelligenceProfile> {
+export async function getWalletIntelligenceProfile(args: { walletAddress: string; chain: 'robinhood'; invocation?: WalletAnalysisInvocationResult }): Promise<WalletIntelligenceProfile> {
   const wallet = args.walletAddress.toLowerCase();
   const [launchResult, analysisResult, activityCountResult] = await Promise.all([
     supabase.from('creator_launches').select('*').eq('chain', 'robinhood').ilike('creator_wallet', wallet).order('launched_at', { ascending: false }).limit(100),
-    supabase.from('wallet_intelligence_analyses').select('result').eq('chain', 'robinhood').eq('wallet_address', wallet).eq('status', 'COMPLETE').maybeSingle(),
+    args.invocation ? Promise.resolve({ data: null, error: null })
+      : supabase.from('wallet_intelligence_analyses').select('status,result,analyzed_at').eq('chain', 'robinhood').eq('wallet_address', wallet).maybeSingle(),
     supabase.from('wallet_activity_deliveries').select('id', { count: 'exact', head: true }).ilike('wallet_address', wallet),
   ]);
   const { data: launches, error: launchError } = launchResult;
   if (launchError) throw launchError;
   if (analysisResult.error) throw analysisResult.error;
   if (activityCountResult.error) throw activityCountResult.error;
-  const analysis = (analysisResult.data?.result as Record<string, unknown> | null) ?? null;
+  const storedAnalysis = analysisResult.data?.status === 'COMPLETE' ? (analysisResult.data.result as HistoricalWalletAnalysis) : null;
+  const invocationAnalysis = args.invocation?.status === 'COMPLETE' ? args.invocation.analysis ?? null : null;
+  const analysis = (invocationAnalysis ?? storedAnalysis) as Record<string, unknown> | null;
+  const analysisState = args.invocation
+    ? args.invocation.status
+    : storedAnalysis ? walletAnalysisCacheIsFresh(analysisResult.data?.analyzed_at) ? 'COMPLETE' : 'EXPIRED'
+      : analysisResult.data?.status === 'FAILED' ? 'FAILED' : 'NOT_RUN';
   const discovered = Array.isArray(analysis?.launches) ? analysis.launches as Array<Record<string, unknown>> : [];
   const mergedLaunches = [...(launches ?? [])];
   const known = new Set(mergedLaunches.map(row => lower(row.token)));
@@ -218,5 +233,5 @@ export async function getWalletIntelligenceProfile(args: { walletAddress: string
   if (shadowResult.error) throw shadowResult.error;
   if (flowResult.error) throw flowResult.error;
   if (activityResult.error) throw activityResult.error;
-  return buildWalletIntelligenceProfile({ walletAddress: wallet, launches: mergedLaunches, shadows: (shadowResult.data ?? []).filter(row => tokenSet.has(lower(row.token_address))), flows: (flowResult.data ?? []).filter(row => tokenSet.has(lower(row.asset_id))), walletActivityObservedAt: (activityResult.data ?? []).map(row => String(row.created_at)), activitiesRecorded: activityCountResult.count ?? 0, analysis });
+  return buildWalletIntelligenceProfile({ walletAddress: wallet, launches: mergedLaunches, shadows: (shadowResult.data ?? []).filter(row => tokenSet.has(lower(row.token_address))), flows: (flowResult.data ?? []).filter(row => tokenSet.has(lower(row.asset_id))), walletActivityObservedAt: (activityResult.data ?? []).map(row => String(row.created_at)), activitiesRecorded: activityCountResult.count ?? 0, analysis, analysisState });
 }

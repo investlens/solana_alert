@@ -33,6 +33,25 @@ import { getWalletIntelligenceProfile, type WalletIntelligenceProfile } from '..
 import { activityTokenLabel, formatActivityAmount, humanAge, normalizeWalletActivityRow, shortWalletValue, type WalletActivityView } from '../services/walletActivityPresentation.js';
 import { resolveTokenOpenTarget } from '../core/tokenOpenRouter.js';
 import { analyzeRobinhoodWallet } from '../services/walletHistoricalAnalysisService.js';
+import { randomUUID } from 'node:crypto';
+
+const walletAnalysesInFlight = new Set<string>();
+
+export function walletAnalysisGuardKey(telegramId: string, walletId: number): string {
+  return `${telegramId}:${walletId}`;
+}
+
+export async function withWalletAnalysisGuard<T>(key: string, alreadyRunning: () => Promise<T>, run: () => Promise<T>): Promise<T> {
+  if (walletAnalysesInFlight.has(key)) return alreadyRunning();
+  walletAnalysesInFlight.add(key);
+  try { return await run(); } finally { walletAnalysesInFlight.delete(key); }
+}
+
+export function renderWalletAnalysisIncomplete(): string {
+  return ['⚠️ <b>WALLET ANALYSIS INCOMPLETE</b>', '', 'Historical scan could not be completed.',
+    'Existing monitoring and alerts were not changed.', '', 'Previous historical coverage may exist,',
+    'but this analysis attempt was not completed.'].join('\n');
+}
 
 function userId(
   ctx: any,
@@ -108,17 +127,28 @@ export function renderWalletIntelligence(profile: WalletIntelligenceProfile): st
     '📊 <b>ALPHAOS COVERAGE</b>',
     `First observed         <b>${profile.walletAge.firstObservedAt ? humanAge(profile.walletAge.firstObservedAt) : 'Unknown'}</b>`,
     `Activities recorded    <b>${profile.coverage.activitiesRecorded}</b>`,
-    `Historical analysis   <b>${profile.coverage.historicalAnalysis === 'COMPLETE' ? 'Bounded scan complete' : 'Not run'}</b>`, '',
+    `Historical analysis   <b>${profile.coverage.historicalAnalysis === 'COMPLETE' ? 'COMPLETE' : profile.coverage.historicalAnalysis === 'EXPIRED' ? 'Expired historical coverage' : profile.coverage.historicalAnalysis === 'FAILED' ? 'Incomplete' : 'Not run'}</b>`, '',
   ];
+  if (profile.coverage.historicalAnalysis === 'COMPLETE' && profile.launches.total === 0) {
+    lines.push('🚀 <b>LAUNCH HISTORY</b>', '', 'No verified PONS launches found.', '',
+      'Coverage      Last 50,000 blocks', 'Sources       PONS V1 · PONS V2');
+    return lines.join('\n');
+  }
   if (profile.coverage.historicalAnalysis === 'COMPLETE' || profile.launches.total > 0) lines.push(
     '🚀 <b>LAUNCH HISTORY</b>',
     `Verified launches      <b>${profile.launches.total}</b>`,
     `Last 30d               <b>${profile.launches.recent30d}</b>`,
-    `Severe failures        <b>${performance.measuredLaunches ? performance.severeCrashes : 'Unknown'}</b>`,
-    `Catastrophic failures  <b>${performance.measuredLaunches ? performance.catastrophicCrashes : 'Unknown'}</b>`,
-    `Reached $50K           <b>${performance.measuredLaunches ? performance.crossed50k : 'Unknown'}</b>`,
-    `Reached $100K          <b>${performance.measuredLaunches ? performance.crossed100k : 'Unknown'}</b>`, '',
-  ); else lines.push('🚀 <b>LAUNCH HISTORY</b>', 'Creator history      <b>Not established</b>', '',
+    'Coverage               <b>50,000 blocks</b>',
+    'Sources                <b>PONS V1 · PONS V2</b>',
+    ...(performance.measuredLaunches ? [
+      `Severe failures        <b>${performance.severeCrashes}</b>`,
+      `Catastrophic failures  <b>${performance.catastrophicCrashes}</b>`,
+      `Reached $50K           <b>${performance.crossed50k}</b>`,
+      `Reached $100K          <b>${performance.crossed100k}</b>`,
+    ] : []), '',
+  ); else if (profile.coverage.historicalAnalysis === 'EXPIRED') lines.push('🚀 <b>LAUNCH HISTORY</b>',
+    'Previous bounded coverage has expired.', 'Run Analyze Wallet for current bounded coverage.', '');
+  else lines.push('🚀 <b>LAUNCH HISTORY</b>', 'Creator history      <b>Not established</b>', '',
     '<i>Historical on-chain discovery has not yet been performed for this wallet.</i>', '');
   if (performance.measuredLaunches > 0) lines.push(
     '📈 <b>PERFORMANCE</b>',
@@ -145,7 +175,6 @@ export function renderWalletIntelligence(profile: WalletIntelligenceProfile): st
     lines.push('⚠️ <b>HISTORY</b>');
     for (const signal of [...profile.reputationEvidence.negativeSignals, ...profile.reputationEvidence.positiveSignals]) lines.push(`• ${escapeTelegramHtml(signal)}`);
   }
-  if (!profile.launches.total && profile.coverage.historicalAnalysis === 'COMPLETE') lines.push('No verified launches were found within the bounded known-PONS-emitter coverage.');
   return lines.join('\n');
 }
 
@@ -962,21 +991,49 @@ registerWalletTracking(
     async ctx => {
       const telegramId = userId(ctx);
       if (!telegramId) return;
-      try {
-        const wallet = await getTrackedWalletByIdForUser({ telegramId, id: Number(ctx.match[1]) });
+      const walletId = Number(ctx.match[1]);
+      const guardKey = walletAnalysisGuardKey(telegramId, walletId);
+      return withWalletAnalysisGuard(guardKey, async () => {
+        await ctx.answerCbQuery('Wallet analysis is already running.').catch(() => {});
+      }, async () => {
+        const invocationId = randomUUID();
+        let wallet;
+        try { wallet = await getTrackedWalletByIdForUser({ telegramId, id: walletId }); }
+        catch (error) {
+          console.error('[WalletAnalysis]', { event: 'WALLET_LOOKUP_FAILED', invocationId, telegramId, walletId, updateId: ctx.update?.update_id, callbackQueryId: ctx.callbackQuery?.id });
+          await ctx.answerCbQuery('Could not load wallet intelligence', { show_alert: true }).catch(() => {});
+          return;
+        }
         if (!wallet || wallet.chain !== 'robinhood') return void await ctx.answerCbQuery('Analyze Wallet is available for Robinhood wallets only', { show_alert: true });
         await ctx.answerCbQuery('Running bounded read-only analysis…');
-        await analyzeRobinhoodWallet(wallet.wallet_address);
-        const profile = await getWalletIntelligenceProfile({ walletAddress: wallet.wallet_address, chain: 'robinhood' });
+        const diagnostics = { invocationId, telegramId, walletId, updateId: ctx.update?.update_id, callbackQueryId: ctx.callbackQuery?.id,
+          walletShort: shortAddress(wallet.wallet_address) };
+        let invocation;
+        try { invocation = await analyzeRobinhoodWallet(wallet.wallet_address, { diagnostics }); }
+        catch (error) {
+          console.error('[WalletAnalysis]', { event: 'EXECUTION_FAILED', ...diagnostics, failureReason: 'Unexpected analysis failure' });
+          invocation = null;
+        }
+        if (!invocation || invocation.status === 'FAILED') {
+          await ctx.reply(renderWalletAnalysisIncomplete(), { parse_mode: 'HTML', reply_markup: Markup.inlineKeyboard([
+            [Markup.button.callback('🔄 Retry Analysis', `WALLET_INTEL_ANALYZE_${wallet.id}`)],
+            [Markup.button.callback('⬅️ Intelligence', `WALLET_INTEL_${wallet.id}`), Markup.button.callback('🏠 Home', 'MAIN_MENU')],
+          ]).reply_markup }).catch(error => console.error('[WalletAnalysis]', { event: 'TELEGRAM_SEND_FAILED', ...diagnostics, resultStatus: 'FAILED' }));
+          return;
+        }
+        let profile;
+        try { profile = await getWalletIntelligenceProfile({ walletAddress: wallet.wallet_address, chain: 'robinhood', invocation }); }
+        catch (error) {
+          console.error('[WalletAnalysis]', { event: 'PROFILE_FAILED', ...diagnostics, resultStatus: invocation.status });
+          await ctx.reply('Could not load wallet intelligence.').catch(sendError => console.error('[WalletAnalysis]', { event: 'TELEGRAM_SEND_FAILED', ...diagnostics, resultStatus: 'PROFILE_FAILED' }));
+          return;
+        }
         await ctx.reply(renderWalletIntelligence(profile), { parse_mode: 'HTML', reply_markup: Markup.inlineKeyboard([
           [Markup.button.callback('📜 Launches', `WALLET_INTEL_LAUNCHES_${wallet.id}`), Markup.button.callback('🔗 Associated Wallets', `WALLET_INTEL_LINKS_${wallet.id}`)],
           [Markup.button.callback('⚡ Activity', `WALLET_ACTIVITY_${wallet.id}`)],
           [Markup.button.callback('⬅️ Wallets', 'WALLET_TRACKING'), Markup.button.callback('🏠 Home', 'MAIN_MENU')],
-        ]).reply_markup });
-      } catch (error) {
-        console.error('[WalletTracking] Analyze wallet failed:', error);
-        await ctx.reply('Wallet analysis could not be completed. No monitoring or alerts were changed.');
-      }
+        ]).reply_markup }).catch(error => console.error('[WalletAnalysis]', { event: 'TELEGRAM_SEND_FAILED', ...diagnostics, resultStatus: invocation.status }));
+      });
     },
   );
 
