@@ -45,9 +45,7 @@ export async function renderIntelligenceHome(ctx: any) {
       '',
       'Understand what is moving, who is involved, and how prior calls performed.',
       '',
-      access.tier === 'free'
-        ? 'Free access includes a limited view of current investigations.'
-        : 'Your access includes the full Intelligence workspace.',
+      'Your access includes the full Intelligence workspace.',
     ].join('\n'),
     intelligenceMenu(access).reply_markup,
   );
@@ -92,7 +90,7 @@ export function registerIntelligenceCenter(bot: Telegraf<any>) {
     await ctx.answerCbQuery();
 
     try {
-      const rows = await getRecentInvestigations(access.tier === 'free' ? 3 : 8);
+      const rows = await getRecentInvestigations(8);
       const lines = ['🔎 <b>INVESTIGATIONS</b>', '', 'Current evidence-backed market theses.', ''];
       if (!rows.length) lines.push('No active investigations right now.');
       for (const row of rows as any[]) {

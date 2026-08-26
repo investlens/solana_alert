@@ -658,26 +658,7 @@ export function mergeOpportunityMarketContext(
 function userCanReceiveOpportunity(
   user: DeliverableUser,
 ): boolean {
-  /*
-   * Safe rollout:
-   *
-   * admin_only = default during Phase 2 validation.
-   * paid       = admins + active paid subscribers.
-   *
-   * We deliberately require an explicit environment change
-   * before the new unified opportunity format reaches users.
-   */
-  const mode =
-    String(
-      process.env.OPPORTUNITY_DELIVERY_MODE ??
-      'paid',
-    )
-      .trim()
-      .toLowerCase();
-
   const access = accessProfileForUser(user);
-  if (access.tier === 'admin') return true;
-  if (mode !== 'paid') return false;
   return hasCapability(access, 'opportunities.realtime');
 }
 

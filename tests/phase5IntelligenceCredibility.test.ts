@@ -146,7 +146,7 @@ test('credibility UI remains escaped and tier boundaries remain enforced', () =>
   const free = accessProfileForTier('free');
   const pro = accessProfileForTier('pro');
   const admin = accessProfileForTier('admin');
-  assert.equal(hasCapability(free, 'intelligence.performance'), false);
+  assert.equal(hasCapability(free, 'intelligence.performance'), true);
   assert.equal(hasCapability(pro, 'intelligence.performance'), true);
   assert.equal(hasCapability(admin, 'intelligence.performance'), true);
   assert.equal(hasCapability(pro, 'trading.admin'), false);

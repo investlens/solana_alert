@@ -15,24 +15,23 @@ export type Capability =
   | 'strategies.manage'
   | 'membership.manage';
 
-const FREE = new Set<Capability>([
+const TESTER = new Set<Capability>([
   'opportunities.view',
-  'intelligence.investigations',
-  'trading.external',
-  'strategies.manage',
-  'membership.manage',
-]);
-
-const PRO = new Set<Capability>([
-  ...FREE,
   'opportunities.realtime',
   'watchlist.use',
+  'intelligence.investigations',
   'intelligence.smartMoney',
   'intelligence.creators',
   'intelligence.performance',
   'wallets.track',
   'wallets.activity',
+  'trading.external',
+  'strategies.manage',
+  'membership.manage',
 ]);
+
+const FREE = TESTER;
+const PRO = TESTER;
 
 const ADMIN = new Set<Capability>([
   ...PRO,
