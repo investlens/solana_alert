@@ -1100,6 +1100,7 @@ export function buildPonsSustainedPresentation(args: {
   const strategyKey = args.opportunity?.strategy_key;
   const actions = buildAlphaMarketActions({
     chartUrl: args.target.chartUrl, tokenUrl: args.target.tokenUrl,
+    fullIntelCallback: /^0x[a-fA-F0-9]{40}$/.test(args.tokenAddress) ? `FI_RH_${args.tokenAddress}` : null,
     copyContractCallback: /^0x[a-fA-F0-9]{40}$/.test(args.tokenAddress) ? `COPY_CA_${args.tokenAddress}` : null,
     trackCallback: opportunityId == null ? null : `OPP_TRACK_${opportunityId}`,
     muteCallback: strategyKey && Buffer.byteLength(`STRAT_TOGGLE_${strategyKey}`, 'utf8') <= 64

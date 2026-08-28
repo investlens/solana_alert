@@ -51,7 +51,7 @@ test('BUILDING renders enriched verified pre-index context and mature PONS actio
   assert.match(result.message, /🧠 <b>STRUCTURE<\/b>/);
   assert.match(result.message, /⏳ <b>STATUS<\/b>/);
   assert.deepEqual(result.actions.map(row => row.map(action => action.text)),
-    [['🔎 Token'], ['📋 Copy CA'], ['⭐ Track', '🔕 Mute']]);
+    [['🔎 Token'], ['📋 Copy CA'], ['🔬 Full Intel'], ['⭐ Track', '🔕 Mute']]);
   assert.equal(result.actions.flat().find(action => action.text === '📋 Copy CA')?.callback_data,
     `COPY_CA_${address}`);
   assert.equal(result.actions.flat().some(action => /Trade/.test(action.text)), false);

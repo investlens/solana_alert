@@ -186,6 +186,7 @@ export function startPostAlertDevWatch(args: {
             assetId: args.tokenAddress, chain: 'robinhood' }, message, buttons: buildAlphaMarketActions({
               chartUrl: target.chartUrl,
               tokenUrl: target.tokenUrl,
+              fullIntelCallback: `FI_RH_${args.tokenAddress}`,
               copyContractCallback: `COPY_CA_${args.tokenAddress}`,
             }) });
 

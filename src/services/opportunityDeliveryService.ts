@@ -50,6 +50,8 @@ import { resolvePonsDeliveryContext } from './ponsDeliveryContext.js';
 import { persistAlphaAlertEvent } from './alphaAlertLedger.js';
 import { criticalAvoidReason, shouldDeliverExit, userHasExitRelevance } from './alphaExitRelevance.js';
 import { buildPremiumTokenNotification } from '../ui/premiumTokenNotification.js';
+import { config } from '../config.js';
+import { analyzeRobinhoodTokenFreshWallets, freshWalletBlockPersistence, freshWalletRiskBlocksPositive } from './tokenIntelligenceService.js';
 
 type DeliverableAction =
   | 'BUY'
@@ -90,6 +92,13 @@ export function qualifyPremiumOpportunity(raw: Record<string, unknown> | null, a
   const volumeMultiple = Number.isFinite(currentVolume) && currentVolume > 0 && Number.isFinite(previousVolume) && previousVolume > 0
     ? currentVolume / previousVolume : Number(data.volumeMultiple);
   const critical = data.confirmedDevSell === true || data.criticalSecurity === true || data.liquidityCritical === true;
+  const freshWallet1dPct = Number(data.freshWallet1dPct);
+  const freshWalletEvidence = String(data.freshWalletEvidence ?? 'UNKNOWN');
+  if (freshWalletEvidence === 'VERIFIED' && Number.isFinite(freshWallet1dPct) &&
+      freshWallet1dPct > config.maxFreshWallet1dPct) {
+    return { eligible: false, reason: 'HIGH_FRESH_WALLET_CONCENTRATION', volumeMultiple,
+      freshWallet1dPct };
+  }
   if (!Number.isFinite(age) || !Number.isFinite(move) || move <= 0 || retention < 0.5 || critical) {
     return { eligible: false, reason: 'INSUFFICIENT_HEALTHY_STRUCTURE', volumeMultiple };
   }
@@ -565,6 +574,7 @@ export function buildButtons(
       text: '📋 Copy CA',
       callback_data: `COPY_CA_${opportunity.asset_id}`,
     }]);
+    rows.push([{ text: '🔬 Full Intel', callback_data: `FI_RH_${opportunity.asset_id}` }]);
   }
 
   const preferenceActions: InlineButton[] = [{
@@ -992,7 +1002,23 @@ async function deliverOpportunity(
     }
   }
 
-  if (tokenTarget.marketContext || devEvidenceEnriched ||
+  if (String(opportunity.chain ?? '').toLowerCase() === 'robinhood' &&
+      (action === 'BUY' || action === 'CHECK_ENTRY')) {
+    try {
+      const fresh = await analyzeRobinhoodTokenFreshWallets(opportunity.asset_id);
+      opportunity.raw_data = { ...(opportunity.raw_data ?? {}), freshWallet1dPct: fresh.oneDayPct,
+        freshWalletEvidence: fresh.evidence, freshWalletVerifiedCount: fresh.verifiedFresh,
+        freshWalletUnknownCount: fresh.unknown, freshWalletSampleSize: fresh.sampleSize,
+        freshWalletClassifiedCount: fresh.classified, freshWalletCoveragePct: fresh.coveragePct,
+        freshWalletMethodology: fresh.methodology, freshWalletObservedAt: new Date().toISOString() };
+    } catch (error) {
+      console.warn('[OpportunityDelivery] Fresh-wallet evidence unavailable', {
+        opportunityId: opportunity.id, reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (tokenTarget.marketContext || devEvidenceEnriched || opportunity.raw_data?.freshWalletEvidence ||
       verifiedPonsPreIndexValuation(opportunity.raw_data, opportunity.asset_id) != null) {
     const { error } = await supabase
       .from('opportunities')
@@ -1004,6 +1030,24 @@ async function deliverOpportunity(
         error: error.message,
       });
     }
+  }
+
+  if ((action === 'BUY' || action === 'CHECK_ENTRY') && freshWalletRiskBlocksPositive(opportunity.raw_data)) {
+    const fresh = { oneDayPct: Number(opportunity.raw_data?.freshWallet1dPct),
+      evidence: 'VERIFIED' as const, sampleSize: Number(opportunity.raw_data?.freshWalletSampleSize),
+      classified: Number(opportunity.raw_data?.freshWalletClassifiedCount),
+      coveragePct: Number(opportunity.raw_data?.freshWalletCoveragePct), verifiedFresh: Number(opportunity.raw_data?.freshWalletVerifiedCount),
+      notFresh: 0, unknown: Number(opportunity.raw_data?.freshWalletUnknownCount), methodology: String(opportunity.raw_data?.freshWalletMethodology ?? '') };
+    const persisted = freshWalletBlockPersistence(fresh, String(opportunity.raw_data?.freshWalletObservedAt ?? new Date().toISOString()));
+    opportunity.raw_data = { ...(opportunity.raw_data ?? {}), ...persisted.evidence };
+    const { error } = await supabase.from('opportunities').update({ risk_reason: persisted.riskReason,
+      raw_data: opportunity.raw_data }).eq('id', opportunity.id);
+    if (error) throw error;
+    console.log('[OpportunityDelivery] Positive delivery blocked by verified fresh-wallet concentration', {
+      opportunityId: opportunity.id, freshWallet1dPct: opportunity.raw_data.freshWallet1dPct,
+      threshold: config.maxFreshWallet1dPct,
+    });
+    return;
   }
 
   if (isPons && !qualifyPremiumOpportunity(opportunity.raw_data, action, opportunity.asset_id).eligible) {

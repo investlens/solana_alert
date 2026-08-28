@@ -5,6 +5,7 @@ import {
 
 import {
   getRobinhoodTokenMetadata,
+  type RobinhoodTokenMetadata,
 } from '../tokenMetadata.js';
 
 import {
@@ -55,6 +56,8 @@ export type RobinhoodHolderRiskResult = {
 
   top1Wallet:
     string | null;
+
+  sampledWallets: string[];
 
   concentrationRisk:
     'LOW'
@@ -127,6 +130,9 @@ export async function scanRobinhoodHolderRisk(
   tokenAddress: string,
   options: {
     poolAddress?: string | null;
+    metadata?: RobinhoodTokenMetadata;
+    signal?: AbortSignal;
+    timeoutMs?: number;
   } = {},
 ): Promise<RobinhoodHolderRiskResult> {
   const address =
@@ -137,10 +143,7 @@ export async function scanRobinhoodHolderRisk(
   const warnings:
     string[] = [];
 
-  const metadata =
-    await getRobinhoodTokenMetadata(
-      address,
-    );
+  const metadata = options.metadata ?? await getRobinhoodTokenMetadata(address, { signal: options.signal });
 
   if (
     metadata.totalSupplyRaw == null ||
@@ -171,6 +174,8 @@ export async function scanRobinhoodHolderRisk(
       top1Wallet:
         null,
 
+      sampledWallets: [],
+
       concentrationRisk:
         'UNKNOWN',
 
@@ -192,6 +197,11 @@ export async function scanRobinhoodHolderRisk(
   let response:
     Response;
 
+  const timeoutController = new AbortController();
+  const timeout = setTimeout(() => timeoutController.abort(), options.timeoutMs ?? 2_750);
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, timeoutController.signal])
+    : timeoutController.signal;
   try {
     response =
       await fetch(
@@ -201,6 +211,7 @@ export async function scanRobinhoodHolderRisk(
             Accept:
               'application/json',
           },
+          signal,
         },
       );
   } catch (error) {
@@ -229,6 +240,8 @@ export async function scanRobinhoodHolderRisk(
       top1Wallet:
         null,
 
+      sampledWallets: [],
+
       concentrationRisk:
         'UNKNOWN',
 
@@ -245,7 +258,7 @@ export async function scanRobinhoodHolderRisk(
       scannedAt:
         Date.now(),
     };
-  }
+  } finally { clearTimeout(timeout); }
 
   if (!response.ok) {
     return {
@@ -272,6 +285,8 @@ export async function scanRobinhoodHolderRisk(
 
       top1Wallet:
         null,
+
+      sampledWallets: [],
 
       concentrationRisk:
         'UNKNOWN',
@@ -582,6 +597,11 @@ export async function scanRobinhoodHolderRisk(
       circulating[0]
         ?.address ??
       null,
+
+    sampledWallets: circulating
+      .filter(holder => !holder.isContract)
+      .slice(0, 20)
+      .map(holder => holder.address!),
 
     concentrationRisk,
 

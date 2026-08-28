@@ -8,6 +8,7 @@ export type AlphaMarketActionInput = {
   muteCallback?: string | null;
   copyContractCallback?: string | null;
   walletActivityCallback?: string | null;
+  fullIntelCallback?: string | null;
 };
 
 export function buildAlphaMarketActions(input: AlphaMarketActionInput): AlphaNotificationAction[][] {
@@ -23,6 +24,9 @@ export function buildAlphaMarketActions(input: AlphaMarketActionInput): AlphaNot
 
   if (input.copyContractCallback) {
     rows.push([{ text: '📋 Copy CA', callback_data: input.copyContractCallback }]);
+  }
+  if (input.fullIntelCallback) {
+    rows.push([{ text: '🔬 Full Intel', callback_data: input.fullIntelCallback }]);
   }
 
   const preferences: AlphaNotificationAction[] = [];

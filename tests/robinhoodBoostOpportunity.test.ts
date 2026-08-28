@@ -83,7 +83,7 @@ test('boost action grammar uses direct verified Chart, full Copy CA, Track and M
     tokenAddress: address, chartUrl, opportunityId: 406, strategyKey: 'PONS_BREAKOUT',
   });
   assert.deepEqual(actions.map(row => row.map(action => action.text)), [
-    ['📊 Chart', '🔎 Token'], ['📋 Copy CA'], ['⭐ Track', '🔕 Mute'],
+    ['📊 Chart', '🔎 Token'], ['📋 Copy CA'], ['🔬 Full Intel'], ['⭐ Track', '🔕 Mute'],
   ]);
   assert.equal(actions[0][0].url, chartUrl);
   assert.equal(actions[1][0].callback_data, `COPY_CA_${address}`);

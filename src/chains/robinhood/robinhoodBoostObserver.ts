@@ -441,6 +441,7 @@ export function buildBoostActions(args: {
   return buildAlphaMarketActions({
     chartUrl: args.chartUrl,
     tokenUrl: `https://robinhoodchain.blockscout.com/token/${args.tokenAddress}`,
+    fullIntelCallback: `FI_RH_${args.tokenAddress}`,
     copyContractCallback: `COPY_CA_${args.tokenAddress}`,
     trackCallback: args.opportunityId != null ? `OPP_TRACK_${args.opportunityId}` : null,
     muteCallback: muteCallback && Buffer.byteLength(muteCallback, 'utf8') <= 64

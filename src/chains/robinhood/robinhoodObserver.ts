@@ -1162,6 +1162,7 @@ if (dexPaid.dexPaid === true && dexPaid.latestPaymentTimestamp != null) {
       statusTitle: '💎 STATUS', status: 'Dex Paid confirmed · evaluate live market conditions.',
     }), buttons: buildAlphaMarketActions({ chartUrl: market.chartUrl,
       tokenUrl: `https://robinhoodchain.blockscout.com/token/${token.tokenAddress}`,
+      fullIntelCallback: `FI_RH_${token.tokenAddress}`,
       copyContractCallback: `COPY_CA_${token.tokenAddress}` }) });
   }
 }

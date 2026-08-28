@@ -12,6 +12,7 @@ import {
   registerWalletTracking,
 } from './walletTracking.js';
 import { registerIntelligenceCenter } from './intelligenceCenter.js';
+import { registerTokenIntelligenceActions } from './tokenIntelligenceActions.js';
 
 export function createBot() {
   const bot = new Telegraf(config.botToken);
@@ -21,5 +22,6 @@ export function createBot() {
   registerOpportunityActions(bot);
   registerWalletTracking(bot);
   registerIntelligenceCenter(bot);
+  registerTokenIntelligenceActions(bot);
   return bot;
 }

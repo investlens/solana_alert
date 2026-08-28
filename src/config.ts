@@ -35,6 +35,9 @@ export const config = {
   adminBuyAmountSmallSol: num('ADMIN_BUY_AMOUNT_SMALL_SOL', 0.03),
   adminBuyAmountDefaultSol: num('ADMIN_BUY_AMOUNT_DEFAULT_SOL', 0.05),
   adminMaxSlippageBps: num('ADMIN_MAX_SLIPPAGE_BPS', 1000),
+  maxFreshWallet1dPct: num('MAX_FRESH_WALLET_1D_PCT', 50),
+  freshWalletMinSample: num('FRESH_WALLET_MIN_SAMPLE', 8),
+  freshWalletMinClassifiedCoveragePct: num('FRESH_WALLET_MIN_CLASSIFIED_COVERAGE_PCT', 60),
 
   autoTradeMode: (process.env.AUTO_TRADE_MODE ?? 'paper').toLowerCase(),
   autoTradeMaxOpenPositions: num('AUTO_TRADE_MAX_OPEN_POSITIONS', 3),

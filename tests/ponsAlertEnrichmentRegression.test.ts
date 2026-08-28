@@ -438,7 +438,7 @@ test('OFY V2 Exit retries verified curve FDV when lifecycle and Dex context are 
   assert.doesNotMatch(message, /Market cap|Market\s+<b>INDEXING|Liquidity|5m volume/);
   const buttons = buildButtons(exit, target, { telegram_id: '1', tier: 'paid', is_admin: false } as any);
   assert.deepEqual(buttons.map(row => row.map(button => button.text)), [
-    ['🔎 Token'], ['📋 Copy CA'], ['⭐ Track', '🔕 Mute'],
+    ['🔎 Token'], ['📋 Copy CA'], ['🔬 Full Intel'], ['⭐ Track', '🔕 Mute'],
   ]);
   assert.equal(buttons[1][0].callback_data, `COPY_CA_${ofyAddress}`);
   assert.equal(buttons.flat().some(button => button.text.includes('Trade')), false);

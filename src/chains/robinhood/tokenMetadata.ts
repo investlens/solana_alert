@@ -8,10 +8,6 @@ import {
 } from 'viem';
 
 import {
-  robinhoodPublicClient,
-} from './rpc.js';
-
-import {
   robinhoodChain,
 } from './config.js';
 
@@ -41,6 +37,7 @@ export type RobinhoodTokenMetadata = {
 async function rawEthCall(args: {
   address: Address;
   data: Hex;
+  signal?: AbortSignal;
 }): Promise<Hex> {
   const rpcUrl =
     robinhoodChain.rpcUrls.default.http[0];
@@ -70,6 +67,7 @@ async function rawEthCall(args: {
           'latest',
         ],
       }),
+      signal: args.signal,
     });
 
   if (!response.ok) {
@@ -105,8 +103,19 @@ async function rawEthCall(args: {
   return payload.result;
 }
 
+async function rawGetCode(address: Address, signal?: AbortSignal): Promise<Hex> {
+  const rpcUrl = robinhoodChain.rpcUrls.default.http[0];
+  const response = await fetch(rpcUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getCode', params: [address, 'latest'] }), signal });
+  if (!response.ok) throw new Error(`Robinhood eth_getCode HTTP ${response.status}`);
+  const payload = await response.json() as { result?: Hex; error?: { message?: string } };
+  if (payload.error || !payload.result) throw new Error(payload.error?.message ?? 'Robinhood eth_getCode failed');
+  return payload.result;
+}
+
 async function readName(
   address: Address,
+  signal?: AbortSignal,
 ): Promise<string> {
   const data =
     encodeFunctionData({
@@ -118,6 +127,7 @@ async function readName(
     await rawEthCall({
       address,
       data,
+      signal,
     });
 
   return decodeFunctionResult({
@@ -129,6 +139,7 @@ async function readName(
 
 async function readSymbol(
   address: Address,
+  signal?: AbortSignal,
 ): Promise<string> {
   const data =
     encodeFunctionData({
@@ -140,6 +151,7 @@ async function readSymbol(
     await rawEthCall({
       address,
       data,
+      signal,
     });
 
   return decodeFunctionResult({
@@ -151,6 +163,7 @@ async function readSymbol(
 
 async function readDecimals(
   address: Address,
+  signal?: AbortSignal,
 ): Promise<number> {
   const data =
     encodeFunctionData({
@@ -162,6 +175,7 @@ async function readDecimals(
     await rawEthCall({
       address,
       data,
+      signal,
     });
 
   return Number(
@@ -175,6 +189,7 @@ async function readDecimals(
 
 async function readTotalSupply(
   address: Address,
+  signal?: AbortSignal,
 ): Promise<bigint> {
   const data =
     encodeFunctionData({
@@ -186,6 +201,7 @@ async function readTotalSupply(
     await rawEthCall({
       address,
       data,
+      signal,
     });
 
   return decodeFunctionResult({
@@ -205,15 +221,12 @@ function errorMessage(
 
 export async function getRobinhoodTokenMetadata(
   tokenAddress: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<RobinhoodTokenMetadata> {
   const address =
     getAddress(tokenAddress);
 
-  const bytecode =
-    await robinhoodPublicClient
-      .getCode({
-        address,
-      });
+  const bytecode = await rawGetCode(address, options.signal);
 
   const bytecodeExists =
     Boolean(
@@ -247,10 +260,10 @@ export async function getRobinhoodTokenMetadata(
     decimalsResult,
     supplyResult,
   ] = await Promise.allSettled([
-    readName(address),
-    readSymbol(address),
-    readDecimals(address),
-    readTotalSupply(address),
+    readName(address, options.signal),
+    readSymbol(address, options.signal),
+    readDecimals(address, options.signal),
+    readTotalSupply(address, options.signal),
   ]);
 
   const readErrors:

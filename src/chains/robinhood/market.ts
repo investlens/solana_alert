@@ -40,6 +40,10 @@ export type DexScreenerPair = {
   fdv?: number | null;
 
   pairCreatedAt?: number | null;
+  info?: {
+    websites?: Array<{ url?: string; label?: string }>;
+    socials?: Array<{ url?: string; type?: string }>;
+  };
 };
 
 export type QuoteUsdObservation = {
@@ -95,6 +99,7 @@ export function verifiedRobinhoodChartUrl(pair: DexScreenerPair): string | undef
 
 export async function fetchRobinhoodPairs(
   tokenAddress: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<DexScreenerPair[]> {
   const address =
     tokenAddress.trim();
@@ -110,11 +115,12 @@ export async function fetchRobinhoodPairs(
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 2_500);
+  const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
   let response: Response;
   try {
     response = await fetch(url, {
       headers: { Accept: 'application/json' },
-      signal: controller.signal,
+      signal,
     });
   } finally {
     clearTimeout(timeout);
@@ -282,4 +288,17 @@ export async function getRobinhoodMarketSnapshot(
     timestamp:
       Date.now(),
   };
+}
+
+export function robinhoodMarketSnapshotFromPairs(tokenAddress: string, pairs: DexScreenerPair[]): ChainMarketSnapshot | null {
+  const pair = chooseBestRobinhoodPair(pairs, tokenAddress);
+  if (!pair) return null;
+  const priceUsd = finiteNumber(pair.priceUsd);
+  if (priceUsd <= 0) return null;
+  return { chain: 'robinhood', tokenAddress, symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
+    name: pair.baseToken?.name ?? pair.baseToken?.symbol ?? 'Unknown Token', priceUsd,
+    marketCapUsd: finiteNumber(pair.marketCap), fdvUsd: finiteNumber(pair.fdv),
+    liquidityUsd: finiteNumber(pair.liquidity?.usd), volume5mUsd: finiteNumber(pair.volume?.m5),
+    buys5m: finiteNumber(pair.txns?.m5?.buys), sells5m: finiteNumber(pair.txns?.m5?.sells),
+    pairAddress: pair.pairAddress, dexId: pair.dexId, chartUrl: verifiedRobinhoodChartUrl(pair), timestamp: Date.now() };
 }
