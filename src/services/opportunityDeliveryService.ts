@@ -51,7 +51,7 @@ import { persistAlphaAlertEvent } from './alphaAlertLedger.js';
 import { criticalAvoidReason, shouldDeliverExit, userHasExitRelevance } from './alphaExitRelevance.js';
 import { buildPremiumTokenNotification } from '../ui/premiumTokenNotification.js';
 import { config } from '../config.js';
-import { analyzeRobinhoodTokenFreshWallets, freshWalletBlockPersistence, freshWalletRiskBlocksPositive } from './tokenIntelligenceService.js';
+import { analyzeRobinhoodTokenFreshWallets, freshWalletBlockPersistence, freshWalletRiskBlocksPositive, getCachedRobinhoodFreshWallets } from './tokenIntelligenceService.js';
 
 type DeliverableAction =
   | 'BUY'
@@ -1005,7 +1005,8 @@ async function deliverOpportunity(
   if (String(opportunity.chain ?? '').toLowerCase() === 'robinhood' &&
       (action === 'BUY' || action === 'CHECK_ENTRY')) {
     try {
-      const fresh = await analyzeRobinhoodTokenFreshWallets(opportunity.asset_id);
+      const fresh = await getCachedRobinhoodFreshWallets(opportunity.asset_id) ??
+        await analyzeRobinhoodTokenFreshWallets(opportunity.asset_id);
       opportunity.raw_data = { ...(opportunity.raw_data ?? {}), freshWallet1dPct: fresh.oneDayPct,
         freshWalletEvidence: fresh.evidence, freshWalletVerifiedCount: fresh.verifiedFresh,
         freshWalletUnknownCount: fresh.unknown, freshWalletSampleSize: fresh.sampleSize,

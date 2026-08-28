@@ -131,6 +131,14 @@ export async function analyzeRobinhoodTokenFreshWallets(tokenAddress: string) {
   } finally { clearTimeout(timeout); controller.abort(); }
 }
 
+export async function getCachedRobinhoodFreshWallets(tokenAddress: string): Promise<FreshWalletIntel | null> {
+  const { data, error } = await supabase.from('token_intelligence_cache').select('status,result,expires_at')
+    .eq('chain', 'robinhood').ilike('token_address', tokenAddress).maybeSingle();
+  if (error || data?.status !== 'COMPLETE' || Date.parse(String(data.expires_at ?? '')) <= Date.now()) return null;
+  const fresh = (data.result as TokenIntel | null)?.freshWallets;
+  return fresh?.evidence === 'VERIFIED' || fresh?.evidence === 'INSUFFICIENT' ? fresh : null;
+}
+
 export function freshWalletBlockPersistence(fresh: FreshWalletIntel, analyzedAt: string) {
   return { riskReason: 'HIGH_FRESH_WALLET_CONCENTRATION', evidence: { freshWallet1dPct: fresh.oneDayPct,
     freshWalletEvidence: fresh.evidence, freshWalletSampleSize: fresh.sampleSize,

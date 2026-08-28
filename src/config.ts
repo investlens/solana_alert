@@ -38,6 +38,11 @@ export const config = {
   maxFreshWallet1dPct: num('MAX_FRESH_WALLET_1D_PCT', 50),
   freshWalletMinSample: num('FRESH_WALLET_MIN_SAMPLE', 8),
   freshWalletMinClassifiedCoveragePct: num('FRESH_WALLET_MIN_CLASSIFIED_COVERAGE_PCT', 60),
+  existingTokenHotScanSeconds: num('HOT_SCAN_INTERVAL_SECONDS', 60),
+  existingTokenWarmScanSeconds: num('WARM_SCAN_INTERVAL_SECONDS', 180),
+  existingTokenRetentionHours: num('ACTIVE_TOKEN_RETENTION_HOURS', 24),
+  existingTokenMaxPerCycle: num('ACTIVE_TOKEN_MAX_PER_CYCLE', 25),
+  existingTokenAlertCooldownMinutes: num('EXISTING_TOKEN_ALERT_COOLDOWN_MINUTES', 15),
 
   autoTradeMode: (process.env.AUTO_TRADE_MODE ?? 'paper').toLowerCase(),
   autoTradeMaxOpenPositions: num('AUTO_TRADE_MAX_OPEN_POSITIONS', 3),

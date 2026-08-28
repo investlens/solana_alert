@@ -11,6 +11,7 @@ import {
 import {
   startRobinhoodOutcomeTracker,
 } from './chains/robinhood/robinhoodOutcomeTracker.js';
+import { startExistingTokenOpportunityScanner } from './chains/robinhood/existingTokenOpportunityScanner.js';
 
 import {
   startRobinhoodBoostObserver,
@@ -1444,6 +1445,7 @@ async function main() {
       // Robinhood Chain
       startRobinhoodObserver(),
       startRobinhoodOutcomeTracker(),
+      startExistingTokenOpportunityScanner(),
       startRobinhoodBoostObserver(),
       startRobinhoodCreatorIntelligenceLoop(),
 
