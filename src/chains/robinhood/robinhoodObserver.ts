@@ -1,14 +1,8 @@
-import {
-  config,
-} from '../../config.js';
-
-import {
-  sendTelegram,
-} from '../../services/telegram.js';
 import { renderAlphaNotification } from '../../ui/alphaNotification.js';
 import { buildAlphaMarketActions } from '../../ui/alphaNotificationActions.js';
 import { coreDecisionEvidenceMetrics, marketContextMetrics, normalizeCoreDecisionMetrics, normalizeNotificationMarketContext } from '../../ui/notificationMarketContext.js';
-import { persistAlphaSemanticEvent } from '../../services/alphaSemanticEventService.js';
+import { persistOrLoadAlphaSemanticEventRecord } from '../../services/alphaSemanticEventService.js';
+import { deliverAlphaSemanticEvent } from '../../services/alphaSemanticDeliveryService.js';
 import { buildPremiumTokenNotification } from '../../ui/premiumTokenNotification.js';
 
 import {
@@ -1143,7 +1137,7 @@ const creatorRisk =
   );
 
 if (dexPaid.dexPaid === true && dexPaid.latestPaymentTimestamp != null) {
-  const inserted = await persistAlphaSemanticEvent({
+  const semanticEvent = await persistOrLoadAlphaSemanticEventRecord({
     identity: `${token.tokenAddress.toLowerCase()}:${dexPaid.latestPaymentTimestamp}`,
     type: 'DEX_PAID', assetId: token.tokenAddress, chain: 'robinhood',
     intelligenceState: 'FORMING', symbol: token.symbol ?? market.symbol,
@@ -1153,8 +1147,9 @@ if (dexPaid.dexPaid === true && dexPaid.latestPaymentTimestamp != null) {
       volume5m: market.volume5mUsd, devHoldingPercent: devHolding.devHoldingPercent,
       burnedPercent: devHolding.totalBurnPercent, chartUrl: market.chartUrl },
   });
-  if (inserted) {
-    await sendTelegram(config.adminTelegramId, buildPremiumTokenNotification({
+  if (semanticEvent) {
+    await deliverAlphaSemanticEvent({ event: { id: semanticEvent.id, eventIdentity: semanticEvent.event_identity,
+      type: 'DEX_PAID', assetId: token.tokenAddress, chain: 'robinhood' }, message: buildPremiumTokenNotification({
       state: 'DEX_PAID', symbol: token.symbol ?? market.symbol, name: token.name ?? market.name,
       address: token.tokenAddress,
       market: normalizeNotificationMarketContext({ marketCap: market.marketCapUsd, fdv: market.fdvUsd,
@@ -1165,9 +1160,9 @@ if (dexPaid.dexPaid === true && dexPaid.latestPaymentTimestamp != null) {
         burnEvidence: devHolding.totalBurnPercent == null ? 'UNAVAILABLE' : 'VERIFIED' }),
       insightTitle: 'VERIFIED EVENT', insight: ['A verified Dex visibility payment was detected.'],
       statusTitle: '💎 STATUS', status: 'Dex Paid confirmed · evaluate live market conditions.',
-    }), buildAlphaMarketActions({ chartUrl: market.chartUrl,
+    }), buttons: buildAlphaMarketActions({ chartUrl: market.chartUrl,
       tokenUrl: `https://robinhoodchain.blockscout.com/token/${token.tokenAddress}`,
-      copyContractCallback: `COPY_CA_${token.tokenAddress}` }));
+      copyContractCallback: `COPY_CA_${token.tokenAddress}` }) });
   }
 }
 

@@ -24,9 +24,6 @@ export const ACTIVE_TELEGRAM_ALERT_INVENTORY: TelegramAlertInventoryEntry[] = [
 export const DOCUMENTED_ACTIVE_TELEGRAM_SEND_SOURCES = [
   'main.ts',
   'bot/commands.ts',
-  'chains/robinhood/robinhoodObserver.ts',
-  'chains/robinhood/robinhoodBoostObserver.ts',
-  'chains/robinhood/security/devPostAlertWatcher.ts',
   'core/autoTradeManager.ts',
   'engines/dexPaidEngine.ts',
   'engines/whaleClusterEngine.ts',

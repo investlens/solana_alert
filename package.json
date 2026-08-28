@@ -8,7 +8,8 @@
     "start": "tsx src/main.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/**/*.test.ts",
-    "release:check": "tsx scripts/releaseSafetyCheck.ts"
+    "release:check": "tsx scripts/releaseSafetyCheck.ts",
+    "audit:alert-quality": "tsx scripts/analyzeUserFacingAlertQuality.ts"
   },
   "dependencies": {
     "@solana/web3.js": "^1.98.4",

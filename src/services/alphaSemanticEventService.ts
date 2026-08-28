@@ -34,12 +34,34 @@ export async function persistAlphaSemanticEvent(args: {
   intelligenceState?: string | null; strategyKey?: string | null; symbol?: string | null;
   rawSnapshot: Record<string, unknown>; alertedAt?: string;
 }): Promise<boolean> {
+  return Boolean(await persistAlphaSemanticEventRecord(args));
+}
+
+export async function persistAlphaSemanticEventRecord(args: {
+  identity: string; type: AlphaSemanticEventType; assetId: string; chain: string;
+  intelligenceState?: string | null; strategyKey?: string | null; symbol?: string | null;
+  rawSnapshot: Record<string, unknown>; alertedAt?: string;
+}): Promise<{ id: number; event_identity: string } | null> {
   const alertedAt = args.alertedAt ?? new Date().toISOString();
   const event = buildAlphaSemanticEvent(args, alertedAt);
   const { data, error } = await supabase.from('alpha_alert_events').upsert(event,
-    { onConflict: 'event_identity', ignoreDuplicates: true }).select('id').maybeSingle();
+    { onConflict: 'event_identity', ignoreDuplicates: true }).select('id,event_identity').maybeSingle();
   if (error) throw error;
-  return Boolean(data);
+  return data ? { id: Number(data.id), event_identity: String(data.event_identity) } : null;
+}
+
+export async function persistOrLoadAlphaSemanticEventRecord(args: {
+  identity: string; type: AlphaSemanticEventType; assetId: string; chain: string;
+  intelligenceState?: string | null; strategyKey?: string | null; symbol?: string | null;
+  rawSnapshot: Record<string, unknown>; alertedAt?: string;
+}): Promise<{ id: number; event_identity: string }> {
+  const inserted = await persistAlphaSemanticEventRecord(args);
+  if (inserted) return inserted;
+  const eventIdentity = `v2:${args.type}:${args.identity}`;
+  const { data, error } = await supabase.from('alpha_alert_events').select('id,event_identity')
+    .eq('event_identity', eventIdentity).single();
+  if (error) throw error;
+  return { id: Number(data.id), event_identity: String(data.event_identity) };
 }
 
 export function buildAlphaSemanticEvent(args: {

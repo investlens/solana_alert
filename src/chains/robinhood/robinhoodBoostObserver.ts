@@ -1,14 +1,6 @@
 import {
-  config,
-} from '../../config.js';
-
-import {
   supabase,
 } from '../../services/supabase.js';
-
-import {
-  sendTelegram,
-} from '../../services/telegram.js';
 import { buildAlphaMarketActions } from '../../ui/alphaNotificationActions.js';
 import {
   normalizeCoreDecisionMetrics,
@@ -25,7 +17,8 @@ import {
 } from './market.js';
 
 import { scanRobinhoodDevTokenFlow } from './security/devTokenFlowScanner.js';
-import { persistAlphaSemanticEvent } from '../../services/alphaSemanticEventService.js';
+import { persistOrLoadAlphaSemanticEventRecord } from '../../services/alphaSemanticEventService.js';
+import { deliverAlphaSemanticEvent } from '../../services/alphaSemanticDeliveryService.js';
 import { buildPremiumTokenNotification } from '../../ui/premiumTokenNotification.js';
 
 import {
@@ -653,7 +646,7 @@ async function processBoost(
     return false;
   }
 
-  await persistAlphaSemanticEvent({
+  const boostEvent = await persistOrLoadAlphaSemanticEventRecord({
     identity: String(eventId), type: 'BOOST', assetId: boost.tokenAddress, chain: 'robinhood',
     intelligenceState: boostNotificationState(boost.totalAmount) === 'BUILDING' ? 'BUILDING' : null,
     strategyKey: opportunity?.strategyKey, symbol: market?.symbol ?? opportunityMarket.symbol,
@@ -669,7 +662,7 @@ async function processBoost(
     currentPrice: market?.priceUsd ?? null, currentLiquidity: market?.liquidityUsd ?? null,
     buys5m: market?.buys5m ?? null, sells5m: market?.sells5m ?? null });
   if (volumeDecision.eligible) {
-    const volumeInserted = await persistAlphaSemanticEvent({ identity: `${eventId}:volume-surge`,
+    const volumeEvent = await persistOrLoadAlphaSemanticEventRecord({ identity: `${eventId}:volume-surge`,
     type: 'VOLUME_SURGE', assetId: boost.tokenAddress, chain: 'robinhood',
     intelligenceState: 'BUILDING', strategyKey: opportunity?.strategyKey,
     symbol: market?.symbol ?? opportunityMarket.symbol,
@@ -679,8 +672,10 @@ async function processBoost(
       volumeMultiple: volumeDecision.volumeMultiple,
       comparisonWindow: 'DEXSCREENER_M5_TO_DEXSCREENER_M5', includedInBoostNotification: false },
   });
-    if (volumeInserted && market) {
-      await sendTelegram(config.adminTelegramId, buildPremiumTokenNotification({
+    if (volumeEvent && market) {
+      await deliverAlphaSemanticEvent({ event: { id: volumeEvent.id, eventIdentity: volumeEvent.event_identity,
+        type: 'VOLUME_SURGE', assetId: boost.tokenAddress, chain: 'robinhood', strategyKey: opportunity?.strategyKey },
+        message: buildPremiumTokenNotification({
         state: 'VOLUME_IGNITION', symbol: market.symbol, name: market.name, address: boost.tokenAddress,
         market: normalizeNotificationMarketContext({ marketCap: market.marketCapUsd, fdv: market.fdvUsd,
           liquidity: market.liquidityUsd, volume5m: market.volume5mUsd, chartUrl: market.chartUrl }),
@@ -689,8 +684,8 @@ async function processBoost(
         volumeMultiple: volumeDecision.volumeMultiple,
         insightTitle: 'WHY NOW', insight: ['Comparable 5-minute volume accelerated while price and liquidity avoided collapse.'],
         statusTitle: '🔥 STATUS', status: 'Abnormal activity detected · review current participation.',
-      }), buildBoostActions({ tokenAddress: boost.tokenAddress, chartUrl: market.chartUrl,
-        opportunityId: opportunity?.id, strategyKey: opportunity?.strategyKey }));
+      }), buttons: buildBoostActions({ tokenAddress: boost.tokenAddress, chartUrl: market.chartUrl,
+        opportunityId: opportunity?.id, strategyKey: opportunity?.strategyKey }) });
     }
   }
 
@@ -756,16 +751,14 @@ async function processBoost(
     });
 
 
-  await sendTelegram(
-    config.adminTelegramId,
-    message,
-    buildBoostActions({
+  if (boostEvent) await deliverAlphaSemanticEvent({ event: { id: boostEvent.id,
+    eventIdentity: boostEvent.event_identity, type: 'BOOST', assetId: boost.tokenAddress,
+    chain: 'robinhood', strategyKey: opportunity?.strategyKey }, message, buttons: buildBoostActions({
       tokenAddress: boost.tokenAddress,
       chartUrl: market?.chartUrl,
       opportunityId: opportunity?.id,
       strategyKey: opportunity?.strategyKey,
-    }),
-  );
+    }) });
 
 
   boostTotals.set(

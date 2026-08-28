@@ -1,16 +1,9 @@
 import {
-  config,
-} from '../../../config.js';
-
-import {
-  sendTelegram,
-} from '../../../services/telegram.js';
-
-import {
   scanRobinhoodDevMovement,
 } from './devMovementScanner.js';
 import { buildAlphaMarketActions } from '../../../ui/alphaNotificationActions.js';
-import { persistAlphaSemanticEvent } from '../../../services/alphaSemanticEventService.js';
+import { persistOrLoadAlphaSemanticEventRecord } from '../../../services/alphaSemanticEventService.js';
+import { deliverAlphaSemanticEvent } from '../../../services/alphaSemanticDeliveryService.js';
 import { developerEvent } from '../../../intelligence/tokenIntelligenceState.js';
 import { buildPremiumTokenNotification } from '../../../ui/premiumTokenNotification.js';
 import { normalizeCoreDecisionMetrics, normalizeNotificationMarketContext } from '../../../ui/notificationMarketContext.js';
@@ -153,9 +146,9 @@ export function startPostAlertDevWatch(args: {
           });
           const target = await resolveTokenOpenTarget({ chain: 'robinhood', tokenAddress: args.tokenAddress });
           const targetMarket = target.marketContext as Record<string, unknown> | undefined;
-          const inserted = classification.type === 'NONE' || classification.type === 'DEV_HOLDING'
-            ? false
-            : await persistAlphaSemanticEvent({
+          const semanticEvent = classification.type === 'NONE' || classification.type === 'DEV_HOLDING'
+            ? null
+            : await persistOrLoadAlphaSemanticEventRecord({
                 identity: `${args.tokenAddress.toLowerCase()}:${classification.type}:${movement.totalMovedRaw}`,
                 type: classification.type, assetId: args.tokenAddress, chain: 'robinhood', symbol: args.symbol,
                 rawSnapshot: { movedPercentOfSupply: movement.movedPercentOfSupply,
@@ -171,7 +164,7 @@ export function startPostAlertDevWatch(args: {
                   chartUrl: target.chartUrl },
               });
           const relevantSell = classification.type !== 'DEV_SELL' || await hasPriorPremiumRelevance(args.tokenAddress);
-          if (!inserted || !classification.notify || !relevantSell) return;
+          if (!semanticEvent || !classification.notify || !relevantSell) return;
           const market = normalizeNotificationMarketContext(targetMarket,
             { address: args.tokenAddress });
           const isBurn = classification.type === 'DEV_BURN';
@@ -188,15 +181,13 @@ export function startPostAlertDevWatch(args: {
           });
 
 
-          await sendTelegram(
-            config.adminTelegramId,
-            message,
-            buildAlphaMarketActions({
+          await deliverAlphaSemanticEvent({ event: { id: semanticEvent.id,
+            eventIdentity: semanticEvent.event_identity, type: classification.type,
+            assetId: args.tokenAddress, chain: 'robinhood' }, message, buttons: buildAlphaMarketActions({
               chartUrl: target.chartUrl,
               tokenUrl: target.tokenUrl,
               copyContractCallback: `COPY_CA_${args.tokenAddress}`,
-            }),
-          );
+            }) });
 
 
           return;

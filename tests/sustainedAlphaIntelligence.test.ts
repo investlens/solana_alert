@@ -135,5 +135,6 @@ test('developer burn and transfer materiality preserve internal evidence', () =>
 test('Dex Paid and Boost each have one active semantic producer', async () => {
   const observer = await readFile(new URL('../src/chains/robinhood/robinhoodObserver.ts', import.meta.url), 'utf8');
   const boost = await readFile(new URL('../src/chains/robinhood/robinhoodBoostObserver.ts', import.meta.url), 'utf8');
-  assert.equal(observer.match(/type: 'DEX_PAID'/g)?.length, 1); assert.equal(boost.match(/type: 'BOOST'/g)?.length, 1);
+  assert.equal(observer.match(/persistOrLoadAlphaSemanticEventRecord\(\{[\s\S]{0,100}type: 'DEX_PAID'/g)?.length, 1);
+  assert.equal(boost.match(/persistOrLoadAlphaSemanticEventRecord\(\{[\s\S]{0,100}type: 'BOOST'/g)?.length, 1);
 });
