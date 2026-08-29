@@ -37,8 +37,8 @@ test('PONS Entry Ready, Watching and Risk preserve symbol and market context', a
     assert.match(message, /<b>PONSY<\/b> · <code>TokenM…11111<\/code>/);
     assert.match(message, /Market cap\s+<b>\$48\.2K<\/b>/);
     assert.match(message, /Liquidity\s+<b>\$12\.5K<\/b>/);
-    assert.match(message, /Confidence\s+<b>81\/100<\/b>/);
-    assert.match(message, /Risk\s+<b>/);
+    assert.doesNotMatch(message, /Confidence\s+<b>81\/100<\/b>/);
+    assert.match(message, /Risk:<\/b>\s+/);
   }
 });
 

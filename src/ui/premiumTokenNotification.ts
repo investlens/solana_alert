@@ -7,6 +7,8 @@ type PremiumState = Extract<AlphaNotificationState,
   'DEV_BURN' | 'DEV_SOLD' | 'CRITICAL_RISK' | 'BUILDING' | 'RUNNER'>;
 
 const percent = (value: number) => `${Number(value.toFixed(2))}%`;
+const price = (value: number) => value >= 1 ? `$${value.toLocaleString('en-US', { maximumFractionDigits: 4 })}`
+  : `$${value.toPrecision(5).replace(/0+$/, '').replace(/\.$/, '')}`;
 
 export function buildPremiumTokenNotification(args: {
   state: PremiumState; symbol?: string | null; name?: string | null; address: string;
@@ -19,6 +21,7 @@ export function buildPremiumTokenNotification(args: {
   const marketCap = args.market.marketCap;
   const fdv = marketCap == null ? args.market.fdv : null;
   const metrics = [
+    ...(args.market.price == null ? [] : [{ icon: '💰', label: 'Price', value: price(args.market.price) }]),
     ...(args.age ? [{ icon: '⏱', label: 'Age', value: args.age }] : []),
     ...(marketCap == null ? [] : [{ icon: '💰', label: 'Market cap', value: formatUsd(marketCap) }]),
     ...(fdv == null ? [] : [{ icon: '💰', label: 'FDV', value: formatUsd(fdv) }]),

@@ -91,8 +91,8 @@ test('V2 verified curve price and quote/USD render FDV without relabeling it', a
   assert.match(message, /FDV\s+<b>\$60\.0K<\/b>/);
   assert.doesNotMatch(message, /Market cap/);
   assert.doesNotMatch(message, /Market\s+<b>INDEXING<\/b>/);
-  assert.match(message, /Dev holding\s+<b>2\.4%<\/b>/);
-  assert.match(message, /Burned\s+<b>3\.1%<\/b>/);
+  assert.doesNotMatch(message, /Dev holding/);
+  assert.doesNotMatch(message, /Burned/);
 });
 
 test('verified circulating supply changes V2 valuation label to Market cap', async () => {
@@ -168,6 +168,6 @@ test('Exit shows a fresh verified lifecycle valuation but never INDEXING', async
   const message = await buildMessage(opportunity({ action: 'EXIT', valuation }));
   assert.doesNotMatch(message, /INDEXING|Market cap/);
   assert.match(message, /FDV\s+<b>\$60\.0K<\/b>/);
-  assert.match(message, /Dev holding\s+<b>2\.4%<\/b>/);
-  assert.match(message, /Burned\s+<b>3\.1%<\/b>/);
+  assert.doesNotMatch(message, /Dev holding/);
+  assert.doesNotMatch(message, /Burned/);
 });

@@ -54,14 +54,14 @@ test('>=200 indexed boost renders high-attention state and verified current mark
     },
     rawData: { preIndexValuation: preIndexValuation(), marketIndexState: 'VERIFIED' },
   });
-  assert.match(message, /ALPHAOS · 🚀 BOOST/);
+  assert.match(message, /🚀 <b>BOOST/);
   assert.match(message, /Boost\s+<b>200 total \(\+50\)<\/b>/);
   assert.match(message, /Market cap\s+<b>\$25\.5K<\/b>/);
   assert.match(message, /Liquidity\s+<b>\$23\.1K<\/b>/);
   assert.match(message, /5m volume\s+<b>\$6\.8K<\/b>/);
   assert.match(message, /Move\s+<b>\+12\.4%<\/b>/);
-  assert.match(message, /Dev holding\s+<b>0%<\/b>/);
-  assert.match(message, /Burned\s+<b>0%<\/b>/);
+  assert.doesNotMatch(message, /Dev holding/);
+  assert.doesNotMatch(message, /Burned/);
   assert.doesNotMatch(message, /FDV|INDEXING/);
 });
 
@@ -73,7 +73,7 @@ test('>=200 pre-index PONS V2 boost renders verified FDV without fabricated mark
       preIndexValuation: preIndexValuation(),
     },
   });
-  assert.match(message, /ALPHAOS · 🚀 BOOST/);
+  assert.match(message, /🚀 <b>BOOST/);
   assert.match(message, /FDV\s+<b>\$4\.6K<\/b>/);
   assert.doesNotMatch(message, /Market cap|Liquidity|5m volume|INDEXING/);
 });
@@ -83,10 +83,10 @@ test('boost action grammar uses direct verified Chart, full Copy CA, Track and M
     tokenAddress: address, chartUrl, opportunityId: 406, strategyKey: 'PONS_BREAKOUT',
   });
   assert.deepEqual(actions.map(row => row.map(action => action.text)), [
-    ['📊 Chart', '🔎 Token'], ['📋 Copy CA'], ['🔬 Full Intel'], ['⭐ Track', '🔕 Mute'],
+    ['🔬 Full Intel', '📊 Chart'], ['⭐ Track', '📋 Copy CA'], ['🔕 Mute'], ['🔎 Token'],
   ]);
-  assert.equal(actions[0][0].url, chartUrl);
-  assert.equal(actions[1][0].callback_data, `COPY_CA_${address}`);
+  assert.equal(actions[0][1].url, chartUrl);
+  assert.equal(actions[1][1].callback_data, `COPY_CA_${address}`);
   assert.equal(actions.flat().some(action => action.text.includes('Trade')), false);
   for (const action of actions.flat()) {
     if (action.callback_data) assert.ok(Buffer.byteLength(action.callback_data, 'utf8') <= 64);
@@ -105,12 +105,12 @@ test('Robinhood Chart routing accepts only a direct verified pair destination', 
 
 test('unverified Chart and genuinely missing metrics are omitted', () => {
   const actions = buildBoostActions({ tokenAddress: address, opportunityId: 406, strategyKey: 'PONS_RISK' });
-  assert.deepEqual(actions[0].map(action => action.text), ['🔎 Token']);
+  assert.deepEqual(actions[0].map(action => action.text), ['🔬 Full Intel']);
   const message = buildBoostMessage({
     ...base, totalBoostAmount: 99, age: null, momentum: null,
     confidence: null, risk: null, devHoldingPercent: null, burnedPercent: null,
     buys5m: null, sells5m: null,
   });
-  assert.match(message, /ALPHAOS · 🚀 BOOST/);
+  assert.match(message, /🚀 <b>BOOST/);
   assert.doesNotMatch(message, /Market cap|FDV|Liquidity|5m volume|Momentum|Dev holding|Burned|\$0/);
 });

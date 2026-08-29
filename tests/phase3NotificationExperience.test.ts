@@ -21,9 +21,9 @@ function render(state: AlphaNotification['state'], extra: Partial<AlphaNotificat
 }
 
 test('representative Opportunity Entry, Building, and Risk snapshots', () => {
-  assert.match(render('ENTRY_READY'), /ALPHAOS · 🔥 ENTRY READY/);
-  assert.match(render('BUILDING'), /ALPHAOS · 📈 BUILDING/);
-  assert.match(render('EXIT_AVOID', { category: 'risk', severity: 'critical' }), /ALPHAOS · 🔴 EXIT \/ AVOID/);
+  assert.match(render('ENTRY_READY'), /🔥 <b>ENTRY READY/);
+  assert.match(render('BUILDING'), /📈 <b>BUILDING/);
+  assert.match(render('EXIT_AVOID', { category: 'risk', severity: 'critical' }), /🔴 <b>EXIT \/ AVOID/);
 });
 
 test('representative Wallet Buy, Sell, and Launch snapshots', () => {
@@ -31,10 +31,10 @@ test('representative Wallet Buy, Sell, and Launch snapshots', () => {
   const buy = buildWalletActivityMessage({ event: { ...common, kind: 'buy', amountSol: 3.2 }, label: 'A&B <Whale>' });
   const sell = buildWalletActivityMessage({ event: { ...common, kind: 'sell', amountSol: 1.1 }, label: null });
   const launch = buildWalletActivityMessage({ event: { ...common, kind: 'launch' }, label: null });
-  assert.match(buy, /ALPHAOS · 🐋 WALLET BUY/);
+  assert.match(buy, /🐋 <b>WALLET BUY/);
   assert.match(buy, /3\.20 SOL/);
-  assert.match(sell, /ALPHAOS · 🔴 WALLET EXIT/);
-  assert.match(launch, /ALPHAOS · 🚀 WALLET LAUNCH/);
+  assert.match(sell, /🔴 <b>WALLET EXIT/);
+  assert.match(launch, /🚀 <b>WALLET LAUNCH/);
   assert.match(buy, /A&amp;B &lt;WHALE&gt;/);
 });
 
@@ -50,9 +50,9 @@ test('wallet buy reuses verified market enrichment without fabricating absent va
     },
     label: null,
   });
-  assert.match(enriched, /Market cap\s+<b>\$48\.2K<\/b>/);
-  assert.match(enriched, /Liquidity\s+<b>\$12\.5K<\/b>/);
-  assert.match(enriched, /5m volume\s+<b>\$6\.8K<\/b>/);
+  assert.match(enriched, /Market cap <b>\$48\.2K<\/b>/);
+  assert.match(enriched, /Liquidity <b>\$12\.5K<\/b>/);
+  assert.match(enriched, /5m volume <b>\$6\.8K<\/b>/);
 
   const unavailable = buildWalletActivityMessage({
     event: { ...common, kind: 'buy' }, label: null,
@@ -65,8 +65,8 @@ test('Creator positive and developer risk snapshots', () => {
   const risk = buildCreatorNotification({ symbol: 'RISK', address: '0x456', risk: true, transferredAmount: 2, reason: 'Developer moved tokens.' });
   assert.match(positive, /CREATOR EVENT/);
   assert.match(positive, /Reputation/);
-  assert.match(risk, /ALPHAOS · ⚠️ RISK/);
-  assert.match(risk, /Protect capital/);
+  assert.match(risk, /⚠️ <b>RISK/);
+  assert.match(risk, /Risk:<\/b> HIGH/);
 });
 
 test('burn evidence distinguishes confirmed zero from unavailable', () => {
@@ -77,7 +77,7 @@ test('burn evidence distinguishes confirmed zero from unavailable', () => {
 });
 
 test('execution snapshots cover success, failure, pause and resume', () => {
-  assert.match(buildExecutionNotification({ state: 'EXECUTED', symbol: 'ABC' }), /✅ EXECUTED/);
+  assert.match(buildExecutionNotification({ state: 'EXECUTED', symbol: 'ABC' }), /✅ <b>EXECUTED/);
   assert.match(buildExecutionNotification({ state: 'FAILED', symbol: 'ABC', reason: '<failure>' }), /EXECUTION FAILED/);
   assert.match(buildExecutionNotification({ state: 'FAILED', symbol: 'ABC', reason: '<failure>' }), /&lt;failure&gt;/);
   assert.match(buildExecutionNotification({ state: 'PAUSED' }), /AUTO TRADE PAUSED/);
@@ -91,7 +91,7 @@ test('Free, Pro, and Admin presentation remains one visual grammar', () => {
   assert.match(free, /Free intelligence may be delayed/);
   assert.doesNotMatch(pro, /Free intelligence may be delayed/);
   assert.doesNotMatch(admin, /Free intelligence may be delayed/);
-  for (const message of [free, pro, admin]) assert.match(message, /^<b>ALPHAOS ·/);
+  for (const message of [free, pro, admin]) assert.match(message, /^👀 <b>WATCHING/);
 });
 
 test('shared renderer escapes every text-bearing field', () => {

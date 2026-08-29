@@ -679,7 +679,7 @@ async function processBoost(
         message: buildPremiumTokenNotification({
         state: 'VOLUME_IGNITION', symbol: market.symbol, name: market.name, address: boost.tokenAddress,
         market: normalizeNotificationMarketContext({ marketCap: market.marketCapUsd, fdv: market.fdvUsd,
-          liquidity: market.liquidityUsd, volume5m: market.volume5mUsd, chartUrl: market.chartUrl }),
+          price: market.priceUsd, liquidity: market.liquidityUsd, volume5m: market.volume5mUsd, chartUrl: market.chartUrl }),
         evidence: normalizeCoreDecisionMetrics({ devHoldingPercent, devHoldingEvidence: devHoldingPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
           burnedPercent, burnEvidence: burnedPercent == null ? 'UNAVAILABLE' : 'VERIFIED' }),
         volumeMultiple: volumeDecision.volumeMultiple,
@@ -737,6 +737,7 @@ async function processBoost(
       rawData: opportunity?.rawData,
       marketContext: market ? {
         symbol: market.symbol, name: market.name, address: boost.tokenAddress,
+        price: market.priceUsd,
         marketCap: market.marketCapUsd, fdv: market.fdvUsd ?? null,
         liquidity: market.liquidityUsd, volume5m: market.volume5mUsd,
         chartUrl: market.chartUrl ?? null,

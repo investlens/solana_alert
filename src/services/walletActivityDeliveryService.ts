@@ -265,6 +265,8 @@ export function buildWalletActivityButtons(
   return buildAlphaMarketActions({
     chartUrl: target.chartUrl,
     tokenUrl: target.tokenUrl,
+    fullIntelCallback: event.chain === 'robinhood' && /^0x[a-fA-F0-9]{40}$/.test(event.tokenMint ?? '')
+      ? `FI_RH_${event.tokenMint}` : null,
     copyContractCallback: event.chain === 'robinhood' && event.tokenMint ? `COPY_CA_${event.tokenMint}` : null,
     walletActivityCallback: 'WALLET_TRACKING',
   });

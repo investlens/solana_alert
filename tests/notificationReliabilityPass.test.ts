@@ -91,7 +91,7 @@ test('shared actions use final labels, exact CA, no PONS Trade, and safe callbac
     tokenUrl: `https://robinhoodchain.blockscout.com/token/${address}`,
     copyContractCallback: `COPY_CA_${address}`, trackCallback: 'OPP_TRACK_42', muteCallback: 'STRAT_TOGGLE_PONS_BREAKOUT' });
   assert.deepEqual(actions.map(row => row.map(action => action.text)),
-    [['📊 Chart', '🔎 Token'], ['📋 Copy CA'], ['⭐ Track', '🔕 Mute']]);
+    [['📊 Chart'], ['⭐ Track', '📋 Copy CA'], ['🔕 Mute'], ['🔎 Token']]);
   assert.equal(actions.flat().find(action => action.text === '📋 Copy CA')?.callback_data, `COPY_CA_${address}`);
   assert.equal(actions.flat().some(action => /Trade/.test(action.text)), false);
   for (const action of actions.flat()) if (action.callback_data) assert.ok(Buffer.byteLength(action.callback_data) <= 64);

@@ -153,59 +153,35 @@ function validMetric(metric: AlphaNotificationMetric): boolean {
 export function renderAlphaNotification(alert: AlphaNotification): string {
   const compactAddress = compactAlphaAddress(alert.address);
   const symbol = normalizeAlphaSymbol(alert.symbol);
-  const identity = symbol || boundedAlphaText(alert.token || alert.title, 96) || compactAddress;
-  const lines = [`<b>ALPHAOS · ${alphaStateLabel(alert.state)}</b>`];
+  const name = boundedAlphaText(alert.subtitle || alert.token || alert.title, 80);
+  const identity = name && symbol ? `${name} ($${symbol})` : symbol ? `$${symbol}` : name || compactAddress;
+  const lines = [`${alphaStateLabel(alert.state).split(' ')[0]} <b>${escapeAlphaHtml(alphaStateLabel(alert.state).replace(/^\S+\s*/, ''))} — ${escapeAlphaHtml(identity)}</b>`];
 
-  if (identity) {
-    const identityParts = [
-      `<b>${escapeAlphaHtml(identity)}</b>`,
-      symbol && compactAddress ? `<code>${escapeAlphaHtml(compactAddress)}</code>` : null,
-    ].filter(Boolean);
-    lines.push('', identityParts.join(' · '));
-  }
-  const subtitle = boundedAlphaText(alert.subtitle, 160);
-  if (subtitle && subtitle.toLowerCase() !== identity.toLowerCase()) {
-    lines.push(escapeAlphaHtml(subtitle));
-  }
-  if (alert.address && !symbol && identity !== compactAddress) {
-    lines.push(`<code>${escapeAlphaHtml(compactAddress)}</code>`);
-  }
+  if (alert.address) lines.push(symbol ? `<b>${escapeAlphaHtml(symbol)}</b> · <code>${escapeAlphaHtml(compactAddress)}</code>` : `<code>${escapeAlphaHtml(compactAddress)}</code>`);
 
   const decisionMetrics: AlphaNotificationMetric[] = [
     ...(alert.age ? [{ label: 'Age', value: alert.age }] : []),
     ...(alert.metrics ?? []),
-    ...(alert.confidence != null && Number.isFinite(alert.confidence)
-      ? [{ label: 'Confidence', value: `${Math.round(alert.confidence)}/100` }]
-      : []),
-    ...(alert.risk ? [{ label: 'Risk', value: alert.risk }] : []),
   ].filter(validMetric).slice(0, 8);
   const metrics = [
     ...decisionMetrics,
     ...(alert.specialistMetrics ?? []).filter(validMetric),
   ].slice(0, 12);
 
-  if (metrics.length) {
-    lines.push('');
-    for (const metric of metrics) {
-      const prefix = metric.icon ? `${escapeAlphaHtml(metric.icon)} ` : '';
-      lines.push(`${prefix}${escapeAlphaHtml(boundedAlphaText(metric.label, 24)).padEnd(11)} <b>${escapeAlphaHtml(boundedAlphaText(metric.value, 80))}</b>`);
-    }
-  }
+  const take = (...labels: string[]) => metrics.find(metric => labels.includes(metric.label.toLowerCase()));
+  const price = take('price'), marketCap = take('market cap', 'market cap', 'fdv'), liquidity = take('liquidity'), volume = take('5m volume');
+  if (price || marketCap) lines.push('', `${price ? `💰 Price <b>${escapeAlphaHtml(boundedAlphaText(price.value, 80))}</b>` : ''}${price && marketCap ? '  •  ' : ''}${marketCap ? `${marketCap.label} <b>${escapeAlphaHtml(boundedAlphaText(marketCap.value, 80))}</b>` : ''}`);
+  if (liquidity || volume) lines.push(`${liquidity ? `💧 Liquidity <b>${escapeAlphaHtml(boundedAlphaText(liquidity.value, 80))}</b>` : ''}${liquidity && volume ? '  •  ' : ''}${volume ? `5m volume <b>${escapeAlphaHtml(boundedAlphaText(volume.value, 80))}</b>` : ''}`);
+  const secondary = metrics.filter(metric => ![price, marketCap, liquidity, volume].includes(metric)).slice(0, 3);
+  for (const metric of secondary) lines.push(`${metric.icon ? `${escapeAlphaHtml(metric.icon)} ` : ''}${escapeAlphaHtml(boundedAlphaText(metric.label, 24))} <b>${escapeAlphaHtml(boundedAlphaText(metric.value, 80))}</b>`);
 
-  const evidence = (alert.evidence ?? []).map(value => boundedAlphaText(value, 150)).filter(Boolean).slice(0, 2);
-  if (alert.reason || evidence.length) {
-    lines.push('', `🧠 ${escapeAlphaHtml(boundedAlphaText(alert.reason ?? evidence[0], 200))}`);
-    for (const item of evidence.slice(alert.reason ? 0 : 1)) lines.push(`• ${escapeAlphaHtml(item)}`);
-  }
-
-  if (alert.recommendedAction) lines.push('', `<b>${escapeAlphaHtml(boundedAlphaText(alert.recommendedAction, 160))}</b>`);
-  const insight = (alert.insight ?? []).map(value => boundedAlphaText(value, 150)).filter(Boolean).slice(0, 3);
-  if (alert.insightTitle && insight.length) {
-    lines.push('', `🧠 <b>${escapeAlphaHtml(alert.insightTitle)}</b>`, ...insight.map(escapeAlphaHtml));
-  }
-  if (alert.statusTitle && alert.status) {
-    lines.push('', `<b>${escapeAlphaHtml(boundedAlphaText(alert.statusTitle, 60))}</b>`, escapeAlphaHtml(boundedAlphaText(alert.status, 200)));
-  }
+  const insightSource = alert.insight?.length ? alert.insight : alert.evidence?.length ? alert.evidence : alert.reason ? [alert.reason] : [];
+  const insight = insightSource.map(value => boundedAlphaText(value, 140)).filter(Boolean).slice(0, 3);
+  if (insight.length) lines.push('', '📈 <b>WHY NOW</b>', ...insight.map(item => `• ${escapeAlphaHtml(item)}`));
+  const risk = String(alert.risk ?? 'UNKNOWN').toUpperCase();
+  const riskIcon = risk === 'LOW' ? '✅' : risk === 'MEDIUM' || risk === 'REVIEW' ? '⚠️' : risk === 'HIGH' ? '🚨' : '⚪';
+  lines.push('', `🧠 <b>AlphaOS:</b> ${escapeAlphaHtml(alert.state)}`, `${riskIcon} <b>Risk:</b> ${escapeAlphaHtml(risk === 'MEASURED' ? 'UNKNOWN' : risk)}`);
+  lines.push('<i>Observed just now</i>');
   if (alert.access === 'FREE') lines.push('', '<i>Free intelligence may be delayed.</i>');
 
   const rendered = lines.join('\n');

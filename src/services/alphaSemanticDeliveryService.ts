@@ -5,6 +5,7 @@ import { isStrategyEnabledForUser } from './strategyService.js';
 import { supabase } from './supabase.js';
 import { sendTelegram } from './telegram.js';
 import { deliverReservedTelegram } from './telegramDeliveryContract.js';
+import { loadPriorDeliveredAlertComparison, renderMomentumUpdate } from './alertComparisonService.js';
 
 type InlineButton = { text: string; callback_data?: string; url?: string };
 
@@ -61,12 +62,22 @@ const productionDependencies: SemanticDeliveryDependencies = {
 export async function deliverAlphaSemanticEvent(args: {
   event: UserFacingSemanticEvent; message: string; buttons?: InlineButton[][];
 }, dependencies: SemanticDeliveryDependencies = productionDependencies): Promise<{ delivered: number; failed: number }> {
+  let deliveryMessage = args.message;
+  if (dependencies === productionDependencies) {
+    try {
+      const comparison = await loadPriorDeliveredAlertComparison({ currentEventId: args.event.id, assetId: args.event.assetId, chain: args.event.chain });
+      deliveryMessage = renderMomentumUpdate(comparison) ?? args.message;
+    } catch (error) {
+      console.warn('[AlphaSemanticDelivery] Comparison unavailable; using standard alert.', { alertEventId: args.event.id,
+        reason: error instanceof Error ? error.message : String(error) });
+    }
+  }
   const users = (await dependencies.getUsers()).sort((a, b) => {
     const rank = (tier: DeliverableUser['tier']) => tier === 'admin' ? 0 : tier === 'paid' ? 1 : 2;
     return rank(a.tier) - rank(b.tier);
   });
-  const renderedCharacters = args.message.length;
-  const renderedBytes = Buffer.byteLength(args.message, 'utf8');
+  const renderedCharacters = deliveryMessage.length;
+  const renderedBytes = Buffer.byteLength(deliveryMessage, 'utf8');
   let delivered = 0; let failed = 0;
   for (const user of users) {
     if (!hasCapability(accessProfileForUser(user), 'opportunities.realtime')) continue;
@@ -75,7 +86,7 @@ export async function deliverAlphaSemanticEvent(args: {
       const leaseToken = createLeaseToken();
       if (!await dependencies.reserve(args.event, user, leaseToken)) continue;
       const result = await deliverReservedTelegram({
-        send: () => dependencies.send(user.telegram_id, args.message, args.buttons),
+        send: () => dependencies.send(user.telegram_id, deliveryMessage, args.buttons),
         complete: () => dependencies.complete(args.event, user, leaseToken),
         release: () => dependencies.release(args.event, user, leaseToken),
       });

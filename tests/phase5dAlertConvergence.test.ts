@@ -35,9 +35,9 @@ function normalAlert(state: 'WATCHING' | 'ENTRY_READY' | 'EXIT_AVOID') {
 test('PONS watching, entry and exit snapshots follow one commercial contract', () => {
   for (const state of ['WATCHING', 'ENTRY_READY', 'EXIT_AVOID'] as const) {
     const message = normalAlert(state);
-    assert.match(message, /^<b>ALPHAOS · /);
+    assert.match(message, /^\S+ <b>/);
     assert.match(message, /<b>BUZZLAND<\/b> · <code>0x02b1…915Fc<\/code>/);
-    assert.ok(message.indexOf('Age') < message.indexOf('Market cap'));
+    assert.ok(message.indexOf('Market cap') < message.indexOf('Age'));
     assert.ok(message.indexOf('Market cap') < message.indexOf('Liquidity'));
     assert.ok(message.indexOf('Liquidity') < message.indexOf('5m volume'));
     assert.ok(message.indexOf('Confidence') < message.indexOf('Risk'));
@@ -60,23 +60,23 @@ test('Solana opportunity and wallet action snapshots use the final grammar', () 
     tokenUrl: 'https://solscan.io/token/mint', trackCallback: 'OPP_TRACK_1', muteCallback: 'STRAT_TOGGLE_SOL_MOMENTUM',
   });
   assert.deepEqual(opportunity.map(row => row.map(item => item.text)), [
-    ['⚡ Trade'], ['📊 Chart', '🔎 Token'], ['⭐ Track', '🔕 Mute'],
+    ['📊 Chart'], ['⭐ Track'], ['🔕 Mute'], ['🔎 Token'], ['⚡ Trade'],
   ]);
   const wallet = buildAlphaMarketActions({
     chartUrl: 'https://dexscreener.com/solana/mint', tokenUrl: 'https://solscan.io/token/mint',
     walletActivityCallback: 'WALLET_TRACKING',
   });
   assert.deepEqual(wallet.map(row => row.map(item => item.text)), [
-    ['📊 Chart', '🔎 Token'], ['🐋 Wallet Activity'],
+    ['📊 Chart'], ['🔎 Token'], ['🐋 Wallet Activity'],
   ]);
 });
 
 test('creator and execution snapshots retain the shared visual grammar and escaping', () => {
   const creator = buildCreatorNotification({ symbol: '<dev>', address: ponsAddress, risk: true, transferredAmount: 2, reason: 'Developer <moved> tokens.' });
   const execution = buildExecutionNotification({ state: 'EXECUTED', symbol: '<abc>', address: 'mint', reason: 'Order filled.' });
-  assert.match(creator, /ALPHAOS · ⚠️ RISK/);
+  assert.match(creator, /⚠️ <b>RISK/);
   assert.match(creator, /&lt;DEV&gt;/);
-  assert.match(execution, /ALPHAOS · ✅ EXECUTED/);
+  assert.match(execution, /✅ <b>EXECUTED/);
   assert.match(execution, /&lt;ABC&gt;/);
 });
 
@@ -106,7 +106,7 @@ test('normal PONS buttons have no Trade, use Chart and Token, and fit callback l
     chartUrl: `https://dexscreener.com/robinhood/${ponsAddress}`,
     tokenUrl: `https://robinhoodchain.blockscout.com/token/${ponsAddress}`,
   });
-  assert.deepEqual(actions.map(row => row.map(item => item.text)), [['📊 Chart', '🔎 Token']]);
+  assert.deepEqual(actions.map(row => row.map(item => item.text)), [['📊 Chart'], ['🔎 Token']]);
   assert.equal(actions.flat().some(item => /Trade/.test(item.text)), false);
   for (const action of actions.flat()) {
     if (action.callback_data) assert.ok(Buffer.byteLength(action.callback_data, 'utf8') <= 64);

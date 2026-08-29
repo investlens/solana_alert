@@ -5,6 +5,7 @@ export type NotificationMarketContext = {
   symbol: string | null;
   name: string | null;
   address: string | null;
+  price: number | null;
   marketCap: number | null;
   fdv: number | null;
   liquidity: number | null;
@@ -114,6 +115,7 @@ export function normalizeNotificationMarketContext(
   ...sources: MarketContextSource[]
 ): NotificationMarketContext {
   const address = text(sources, ['address', 'tokenAddress', 'token_address', 'mint', 'asset_id']);
+  const price = positiveNumber(sources, ['price', 'priceUsd', 'price_usd', 'currentPrice']);
   const marketCap = positiveNumber(sources, [
     'marketCap', 'marketCapUsd', 'market_cap', 'currentMarketCap', 'current_market_cap',
     'entryMarketCap', 'entry_market_cap',
@@ -127,6 +129,7 @@ export function normalizeNotificationMarketContext(
     symbol: text(sources, ['symbol', 'tokenSymbol', 'token_symbol'])?.replace(/^UNKNOWN$/i, '') || null,
     name: text(sources, ['name', 'tokenName', 'token_name'])?.replace(/^Unknown Token$/i, '') || null,
     address,
+    price,
     marketCap: marketCap ?? (preIndexValuation?.type === 'MARKET_CAP' ? preIndexValuation.valueUsd : null),
     fdv: fdv ?? (preIndexValuation?.type === 'FDV' ? preIndexValuation.valueUsd : null),
     liquidity: positiveNumber(sources, [

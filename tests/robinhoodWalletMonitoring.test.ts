@@ -147,7 +147,7 @@ test('Robinhood wallet alert preserves verified market/FDV context and safe acti
   assert.match(message, /Market cap\s+<b>\$25\.5K<\/b>/);
   assert.match(message, /Liquidity\s+<b>\$23\.0K<\/b>/);
   assert.match(message, /Dev holding\s+<b>0%<\/b>/);
-  assert.match(message, /Burned\s+<b>0%<\/b>/);
+  assert.doesNotMatch(message, /Burned/);
   assert.doesNotMatch(message, /\$40\.0K|Trade/);
 
   const actions = buildWalletActivityButtons(event, {
@@ -156,7 +156,7 @@ test('Robinhood wallet alert preserves verified market/FDV context and safe acti
     chartSource: 'dexscreener', tokenSource: 'blockscout',
   });
   assert.deepEqual(actions.map(row => row.map(action => action.text)), [
-    ['📊 Chart', '🔎 Token'], ['📋 Copy CA'], ['🐋 Wallet Activity'],
+    ['🔬 Full Intel', '📊 Chart'], ['📋 Copy CA'], ['🔎 Token'], ['🐋 Wallet Activity'],
   ]);
   assert.equal(actions[1][0].callback_data, `COPY_CA_${token}`);
   assert.equal(actions.flat().some(action => action.text.includes('Trade')), false);
@@ -178,7 +178,7 @@ test('pre-index wallet activity uses verified FDV and never fabricates Chart', (
   const actions = buildWalletActivityButtons(event, {
     tokenUrl: `https://robinhoodchain.blockscout.com/token/${token}`, tokenSource: 'blockscout',
   });
-  assert.deepEqual(actions[0].map(action => action.text), ['🔎 Token']);
+  assert.deepEqual(actions[0].map(action => action.text), ['🔬 Full Intel']);
 });
 
 test('network model, selection UX, watcher isolation and durable per-network cursor are explicit', async () => {

@@ -61,7 +61,7 @@ test('social URLs are allowlisted, clickable, and invalid URLs are suppressed', 
 test('Full Intel renders verified developer/history without false sell or scam claims', () => {
   const text = renderTokenIntelligence(fixture());
   assert.match(text, /0xf435…eb4b/);
-  assert.match(text, /Verified sold\s+<b>NO<\/b>/);
+  assert.match(text, /Sold\s+<b>No verified sell<\/b>/);
   assert.match(text, /Transferred\s+<b>4\.2%<\/b>/);
   assert.doesNotMatch(text, /scam/i);
 });
@@ -69,15 +69,15 @@ test('Full Intel renders verified developer/history without false sell or scam c
 test('token burn and LP status remain distinct', () => {
   const text = renderTokenIntelligence(fixture());
   assert.match(text, /Token burned\s+<b>4\.2%<\/b>/);
-  assert.match(text, /LP status\s+<b>UNKNOWN<\/b>/);
+  assert.doesNotMatch(text, /LP status\s+<b>UNKNOWN<\/b>/);
 });
 
 test('verified ATH and distance render; unavailable ATH stays UNKNOWN', () => {
   assert.match(renderTokenIntelligence(fixture()), /23\.0% below ATH/);
   const unknown = fixture({ ath: { priceUsd: null, priceObservedAt: null, priceSource: null, marketCapUsd: null,
     marketCapObservedAt: null, marketCapSource: null, distanceFromPricePct: null, distanceFromMarketCapPct: null } });
-  assert.match(renderTokenIntelligence(unknown), /ATH Market Cap\s+<b>UNKNOWN<\/b>/);
-  assert.match(renderTokenIntelligence(unknown), /Distance from ATH <b>UNKNOWN<\/b>/);
+  assert.doesNotMatch(renderTokenIntelligence(unknown), /ATH Market Cap/);
+  assert.match(renderTokenIntelligence(unknown), /From ATH\s+<b>UNKNOWN<\/b>/);
 });
 
 test('TROLL failure shape distinguishes unavailable current market from last verified AlphaOS evidence', () => {
@@ -89,10 +89,10 @@ test('TROLL failure shape distinguishes unavailable current market from last ver
     freshWallets: { oneDayPct: null, verifiedFresh: 0, notFresh: 0, unknown: 0, classified: 0,
       coveragePct: null, sampleSize: 0, evidence: 'UNKNOWN', methodology: 'verified nonce history' } });
   const text = renderTokenIntelligence(troll);
-  assert.match(text, /Current market data <b>UNAVAILABLE<\/b>/);
+  assert.match(text, /Current market data <b>unavailable<\/b>/);
   assert.match(text, /Last verified price <b>\$0\.0001638<\/b>/);
   assert.match(text, /Last verified MC\s+<b>\$161\.4K<\/b>/);
-  assert.match(text, /Holder analysis <b>UNAVAILABLE<\/b>/);
+  assert.match(text, /HOLDERS<\/b>[\s\S]*Analysis unavailable/);
   assert.match(text, /Blockscout holders HTTP 403/);
   assert.doesNotMatch(text, /Price\s+<b>\$0<\/b>/);
 });
@@ -104,7 +104,7 @@ test('live market and holder evidence remain independent in Full Intel presentat
   const marketFailureWithHolders = fixture({ price: null, marketCap: null, liquidity: null, volume5m: null,
     lastVerifiedMarket: null });
   const rendered = renderTokenIntelligence(marketFailureWithHolders);
-  assert.match(rendered, /Current market data <b>UNAVAILABLE<\/b>/);
+  assert.match(rendered, /Current market data <b>unavailable<\/b>/);
   assert.match(rendered, /Observed holders\s+<b>44<\/b>/);
 });
 
@@ -157,7 +157,7 @@ test('fresh-wallet block persistence contains normalized reason and coverage evi
   assert.equal(persisted.evidence.freshWalletSampleSize, 8);
   assert.equal(persisted.evidence.freshWalletClassifiedCount, 5);
   assert.equal(persisted.evidence.freshWalletCoveragePct, 62.5);
-  assert.match(renderTokenIntelligence(fixture()), /Coverage\s+<b>17 \/ 20 wallets<\/b>/);
+  assert.match(renderTokenIntelligence(fixture()), /Coverage\s+<b>17 \/ 20<\/b>/);
 });
 
 test('opportunity block persists normalized risk before returning without a fake alert event', async () => {
@@ -181,8 +181,8 @@ test('ATH is monotonic, includes verified current values, and keeps independent 
   const unverified = mergeTokenAth({ previous, currentPrice: 1, currentMc: 9_000_000, observedAt: 'bad', currentVerified: false });
   assert.equal(unverified.priceUsd, previous.priceUsd); assert.equal(unverified.marketCapUsd, previous.marketCapUsd);
   const rendered = renderTokenIntelligence(fixture());
-  assert.match(rendered, /ATH MC source\s+<b>ALPHAOS_VERIFIED_OBSERVATION<\/b>/);
-  assert.match(rendered, /ATH Price observed <b>2026-08-27T00:00:00.000Z<\/b>/);
+  assert.match(rendered, /ATH source\s+<b>AlphaOS verified history<\/b>/);
+  assert.match(rendered, /ATH observed\s+<b>00:00 UTC<\/b>/);
 });
 
 test('Full Intel performance controls are bounded and deduplicate cache misses', async () => {

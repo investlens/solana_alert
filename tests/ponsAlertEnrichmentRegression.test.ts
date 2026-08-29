@@ -217,8 +217,7 @@ test('Entry to Exit preserves verified developer holding and burn but not stale 
   });
   const exit = { ...opportunity(exitRaw, rustyAddress), recommended_action: 'EXIT' };
   const message = buildOpportunityMessage(exit);
-  assert.match(message, /Dev holding\s+<b>2\.86%<\/b>/);
-  assert.match(message, /Burned\s+<b>12\.4%<\/b>/);
+  assert.doesNotMatch(message, /Dev holding|Burned/);
   assert.doesNotMatch(message, /Market cap/);
 });
 
@@ -267,7 +266,7 @@ test('metadata failure safely leaves Exit address-only', async () => {
   });
   assert.equal(resolved.rawData.symbol, undefined);
   const { buildOpportunityMessage } = await service();
-  assert.match(buildOpportunityMessage(exit), /<b>0xa091…36e9d<\/b>/);
+  assert.match(buildOpportunityMessage(exit), /— 0xa091…36e9d<\/b>/);
 });
 
 test('persisted lifecycle identity prevents unnecessary metadata fallback', async () => {
@@ -344,8 +343,7 @@ test('SPURDO persisted lifecycle data reaches final Exit rendering and Copy CA a
   const message = buildOpportunityMessage(exit);
   assert.match(message, /<b>SPURDO<\/b>/);
   assert.match(message, /FDV\s+<b>\$4\.(?:58|6)K<\/b>/);
-  assert.match(message, /Dev holding\s+<b>0%<\/b>/);
-  assert.match(message, /Burned\s+<b>0%<\/b>/);
+  assert.doesNotMatch(message, /Dev holding|Burned/);
   assert.doesNotMatch(message, /Market INDEXING|Market cap|Liquidity|5m volume/);
 
   const buttons = buildButtons(exit, target, { telegram_id: '1', tier: 'paid', is_admin: false } as any);

@@ -13,26 +13,20 @@ export type AlphaMarketActionInput = {
 
 export function buildAlphaMarketActions(input: AlphaMarketActionInput): AlphaNotificationAction[][] {
   const rows: AlphaNotificationAction[][] = [];
-  if (input.tradeUrl) rows.push([{ text: '⚡ Trade', url: input.tradeUrl }]);
-
-  const market: AlphaNotificationAction[] = [];
+  const primary: AlphaNotificationAction[] = [];
+  if (input.fullIntelCallback) primary.push({ text: '🔬 Full Intel', callback_data: input.fullIntelCallback });
   if (input.chartUrl && input.chartUrl !== input.tokenUrl) {
-    market.push({ text: '📊 Chart', url: input.chartUrl });
+    primary.push({ text: '📊 Chart', url: input.chartUrl });
   }
-  market.push({ text: '🔎 Token', url: input.tokenUrl });
-  rows.push(market);
-
-  if (input.copyContractCallback) {
-    rows.push([{ text: '📋 Copy CA', callback_data: input.copyContractCallback }]);
-  }
-  if (input.fullIntelCallback) {
-    rows.push([{ text: '🔬 Full Intel', callback_data: input.fullIntelCallback }]);
-  }
+  if (primary.length) rows.push(primary);
 
   const preferences: AlphaNotificationAction[] = [];
   if (input.trackCallback) preferences.push({ text: '⭐ Track', callback_data: input.trackCallback });
-  if (input.muteCallback) preferences.push({ text: '🔕 Mute', callback_data: input.muteCallback });
+  if (input.copyContractCallback) preferences.push({ text: '📋 Copy CA', callback_data: input.copyContractCallback });
   if (preferences.length) rows.push(preferences);
+  if (input.muteCallback) rows.push([{ text: '🔕 Mute', callback_data: input.muteCallback }]);
+  rows.push([{ text: '🔎 Token', url: input.tokenUrl }]);
+  if (input.tradeUrl) rows.push([{ text: '⚡ Trade', url: input.tradeUrl }]);
   if (input.walletActivityCallback) {
     rows.push([{ text: '🐋 Wallet Activity', callback_data: input.walletActivityCallback }]);
   }

@@ -1153,7 +1153,7 @@ if (dexPaid.dexPaid === true && dexPaid.latestPaymentTimestamp != null) {
       state: 'DEX_PAID', symbol: token.symbol ?? market.symbol, name: token.name ?? market.name,
       address: token.tokenAddress,
       market: normalizeNotificationMarketContext({ marketCap: market.marketCapUsd, fdv: market.fdvUsd,
-        liquidity: market.liquidityUsd, volume5m: market.volume5mUsd, chartUrl: market.chartUrl }),
+        price: market.priceUsd, liquidity: market.liquidityUsd, volume5m: market.volume5mUsd, chartUrl: market.chartUrl }),
       evidence: normalizeCoreDecisionMetrics({ devHoldingPercent: devHolding.devHoldingPercent,
         devHoldingEvidence: devHolding.devHoldingPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
         totalBurnPercent: devHolding.totalBurnPercent,
