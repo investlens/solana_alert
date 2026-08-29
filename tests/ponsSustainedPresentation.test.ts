@@ -51,7 +51,7 @@ test('BUILDING renders enriched verified pre-index context and mature PONS actio
   assert.match(result.message, /🧠 <b>STRUCTURE<\/b>/);
   assert.match(result.message, /⏳ <b>STATUS<\/b>/);
   assert.deepEqual(result.actions.map(row => row.map(action => action.text)),
-    [['🔬 Full Intel'], ['⭐ Track', '📋 Copy CA'], ['🔕 Mute'], ['🔎 Token']]);
+    [['🔬 Full Intel'], ['⭐ Track', '📋 Copy CA'], ['🔕 Mute']]);
   assert.equal(result.actions.flat().find(action => action.text === '📋 Copy CA')?.callback_data,
     `COPY_CA_${address}`);
   assert.equal(result.actions.flat().some(action => /Trade/.test(action.text)), false);
@@ -67,7 +67,7 @@ test('indexed market replaces pre-index FDV and exposes only a verified direct c
   assert.match(result.message, /💧 Liquidity\s+<b>\$11\.6K<\/b>/);
   assert.match(result.message, /📊 5m volume\s+<b>\$7\.2K<\/b>/);
   assert.doesNotMatch(result.message, /FDV/);
-  assert.equal(result.actions.flat().some(action => action.text === '🔎 Token'), true);
+  assert.equal(result.actions.flat().some(action => action.text === '🔎 Token'), false);
 
   const withVerifiedRoute = buildPonsSustainedPresentation({
     state: 'BUILDING', tokenAddress: address,
@@ -78,7 +78,7 @@ test('indexed market replaces pre-index FDV and exposes only a verified direct c
       chartUrl: 'https://dexscreener.com/robinhood/pair' },
   });
   assert.deepEqual(withVerifiedRoute.actions.map(row => row.map(action => action.text)),
-    [['🔬 Full Intel', '📊 Chart'], ['📋 Copy CA'], ['🔎 Token']]);
+    [['🔬 Full Intel', '📊 Chart'], ['📋 Copy CA']]);
 });
 
 test('meaningless names and provenance-only risk are omitted while valid risk renders', () => {

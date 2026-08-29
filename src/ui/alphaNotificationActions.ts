@@ -25,7 +25,7 @@ export function buildAlphaMarketActions(input: AlphaMarketActionInput): AlphaNot
   if (input.copyContractCallback) preferences.push({ text: '📋 Copy CA', callback_data: input.copyContractCallback });
   if (preferences.length) rows.push(preferences);
   if (input.muteCallback) rows.push([{ text: '🔕 Mute', callback_data: input.muteCallback }]);
-  rows.push([{ text: '🔎 Token', url: input.tokenUrl }]);
+  if (!input.fullIntelCallback) rows.push([{ text: '🔎 Token', url: input.tokenUrl }]);
   if (input.tradeUrl) rows.push([{ text: '⚡ Trade', url: input.tradeUrl }]);
   if (input.walletActivityCallback) {
     rows.push([{ text: '🐋 Wallet Activity', callback_data: input.walletActivityCallback }]);

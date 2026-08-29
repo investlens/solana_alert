@@ -49,13 +49,18 @@ test('BOOST, DEX Paid, opportunity and developer alerts wire Full Intel without 
   for (const source of sources.slice(0, 3)) assert.doesNotMatch(source, /getRobinhoodTokenIntelligence|analyzeRobinhoodToken/);
 });
 
-test('social URLs are allowlisted, clickable, and invalid URLs are suppressed', () => {
+test('social URLs remain allowlisted data but Full Intel keyboard cannot emit stale X buttons', () => {
   assert.deepEqual(validateProjectSocial('https://x.com/alpha', 'twitter'), { label: 'X', url: 'https://x.com/alpha' });
   assert.deepEqual(validateProjectSocial('https://t.me/alpha', 'telegram'), { label: 'Telegram', url: 'https://t.me/alpha' });
   assert.equal(validateProjectSocial('javascript:alert(1)', 'website'), null);
   assert.equal(validateProjectSocial('http://evil.example', 'website'), null);
-  const buttons = tokenIntelligenceButtons(fixture());
-  assert(buttons.flat().some(x => x.url === 'https://x.com/stonkatm'));
+  const buttons = tokenIntelligenceButtons(fixture({ socials: [
+    { label: 'X', url: 'https://x.com/stonkatm' }, { label: 'X', url: 'https://twitter.com/stonkatm' },
+  ] }));
+  assert.deepEqual(buttons.map(row => row.map(button => button.text)),
+    [['📊 Chart', '🔎 Explorer'], ['📋 Copy CA']]);
+  assert.equal(buttons.flat().some(button => /(^|\s)X($|\s)/.test(button.text)), false);
+  assert.equal(buttons.flat().some(button => /Trade/i.test(button.text)), false);
 });
 
 test('Full Intel renders verified developer/history without false sell or scam claims', () => {
@@ -92,9 +97,17 @@ test('TROLL failure shape distinguishes unavailable current market from last ver
   assert.match(text, /Current market data <b>unavailable<\/b>/);
   assert.match(text, /Last verified price <b>\$0\.0001638<\/b>/);
   assert.match(text, /Last verified MC\s+<b>\$161\.4K<\/b>/);
-  assert.match(text, /HOLDERS<\/b>[\s\S]*Analysis unavailable/);
-  assert.match(text, /Blockscout holders HTTP 403/);
+  assert.match(text, /HOLDERS &amp; FRESH WALLETS<\/b>[\s\S]*Analysis currently unavailable/);
+  assert.doesNotMatch(text, /Blockscout holders HTTP 403/);
+  assert.deepEqual(troll.holders.warnings, ['Blockscout holders HTTP 403']);
   assert.doesNotMatch(text, /Price\s+<b>\$0<\/b>/);
+});
+
+test('verified holder and fresh-wallet intelligence remain visible', () => {
+  const text = renderTokenIntelligence(fixture());
+  assert.match(text, /👥 <b>HOLDERS<\/b>[\s\S]*Top 10\s+<b>31\.0%<\/b>/);
+  assert.match(text, /🆕 <b>FRESH WALLETS<\/b>[\s\S]*1D verified fresh <b>64\.7%<\/b>/);
+  assert.match(text, /Coverage\s+<b>17 \/ 20<\/b>/);
 });
 
 test('live market and holder evidence remain independent in Full Intel presentation', () => {

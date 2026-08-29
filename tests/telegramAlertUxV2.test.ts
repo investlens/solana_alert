@@ -66,15 +66,44 @@ test('Full Intel groups unavailable evidence and humanizes time and provenance',
   const message = renderTokenIntelligence(intel);
   assert.ok(message.length < 2500); assert.match(message, /FULL INTEL/); assert.match(message, /State\s+<b>RUNNER/);
   assert.match(message, /Supply\s+<b>1,000,000,000/); assert.match(message, /ATH source\s+<b>DexScreener/);
-  assert.equal((message.match(/Blockscout holders HTTP 403/g) ?? []).length, 1);
+  assert.doesNotMatch(message, /Blockscout holders HTTP 403/);
+  assert.deepEqual(intel.holders.warnings, ['Blockscout holders HTTP 403']);
+  assert.match(message, /HOLDERS &amp; FRESH WALLETS[\s\S]*Analysis currently unavailable/);
   assert.doesNotMatch(message, /DEXSCREENER_VERIFIED_BASE_PAIR|2026-\d\d-\d\dT/);
-  assert.match(message, /No verified developer data available/);
+  assert.equal((message.match(/👨‍💻 <b>DEVELOPER<\/b>/g) ?? []).length, 1);
+  assert.doesNotMatch(message, /DEV HISTORY/);
+  assert.match(message, /No verified developer history available/);
+});
+
+test('Internet Money Full Intel stays compact without hiding verified security evidence', () => {
+  const now = '2026-08-29T12:00:00.000Z';
+  const intel: TokenIntel = { status: 'PARTIAL', analyzedAt: now, chain: 'robinhood',
+    tokenAddress: '0x41e3000000000000000000000000000000008d41', name: 'Internet Money', symbol: 'INTERNETMONEY',
+    decimals: 18, supply: '1000000000000000000000000000', ageObservedAt: null, price: 0.000004139,
+    marketCap: 4139, liquidity: 3170, volume5m: 0, chartUrl: 'https://dexscreener.com/robinhood/internetmoney',
+    marketObservedAt: now, lastVerifiedMarket: null,
+    ath: { priceUsd: 0.000004139, marketCapUsd: 4139, priceObservedAt: now, marketCapObservedAt: now,
+      priceSource: 'DEXSCREENER_VERIFIED_BASE_PAIR', marketCapSource: 'DEXSCREENER_VERIFIED_BASE_PAIR',
+      distanceFromPricePct: 0, distanceFromMarketCapPct: 0 },
+    holders: { count: null, top10Pct: null, largestPct: null, risk: 'UNKNOWN', warnings: ['Blockscout holders HTTP 403'] },
+    freshWallets: { oneDayPct: null, verifiedFresh: 0, notFresh: 0, unknown: 0, classified: 0,
+      coveragePct: null, sampleSize: 0, evidence: 'UNKNOWN', methodology: 'verified nonce history' },
+    developer: { wallet: null, holdingPct: null, sold: null, transferredPct: null, burnedPct: null },
+    devHistory: { launches: 0, measuredSuccessful: 0, weakOrFailed: 0, verdict: 'Creator history unavailable.', risks: [] },
+    security: { tokenBurnedPct: null, lpStatus: 'UNKNOWN', dexPaid: null, boostTotal: 30 }, socials: [],
+    alpha: { state: 'BUILDING', risk: 'UNKNOWN', verdict: 'Showing verified data collected within the analysis budget.', positive: [], watch: [] },
+    incompleteReason: 'Blockscout holders HTTP 403' };
+  const message = renderTokenIntelligence(intel);
+  assert.ok(message.length < 1800); assert.ok(message.length <= 4096);
+  assert.match(message, /Volume \(5m\)\s+<b>\$0<\/b>/); assert.match(message, /Boost total\s+<b>30<\/b>/);
+  assert.match(message, /View\s+Momentum is building\./);
+  assert.doesNotMatch(message, /HTTP 403|Showing verified data collected|DEV HISTORY/);
 });
 
 test('automatic action hierarchy remains callback-safe and does not add Trade', () => {
   const rows = buildAlphaMarketActions({ chartUrl: 'https://dexscreener.com/x', tokenUrl: 'https://explorer/x',
     fullIntelCallback: 'FI_RH_0x123', trackCallback: 'TRACK_1', copyContractCallback: 'COPY_CA_1', muteCallback: 'MUTE_1' });
-  assert.deepEqual(rows.map(row => row.map(button => button.text)), [['🔬 Full Intel', '📊 Chart'], ['⭐ Track', '📋 Copy CA'], ['🔕 Mute'], ['🔎 Token']]);
+  assert.deepEqual(rows.map(row => row.map(button => button.text)), [['🔬 Full Intel', '📊 Chart'], ['⭐ Track', '📋 Copy CA'], ['🔕 Mute']]);
   assert.ok(rows.flat().every(button => !button.callback_data || Buffer.byteLength(button.callback_data) <= 64));
   assert.ok(rows.flat().every(button => !/Trade/i.test(button.text)));
 });

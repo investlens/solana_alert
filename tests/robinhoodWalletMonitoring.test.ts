@@ -156,7 +156,7 @@ test('Robinhood wallet alert preserves verified market/FDV context and safe acti
     chartSource: 'dexscreener', tokenSource: 'blockscout',
   });
   assert.deepEqual(actions.map(row => row.map(action => action.text)), [
-    ['🔬 Full Intel', '📊 Chart'], ['📋 Copy CA'], ['🔎 Token'], ['🐋 Wallet Activity'],
+    ['🔬 Full Intel', '📊 Chart'], ['📋 Copy CA'], ['🐋 Wallet Activity'],
   ]);
   assert.equal(actions[1][0].callback_data, `COPY_CA_${token}`);
   assert.equal(actions.flat().some(action => action.text.includes('Trade')), false);
