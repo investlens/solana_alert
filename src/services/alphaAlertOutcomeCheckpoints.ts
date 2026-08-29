@@ -3,6 +3,8 @@ import { enrichTokenByMintAddress } from './dexscreener.js';
 import { supabase } from './supabase.js';
 
 export const ALPHA_OUTCOME_CHECKPOINTS = [30, 60, 180, 300, 900, 1800, 3600] as const;
+export const OUTCOME_ELIGIBLE_SEMANTIC_TYPES = ['DEX_PAID', 'BOOST', 'VOLUME_SURGE', 'DEV_BURN', 'DEV_SELL', 'LIQUIDITY_RISK'] as const;
+export const OUTCOME_ELIGIBLE_ALERT_TYPES = ['ENTRY', 'CHECK_ENTRY', 'OPPORTUNITY'] as const;
 type EventRow = { id: number; asset_id: string; chain: string; price: number | string | null; alerted_at: string; semantic_event_type?: string | null; alert_type?: string | null };
 type PriorRow = { current_price: number | string | null; peak_price: number | string | null; peak_roi: number | string | null; time_to_peak_seconds: number | null };
 const positive = (value: unknown): number | null => { const number = Number(value); return Number.isFinite(number) && number > 0 ? number : null; };
@@ -50,19 +52,28 @@ async function currentPrice(event: EventRow): Promise<{ price: number | null; so
 }
 
 export function premiumEventNeedsOutcome(event: Pick<EventRow, 'semantic_event_type' | 'alert_type'>): boolean {
-  return ['DEX_PAID', 'BOOST', 'VOLUME_SURGE', 'DEV_BURN', 'DEV_SELL', 'LIQUIDITY_RISK'].includes(String(event.semantic_event_type ?? '').toUpperCase()) ||
-    ['ENTRY', 'CHECK_ENTRY', 'OPPORTUNITY'].includes(String(event.alert_type ?? '').toUpperCase());
+  return (OUTCOME_ELIGIBLE_SEMANTIC_TYPES as readonly string[]).includes(String(event.semantic_event_type ?? '').toUpperCase()) ||
+    (OUTCOME_ELIGIBLE_ALERT_TYPES as readonly string[]).includes(String(event.alert_type ?? '').toUpperCase());
+}
+
+export function selectOutcomeEligibleCandidates(events: EventRow[], limit = 200): EventRow[] {
+  return events.filter(premiumEventNeedsOutcome).slice(0, limit);
+}
+
+export function checkpointCanUseCurrentPrice(ageSeconds: number, checkpointSeconds: number, maximumLatenessSeconds = 60): boolean {
+  return ageSeconds >= checkpointSeconds && ageSeconds - checkpointSeconds <= maximumLatenessSeconds;
 }
 
 export async function runAlphaOutcomeCheckpointCycle(now = new Date()): Promise<number> {
+  const started = Date.now();
   const oldest = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
-  const { data, error } = await supabase.from('alpha_alert_events').select('id,asset_id,chain,price,alerted_at,semantic_event_type,alert_type')
-    .gte('alerted_at', oldest).lte('alerted_at', new Date(now.getTime() - 30_000).toISOString())
-    .order('alerted_at', { ascending: true }).limit(200);
+  const latest = new Date(now.getTime() - 30_000).toISOString();
+  const { data, error } = await supabase.rpc('select_alpha_outcome_candidates', {
+    p_oldest: oldest, p_latest: latest, p_now: now.toISOString(), p_limit: 200,
+  });
   if (error) throw error;
-  let inserted = 0;
+  let inserted = 0, attempted = 0, measured = 0, unavailable = 0, failed = 0;
   for (const event of (data ?? []) as EventRow[]) {
-    if (!premiumEventNeedsOutcome(event)) continue;
     const ageSeconds = Math.floor((now.getTime() - new Date(event.alerted_at).getTime()) / 1000);
     const { data: existing, error: existingError } = await supabase.from('alpha_alert_outcomes')
       .select('checkpoint_seconds,current_price,peak_price,peak_roi,time_to_peak_seconds').eq('alert_event_id', event.id);
@@ -70,13 +81,21 @@ export async function runAlphaOutcomeCheckpointCycle(now = new Date()): Promise<
     const done = new Set((existing ?? []).map(row => Number(row.checkpoint_seconds)));
     const due = ALPHA_OUTCOME_CHECKPOINTS.find(seconds => ageSeconds >= seconds && !done.has(seconds));
     if (!due) continue;
-    let measurement = { price: null as number | null, source: null as string | null, provenance: null as string | null, reason: 'PRICE_ACQUISITION_FAILED' as string | null };
-    try { measurement = await currentPrice(event); } catch { /* persist unavailable; never synthesize */ }
+    attempted += 1;
+    let measurement = { price: null as number | null, source: null as string | null, provenance: null as string | null,
+      reason: 'HISTORICAL_CHECKPOINT_PRICE_UNAVAILABLE' as string | null };
+    if (checkpointCanUseCurrentPrice(ageSeconds, due)) {
+      measurement.reason = 'PRICE_ACQUISITION_FAILED';
+      try { measurement = await currentPrice(event); } catch { /* persist unavailable; never synthesize */ }
+    }
     const row = buildAlphaOutcomeCheckpoint({ event, checkpointSeconds: due, currentPrice: measurement.price, source: measurement.source, provenance: measurement.provenance, prior: (existing ?? []) as PriorRow[], measuredAt: now.toISOString(), unavailableReason: measurement.reason });
     const { error: insertError } = await supabase.from('alpha_alert_outcomes').upsert(row, { onConflict: 'alert_event_id,checkpoint_seconds', ignoreDuplicates: true });
-    if (insertError) throw insertError;
-    inserted += 1;
+    if (insertError) { failed += 1; console.warn('[AlphaOutcomeCheckpoints] Checkpoint persistence failed', { alertEventId: event.id,
+      checkpointSeconds: due, reason: insertError.message }); continue; }
+    inserted += 1; if (row.status === 'MEASURED') measured += 1; else unavailable += 1;
   }
+  console.log('alpha_outcome_checkpoint_cycle', { eligible_candidates: data?.length ?? 0, selected: data?.length ?? 0,
+    checkpoints_attempted: attempted, measured, unavailable, failed, duration_ms: Date.now() - started });
   return inserted;
 }
 

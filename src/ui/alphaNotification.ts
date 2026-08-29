@@ -110,6 +110,13 @@ export function escapeAlphaHtml(value: unknown): string {
     .replace(/"/g, '&quot;');
 }
 
+export const TELEGRAM_MESSAGE_LIMIT = 4096;
+export function boundedAlphaText(value: unknown, max: number): string {
+  const text = String(value ?? '').trim();
+  if (text.length <= max) return text;
+  return `${text.slice(0, Math.max(0, max - 1))}…`;
+}
+
 export function compactAlphaAddress(value?: string | null, start = 6, end = 5): string {
   const clean = String(value ?? '').trim();
   if (!clean) return '';
@@ -118,7 +125,7 @@ export function compactAlphaAddress(value?: string | null, start = 6, end = 5): 
 }
 
 export function normalizeAlphaSymbol(value?: string | null): string {
-  return String(value ?? '').trim().replace(/^\$+/, '').toUpperCase();
+  return boundedAlphaText(String(value ?? '').replace(/^\$+/, '').toUpperCase(), 64);
 }
 
 export function alphaStateLabel(state: AlphaNotificationState): string {
@@ -146,7 +153,7 @@ function validMetric(metric: AlphaNotificationMetric): boolean {
 export function renderAlphaNotification(alert: AlphaNotification): string {
   const compactAddress = compactAlphaAddress(alert.address);
   const symbol = normalizeAlphaSymbol(alert.symbol);
-  const identity = symbol || alert.token || alert.title || compactAddress;
+  const identity = symbol || boundedAlphaText(alert.token || alert.title, 96) || compactAddress;
   const lines = [`<b>ALPHAOS · ${alphaStateLabel(alert.state)}</b>`];
 
   if (identity) {
@@ -156,7 +163,7 @@ export function renderAlphaNotification(alert: AlphaNotification): string {
     ].filter(Boolean);
     lines.push('', identityParts.join(' · '));
   }
-  const subtitle = String(alert.subtitle ?? '').trim();
+  const subtitle = boundedAlphaText(alert.subtitle, 160);
   if (subtitle && subtitle.toLowerCase() !== identity.toLowerCase()) {
     lines.push(escapeAlphaHtml(subtitle));
   }
@@ -181,27 +188,29 @@ export function renderAlphaNotification(alert: AlphaNotification): string {
     lines.push('');
     for (const metric of metrics) {
       const prefix = metric.icon ? `${escapeAlphaHtml(metric.icon)} ` : '';
-      lines.push(`${prefix}${escapeAlphaHtml(metric.label).padEnd(11)} <b>${escapeAlphaHtml(metric.value)}</b>`);
+      lines.push(`${prefix}${escapeAlphaHtml(boundedAlphaText(metric.label, 24)).padEnd(11)} <b>${escapeAlphaHtml(boundedAlphaText(metric.value, 80))}</b>`);
     }
   }
 
-  const evidence = (alert.evidence ?? []).map(value => String(value).trim()).filter(Boolean).slice(0, 2);
+  const evidence = (alert.evidence ?? []).map(value => boundedAlphaText(value, 150)).filter(Boolean).slice(0, 2);
   if (alert.reason || evidence.length) {
-    lines.push('', `🧠 ${escapeAlphaHtml(alert.reason ?? evidence[0])}`);
+    lines.push('', `🧠 ${escapeAlphaHtml(boundedAlphaText(alert.reason ?? evidence[0], 200))}`);
     for (const item of evidence.slice(alert.reason ? 0 : 1)) lines.push(`• ${escapeAlphaHtml(item)}`);
   }
 
-  if (alert.recommendedAction) lines.push('', `<b>${escapeAlphaHtml(alert.recommendedAction)}</b>`);
-  const insight = (alert.insight ?? []).map(value => String(value).trim()).filter(Boolean);
+  if (alert.recommendedAction) lines.push('', `<b>${escapeAlphaHtml(boundedAlphaText(alert.recommendedAction, 160))}</b>`);
+  const insight = (alert.insight ?? []).map(value => boundedAlphaText(value, 150)).filter(Boolean).slice(0, 3);
   if (alert.insightTitle && insight.length) {
     lines.push('', `🧠 <b>${escapeAlphaHtml(alert.insightTitle)}</b>`, ...insight.map(escapeAlphaHtml));
   }
   if (alert.statusTitle && alert.status) {
-    lines.push('', `<b>${escapeAlphaHtml(alert.statusTitle)}</b>`, escapeAlphaHtml(alert.status));
+    lines.push('', `<b>${escapeAlphaHtml(boundedAlphaText(alert.statusTitle, 60))}</b>`, escapeAlphaHtml(boundedAlphaText(alert.status, 200)));
   }
   if (alert.access === 'FREE') lines.push('', '<i>Free intelligence may be delayed.</i>');
 
-  return lines.join('\n');
+  const rendered = lines.join('\n');
+  if (rendered.length > TELEGRAM_MESSAGE_LIMIT) throw new Error('Alpha notification exceeds Telegram message limit after bounded rendering');
+  return rendered;
 }
 
 export function burnEvidenceMetric(burnedAmount: number | null | undefined): AlphaNotificationMetric {

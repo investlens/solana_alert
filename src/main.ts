@@ -84,6 +84,7 @@ import {
   fetchTakeoverSet,
 } from './services/dexscreener.js';
 import { sendTelegram } from './services/telegram.js';
+import { claimTelegramPollingOwner } from './services/telegramPollingOwner.js';
 import { confirmMomentum } from './services/momentumConfirmation.js';
 import type { DexProfile, RiskResult, TokenState } from './types.js';
 import { pollWatchedWallets } from './core/walletWatcher.js';
@@ -1395,6 +1396,10 @@ if (shouldRunCreatorReputationEngine()) {
 }
 
 async function startBot() {
+  if (!claimTelegramPollingOwner()) {
+    console.warn('[TelegramPolling] Same-process duplicate startup suppressed.');
+    return;
+  }
   console.log('starting Telegram bot...');
   const bot = createBot();
   console.log('bot created');

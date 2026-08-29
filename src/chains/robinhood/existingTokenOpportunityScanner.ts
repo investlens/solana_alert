@@ -23,6 +23,11 @@ let hotCursor = 0;
 let warmCursor = 0;
 const lastScannedAt = new Map<string, number>();
 
+export function requirePersistedScannerOpportunity<T>(value: T | null, strategyKey: string): T {
+  if (value == null) throw new Error(`scanner persistence failed for ${strategyKey}`);
+  return value;
+}
+
 const normalize = (value: string) => value.trim().toLowerCase();
 const rowTime = (row: UniverseRow) => row.last_observed_at ?? row.alerted_at ?? row.updated_at ?? row.created_at ?? new Date(0).toISOString();
 const finitePositive = (value: unknown) => Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : null;
@@ -143,19 +148,19 @@ async function scanToken(entry: ExistingTokenUniverseEntry) {
     if (qualified && (cooldownPassed || result.previousState !== result.assessment.state)) {
       const kind = result.reentry ? 'REIGNITION' : result.assessment.state === 'RUNNER' ? 'RUNNER' : 'BREAKOUT';
       const actionRaw = { ...rawData, lastAlertState: result.assessment.state, lastAlertAt: observedAt };
-      await recordOpportunityAndEmit({ opportunityType: 'DEX_CONFIRMATION', assetId: entry.token, chain: 'robinhood', sourceAgent: 'ExistingTokenOpportunityScanner',
+      requirePersistedScannerOpportunity(await recordOpportunityAndEmit({ opportunityType: 'DEX_CONFIRMATION', assetId: entry.token, chain: 'robinhood', sourceAgent: 'ExistingTokenOpportunityScanner',
         title: `${market.symbol} Existing Token ${kind}`, strategyKey: `EXISTING_TOKEN_${kind}`, recommendedAction: 'CHECK_ENTRY', status: 'NEW',
         why: result.assessment.reasons.join(' '), whatHappened: `Existing-token structure advanced from ${result.previousState} to ${result.assessment.state} without requiring a new BOOST or DEX Paid event.`,
         invalidation: 'Invalidate if sustained participation, price retention, liquidity, or buy pressure breaks down.', riskReason: 'Manual entry review required; fresh-wallet and security gates remain enforced at delivery.',
         confidence: result.assessment.state === 'RUNNER' ? 78 : 72, riskScore: 42,
-        expiresAt: new Date(Date.now() + config.existingTokenAlertCooldownMinutes * 60_000).toISOString(), rawData: actionRaw });
+        expiresAt: new Date(Date.now() + config.existingTokenAlertCooldownMinutes * 60_000).toISOString(), rawData: actionRaw }), `EXISTING_TOKEN_${kind}`);
       rawData.lastAlertState = result.assessment.state; rawData.lastAlertAt = observedAt; emitted = true;
     }
   }
-  await recordOpportunity({ opportunityType: 'DEX_CONFIRMATION', assetId: entry.token, chain: 'robinhood', sourceAgent: 'ExistingTokenOpportunityScanner',
+  requirePersistedScannerOpportunity(await recordOpportunity({ opportunityType: 'DEX_CONFIRMATION', assetId: entry.token, chain: 'robinhood', sourceAgent: 'ExistingTokenOpportunityScanner',
     title: `${market.symbol} continuous monitoring`, strategyKey: 'EXISTING_TOKEN_MONITOR', recommendedAction: 'TRACK', status: 'WATCHING',
     why: result.assessment.reasons.join(' '), whatHappened: 'Lightweight comparable market observation recorded.', riskReason: null,
-    confidence: 50, riskScore: 50, rawData });
+    confidence: 50, riskScore: 50, rawData }), 'EXISTING_TOKEN_MONITOR');
   return { candidate: result.alertable, qualified, emitted };
 }
 
@@ -163,7 +168,8 @@ export async function refreshExistingTokenOpportunityScanner() {
   if (scannerRunning) return { skipped: true };
   scannerRunning = true; const started = Date.now();
   const metrics = { health: 'HEALTHY', universe_size: 0, tokens_due: 0, tokens_scanned: 0, candidates: 0, qualified: 0,
-    actionable_emitted: 0, delivered: null, deduped: null, fresh_wallet_blocked: null, failures: 0, duration_ms: 0 };
+    actionable_emitted: 0, delivered: null, deduped: null, fresh_wallet_blocked: null, failures: 0,
+    failure_reasons: {} as Record<string, number>, duration_ms: 0 };
   try {
     const universe = await loadUniverse(); metrics.universe_size = universe.length;
     const due = selectDueExistingTokens(universe); hotCursor = due.nextHotCursor; warmCursor = due.nextWarmCursor; metrics.tokens_due = due.dueCount;
@@ -172,7 +178,10 @@ export async function refreshExistingTokenOpportunityScanner() {
       while (next < due.selected.length && Date.now() - started < CYCLE_BUDGET_MS) {
         const entry = due.selected[next++];
         try { const result = await scanToken(entry); lastScannedAt.set(entry.token, Date.now()); metrics.tokens_scanned++; metrics.candidates += Number(result.candidate); metrics.qualified += Number(result.qualified); metrics.actionable_emitted += Number(result.emitted); }
-        catch (error) { metrics.failures++; console.warn('[ExistingTokenScanner] token failed', { token: entry.token, reason: error instanceof Error ? error.message : String(error) }); }
+        catch (error) { metrics.failures++; const reason = error instanceof Error ? error.message : String(error);
+          const category = reason.startsWith('scanner persistence failed') ? 'PERSISTENCE_FAILED' : reason === 'verified market unavailable' ? 'MARKET_UNAVAILABLE' : 'TOKEN_SCAN_FAILED';
+          metrics.failure_reasons[category] = (metrics.failure_reasons[category] ?? 0) + 1;
+          console.warn('[ExistingTokenScanner] token failed', { token: entry.token, category, reason }); }
       }
     };
     await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENCY, due.selected.length) }, () => worker()));

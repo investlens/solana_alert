@@ -5,8 +5,8 @@ import { readFile } from 'node:fs/promises';
 import { buildAlphaMarketActions } from '../src/ui/alphaNotificationActions.js';
 import { qualifyPremiumOpportunity } from '../src/services/opportunityDeliveryService.js';
 import { freshWalletBlockPersistence, freshWalletEvidenceFromStates, freshWalletRiskBlocksPositive,
-  mergeTokenAth, validateProjectSocial, type TokenIntel } from '../src/services/tokenIntelligenceService.js';
-import { renderTokenIntelligence, tokenIntelligenceButtons } from '../src/ui/tokenIntelligenceView.js';
+  mergeTokenAth, tokenIntelligenceCacheIsReusable, validateProjectSocial, type TokenIntel } from '../src/services/tokenIntelligenceService.js';
+import { normalizedTokenSupply, renderTokenIntelligence, tokenIntelligenceButtons } from '../src/ui/tokenIntelligenceView.js';
 
 function fixture(overrides: Partial<TokenIntel> = {}): TokenIntel {
   return { status: 'COMPLETE', analyzedAt: '2026-08-28T12:00:00.000Z', chain: 'robinhood',
@@ -78,6 +78,49 @@ test('verified ATH and distance render; unavailable ATH stays UNKNOWN', () => {
     marketCapObservedAt: null, marketCapSource: null, distanceFromPricePct: null, distanceFromMarketCapPct: null } });
   assert.match(renderTokenIntelligence(unknown), /ATH Market Cap\s+<b>UNKNOWN<\/b>/);
   assert.match(renderTokenIntelligence(unknown), /Distance from ATH <b>UNKNOWN<\/b>/);
+});
+
+test('TROLL failure shape distinguishes unavailable current market from last verified AlphaOS evidence', () => {
+  const troll = fixture({ status: 'PARTIAL', tokenAddress: '0xa206753eb19D8E3F9Ae3313ADb467BdC2a7a4d90',
+    name: 'Troll in Hood', symbol: 'TROLL', price: null, marketCap: null, liquidity: null, volume5m: null,
+    marketObservedAt: null, lastVerifiedMarket: { price: 0.0001638, marketCap: 161_382, liquidity: 44_757.28,
+      volume5m: 141.37, observedAt: '2026-08-28T18:01:48.647Z', source: 'DEXSCREENER_VERIFIED_BASE_PAIR' },
+    holders: { count: null, top10Pct: null, largestPct: null, risk: 'UNKNOWN', warnings: ['Blockscout holders HTTP 403'] },
+    freshWallets: { oneDayPct: null, verifiedFresh: 0, notFresh: 0, unknown: 0, classified: 0,
+      coveragePct: null, sampleSize: 0, evidence: 'UNKNOWN', methodology: 'verified nonce history' } });
+  const text = renderTokenIntelligence(troll);
+  assert.match(text, /Current market data <b>UNAVAILABLE<\/b>/);
+  assert.match(text, /Last verified price <b>\$0\.0001638<\/b>/);
+  assert.match(text, /Last verified MC\s+<b>\$161\.4K<\/b>/);
+  assert.match(text, /Holder analysis <b>UNAVAILABLE<\/b>/);
+  assert.match(text, /Blockscout holders HTTP 403/);
+  assert.doesNotMatch(text, /Price\s+<b>\$0<\/b>/);
+});
+
+test('live market and holder evidence remain independent in Full Intel presentation', () => {
+  const liveWithHolderFailure = fixture({ holders: { count: null, top10Pct: null, largestPct: null,
+    risk: 'UNKNOWN', warnings: ['holder provider unavailable'] } });
+  assert.match(renderTokenIntelligence(liveWithHolderFailure), /Price\s+<b>\$0\.01000<\/b>/);
+  const marketFailureWithHolders = fixture({ price: null, marketCap: null, liquidity: null, volume5m: null,
+    lastVerifiedMarket: null });
+  const rendered = renderTokenIntelligence(marketFailureWithHolders);
+  assert.match(rendered, /Current market data <b>UNAVAILABLE<\/b>/);
+  assert.match(rendered, /Observed holders\s+<b>44<\/b>/);
+});
+
+test('PARTIAL cache is retryable after one minute while COMPLETE keeps the declared TTL', () => {
+  const now = Date.parse('2026-08-29T00:02:00.000Z');
+  const partial = fixture({ status: 'PARTIAL', analyzedAt: '2026-08-29T00:00:00.000Z' });
+  assert.equal(tokenIntelligenceCacheIsReusable('PARTIAL', partial, '2026-08-29T00:15:00.000Z', now), false);
+  assert.equal(tokenIntelligenceCacheIsReusable('PARTIAL', { ...partial, analyzedAt: '2026-08-29T00:01:30.000Z' }, '2026-08-29T00:02:30.000Z', now), true);
+  assert.equal(tokenIntelligenceCacheIsReusable('COMPLETE', fixture(), '2026-08-29T00:10:00.000Z', now), true);
+});
+
+test('raw token supply is normalized for display without losing stored precision', () => {
+  assert.equal(normalizedTokenSupply('1000000000000000000000000000', 18), '1,000,000,000');
+  const text = renderTokenIntelligence(fixture({ supply: '1000000000000000000000000000', decimals: 18 }));
+  assert.match(text, /Supply\s+<b>1,000,000,000<\/b>/);
+  assert.doesNotMatch(text, /1000000000000000000000000000/);
 });
 
 test('fresh-wallet threshold is strict, verified-only, and visible', () => {

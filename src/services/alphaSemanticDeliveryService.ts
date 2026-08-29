@@ -65,6 +65,8 @@ export async function deliverAlphaSemanticEvent(args: {
     const rank = (tier: DeliverableUser['tier']) => tier === 'admin' ? 0 : tier === 'paid' ? 1 : 2;
     return rank(a.tier) - rank(b.tier);
   });
+  const renderedCharacters = args.message.length;
+  const renderedBytes = Buffer.byteLength(args.message, 'utf8');
   let delivered = 0; let failed = 0;
   for (const user of users) {
     if (!hasCapability(accessProfileForUser(user), 'opportunities.realtime')) continue;
@@ -84,7 +86,9 @@ export async function deliverAlphaSemanticEvent(args: {
       const reason = result.error instanceof Error ? result.error.message : String(result.error ?? 'unknown');
       if (reason.includes('403')) await dependencies.blocked(user.telegram_id);
       console.error('[AlphaSemanticDelivery] Delivery failed:', { alertEventId: args.event.id,
-        semanticEventType: args.event.type, telegramId: user.telegram_id, sent: result.sent, reason });
+        semanticEventType: args.event.type, recipientCount: users.length, renderedCharacters, renderedBytes,
+        telegramErrorCategory: reason.includes('text is too long') ? 'MESSAGE_TOO_LONG' : reason.includes('403') ? 'RECIPIENT_BLOCKED' : 'SEND_FAILED',
+        telegramId: user.telegram_id, sent: result.sent, reason });
     } catch (error) {
       failed += 1;
       console.error('[AlphaSemanticDelivery] Recipient processing failed:', { alertEventId: args.event.id,

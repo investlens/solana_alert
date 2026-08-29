@@ -6,7 +6,7 @@ import { getRobinhoodTokenMetadata, type RobinhoodTokenMetadata } from '../chain
 import { scanRobinhoodHolderRisk } from '../chains/robinhood/security/holderRiskScanner.js';
 import { supabase } from './supabase.js';
 
-const CACHE_MS = 15 * 60_000, ANALYSIS_DEADLINE_MS = 8_000, CUTOFF_CACHE_MS = 60_000;
+const CACHE_MS = 15 * 60_000, PARTIAL_CACHE_MS = 60_000, ANALYSIS_DEADLINE_MS = 8_000, CUTOFF_CACHE_MS = 60_000;
 const BLOCKSCOUT_BASE = 'https://robinhoodchain.blockscout.com';
 const inFlight = new Map<string, Promise<TokenIntel>>();
 let cutoffCache: { block: bigint; expiresAt: number } | null = null;
@@ -23,7 +23,10 @@ export type TokenIntel = {
   status: 'COMPLETE' | 'PARTIAL'; analyzedAt: string; chain: 'robinhood'; tokenAddress: string;
   name: string | null; symbol: string | null; decimals: number | null; supply: string | null;
   ageObservedAt: string | null; price: number | null; marketCap: number | null; liquidity: number | null;
-  volume5m: number | null; chartUrl: string | null; ath: TokenAth;
+  volume5m: number | null; chartUrl: string | null; marketObservedAt?: string | null;
+  lastVerifiedMarket?: { price: number | null; marketCap: number | null; liquidity: number | null; volume5m: number | null;
+    observedAt: string | null; source: string | null } | null;
+  ath: TokenAth;
   holders: { count: number | null; top10Pct: number | null; largestPct: number | null; risk: string; warnings: string[] };
   freshWallets: FreshWalletIntel;
   developer: { wallet: string | null; holdingPct: number | null; sold: boolean | null; transferredPct: number | null; burnedPct: number | null };
@@ -177,7 +180,7 @@ export function mergeTokenAth(args: { previous?: TokenAth | null; historicalPric
 async function databaseContext(token: string, signal: AbortSignal) {
   const base = () => supabase.from('alpha_alert_events');
   const queries = [
-    base().select('semantic_event_type,intelligence_state,risk_label,boost_total,raw_snapshot').eq('chain', 'robinhood').ilike('asset_id', token).order('alerted_at', { ascending: false }).limit(1).maybeSingle(),
+    base().select('semantic_event_type,intelligence_state,risk_label,boost_total,price,price_provenance,market_cap,liquidity,volume_5m,alerted_at,raw_snapshot').eq('chain', 'robinhood').ilike('asset_id', token).order('alerted_at', { ascending: false }).limit(1).maybeSingle(),
     base().select('price,price_provenance,alerted_at').eq('chain', 'robinhood').ilike('asset_id', token).not('price_provenance', 'is', null).gt('price', 0).order('price', { ascending: false }).limit(1).maybeSingle(),
     base().select('market_cap,valuation_provenance,alerted_at').eq('chain', 'robinhood').ilike('asset_id', token).not('valuation_provenance', 'is', null).gt('market_cap', 0).order('market_cap', { ascending: false }).limit(1).maybeSingle(),
     base().select('boost_total').eq('chain', 'robinhood').ilike('asset_id', token).gt('boost_total', 0).order('boost_total', { ascending: false }).limit(1).maybeSingle(),
@@ -202,7 +205,8 @@ function emptyIntel(token: string, previous?: TokenIntel | null): TokenIntel {
   return { status: 'PARTIAL', analyzedAt: new Date().toISOString(), chain: 'robinhood', tokenAddress: token,
     name: previous?.name ?? null, symbol: previous?.symbol ?? null, decimals: previous?.decimals ?? null, supply: previous?.supply ?? null,
     ageObservedAt: previous?.ageObservedAt ?? null, price: null, marketCap: null, liquidity: null, volume5m: null,
-    chartUrl: previous?.chartUrl ?? null, ath: previous?.ath ?? unknownAth(),
+    chartUrl: previous?.chartUrl ?? null, marketObservedAt: null,
+    lastVerifiedMarket: previous?.lastVerifiedMarket ?? null, ath: previous?.ath ?? unknownAth(),
     holders: { count: null, top10Pct: null, largestPct: null, risk: 'UNKNOWN', warnings: [] }, freshWallets: unknownFresh(),
     developer: { wallet: null, holdingPct: null, sold: null, transferredPct: null, burnedPct: null },
     devHistory: { launches: 0, measuredSuccessful: 0, weakOrFailed: 0, verdict: 'Creator history unavailable.', risks: [] },
@@ -225,7 +229,7 @@ export async function analyzeRobinhoodToken(tokenAddress: string, previous?: Tok
     if (metadata) Object.assign(result, { name: metadata.name ?? market?.name ?? null, symbol: metadata.symbol ?? market?.symbol ?? null,
       decimals: metadata.decimals, supply: metadata.totalSupplyRaw?.toString() ?? null });
     if (market) Object.assign(result, { price: market.priceUsd, marketCap: market.marketCapUsd, liquidity: market.liquidityUsd,
-      volume5m: market.volume5mUsd, chartUrl: market.chartUrl ?? null });
+      volume5m: market.volume5mUsd, chartUrl: market.chartUrl ?? null, marketObservedAt: observedAt });
     result.ageObservedAt = pair?.pairCreatedAt ? new Date(pair.pairCreatedAt).toISOString() : null; result.socials = socialLinks(pair);
     const [holderResult, dbResult] = await Promise.allSettled([
       metadata ? scanRobinhoodHolderRisk(token, { metadata, signal: controller.signal }) : Promise.reject(new Error('metadata unavailable')),
@@ -237,6 +241,15 @@ export async function analyzeRobinhoodToken(tokenAddress: string, previous?: Tok
       result.security.dexPaid = db.dexPaid; result.security.boostTotal = db.boostTotal;
       result.alpha.state = db.latest?.intelligence_state ?? null; result.alpha.risk = db.latest?.risk_label ?? null;
       const raw = (db.latest?.raw_snapshot ?? {}) as Record<string, unknown>;
+      const lastPrice = positive(db.latest?.price ?? raw.price ?? raw.currentPrice);
+      const lastMarketCap = positive(db.latest?.market_cap ?? raw.marketCap ?? raw.fdv);
+      const lastLiquidity = positive(db.latest?.liquidity ?? raw.liquidity);
+      const lastVolume5m = positive(db.latest?.volume_5m ?? raw.volume5m ?? raw.currentVolume5m);
+      if (lastPrice || lastMarketCap || lastLiquidity || lastVolume5m) result.lastVerifiedMarket = {
+        price: lastPrice, marketCap: lastMarketCap, liquidity: lastLiquidity, volume5m: lastVolume5m,
+        observedAt: db.latest?.alerted_at ?? null,
+        source: db.latest?.price_provenance ?? (lastPrice ? 'ALPHAOS_VERIFIED_EVENT_SNAPSHOT' : null),
+      };
       result.developer = { wallet: typeof raw.deployerAddress === 'string' ? raw.deployerAddress : null,
         holdingPct: positive(raw.devHoldingPercent), sold: raw.confirmedDevSell === true ? true : raw.confirmedDevSell === false ? false : null,
         transferredPct: positive(raw.otherDevTransferPercent), burnedPct: positive(raw.confirmedDevBurnPercent) };
@@ -260,8 +273,16 @@ export async function analyzeRobinhoodToken(tokenAddress: string, previous?: Tok
     }
     if (freshWalletRiskBlocksPositive({ freshWallet1dPct: result.freshWallets.oneDayPct, freshWalletEvidence: result.freshWallets.evidence }))
       result.alpha.watch.unshift(`High fresh-wallet concentration (${result.freshWallets.oneDayPct!.toFixed(1)}% of classified wallets)`);
-    const complete = !controller.signal.aborted && metadata != null && market != null && holderResult.status === 'fulfilled' && db != null && result.freshWallets.evidence === 'VERIFIED';
-    result.status = complete ? 'COMPLETE' : 'PARTIAL'; result.incompleteReason = complete ? null : result.incompleteReason;
+    const complete = !controller.signal.aborted && metadata != null && market != null && holderResult.status === 'fulfilled' &&
+      !holderResult.value.warnings.length && db != null && result.freshWallets.evidence === 'VERIFIED';
+    result.status = complete ? 'COMPLETE' : 'PARTIAL';
+    const incomplete: string[] = [];
+    if (!market) incomplete.push(pairsResult.status === 'rejected' ? `Current market lookup failed: ${pairsResult.reason instanceof Error ? pairsResult.reason.message : 'provider unavailable'}` : 'Current market pair unavailable');
+    if (holderResult.status === 'rejected') incomplete.push('Holder analysis failed');
+    else incomplete.push(...holderResult.value.warnings);
+    if (!db) incomplete.push('AlphaOS evidence lookup unavailable');
+    if (controller.signal.aborted) incomplete.push('Analysis deadline reached');
+    result.incompleteReason = complete ? null : [...new Set(incomplete)].join(' · ') || result.incompleteReason;
     result.analyzedAt = new Date().toISOString(); return result;
   } catch { return result; } finally { clearTimeout(timeout); controller.abort(); }
 }
@@ -274,14 +295,22 @@ export async function getRobinhoodTokenIntelligence(tokenAddress: string): Promi
     .catch(() => ({ data: null, error: null }));
   clearTimeout(cacheTimeout);
   const data = cacheResult.data as { status: string; result: unknown; expires_at: string } | null;
-  if (data && data.expires_at > now && (data.status === 'COMPLETE' || data.status === 'PARTIAL')) return data.result as TokenIntel;
+  if (data && tokenIntelligenceCacheIsReusable(data.status, data.result as TokenIntel, data.expires_at)) return data.result as TokenIntel;
   const running = inFlight.get(key); if (running) return running;
   const request = analyzeRobinhoodToken(token, (data?.result as TokenIntel | undefined) ?? null,
     ANALYSIS_DEADLINE_MS - (Date.now() - startedAt)).then(async result => {
     const { error } = await supabase.from('token_intelligence_cache').upsert({ chain: 'robinhood', token_address: token.toLowerCase(),
-      status: result.status, result, analyzed_at: result.analyzedAt, expires_at: new Date(Date.now() + CACHE_MS).toISOString() },
+      status: result.status, result, analyzed_at: result.analyzedAt,
+      expires_at: new Date(Date.now() + (result.status === 'COMPLETE' ? CACHE_MS : PARTIAL_CACHE_MS)).toISOString() },
       { onConflict: 'chain,token_address' });
     if (error) console.warn('[TokenIntel] Cache write failed', { token, error: error.message }); return result;
   }).finally(() => inFlight.delete(key));
   inFlight.set(key, request); return request;
+}
+
+export function tokenIntelligenceCacheIsReusable(status: string, result: TokenIntel, expiresAt: string, now = Date.now()) {
+  const expiry = Date.parse(expiresAt), analyzed = Date.parse(result?.analyzedAt ?? '');
+  if (!Number.isFinite(expiry) || expiry <= now) return false;
+  if (status === 'COMPLETE') return true;
+  return status === 'PARTIAL' && Number.isFinite(analyzed) && now - analyzed >= 0 && now - analyzed <= PARTIAL_CACHE_MS;
 }
