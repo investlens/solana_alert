@@ -1,7 +1,7 @@
 import {
   supabase,
 } from '../../services/supabase.js';
-import { buildAlphaMarketActions } from '../../ui/alphaNotificationActions.js';
+import { buildAlphaMarketActions, extractAutomaticSocials } from '../../ui/alphaNotificationActions.js';
 import {
   normalizeCoreDecisionMetrics,
   normalizeNotificationMarketContext,
@@ -434,10 +434,12 @@ export function buildBoostActions(args: {
   chartUrl?: string | null;
   opportunityId?: number | null;
   strategyKey?: string | null;
+  rawData?: Record<string, unknown> | null;
 }) {
   const muteCallback = args.strategyKey
     ? `STRAT_TOGGLE_${args.strategyKey}`
     : null;
+  const socials = extractAutomaticSocials(args.rawData);
   return buildAlphaMarketActions({
     chartUrl: args.chartUrl,
     tokenUrl: `https://robinhoodchain.blockscout.com/token/${args.tokenAddress}`,
@@ -447,6 +449,7 @@ export function buildBoostActions(args: {
     muteCallback: muteCallback && Buffer.byteLength(muteCallback, 'utf8') <= 64
       ? muteCallback
       : null,
+    xUrl: socials.xUrl, telegramUrl: socials.telegramUrl,
   });
 }
 
@@ -686,7 +689,7 @@ async function processBoost(
         insightTitle: 'WHY NOW', insight: ['Comparable 5-minute volume accelerated while price and liquidity avoided collapse.'],
         statusTitle: '🔥 STATUS', status: 'Abnormal activity detected · review current participation.',
       }), buttons: buildBoostActions({ tokenAddress: boost.tokenAddress, chartUrl: market.chartUrl,
-        opportunityId: opportunity?.id, strategyKey: opportunity?.strategyKey }) });
+        opportunityId: opportunity?.id, strategyKey: opportunity?.strategyKey, rawData: opportunity?.rawData }) });
     }
   }
 
@@ -760,6 +763,7 @@ async function processBoost(
       chartUrl: market?.chartUrl,
       opportunityId: opportunity?.id,
       strategyKey: opportunity?.strategyKey,
+      rawData: opportunity?.rawData,
     }) });
 
 

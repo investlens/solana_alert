@@ -93,7 +93,8 @@ test('production-case delivery enrichment renders identity, market metrics and v
   assert.match(message, /5m volume\s+<b>\$8\.4K<\/b>/);
   assert.doesNotMatch(message, /INDEXING|still indexing/i);
   const buttons = buildButtons(row, target, { telegram_id: '1', tier: 'paid', is_admin: false } as any);
-  assert.deepEqual(buttons[0].map(button => button.text), ['📊 Chart', '🔎 Token']);
+  assert.deepEqual(buttons[0].map(button => button.text), ['🔬 Full Intel', '📊 Chart']);
+  assert.equal(buttons.flat().some(button => button.text === '🔎 Token'), false);
   assert.equal(buttons.flat().some(button => button.text.includes('Trade')), false);
 });
 
@@ -113,7 +114,7 @@ test('fresh verified PONS identity with confirmed market miss omits unavailable 
   assert.doesNotMatch(message, /still indexing/i);
   assert.doesNotMatch(message, /Market cap|Liquidity|5m volume|\$0/);
   const buttons = buildButtons(row, target, { telegram_id: '1', tier: 'paid', is_admin: false } as any);
-  assert.deepEqual(buttons[0].map(button => button.text), ['🔎 Token']);
+  assert.deepEqual(buttons[0].map(button => button.text), ['🔬 Full Intel']);
   assert.equal(buttons.flat().some(button => button.text.includes('Trade')), false);
 });
 
@@ -266,7 +267,7 @@ test('metadata failure safely leaves Exit address-only', async () => {
   });
   assert.equal(resolved.rawData.symbol, undefined);
   const { buildOpportunityMessage } = await service();
-  assert.match(buildOpportunityMessage(exit), /— 0xa091…36e9d<\/b>/);
+  assert.match(buildOpportunityMessage(exit), /RISK ACTION[\s\S]*0xa091…36e9d<\/b>[\s\S]*ACTION: EXIT/);
 });
 
 test('persisted lifecycle identity prevents unnecessary metadata fallback', async () => {
@@ -315,7 +316,7 @@ test('Exit uses only a verified current market snapshot for metrics and Chart', 
   assert.match(message, /5m volume\s+<b>\$4\.5K<\/b>/);
   assert.doesNotMatch(message, /INDEXING/);
   const buttons = buildButtons(exit, target, { telegram_id: '1', tier: 'paid', is_admin: false } as any);
-  assert.deepEqual(buttons[0].map(button => button.text), ['📊 Chart', '🔎 Token']);
+  assert.deepEqual(buttons[0].map(button => button.text), ['🔬 Full Intel', '📊 Chart']);
   assert.equal(buttons.flat().some(button => button.text.includes('Trade')), false);
   for (const button of buttons.flat()) {
     if (button.callback_data) assert.ok(Buffer.byteLength(button.callback_data, 'utf8') <= 64);
@@ -348,7 +349,7 @@ test('SPURDO persisted lifecycle data reaches final Exit rendering and Copy CA a
 
   const buttons = buildButtons(exit, target, { telegram_id: '1', tier: 'paid', is_admin: false } as any);
   assert.equal(buttons.flat().some(button => button.text.includes('Trade')), false);
-  assert.deepEqual(buttons[0].map(button => button.text), ['🔎 Token']);
+  assert.deepEqual(buttons[0].map(button => button.text), ['🔬 Full Intel']);
   const copy = buttons.flat().find(button => button.text === '📋 Copy CA');
   assert.equal(copy?.callback_data, `COPY_CA_${spurdoAddress}`);
   assert.ok(Buffer.byteLength(copy!.callback_data!, 'utf8') <= 64);
@@ -436,9 +437,9 @@ test('OFY V2 Exit retries verified curve FDV when lifecycle and Dex context are 
   assert.doesNotMatch(message, /Market cap|Market\s+<b>INDEXING|Liquidity|5m volume/);
   const buttons = buildButtons(exit, target, { telegram_id: '1', tier: 'paid', is_admin: false } as any);
   assert.deepEqual(buttons.map(row => row.map(button => button.text)), [
-    ['🔎 Token'], ['📋 Copy CA'], ['🔬 Full Intel'], ['⭐ Track', '🔕 Mute'],
+    ['🔬 Full Intel'], ['⭐ Track', '📋 Copy CA'], ['🔕 Mute'],
   ]);
-  assert.equal(buttons[1][0].callback_data, `COPY_CA_${ofyAddress}`);
+  assert.equal(buttons[1][1].callback_data, `COPY_CA_${ofyAddress}`);
   assert.equal(buttons.flat().some(button => button.text.includes('Trade')), false);
 });
 

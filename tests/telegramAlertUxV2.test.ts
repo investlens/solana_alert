@@ -107,3 +107,94 @@ test('automatic action hierarchy remains callback-safe and does not add Trade', 
   assert.ok(rows.flat().every(button => !button.callback_data || Buffer.byteLength(button.callback_data) <= 64));
   assert.ok(rows.flat().every(button => !/Trade/i.test(button.text)));
 });
+
+const intentOpportunity = (rawData: Record<string, unknown>) => ({ id: 42,
+  asset_id: '0xf435ac1926e21d47bfe0916bd1f15c22ca6ceb4b', chain: 'robinhood',
+  strategy_key: 'EXISTING_TOKEN_BREAKOUT', recommended_action: 'CHECK_ENTRY', status: 'NEW',
+  title: 'HOTDOG Existing Token Breakout', why: 'Breakout confirmed. Volume acceleration increased. Structure remains confirmed. Fourth reason is bounded.',
+  what_happened: null, invalidation: null, risk_reason: null, confidence: 72, risk_score: 42,
+  raw_data: { symbol: 'HOTDOG', price: 0.00004952, marketCap: 49_527, liquidity: 18_380,
+    currentRoi: 12.75, elapsedSec: 2233, ...rawData } });
+
+test('first actionable CHECK_ENTRY is explicit entry intent and bounded to three reasons', async () => {
+  await import('dotenv/config');
+  const { buildOpportunityMessage } = await import('../src/services/opportunityDeliveryService.js');
+  const message = buildOpportunityMessage(intentOpportunity({}));
+  assert.match(message, /^🎯 <b>ENTRY OPPORTUNITY<\/b>/);
+  assert.match(message, /🎯 <b>ACTION: CHECK ENTRY<\/b>/);
+  assert.match(message, /Conditions qualify for entry consideration/);
+  assert.doesNotMatch(message, /Previously alerted opportunity has a new qualified momentum signal/);
+  assert.equal((message.match(/^• /gm) ?? []).length, 3);
+  assert.match(message, /• Breakout confirmed\n• Volume acceleration increased\n• Structure remains confirmed/);
+  assert.ok(message.length <= 4096);
+});
+
+test('prior successfully delivered actionable event produces momentum intent with verified comparison only', async () => {
+  await import('dotenv/config');
+  const { buildOpportunityMessage } = await import('../src/services/opportunityDeliveryService.js');
+  const base = intentOpportunity({});
+  const message = buildOpportunityMessage(base, { hasPriorAlert: true,
+    price: { previous: 0.00004, current: 0.00004952, changePct: 23.8 }, previousState: 'CONFIRMED', currentState: 'RUNNER' });
+  assert.match(message, /^📈 <b>MOMENTUM UPDATE<\/b>/);
+  assert.match(message, /📈 <b>ACTION: MOMENTUM UPDATE<\/b>/);
+  assert.match(message, /Previously alerted opportunity has a new qualified momentum signal/);
+  assert.match(message, /Previously alerted[\s\S]*Now[\s\S]*Change[\s\S]*\+23\.8%/);
+  assert.match(message, /This is an update to an earlier opportunity/);
+  const unavailable = buildOpportunityMessage(base, { hasPriorAlert: true });
+  assert.doesNotMatch(unavailable, /Previously alerted\s+<b>\$0/);
+});
+
+test('reason formatting renders one verified reason once and never more than three bullets', () => {
+  const one = renderAlphaNotification({ category: 'market', severity: 'watch', state: 'BOOST', symbol: 'ONE',
+    displayIntent: 'WATCH', insight: ['One verified reason.'] });
+  assert.equal((one.match(/^• /gm) ?? []).length, 1); assert.match(one, /• One verified reason/);
+  const four = renderAlphaNotification({ category: 'market', severity: 'watch', state: 'BOOST', symbol: 'FOUR',
+    displayIntent: 'WATCH', insight: ['First. Second. Third. Fourth.'] });
+  assert.equal((four.match(/^• /gm) ?? []).length, 3); assert.doesNotMatch(four, /Fourth/);
+});
+
+test('informational, avoid and exit display intents remain unambiguous', () => {
+  const watch = renderAlphaNotification({ category: 'market', severity: 'watch', state: 'BOOST', symbol: 'HOTDOG', displayIntent: 'WATCH' });
+  assert.match(watch, /MARKET UPDATE[\s\S]*ACTION: WATCH[\s\S]*Information only — entry not confirmed/);
+  assert.doesNotMatch(watch, /CHECK ENTRY|ACTION: BUY/);
+  assert.match(renderAlphaNotification({ category: 'risk', severity: 'critical', state: 'RISK', symbol: 'HOTDOG', displayIntent: 'AVOID' }), /ACTION: AVOID/);
+  assert.match(renderAlphaNotification({ category: 'risk', severity: 'critical', state: 'EXIT_AVOID', symbol: 'HOTDOG', displayIntent: 'EXIT' }), /ACTION: EXIT/);
+});
+
+test('automatic social links are allowlisted, deduplicated and optional without changing callbacks', async () => {
+  await import('dotenv/config');
+  const { automaticAlertSocials } = await import('../src/services/opportunityDeliveryService.js');
+  assert.deepEqual(automaticAlertSocials({ xUrl: 'https://x.com/hotdog', socials: [
+    { type: 'twitter', url: 'https://twitter.com/hotdog' }, { type: 'telegram', url: 'https://t.me/hotdog' },
+    { type: 'telegram', url: 'https://telegram.me/hotdog' }, { url: 'javascript:alert(1)' },
+  ] }), { xUrl: 'https://x.com/hotdog', telegramUrl: 'https://t.me/hotdog' });
+  assert.deepEqual(automaticAlertSocials({ xUrl: 'http://x.com/bad', telegramUrl: 'data:text/html,bad' }), { xUrl: null, telegramUrl: null });
+  const rows = buildAlphaMarketActions({ tokenUrl: 'https://example.com/token', fullIntelCallback: 'FI_RH_0x123',
+    xUrl: 'https://twitter.com/hotdog', telegramUrl: 'https://t.me/hotdog', trackCallback: 'TRACK_1',
+    copyContractCallback: 'COPY_CA_1', muteCallback: 'MUTE_1' });
+  assert.deepEqual(rows.map(row => row.map(button => button.text)), [
+    ['🔬 Full Intel'], ['𝕏 X', '✈️ Telegram'], ['⭐ Track', '📋 Copy CA'], ['🔕 Mute'],
+  ]);
+  assert.equal(rows.flat().filter(button => button.text === '𝕏 X').length, 1);
+  assert.equal(rows.flat().filter(button => button.text === '✈️ Telegram').length, 1);
+  const one = buildAlphaMarketActions({ tokenUrl: 'https://example.com/token', fullIntelCallback: 'FI_RH_0x123',
+    xUrl: 'https://x.com/hotdog', trackCallback: 'TRACK_1', copyContractCallback: 'COPY_CA_1', muteCallback: 'MUTE_1' });
+  assert.deepEqual(one.map(row => row.map(button => button.text)), [
+    ['🔬 Full Intel'], ['𝕏 X'], ['⭐ Track', '📋 Copy CA'], ['🔕 Mute'],
+  ]);
+  const none = buildAlphaMarketActions({ tokenUrl: 'https://example.com/token', fullIntelCallback: 'FI_RH_0x123',
+    trackCallback: 'TRACK_1', copyContractCallback: 'COPY_CA_1', muteCallback: 'MUTE_1' });
+  assert.deepEqual(none.map(row => row.map(button => button.text)), [
+    ['🔬 Full Intel'], ['⭐ Track', '📋 Copy CA'], ['🔕 Mute'],
+  ]);
+  const noIntel = buildAlphaMarketActions({ tokenUrl: 'https://example.com/token', chartUrl: 'https://example.com/chart' });
+  assert.deepEqual(noIntel.map(row => row.map(button => button.text)), [['📊 Chart'], ['🔎 Token']]);
+  assert.equal(rows.flat().find(button => button.text === '🔬 Full Intel')?.callback_data, 'FI_RH_0x123');
+  assert.equal(rows.flat().find(button => button.text === '📋 Copy CA')?.callback_data, 'COPY_CA_1');
+});
+
+test('comparison source requires actionable semantics and checks both successful delivery ledgers', async () => {
+  const source = await readFile('src/services/alertComparisonService.ts', 'utf8');
+  assert.match(source, /ACTIONABLE_TYPES/); assert.match(source, /opportunity_deliveries/);
+  assert.doesNotMatch(source, /ACTIONABLE_TYPES = new Set\([^)]*BOOST/s);
+});

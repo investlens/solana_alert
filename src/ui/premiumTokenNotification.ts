@@ -17,6 +17,9 @@ export function buildPremiumTokenNotification(args: {
   retainedPeakPercent?: number | null; boostTotal?: number | null; boostIncrement?: number | null;
   devLaunches?: number | null; risk?: string | null; confidence?: number | null;
   insightTitle: string; insight: string[]; statusTitle: string; status: string;
+  displayIntent?: 'ENTRY' | 'MOMENTUM_UPDATE' | 'WATCH' | 'AVOID' | 'EXIT';
+  comparison?: { previous: number; current: number; changePct: number };
+  entryAction?: 'BUY' | 'CHECK_ENTRY';
 }) {
   const marketCap = args.market.marketCap;
   const fdv = marketCap == null ? args.market.fdv : null;
@@ -46,5 +49,9 @@ export function buildPremiumTokenNotification(args: {
     confidence: args.confidence, risk: args.risk, metrics,
     insightTitle: args.insightTitle, insight: args.insight,
     statusTitle: args.statusTitle, status: args.status,
+    displayIntent: args.displayIntent ?? (args.state === 'OPPORTUNITY' ? 'ENTRY'
+      : args.state === 'DEV_SOLD' || args.state === 'CRITICAL_RISK' ? 'AVOID' : 'WATCH'),
+    comparison: args.comparison,
+    entryAction: args.entryAction,
   });
 }

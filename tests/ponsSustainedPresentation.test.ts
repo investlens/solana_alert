@@ -160,7 +160,8 @@ test('PONS CHECK_ENTRY renders the premium OPPORTUNITY category without changing
       liquidity: 12_000, volume5m: 8_000, devHoldingPercent: 1.15,
       devHoldingEvidence: 'VERIFIED', totalBurnPercent: 0, burnEvidence: 'VERIFIED' },
   });
-  assert.match(message, /🎯 <b>OPPORTUNITY/);
+  assert.match(message, /🎯 <b>ENTRY OPPORTUNITY/);
+  assert.match(message, /🎯 <b>ACTION: CHECK ENTRY/);
   assert.match(message, /📈 <b>WHY NOW<\/b>/);
   assert.match(message, /Volume and price structure remain constructive/);
   assert.match(message, /🧠 <b>AlphaOS:<\/b> OPPORTUNITY/);

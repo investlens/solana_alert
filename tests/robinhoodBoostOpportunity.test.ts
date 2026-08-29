@@ -54,7 +54,9 @@ test('>=200 indexed boost renders high-attention state and verified current mark
     },
     rawData: { preIndexValuation: preIndexValuation(), marketIndexState: 'VERIFIED' },
   });
-  assert.match(message, /🚀 <b>BOOST/);
+  assert.match(message, /ℹ️ <b>MARKET UPDATE/);
+  assert.match(message, /👀 <b>ACTION: WATCH/);
+  assert.doesNotMatch(message, /CHECK ENTRY|ACTION: BUY/);
   assert.match(message, /Boost\s+<b>200 total \(\+50\)<\/b>/);
   assert.match(message, /Market cap\s+<b>\$25\.5K<\/b>/);
   assert.match(message, /Liquidity\s+<b>\$23\.1K<\/b>/);
@@ -73,7 +75,7 @@ test('>=200 pre-index PONS V2 boost renders verified FDV without fabricated mark
       preIndexValuation: preIndexValuation(),
     },
   });
-  assert.match(message, /🚀 <b>BOOST/);
+  assert.match(message, /ℹ️ <b>MARKET UPDATE/);
   assert.match(message, /FDV\s+<b>\$4\.6K<\/b>/);
   assert.doesNotMatch(message, /Market cap|Liquidity|5m volume|INDEXING/);
 });
@@ -111,6 +113,6 @@ test('unverified Chart and genuinely missing metrics are omitted', () => {
     confidence: null, risk: null, devHoldingPercent: null, burnedPercent: null,
     buys5m: null, sells5m: null,
   });
-  assert.match(message, /🚀 <b>BOOST/);
+  assert.match(message, /ℹ️ <b>MARKET UPDATE/);
   assert.doesNotMatch(message, /Market cap|FDV|Liquidity|5m volume|Momentum|Dev holding|Burned|\$0/);
 });

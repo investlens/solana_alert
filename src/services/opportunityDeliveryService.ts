@@ -50,6 +50,8 @@ import { resolvePonsDeliveryContext } from './ponsDeliveryContext.js';
 import { persistAlphaAlertEvent } from './alphaAlertLedger.js';
 import { criticalAvoidReason, shouldDeliverExit, userHasExitRelevance } from './alphaExitRelevance.js';
 import { buildPremiumTokenNotification } from '../ui/premiumTokenNotification.js';
+import { extractAutomaticSocials } from '../ui/alphaNotificationActions.js';
+import { loadPriorDeliveredAlertComparison, type AlertComparison } from './alertComparisonService.js';
 import { config } from '../config.js';
 import { analyzeRobinhoodTokenFreshWallets, freshWalletBlockPersistence, freshWalletRiskBlocksPositive, getCachedRobinhoodFreshWallets } from './tokenIntelligenceService.js';
 
@@ -386,6 +388,7 @@ function signedPercent(
 
 export function buildOpportunityMessage(
   opportunity: OpportunityRow,
+  comparison?: AlertComparison,
 ): string {
   const presentation =
     actionPresentation(
@@ -480,6 +483,9 @@ export function buildOpportunityMessage(
           ? ['Sustained PONS curve evidence reached the existing confirmed entry conditions.']
           : ['Multiple checkpoints continue to support the setup.'],
       statusTitle: '🎯 STATUS', status: 'Sustained activity detected · review opportunity.',
+      displayIntent: comparison?.hasPriorAlert ? 'MOMENTUM_UPDATE' : 'ENTRY',
+      comparison: comparison?.price ?? comparison?.marketCap,
+      entryAction: action === 'BUY' ? 'BUY' : 'CHECK_ENTRY',
     });
   }
 
@@ -513,8 +519,15 @@ export function buildOpportunityMessage(
       : hasPreIndexValuation
         ? 'Market indexing · valuation from verified launch curve.'
       : presentation.action,
+    displayIntent: action === 'EXIT' ? 'EXIT'
+      : action === 'BUY' || action === 'CHECK_ENTRY' ? comparison?.hasPriorAlert ? 'MOMENTUM_UPDATE' : 'ENTRY'
+      : 'WATCH',
+    comparison: comparison?.price ?? comparison?.marketCap,
+    entryAction: action === 'BUY' ? 'BUY' : 'CHECK_ENTRY',
   });
 }
+
+export const automaticAlertSocials = extractAutomaticSocials;
 
 function executionAvailable(
   opportunity: OpportunityRow,
@@ -546,6 +559,7 @@ export function buildButtons(
 ): InlineButton[][] {
   const rows:
     InlineButton[][] = [];
+  const socials = extractAutomaticSocials(opportunity.raw_data);
 
   if (
     executionAvailable(opportunity) &&
@@ -562,34 +576,32 @@ export function buildButtons(
     ]);
   }
 
+  const hasFullIntel = /^0x[a-fA-F0-9]{40}$/.test(opportunity.asset_id);
   const marketActions: InlineButton[] = [];
-  if (tokenTarget.chartUrl && tokenTarget.chartUrl !== tokenTarget.tokenUrl) {
-    marketActions.push({ text: '📊 Chart', url: tokenTarget.chartUrl });
-  }
-  marketActions.push({ text: '🔎 Token', url: tokenTarget.tokenUrl });
-  rows.push(marketActions);
+  if (hasFullIntel) marketActions.push({ text: '🔬 Full Intel', callback_data: `FI_RH_${opportunity.asset_id}` });
+  if (tokenTarget.chartUrl && tokenTarget.chartUrl !== tokenTarget.tokenUrl) marketActions.push({ text: '📊 Chart', url: tokenTarget.chartUrl });
+  if (!hasFullIntel) marketActions.push({ text: '🔎 Token', url: tokenTarget.tokenUrl });
+  if (marketActions.length) rows.push(marketActions);
 
-  if (/^0x[a-fA-F0-9]{40}$/.test(opportunity.asset_id)) {
-    rows.push([{
-      text: '📋 Copy CA',
-      callback_data: `COPY_CA_${opportunity.asset_id}`,
-    }]);
-    rows.push([{ text: '🔬 Full Intel', callback_data: `FI_RH_${opportunity.asset_id}` }]);
-  }
+  const socialActions: InlineButton[] = [];
+  if (socials.xUrl) socialActions.push({ text: '𝕏 X', url: socials.xUrl });
+  if (socials.telegramUrl) socialActions.push({ text: '✈️ Telegram', url: socials.telegramUrl });
+  if (socialActions.length) rows.push(socialActions);
 
   const preferenceActions: InlineButton[] = [{
     text: '⭐ Track',
     callback_data: `OPP_TRACK_${opportunity.id}`,
   }];
 
+  if (hasFullIntel) preferenceActions.push({ text: '📋 Copy CA', callback_data: `COPY_CA_${opportunity.asset_id}` });
+
   if (
     opportunity.strategy_key &&
     Buffer.byteLength(`STRAT_TOGGLE_${opportunity.strategy_key}`, 'utf8') <= 64
   ) {
-    preferenceActions.push({
-      text: '🔕 Mute',
-      callback_data: `STRAT_TOGGLE_${opportunity.strategy_key}`,
-    });
+    rows.push(preferenceActions);
+    rows.push([{ text: '🔕 Mute', callback_data: `STRAT_TOGGLE_${opportunity.strategy_key}` }]);
+    return assertAlphaActions(rows);
   }
   rows.push(preferenceActions);
 
@@ -1059,7 +1071,18 @@ async function deliverOpportunity(
   }
 
   // Final normalized context, before user-specific filtering or Telegram retries.
-  await persistAlphaAlertEvent(opportunity);
+  const alertEvent = await persistAlphaAlertEvent(opportunity);
+  let comparison: AlertComparison = { hasPriorAlert: false };
+  if (alertEvent?.id && (action === 'BUY' || action === 'CHECK_ENTRY')) {
+    try {
+      comparison = await loadPriorDeliveredAlertComparison({ currentEventId: Number(alertEvent.id),
+        assetId: opportunity.asset_id, chain: opportunity.chain ?? 'solana' });
+    } catch (error) {
+      console.warn('[OpportunityDelivery] Prior delivered comparison unavailable; rendering first-entry intent.', {
+        opportunityId: opportunity.id, reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
   const criticalReason = action === 'EXIT' ? criticalAvoidReason(opportunity.raw_data) : null;
 
   const users =
@@ -1214,6 +1237,7 @@ async function deliverOpportunity(
         user.telegram_id,
         buildOpportunityMessage(
           opportunity,
+          comparison,
         ),
         buildButtons(
           opportunity,
