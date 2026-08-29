@@ -198,8 +198,8 @@ test('opportunity specialist zeroes require explicit meaningful confirmation', a
     transferZeroConfirmedMeaningful: true,
   }));
   assert.doesNotMatch(confirmed, /Transferred/);
-  assert.match(confirmed, /Dev holding\s+<b>0%<\/b>/);
-  assert.match(confirmed, /Burned\s+<b>0%<\/b>/);
+  assert.match(confirmed, /Dev:<\/b> Holds 0%/);
+  assert.doesNotMatch(confirmed, /Dev:<\/b>[^\n]*Burned/);
 });
 
 test('Entry to Exit preserves verified developer holding and burn but not stale market cap', async () => {

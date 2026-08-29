@@ -52,6 +52,7 @@ import { criticalAvoidReason, shouldDeliverExit, userHasExitRelevance } from './
 import { buildPremiumTokenNotification } from '../ui/premiumTokenNotification.js';
 import { extractAutomaticSocials } from '../ui/alphaNotificationActions.js';
 import { loadPriorDeliveredAlertComparison, type AlertComparison } from './alertComparisonService.js';
+import { evaluateProAlertNotification, type ProAlertDecision } from './proAlertNotificationGovernor.js';
 import { config } from '../config.js';
 import { analyzeRobinhoodTokenFreshWallets, freshWalletBlockPersistence, freshWalletRiskBlocksPositive, getCachedRobinhoodFreshWallets } from './tokenIntelligenceService.js';
 
@@ -389,6 +390,7 @@ function signedPercent(
 export function buildOpportunityMessage(
   opportunity: OpportunityRow,
   comparison?: AlertComparison,
+  notificationDecision?: ProAlertDecision,
 ): string {
   const presentation =
     actionPresentation(
@@ -426,7 +428,7 @@ export function buildOpportunityMessage(
           )}m`;
 
   const reason =
-    opportunity.why ??
+    notificationDecision?.reasons.length ? notificationDecision.reasons.join('. ') : opportunity.why ??
     opportunity.what_happened ??
     'AlphaOS detected a qualified market-state change.';
 
@@ -442,6 +444,19 @@ export function buildOpportunityMessage(
   const transferEvidenceComplete = opportunity.raw_data?.devFlowEvidenceStatus === 'COMPLETE';
   const transferZeroMeaningful = opportunity.raw_data?.transferZeroConfirmedMeaningful === true;
   const decisionEvidence = normalizeCoreDecisionMetrics(opportunity.raw_data);
+  const creatorEvidence = opportunity.raw_data?.creatorEvidence as Record<string, unknown> | null | undefined;
+  const creatorLaunches = Number(creatorEvidence?.launches);
+  const verifiedObservedLaunches = Number.isFinite(creatorLaunches) && creatorLaunches > 0 &&
+    String(creatorEvidence?.status ?? '').toUpperCase() !== 'UNKNOWN' ? creatorLaunches : null;
+  const devBurn = Number(opportunity.raw_data?.confirmedDevBurnPercent);
+  const verifiedDevBurn = ['COMPLETE', 'BALANCES_ONLY'].includes(String(opportunity.raw_data?.devFlowEvidenceStatus ?? '').toUpperCase()) &&
+    Number.isFinite(devBurn) && devBurn >= 0 ? devBurn : null;
+  const developerParts = [
+    ...(decisionEvidence.devHoldingEvidence === 'VERIFIED' && decisionEvidence.devHoldingPercent != null
+      ? [`Holds ${Number(decisionEvidence.devHoldingPercent.toFixed(2))}%`] : []),
+    ...(verifiedDevBurn == null ? [] : [`Burned ${Number(verifiedDevBurn.toFixed(2))}%`]),
+    ...(verifiedObservedLaunches == null ? [] : [`${verifiedObservedLaunches} observed launches`]),
+  ];
   const market = normalizeNotificationMarketContext(
     opportunity.raw_data,
     opportunity.raw_data?.market as Record<string, unknown> | undefined,
@@ -469,23 +484,26 @@ export function buildOpportunityMessage(
     const peakMove = currentRoi == null ? peakMoveRaw : Math.max(currentRoi, peakMoveRaw ?? currentRoi);
     const retainedPeakPercent = currentRoi != null && peakMove != null && peakMove > 0
       ? Math.round((currentRoi / peakMove) * 100) : null;
-    const creatorEvidence = opportunity.raw_data?.creatorEvidence as Record<string, unknown> | null | undefined;
-    const launches = Number(creatorEvidence?.launches);
+    const displayIntent = notificationDecision?.intent === 'RECOVERY_WATCH' ? 'RECOVERY_WATCH'
+      : notificationDecision?.intent === 'MOMENTUM_UPDATE' ? 'MOMENTUM_UPDATE' : 'ENTRY';
+    const drawdown = comparison?.drawdownFromPriorStructuralPricePct;
     return buildPremiumTokenNotification({
       state: 'OPPORTUNITY', symbol, name: market.name, address: opportunity.asset_id,
       age: elapsedSec == null ? null : age, market, evidence: decisionEvidence,
       move: currentRoi, peakMove, retainedPeakPercent, risk: presentation.riskLabel,
-      confidence: opportunity.confidence, devLaunches: Number.isFinite(launches) ? launches : null,
+      confidence: opportunity.confidence, devLaunches: verifiedObservedLaunches, devBurnPercent: verifiedDevBurn,
       insightTitle: 'WHY NOW',
-      insight: market.volume5m != null && market.liquidity != null
+      insight: notificationDecision?.reasons.length ? notificationDecision.reasons : market.volume5m != null && market.liquidity != null
         ? ['Volume and price structure remain constructive with verified liquidity.']
         : market.preIndexValuation
           ? ['Sustained PONS curve evidence reached the existing confirmed entry conditions.']
           : ['Multiple checkpoints continue to support the setup.'],
       statusTitle: '🎯 STATUS', status: 'Sustained activity detected · review opportunity.',
-      displayIntent: comparison?.hasPriorAlert ? 'MOMENTUM_UPDATE' : 'ENTRY',
+      displayIntent,
       comparison: comparison?.price ?? comparison?.marketCap,
       entryAction: action === 'BUY' ? 'BUY' : 'CHECK_ENTRY',
+      structureContext: drawdown != null && drawdown <= -50
+        ? `Structure remains ${Math.abs(drawdown).toFixed(0)}% below prior verified level.` : null,
     });
   }
 
@@ -520,10 +538,14 @@ export function buildOpportunityMessage(
         ? 'Market indexing · valuation from verified launch curve.'
       : presentation.action,
     displayIntent: action === 'EXIT' ? 'EXIT'
-      : action === 'BUY' || action === 'CHECK_ENTRY' ? comparison?.hasPriorAlert ? 'MOMENTUM_UPDATE' : 'ENTRY'
+      : action === 'BUY' || action === 'CHECK_ENTRY' ? notificationDecision?.intent === 'RECOVERY_WATCH' ? 'RECOVERY_WATCH'
+        : notificationDecision?.intent === 'MOMENTUM_UPDATE' ? 'MOMENTUM_UPDATE' : 'ENTRY'
       : 'WATCH',
     comparison: comparison?.price ?? comparison?.marketCap,
     entryAction: action === 'BUY' ? 'BUY' : 'CHECK_ENTRY',
+    developerContext: (action === 'BUY' || action === 'CHECK_ENTRY') && developerParts.length ? developerParts.join(' · ') : null,
+    structureContext: comparison?.drawdownFromPriorStructuralPricePct != null && comparison.drawdownFromPriorStructuralPricePct <= -50
+      ? `Structure remains ${Math.abs(comparison.drawdownFromPriorStructuralPricePct).toFixed(0)}% below prior verified level.` : null,
   });
 }
 
@@ -1072,15 +1094,27 @@ async function deliverOpportunity(
 
   // Final normalized context, before user-specific filtering or Telegram retries.
   const alertEvent = await persistAlphaAlertEvent(opportunity);
-  let comparison: AlertComparison = { hasPriorAlert: false };
+  let comparison: AlertComparison = { hasPriorAlert: false, historyStatus: 'AVAILABLE' };
+  let notificationDecision: ProAlertDecision | undefined;
   if (alertEvent?.id && (action === 'BUY' || action === 'CHECK_ENTRY')) {
     try {
       comparison = await loadPriorDeliveredAlertComparison({ currentEventId: Number(alertEvent.id),
         assetId: opportunity.asset_id, chain: opportunity.chain ?? 'solana' });
     } catch (error) {
-      console.warn('[OpportunityDelivery] Prior delivered comparison unavailable; rendering first-entry intent.', {
+      comparison = { hasPriorAlert: false, historyStatus: 'UNAVAILABLE' };
+      console.warn('[OpportunityDelivery] Prior delivered comparison unavailable; keeping positive notification internal.', {
         opportunityId: opportunity.id, reason: error instanceof Error ? error.message : String(error),
       });
+    }
+    notificationDecision = evaluateProAlertNotification(comparison);
+    if (!notificationDecision.notify) {
+      console.log('[OpportunityDelivery] Pro Alerts V2 notification suppressed; event retained internally.', {
+        opportunityId: opportunity.id, token: opportunity.asset_id, priorEventId: comparison.previousEventId,
+        elapsedSincePriorMs: comparison.elapsedSincePriorMs,
+        drawdownFromPriorStructuralPricePct: comparison.drawdownFromPriorStructuralPricePct,
+        factors: notificationDecision.factors,
+      });
+      return;
     }
   }
   const criticalReason = action === 'EXIT' ? criticalAvoidReason(opportunity.raw_data) : null;
@@ -1238,6 +1272,7 @@ async function deliverOpportunity(
         buildOpportunityMessage(
           opportunity,
           comparison,
+          notificationDecision,
         ),
         buildButtons(
           opportunity,

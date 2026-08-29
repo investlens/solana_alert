@@ -66,9 +66,11 @@ export type AlphaNotification = {
   statusTitle?: string | null;
   status?: string | null;
   access?: 'FREE' | 'PRO' | 'ADMIN';
-  displayIntent?: 'ENTRY' | 'MOMENTUM_UPDATE' | 'WATCH' | 'AVOID' | 'EXIT';
+  displayIntent?: 'ENTRY' | 'MOMENTUM_UPDATE' | 'RECOVERY_WATCH' | 'WATCH' | 'AVOID' | 'EXIT';
   comparison?: { previous: number; current: number; changePct: number };
   entryAction?: 'BUY' | 'CHECK_ENTRY';
+  developerContext?: string | null;
+  structureContext?: string | null;
 };
 
 export type AlphaNotificationAction = {
@@ -82,8 +84,8 @@ const STATE_LABELS: Record<AlphaNotificationState, string> = {
   OPPORTUNITY: '🎯 OPPORTUNITY',
   VOLUME_IGNITION: '🔥 VOLUME IGNITION',
   DEX_PAID: '💎 DEX PAID',
-  BOOST: '🚀 BOOST',
-  MAJOR_BOOST: '🚀 MAJOR BOOST',
+  BOOST: '🚀 BOOST DETECTED',
+  MAJOR_BOOST: '🔥🚀 MAJOR BOOST',
   DEV_BURN: '🔥 DEV BURN',
   DEV_SOLD: '🚨 DEV SOLD',
   CRITICAL_RISK: '🚨 CRITICAL RISK',
@@ -161,13 +163,17 @@ export function renderAlphaNotification(alert: AlphaNotification): string {
   const intent = alert.displayIntent;
   const intentHeader = intent === 'ENTRY' ? '🎯 <b>ENTRY OPPORTUNITY</b>'
     : intent === 'MOMENTUM_UPDATE' ? '📈 <b>MOMENTUM UPDATE</b>'
+    : intent === 'RECOVERY_WATCH' ? '👀 <b>RECOVERY WATCH</b>'
+    : intent === 'WATCH' && alert.state === 'DEX_PAID' ? '💎 <b>DEX PAID</b>'
+    : intent === 'WATCH' && alert.state === 'BOOST' ? '🚀 <b>BOOST DETECTED</b>'
+    : intent === 'WATCH' && alert.state === 'MAJOR_BOOST' ? '🔥🚀 <b>MAJOR BOOST</b>'
     : intent === 'WATCH' ? 'ℹ️ <b>MARKET UPDATE</b>'
     : intent === 'EXIT' ? '🚨 <b>RISK ACTION</b>'
     : intent === 'AVOID' ? '🚫 <b>RISK ACTION</b>' : null;
   const lines = intentHeader
     ? [intentHeader, '', `🔥 <b>${escapeAlphaHtml(identity)}</b>`]
     : [`${alphaStateLabel(alert.state).split(' ')[0]} <b>${escapeAlphaHtml(alphaStateLabel(alert.state).replace(/^\S+\s*/, ''))} — ${escapeAlphaHtml(identity)}</b>`];
-  if (intent === 'WATCH' && ['BOOST', 'MAJOR_BOOST', 'DEX_PAID', 'VOLUME_IGNITION'].includes(alert.state)) {
+  if (intent === 'WATCH' && ['VOLUME_IGNITION'].includes(alert.state)) {
     lines.push(`${alphaStateLabel(alert.state).split(' ')[0]} <b>${escapeAlphaHtml(alphaStateLabel(alert.state).replace(/^\S+\s*/, ''))}</b>`);
   }
 
@@ -198,6 +204,7 @@ export function renderAlphaNotification(alert: AlphaNotification): string {
   if (intent === 'ENTRY') lines.push('', alert.entryAction === 'BUY' ? '🟢 <b>ACTION: BUY SETUP</b>' : '🎯 <b>ACTION: CHECK ENTRY</b>',
     alert.entryAction === 'BUY' ? 'AlphaOS identified a qualified setup; execution remains manual.' : 'Conditions qualify for entry consideration.');
   if (intent === 'MOMENTUM_UPDATE') lines.push('', '📈 <b>ACTION: MOMENTUM UPDATE</b>', 'Previously alerted opportunity has a new qualified momentum signal.');
+  if (intent === 'RECOVERY_WATCH') lines.push('', '👀 <b>ACTION: WATCH</b>', 'Recovery activity detected — entry not confirmed.');
   if (intent === 'WATCH') lines.push('', '👀 <b>ACTION: WATCH</b>', 'Information only — entry not confirmed.');
   if (intent === 'AVOID') lines.push('', '🚫 <b>ACTION: AVOID</b>');
   if (intent === 'EXIT') lines.push('', '🚨 <b>ACTION: EXIT</b>');
@@ -205,13 +212,16 @@ export function renderAlphaNotification(alert: AlphaNotification): string {
   const insightSource = alert.insight?.length ? alert.insight : alert.evidence?.length ? alert.evidence : alert.reason ? [alert.reason] : [];
   const insight = insightSource.flatMap(value => String(value ?? '').split(/(?<=[.!?])\s+/))
     .map(value => boundedAlphaText(value.replace(/[.!?]+$/, ''), 140)).filter(Boolean).slice(0, 3);
-  if (insight.length) lines.push('', `📈 <b>${intent === 'MOMENTUM_UPDATE' || intent === 'WATCH' ? 'WHAT CHANGED' : 'WHY NOW'}</b>`, ...insight.map(item => `• ${escapeAlphaHtml(item)}`));
+  if (insight.length) lines.push('', `📈 <b>${intent === 'MOMENTUM_UPDATE' || intent === 'RECOVERY_WATCH' || intent === 'WATCH' ? 'WHAT CHANGED' : 'WHY NOW'}</b>`, ...insight.map(item => `• ${escapeAlphaHtml(item)}`));
+  if (alert.structureContext) lines.push('', `⚠️ ${escapeAlphaHtml(boundedAlphaText(alert.structureContext, 180))}`);
+  if (alert.developerContext) lines.push('', `👨‍💻 <b>Dev:</b> ${escapeAlphaHtml(boundedAlphaText(alert.developerContext, 180))}`);
   const risk = String(alert.risk ?? 'UNKNOWN').toUpperCase();
   const riskIcon = risk === 'LOW' ? '✅' : risk === 'MEDIUM' || risk === 'REVIEW' ? '⚠️' : risk === 'HIGH' ? '🚨' : '⚪';
   lines.push('', `🧠 <b>AlphaOS:</b> ${escapeAlphaHtml(alert.state)}`, `${riskIcon} <b>Risk:</b> ${escapeAlphaHtml(risk === 'MEASURED' ? 'UNKNOWN' : risk)}`);
   lines.push('<i>Observed just now</i>');
   if (intent === 'MOMENTUM_UPDATE') lines.push('', '<i>This is an update to an earlier opportunity.</i>');
   if (intent === 'WATCH') lines.push('', '<i>AlphaOS is monitoring for entry confirmation.</i>');
+  if (intent === 'RECOVERY_WATCH') lines.push('', '<i>AlphaOS is monitoring for structural recovery.</i>');
   if (alert.access === 'FREE') lines.push('', '<i>Free intelligence may be delayed.</i>');
 
   const rendered = lines.join('\n');

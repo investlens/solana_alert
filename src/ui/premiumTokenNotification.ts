@@ -15,11 +15,12 @@ export function buildPremiumTokenNotification(args: {
   age?: string | null; market: NotificationMarketContext; evidence?: CoreDecisionMetricContext | null;
   volumeMultiple?: number | null; move?: number | null; peakMove?: number | null;
   retainedPeakPercent?: number | null; boostTotal?: number | null; boostIncrement?: number | null;
-  devLaunches?: number | null; risk?: string | null; confidence?: number | null;
+  devLaunches?: number | null; devBurnPercent?: number | null; risk?: string | null; confidence?: number | null;
   insightTitle: string; insight: string[]; statusTitle: string; status: string;
-  displayIntent?: 'ENTRY' | 'MOMENTUM_UPDATE' | 'WATCH' | 'AVOID' | 'EXIT';
+  displayIntent?: 'ENTRY' | 'MOMENTUM_UPDATE' | 'RECOVERY_WATCH' | 'WATCH' | 'AVOID' | 'EXIT';
   comparison?: { previous: number; current: number; changePct: number };
   entryAction?: 'BUY' | 'CHECK_ENTRY';
+  structureContext?: string | null;
 }) {
   const marketCap = args.market.marketCap;
   const fdv = marketCap == null ? args.market.fdv : null;
@@ -35,11 +36,13 @@ export function buildPremiumTokenNotification(args: {
     ...(args.peakMove == null ? [] : [{ icon: '🏔', label: 'Peak', value: `${args.peakMove >= 0 ? '+' : ''}${args.peakMove.toFixed(1)}%` }]),
     ...(args.retainedPeakPercent == null ? [] : [{ icon: '🛡', label: 'Retained', value: `${args.retainedPeakPercent}%` }]),
     ...(args.boostTotal == null ? [] : [{ icon: '🚀', label: 'Boost', value: `${args.boostTotal} total${args.boostIncrement == null ? '' : ` (+${args.boostIncrement})`}` }]),
+  ];
+  const developerParts = [
     ...(args.evidence?.devHoldingEvidence === 'VERIFIED' && args.evidence.devHoldingPercent != null
-      ? [{ icon: '👤', label: 'Dev holding', value: percent(args.evidence.devHoldingPercent) }] : []),
-    ...(args.evidence?.burnEvidence === 'VERIFIED' && args.evidence.burnedPercent != null
-      ? [{ icon: '🔥', label: 'Burned', value: percent(args.evidence.burnedPercent) }] : []),
-    ...(args.devLaunches == null ? [] : [{ icon: '🧠', label: 'Dev history', value: `${args.devLaunches} prior launches` }]),
+      ? [`Holds ${percent(args.evidence.devHoldingPercent)}`] : []),
+    ...(args.devBurnPercent != null && Number.isFinite(args.devBurnPercent)
+      ? [`Burned ${percent(args.devBurnPercent)}`] : []),
+    ...(args.devLaunches != null && args.devLaunches > 0 ? [`${args.devLaunches} observed launches`] : []),
   ];
   return renderAlphaNotification({
     category: ['DEV_SOLD', 'CRITICAL_RISK'].includes(args.state) ? 'risk' : 'market',
@@ -53,5 +56,7 @@ export function buildPremiumTokenNotification(args: {
       : args.state === 'DEV_SOLD' || args.state === 'CRITICAL_RISK' ? 'AVOID' : 'WATCH'),
     comparison: args.comparison,
     entryAction: args.entryAction,
+    developerContext: developerParts.length ? developerParts.join(' · ') : null,
+    structureContext: args.structureContext,
   });
 }

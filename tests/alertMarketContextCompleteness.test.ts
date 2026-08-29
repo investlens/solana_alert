@@ -97,8 +97,8 @@ test('Robinhood early watch and boost preserve snapshot identity and market cont
   assert.match(boost, /<b>HOOD<\/b>/);
   assert.match(boost, /Market cap\s+<b>\$25\.5K<\/b>/);
   assert.match(boost, /Liquidity\s+<b>\$23\.1K<\/b>/);
-  assert.match(boost, /Dev holding\s+<b>2%<\/b>/);
-  assert.match(boost, /Burned\s+<b>4\.2%<\/b>/);
+  assert.match(boost, /Dev:<\/b> Holds 2%/);
+  assert.doesNotMatch(boost, /Dev:<\/b>[^\n]*Burned/);
 });
 
 test('Pump.fun renders known symbol and market cap without fabricating missing values', () => {

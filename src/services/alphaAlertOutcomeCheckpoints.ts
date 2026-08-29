@@ -1,11 +1,12 @@
 import { getRobinhoodMarketSnapshot } from '../chains/robinhood/market.js';
 import { enrichTokenByMintAddress } from './dexscreener.js';
 import { supabase } from './supabase.js';
+import { compareVerifiedPrices } from './priceComparability.js';
 
 export const ALPHA_OUTCOME_CHECKPOINTS = [30, 60, 180, 300, 900, 1800, 3600] as const;
 export const OUTCOME_ELIGIBLE_SEMANTIC_TYPES = ['DEX_PAID', 'BOOST', 'VOLUME_SURGE', 'DEV_BURN', 'DEV_SELL', 'LIQUIDITY_RISK'] as const;
 export const OUTCOME_ELIGIBLE_ALERT_TYPES = ['ENTRY', 'CHECK_ENTRY', 'OPPORTUNITY'] as const;
-type EventRow = { id: number; asset_id: string; chain: string; price: number | string | null; alerted_at: string; semantic_event_type?: string | null; alert_type?: string | null };
+type EventRow = { id: number; asset_id: string; chain: string; price: number | string | null; price_provenance?: string | null; market_index_state?: string | null; alerted_at: string; semantic_event_type?: string | null; alert_type?: string | null };
 type PriorRow = { current_price: number | string | null; peak_price: number | string | null; peak_roi: number | string | null; time_to_peak_seconds: number | null };
 const positive = (value: unknown): number | null => { const number = Number(value); return Number.isFinite(number) && number > 0 ? number : null; };
 
@@ -16,14 +17,22 @@ export function buildAlphaOutcomeCheckpoint(args: {
 }) {
   const measuredAt = args.measuredAt ?? new Date().toISOString();
   const entry = positive(args.event.price); const current = positive(args.currentPrice);
+  const priceComparison = compareVerifiedPrices(
+    { chain: args.event.chain, token: args.event.asset_id, price: entry, provenance: args.event.price_provenance,
+      marketIndexState: args.event.market_index_state },
+    { chain: args.event.chain, token: args.event.asset_id, price: current, provenance: args.provenance,
+      marketIndexState: args.provenance === 'DEXSCREENER_VERIFIED_BASE_PAIR' ? 'VERIFIED' : args.event.market_index_state },
+  );
+  const priceUnavailableReason = 'reason' in priceComparison ? priceComparison.reason : null;
   const previousPrices = args.prior.flatMap(row => [positive(row.current_price), positive(row.peak_price)]).filter((v): v is number => v != null);
-  if (entry == null || current == null) return {
+  if (entry == null || current == null || !priceComparison.comparable) return {
     alert_event_id: args.event.id, checkpoint_seconds: args.checkpointSeconds,
     current_roi: null, peak_roi: null, time_to_peak_seconds: null, max_drawdown: null,
     current_price: current, peak_price: previousPrices.length ? Math.max(...previousPrices) : null,
     measurement_source: args.source, price_provenance: args.provenance, measured_at: measuredAt,
     status: 'UNAVAILABLE', completeness: { entryPrice: entry != null, currentPrice: current != null,
-      reason: entry == null ? 'MISSING_ENTRY_PRICE' : (args.unavailableReason ?? 'MISSING_CURRENT_PRICE') },
+      reason: entry == null ? 'MISSING_ENTRY_PRICE' : current == null ? (args.unavailableReason ?? 'MISSING_CURRENT_PRICE')
+        : priceUnavailableReason },
   };
   const peak = Math.max(entry, current, ...previousPrices);
   const currentRoi = ((current - entry) / entry) * 100; const peakRoi = ((peak - entry) / entry) * 100;
@@ -72,8 +81,21 @@ export async function runAlphaOutcomeCheckpointCycle(now = new Date()): Promise<
     p_oldest: oldest, p_latest: latest, p_now: now.toISOString(), p_limit: 200,
   });
   if (error) throw error;
+  const selected = (data ?? []) as EventRow[];
+  const selectedIds = selected.map(event => event.id);
+  const { data: fullEvents, error: fullEventsError } = selectedIds.length
+    ? await supabase.from('alpha_alert_events')
+      .select('id,asset_id,chain,price,price_provenance,market_index_state,alerted_at,semantic_event_type,alert_type')
+      .in('id', selectedIds)
+    : { data: [] as EventRow[], error: null };
+  if (fullEventsError) throw fullEventsError;
+  const fullById = new Map<number, EventRow>((fullEvents ?? []).map(event => [Number(event.id), event as EventRow] as const));
+  const candidates = selected.flatMap(event => {
+    const full = fullById.get(Number(event.id));
+    return full ? [full] : [];
+  });
   let inserted = 0, attempted = 0, measured = 0, unavailable = 0, failed = 0;
-  for (const event of (data ?? []) as EventRow[]) {
+  for (const event of candidates) {
     const ageSeconds = Math.floor((now.getTime() - new Date(event.alerted_at).getTime()) / 1000);
     const { data: existing, error: existingError } = await supabase.from('alpha_alert_outcomes')
       .select('checkpoint_seconds,current_price,peak_price,peak_roi,time_to_peak_seconds').eq('alert_event_id', event.id);
@@ -94,7 +116,7 @@ export async function runAlphaOutcomeCheckpointCycle(now = new Date()): Promise<
       checkpointSeconds: due, reason: insertError.message }); continue; }
     inserted += 1; if (row.status === 'MEASURED') measured += 1; else unavailable += 1;
   }
-  console.log('alpha_outcome_checkpoint_cycle', { eligible_candidates: data?.length ?? 0, selected: data?.length ?? 0,
+  console.log('alpha_outcome_checkpoint_cycle', { eligible_candidates: selected.length, selected: candidates.length,
     checkpoints_attempted: attempted, measured, unavailable, failed, duration_ms: Date.now() - started });
   return inserted;
 }

@@ -17,7 +17,7 @@ test('alert snapshot is immutable after opportunity mutation and EXIT is distinc
 
 test('checkpoint measures price with provenance and missing price stays unavailable', async () => {
   const { buildAlphaOutcomeCheckpoint } = await import('../src/services/alphaAlertOutcomeCheckpoints.js');
-  const event = { id: 1, asset_id: '0xabc', chain: 'robinhood', price: 1, alerted_at: '2026-08-24T00:00:00Z' };
+  const event = { id: 1, asset_id: '0xabc', chain: 'robinhood', price: 1, price_provenance: 'DEX_BASE_V1', alerted_at: '2026-08-24T00:00:00Z' };
   const measured = buildAlphaOutcomeCheckpoint({ event, checkpointSeconds: 30, currentPrice: 1.2, source: 'MARKET', provenance: 'DEX_BASE_V1', prior: [] });
   assert.equal(measured.status, 'MEASURED'); assert.ok(Math.abs(Number(measured.current_roi) - 20) < 0.001); assert.equal(measured.price_provenance, 'DEX_BASE_V1');
   const unavailable = buildAlphaOutcomeCheckpoint({ event, checkpointSeconds: 60, currentPrice: null, source: null, provenance: null, prior: [] });

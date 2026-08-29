@@ -91,8 +91,8 @@ test('V2 verified curve price and quote/USD render FDV without relabeling it', a
   assert.match(message, /FDV\s+<b>\$60\.0K<\/b>/);
   assert.doesNotMatch(message, /Market cap/);
   assert.doesNotMatch(message, /Market\s+<b>INDEXING<\/b>/);
-  assert.doesNotMatch(message, /Dev holding/);
-  assert.doesNotMatch(message, /Burned/);
+  assert.match(message, /Dev:<\/b> Holds 2\.4%/);
+  assert.doesNotMatch(message, /Dev:<\/b>[^\n]*Burned/);
 });
 
 test('verified circulating supply changes V2 valuation label to Market cap', async () => {

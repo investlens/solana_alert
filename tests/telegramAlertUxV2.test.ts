@@ -20,7 +20,7 @@ test('standard automatic alert is compact, decision-oriented and contains no raw
 });
 
 test('Time Vault comparison produces the expected qualified momentum update only when explicitly rendered', () => {
-  const previous = { id: 1, alerted_at: '2026-08-29T10:40:00Z', asset_id: '0xEAe2000000000000000000000000000000008bcc', symbol: 'TV', token_name: 'Time Vault',
+  const previous = { id: 1, alerted_at: '2026-08-29T10:40:00Z', asset_id: '0xEAe2000000000000000000000000000000008bcc', chain: 'robinhood', symbol: 'TV', token_name: 'Time Vault',
     semantic_event_type: 'OPPORTUNITY', intelligence_state: 'RUNNER', price: 0.00003541, price_provenance: 'VERIFIED', market_cap: 34700, liquidity: 18300, volume_5m: 118.5 };
   const current = { ...previous, id: 2, alerted_at: '2026-08-29T10:49:00Z', price: 0.00004173, market_cap: 40800, liquidity: 19200, volume_5m: 256.3 };
   const comparison = buildAlertComparison(previous, current);
@@ -133,8 +133,10 @@ test('prior successfully delivered actionable event produces momentum intent wit
   await import('dotenv/config');
   const { buildOpportunityMessage } = await import('../src/services/opportunityDeliveryService.js');
   const base = intentOpportunity({});
-  const message = buildOpportunityMessage(base, { hasPriorAlert: true,
-    price: { previous: 0.00004, current: 0.00004952, changePct: 23.8 }, previousState: 'CONFIRMED', currentState: 'RUNNER' });
+  const comparison = { hasPriorAlert: true,
+    price: { previous: 0.00004, current: 0.00004952, changePct: 23.8 }, previousState: 'CONFIRMED', currentState: 'RUNNER' };
+  const message = buildOpportunityMessage(base, comparison, { intent: 'MOMENTUM_UPDATE', notify: true,
+    factors: ['PROGRESSION'], reasons: ['Price advanced 23.8% since previous alert'] });
   assert.match(message, /^📈 <b>MOMENTUM UPDATE<\/b>/);
   assert.match(message, /📈 <b>ACTION: MOMENTUM UPDATE<\/b>/);
   assert.match(message, /Previously alerted opportunity has a new qualified momentum signal/);
@@ -155,7 +157,7 @@ test('reason formatting renders one verified reason once and never more than thr
 
 test('informational, avoid and exit display intents remain unambiguous', () => {
   const watch = renderAlphaNotification({ category: 'market', severity: 'watch', state: 'BOOST', symbol: 'HOTDOG', displayIntent: 'WATCH' });
-  assert.match(watch, /MARKET UPDATE[\s\S]*ACTION: WATCH[\s\S]*Information only — entry not confirmed/);
+  assert.match(watch, /BOOST DETECTED[\s\S]*ACTION: WATCH[\s\S]*Information only — entry not confirmed/);
   assert.doesNotMatch(watch, /CHECK ENTRY|ACTION: BUY/);
   assert.match(renderAlphaNotification({ category: 'risk', severity: 'critical', state: 'RISK', symbol: 'HOTDOG', displayIntent: 'AVOID' }), /ACTION: AVOID/);
   assert.match(renderAlphaNotification({ category: 'risk', severity: 'critical', state: 'EXIT_AVOID', symbol: 'HOTDOG', displayIntent: 'EXIT' }), /ACTION: EXIT/);
