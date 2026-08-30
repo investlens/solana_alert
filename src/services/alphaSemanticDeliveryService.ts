@@ -60,10 +60,10 @@ const productionDependencies: SemanticDeliveryDependencies = {
 };
 
 export async function deliverAlphaSemanticEvent(args: {
-  event: UserFacingSemanticEvent; message: string; buttons?: InlineButton[][];
+  event: UserFacingSemanticEvent; message: string; buttons?: InlineButton[][]; preserveMessage?: boolean;
 }, dependencies: SemanticDeliveryDependencies = productionDependencies): Promise<{ delivered: number; failed: number }> {
   let deliveryMessage = args.message;
-  if (dependencies === productionDependencies) {
+  if (dependencies === productionDependencies && !args.preserveMessage) {
     try {
       const comparison = await loadPriorDeliveredAlertComparison({ currentEventId: args.event.id, assetId: args.event.assetId, chain: args.event.chain });
       deliveryMessage = renderMomentumUpdate(comparison) ?? args.message;

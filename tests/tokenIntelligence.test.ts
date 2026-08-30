@@ -187,7 +187,9 @@ test('ATH is monotonic, includes verified current values, and keeps independent 
   const lower = mergeTokenAth({ previous, historicalPrice: { price: 0.01, price_provenance: 'OLD', alerted_at: 'old-price' },
     historicalMc: { market_cap: 40_000, valuation_provenance: 'OLD', alerted_at: 'old-mc' },
     currentPrice: 0.012, currentMc: 50_000, observedAt: 'current', currentVerified: true });
-  assert.equal(lower.priceUsd, previous.priceUsd); assert.equal(lower.marketCapUsd, previous.marketCapUsd);
+  // Legacy cache provenance without a comparable price regime is not allowed to override a verified DEX observation.
+  assert.equal(lower.priceUsd, 0.012); assert.equal(lower.priceSource, 'DEXSCREENER_VERIFIED_BASE_PAIR');
+  assert.equal(lower.marketCapUsd, previous.marketCapUsd);
   const higher = mergeTokenAth({ previous, currentPrice: 0.02, currentMc: 80_000, observedAt: 'new-current', currentVerified: true });
   assert.equal(higher.priceUsd, 0.02); assert.equal(higher.marketCapUsd, 80_000);
   assert.equal(higher.priceObservedAt, 'new-current'); assert.equal(higher.marketCapObservedAt, 'new-current');

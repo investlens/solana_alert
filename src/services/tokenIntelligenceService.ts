@@ -5,6 +5,7 @@ import { robinhoodChain } from '../chains/robinhood/config.js';
 import { getRobinhoodTokenMetadata, type RobinhoodTokenMetadata } from '../chains/robinhood/tokenMetadata.js';
 import { scanRobinhoodHolderRisk } from '../chains/robinhood/security/holderRiskScanner.js';
 import { supabase } from './supabase.js';
+import { compareVerifiedPrices } from './priceComparability.js';
 
 const CACHE_MS = 15 * 60_000, PARTIAL_CACHE_MS = 60_000, ANALYSIS_DEADLINE_MS = 8_000, CUTOFF_CACHE_MS = 60_000;
 const BLOCKSCOUT_BASE = 'https://robinhoodchain.blockscout.com';
@@ -162,12 +163,22 @@ function maxObservation(...values: Array<{ value: number | null; at: string | nu
     ?? { value: null, at: null, source: null };
 }
 
-export function mergeTokenAth(args: { previous?: TokenAth | null; historicalPrice?: any; historicalMc?: any;
-  currentPrice?: number | null; currentMc?: number | null; observedAt: string; currentVerified: boolean }): TokenAth {
+export function mergeTokenAth(args: { previous?: TokenAth | null; historicalPrice?: any | any[]; historicalMc?: any;
+  currentPrice?: number | null; currentMc?: number | null; observedAt: string; currentVerified: boolean;
+  chain?: string; token?: string }): TokenAth {
   const prior = args.previous ?? unknownAth();
-  const price = maxObservation({ value: prior.priceUsd, at: prior.priceObservedAt, source: prior.priceSource },
-    { value: positive(args.historicalPrice?.price), at: args.historicalPrice?.alerted_at ?? null, source: args.historicalPrice?.price_provenance ?? null },
-    { value: args.currentVerified ? positive(args.currentPrice) : null, at: args.observedAt, source: 'DEXSCREENER_VERIFIED_BASE_PAIR' });
+  const chain = args.chain ?? 'robinhood', token = args.token ?? 'token';
+  const currentEvidence = { chain, token, price: args.currentPrice, provenance: 'DEXSCREENER_VERIFIED_BASE_PAIR', marketIndexState: 'VERIFIED' };
+  const historical = (Array.isArray(args.historicalPrice) ? args.historicalPrice : [args.historicalPrice]).filter(Boolean);
+  const priceCandidates = [
+    { value: prior.priceUsd, at: prior.priceObservedAt, source: prior.priceSource },
+    ...historical.map(row => ({ value: positive(row?.price), at: row?.alerted_at ?? null, source: row?.price_provenance ?? null })),
+    { value: args.currentVerified ? positive(args.currentPrice) : null, at: args.observedAt, source: 'DEXSCREENER_VERIFIED_BASE_PAIR' },
+  ].filter(candidate => candidate.value != null && candidate.source && (!args.currentVerified || compareVerifiedPrices(
+    { chain, token, price: candidate.value, provenance: candidate.source }, currentEvidence).comparable));
+  const price = args.currentVerified ? maxObservation(...priceCandidates) : prior.priceUsd != null && prior.priceSource
+    ? { value: prior.priceUsd, at: prior.priceObservedAt, source: prior.priceSource }
+    : { value: null, at: null, source: null };
   const mc = maxObservation({ value: prior.marketCapUsd, at: prior.marketCapObservedAt, source: prior.marketCapSource },
     { value: positive(args.historicalMc?.market_cap), at: args.historicalMc?.alerted_at ?? null, source: args.historicalMc?.valuation_provenance ?? null },
     { value: args.currentVerified ? positive(args.currentMc) : null, at: args.observedAt, source: 'DEXSCREENER_VERIFIED_BASE_PAIR' });
@@ -181,7 +192,7 @@ async function databaseContext(token: string, signal: AbortSignal) {
   const base = () => supabase.from('alpha_alert_events');
   const queries = [
     base().select('semantic_event_type,intelligence_state,risk_label,boost_total,price,price_provenance,market_cap,liquidity,volume_5m,alerted_at,raw_snapshot').eq('chain', 'robinhood').ilike('asset_id', token).order('alerted_at', { ascending: false }).limit(1).maybeSingle(),
-    base().select('price,price_provenance,alerted_at').eq('chain', 'robinhood').ilike('asset_id', token).not('price_provenance', 'is', null).gt('price', 0).order('price', { ascending: false }).limit(1).maybeSingle(),
+    base().select('price,price_provenance,market_index_state,alerted_at').eq('chain', 'robinhood').ilike('asset_id', token).not('price_provenance', 'is', null).gt('price', 0).order('alerted_at', { ascending: false }).limit(200),
     base().select('market_cap,valuation_provenance,alerted_at').eq('chain', 'robinhood').ilike('asset_id', token).not('valuation_provenance', 'is', null).gt('market_cap', 0).order('market_cap', { ascending: false }).limit(1).maybeSingle(),
     base().select('boost_total').eq('chain', 'robinhood').ilike('asset_id', token).gt('boost_total', 0).order('boost_total', { ascending: false }).limit(1).maybeSingle(),
     base().select('id').eq('chain', 'robinhood').ilike('asset_id', token).eq('semantic_event_type', 'DEX_PAID').limit(1).maybeSingle(),
@@ -236,7 +247,8 @@ export async function analyzeRobinhoodToken(tokenAddress: string, previous?: Tok
       databaseContext(token, controller.signal)]);
     const db = dbResult.status === 'fulfilled' ? dbResult.value : null;
     result.ath = mergeTokenAth({ previous: previous?.ath, historicalPrice: db?.historicalPrice, historicalMc: db?.historicalMc,
-      currentPrice: market?.priceUsd, currentMc: market?.marketCapUsd, observedAt, currentVerified: Boolean(market) });
+      currentPrice: market?.priceUsd, currentMc: market?.marketCapUsd, observedAt, currentVerified: Boolean(market),
+      chain: 'robinhood', token });
     if (db) {
       result.security.dexPaid = db.dexPaid; result.security.boostTotal = db.boostTotal;
       result.alpha.state = db.latest?.intelligence_state ?? null; result.alpha.risk = db.latest?.risk_label ?? null;

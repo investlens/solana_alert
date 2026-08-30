@@ -3,6 +3,7 @@ import { enrichTokenByMintAddress } from './dexscreener.js';
 import { supabase } from './supabase.js';
 import { isDexScreenerProviderBackoffError } from './dexscreenerRequestGovernor.js';
 import { compareVerifiedPrices } from './priceComparability.js';
+import { processRunnerMilestones } from './runnerMilestoneService.js';
 
 export const ALPHA_OUTCOME_CHECKPOINTS = [30, 60, 180, 300, 900, 1800, 3600] as const;
 export const OUTCOME_ELIGIBLE_SEMANTIC_TYPES = ['DEX_PAID', 'BOOST', 'VOLUME_SURGE', 'DEV_BURN', 'DEV_SELL', 'LIQUIDITY_RISK'] as const;
@@ -117,6 +118,10 @@ export async function runAlphaOutcomeCheckpointCycle(now = new Date()): Promise<
     if (insertError) { failed += 1; console.warn('[AlphaOutcomeCheckpoints] Checkpoint persistence failed', { alertEventId: event.id,
       checkpointSeconds: due, reason: insertError.message }); continue; }
     inserted += 1; if (row.status === 'MEASURED') measured += 1; else unavailable += 1;
+    if (row.status === 'MEASURED') await processRunnerMilestones({ alertEventId: event.id,
+      currentPrice: row.current_price, priceProvenance: row.price_provenance, measuredAt: row.measured_at,
+      measurementSource: row.measurement_source }).catch(error => console.warn('[RunnerMilestones] Evaluation failed', {
+        alertEventId: event.id, checkpointSeconds: due, reason: error instanceof Error ? error.message : String(error) }));
   }
   console.log('alpha_outcome_checkpoint_cycle', { eligible_candidates: selected.length, selected: candidates.length,
     checkpoints_attempted: attempted, measured, unavailable, failed, duration_ms: Date.now() - started });
