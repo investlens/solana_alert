@@ -1,3 +1,5 @@
+import { governedDexScreenerJson } from '../../../services/dexscreenerRequestGovernor.js';
+
 const DEXSCREENER_CHAIN_ID =
   'robinhood';
 
@@ -50,47 +52,8 @@ export async function scanRobinhoodDexPaid(
       `${DEXSCREENER_CHAIN_ID}/` +
       tokenAddress;
 
-    const response =
-      await fetch(
-        url,
-        {
-          headers: {
-            Accept:
-              'application/json',
-          },
-        },
-      );
-
-    if (!response.ok) {
-      return {
-        tokenAddress,
-
-        dexPaid:
-          null,
-
-        status:
-          'UNKNOWN',
-
-        orderTypes:
-          [],
-
-        orderStatuses:
-          [],
-
-        latestPaymentTimestamp:
-          null,
-
-        warnings: [
-          `DexScreener orders HTTP ${response.status}`,
-        ],
-
-        scannedAt:
-          Date.now(),
-      };
-    }
-
-    const payload =
-      await response.json();
+    const payload = (await governedDexScreenerJson<unknown>({ url, caller: 'robinhood_dex_paid', priority: 'NORMAL',
+      endpoint: 'ORDERS', cacheKey: `orders:robinhood:${tokenAddress.trim().toLowerCase()}`, cacheTtlMs: 120_000 })).value;
 
     const orders:
       DexScreenerOrder[] =

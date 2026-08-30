@@ -2378,6 +2378,7 @@ async function updateShadowRow(
       market =
         await getRobinhoodMarketSnapshot(
           row.token_address,
+          { priority: 'HIGH', caller: 'pons_shadow_outcome' },
         );
     } catch {
       return;
@@ -2512,6 +2513,7 @@ async function updateShadowRow(
     market =
       await getRobinhoodMarketSnapshot(
         row.token_address,
+        { priority: 'HIGH', caller: 'pons_shadow_outcome' },
       );
   } catch (error) {
     console.log(

@@ -1,4 +1,5 @@
 import { supabase } from "./supabase.js";
+import { governedDexScreenerJson } from './dexscreenerRequestGovernor.js';
 import {
   publishOutcomeStatus,
   type OutcomeStatus,
@@ -114,21 +115,9 @@ async function fetchLatestPairPrice(
   }, 10_000);
 
   try {
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-      },
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      throw new Error(
-        `DexScreener returned ${response.status} ${response.statusText}`
-      );
-    }
-
-    const payload = (await response.json()) as DexPairResponse;
+    const payload = (await governedDexScreenerJson<DexPairResponse>({ url, caller: 'legacy_outcome_tracker', priority: 'HIGH',
+      endpoint: 'PAIR_PRICE', cacheKey: `pair:${chain.toLowerCase()}:${pairAddress.toLowerCase()}`, cacheTtlMs: 15_000,
+      signal: controller.signal })).value;
     const pair = payload.pairs?.[0];
 
     if (!pair?.priceUsd) {

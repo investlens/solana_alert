@@ -1,3 +1,5 @@
+import { governedDexScreenerJson } from './dexscreenerRequestGovernor.js';
+
 type DexScreenerPair = {
   chainId?: string;
   dexId?: string;
@@ -52,26 +54,9 @@ export async function fetchDexscreenerPairMarketCap(
       `https://api.dexscreener.com/token-pairs/v1/solana/` +
       encodeURIComponent(normalisedToken);
 
-    const res = await fetch(url, {
-      headers: {
-        Accept: 'application/json',
-      },
-      signal: AbortSignal.timeout(10_000),
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-
-      console.log('dexscreener pairs fetch failed:', {
-        token: normalisedToken,
-        status: res.status,
-        body: text.slice(0, 200),
-      });
-
-      return null;
-    }
-
-    const response: unknown = await res.json();
+    const response = (await governedDexScreenerJson<unknown>({ url, caller: 'creator_market_fallback', priority: 'BACKGROUND',
+      endpoint: 'TOKEN_PAIRS_SOLANA', cacheKey: `solana:${normalisedToken.toLowerCase()}`, cacheTtlMs: 60_000,
+      signal: AbortSignal.timeout(10_000) })).value;
 
     if (!Array.isArray(response) || response.length === 0) {
       console.log('dexscreener returned no pairs:', {

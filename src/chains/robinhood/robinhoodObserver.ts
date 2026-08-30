@@ -823,6 +823,7 @@ if (!isVerifiedSource) {
   const market =
     await getRobinhoodMarketSnapshot(
       token.tokenAddress,
+      { priority: 'NORMAL', caller: 'robinhood_observer' },
     );
 
   /*

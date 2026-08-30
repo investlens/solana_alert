@@ -539,6 +539,7 @@ async function processBoost(
   const market =
     await getRobinhoodMarketSnapshot(
       boost.tokenAddress,
+      { priority: 'NORMAL', caller: 'robinhood_boost_observer' },
     );
   const previousBoostMarket = await getPreviousBoostMarket(boost.tokenAddress).catch(() => null);
 

@@ -1,6 +1,7 @@
 import type {
   ChainMarketSnapshot,
 } from '../shared/types.js';
+import { governedDexScreenerJson, type DexScreenerPriority } from '../../services/dexscreenerRequestGovernor.js';
 
 const DEXSCREENER_CHAIN_ID = 'robinhood';
 
@@ -55,6 +56,9 @@ export type QuoteUsdObservation = {
 };
 
 const QUOTE_USD_CACHE_MS = 60_000;
+// Short enough to preserve 15-second momentum cadence while eliminating overlapping worker fetches.
+export const ROBINHOOD_MARKET_CACHE_MS = 15_000;
+const pairFetchMetadata = new WeakMap<DexScreenerPair[], { fetchedAt: string; source: 'DEXSCREENER' }>();
 const quoteUsdCache = new Map<string, { expiresAt: number; observation: QuoteUsdObservation }>();
 
 function finiteNumber(
@@ -99,7 +103,7 @@ export function verifiedRobinhoodChartUrl(pair: DexScreenerPair): string | undef
 
 export async function fetchRobinhoodPairs(
   tokenAddress: string,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; priority?: DexScreenerPriority; caller?: string } = {},
 ): Promise<DexScreenerPair[]> {
   const address =
     tokenAddress.trim();
@@ -116,45 +120,23 @@ export async function fetchRobinhoodPairs(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 2_500);
   const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
-  let response: Response;
   try {
-    response = await fetch(url, {
-      headers: { Accept: 'application/json' },
-      signal,
+    const result = await governedDexScreenerJson<unknown>({
+      url, signal, priority: options.priority ?? 'NORMAL', caller: options.caller ?? 'robinhood_market',
+      endpoint: 'TOKEN_PAIRS_ROBINHOOD', cacheKey: `robinhood:${address.toLowerCase()}`,
+      cacheTtlMs: ROBINHOOD_MARKET_CACHE_MS,
     });
+    const data = result.value;
+    if (!Array.isArray(data)) return [];
+    const pairs = data.filter(
+      (pair): pair is DexScreenerPair => Boolean(pair && typeof pair === 'object' &&
+        (pair as DexScreenerPair).chainId === DEXSCREENER_CHAIN_ID),
+    );
+    pairFetchMetadata.set(pairs, { fetchedAt: result.fetchedAt, source: result.source });
+    return pairs;
   } finally {
     clearTimeout(timeout);
   }
-
-  if (!response.ok) {
-    const text =
-      await response
-        .text()
-        .catch(() => '');
-
-    throw new Error(
-      `Robinhood DexScreener request failed: ` +
-      `${response.status} ${text}`,
-    );
-  }
-
-  const data =
-    (await response.json()) as unknown;
-
-  if (!Array.isArray(data)) {
-    return [];
-  }
-
-  return data.filter(
-    (pair): pair is DexScreenerPair =>
-      Boolean(
-        pair &&
-        typeof pair === 'object' &&
-        (pair as DexScreenerPair)
-          .chainId ===
-          DEXSCREENER_CHAIN_ID,
-      ),
-  );
 }
 
 export function selectVerifiedQuoteUsdObservation(args: {
@@ -199,21 +181,24 @@ export async function getVerifiedRobinhoodQuoteUsd(
   const key = quoteAddress.toLowerCase();
   const cached = quoteUsdCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.observation;
-  const observation = selectVerifiedQuoteUsdObservation({
-    quoteAddress,
-    pairs: await fetchRobinhoodPairs(quoteAddress),
-  });
+  const pairs = await fetchRobinhoodPairs(quoteAddress);
+  const metadata = pairFetchMetadata.get(pairs);
+  const observation = selectVerifiedQuoteUsdObservation({ quoteAddress, pairs,
+    observedAt: metadata ? new Date(metadata.fetchedAt) : undefined });
   quoteUsdCache.set(key, { expiresAt: Date.now() + QUOTE_USD_CACHE_MS, observation });
   return observation;
 }
 
 export async function getRobinhoodMarketSnapshot(
   tokenAddress: string,
+  options: { priority?: DexScreenerPriority; caller?: string } = {},
 ): Promise<ChainMarketSnapshot | null> {
   const pairs =
     await fetchRobinhoodPairs(
       tokenAddress,
+      options,
     );
+  const fetchMetadata = pairFetchMetadata.get(pairs);
 
   const pair =
     chooseBestRobinhoodPair(pairs, tokenAddress);
@@ -285,8 +270,9 @@ export async function getRobinhoodMarketSnapshot(
 
     chartUrl: verifiedRobinhoodChartUrl(pair),
 
-    timestamp:
-      Date.now(),
+    timestamp: fetchMetadata ? Date.parse(fetchMetadata.fetchedAt) : Date.now(),
+    fetchedAt: fetchMetadata?.fetchedAt,
+    source: fetchMetadata?.source,
   };
 }
 
@@ -295,10 +281,12 @@ export function robinhoodMarketSnapshotFromPairs(tokenAddress: string, pairs: De
   if (!pair) return null;
   const priceUsd = finiteNumber(pair.priceUsd);
   if (priceUsd <= 0) return null;
+  const fetchMetadata = pairFetchMetadata.get(pairs);
   return { chain: 'robinhood', tokenAddress, symbol: pair.baseToken?.symbol ?? 'UNKNOWN',
     name: pair.baseToken?.name ?? pair.baseToken?.symbol ?? 'Unknown Token', priceUsd,
     marketCapUsd: finiteNumber(pair.marketCap), fdvUsd: finiteNumber(pair.fdv),
     liquidityUsd: finiteNumber(pair.liquidity?.usd), volume5mUsd: finiteNumber(pair.volume?.m5),
     buys5m: finiteNumber(pair.txns?.m5?.buys), sells5m: finiteNumber(pair.txns?.m5?.sells),
-    pairAddress: pair.pairAddress, dexId: pair.dexId, chartUrl: verifiedRobinhoodChartUrl(pair), timestamp: Date.now() };
+    pairAddress: pair.pairAddress, dexId: pair.dexId, chartUrl: verifiedRobinhoodChartUrl(pair),
+    timestamp: fetchMetadata ? Date.parse(fetchMetadata.fetchedAt) : Date.now(), fetchedAt: fetchMetadata?.fetchedAt, source: fetchMetadata?.source };
 }

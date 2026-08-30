@@ -1,6 +1,7 @@
 import { getRobinhoodMarketSnapshot } from '../chains/robinhood/market.js';
 import { enrichTokenByMintAddress } from './dexscreener.js';
 import { supabase } from './supabase.js';
+import { isDexScreenerProviderBackoffError } from './dexscreenerRequestGovernor.js';
 import { compareVerifiedPrices } from './priceComparability.js';
 
 export const ALPHA_OUTCOME_CHECKPOINTS = [30, 60, 180, 300, 900, 1800, 3600] as const;
@@ -49,7 +50,7 @@ export function buildAlphaOutcomeCheckpoint(args: {
 
 async function currentPrice(event: EventRow): Promise<{ price: number | null; source: string | null; provenance: string | null; reason: string | null }> {
   if (['robinhood', 'pons'].includes(event.chain.toLowerCase())) {
-    const market = await getRobinhoodMarketSnapshot(event.asset_id);
+    const market = await getRobinhoodMarketSnapshot(event.asset_id, { priority: 'HIGH', caller: 'alpha_outcome_checkpoint' });
     return { price: market?.priceUsd ?? null, source: market ? 'ROBINHOOD_MARKET_SNAPSHOT' : null, provenance: market ? 'DEXSCREENER_VERIFIED_BASE_PAIR' : null, reason: market ? null : 'ROBINHOOD_MARKET_UNAVAILABLE' };
   }
   if (event.chain.toLowerCase() === 'solana') {
@@ -108,7 +109,8 @@ export async function runAlphaOutcomeCheckpointCycle(now = new Date()): Promise<
       reason: 'HISTORICAL_CHECKPOINT_PRICE_UNAVAILABLE' as string | null };
     if (checkpointCanUseCurrentPrice(ageSeconds, due)) {
       measurement.reason = 'PRICE_ACQUISITION_FAILED';
-      try { measurement = await currentPrice(event); } catch { /* persist unavailable; never synthesize */ }
+      try { measurement = await currentPrice(event); }
+      catch (error) { if (isDexScreenerProviderBackoffError(error)) measurement.reason = 'DEXSCREENER_BACKOFF'; /* persist unavailable; never synthesize */ }
     }
     const row = buildAlphaOutcomeCheckpoint({ event, checkpointSeconds: due, currentPrice: measurement.price, source: measurement.source, provenance: measurement.provenance, prior: (existing ?? []) as PriorRow[], measuredAt: now.toISOString(), unavailableReason: measurement.reason });
     const { error: insertError } = await supabase.from('alpha_alert_outcomes').upsert(row, { onConflict: 'alert_event_id,checkpoint_seconds', ignoreDuplicates: true });

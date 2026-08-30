@@ -5,6 +5,7 @@ import { recordOpportunityAndEmit } from '../../services/opportunityService.js';
 import { qualifyPremiumOpportunity } from '../../services/opportunityDeliveryService.js';
 import { supabase } from '../../services/supabase.js';
 import { getRobinhoodMarketSnapshot } from './market.js';
+import { getDexScreenerBackoffState, isDexScreenerProviderBackoffError } from '../../services/dexscreenerRequestGovernor.js';
 
 export type ExistingTokenTier = 'HOT' | 'WARM';
 export type ExistingTokenUniverseEntry = { token: string; tier: ExistingTokenTier; lastSeenAt: string; watched?: boolean };
@@ -22,6 +23,13 @@ let scannerTimer: ReturnType<typeof setInterval> | null = null;
 let hotCursor = 0;
 let warmCursor = 0;
 const lastScannedAt = new Map<string, number>();
+
+export function recordCompletedExistingTokenScans(entries: ExistingTokenUniverseEntry[], scannedAt = Date.now()) {
+  for (const entry of entries) lastScannedAt.set(normalize(entry.token), scannedAt);
+}
+
+export function existingTokenLastScannedAtForTests(token: string) { return lastScannedAt.get(normalize(token)) ?? null; }
+export function resetExistingTokenLastScannedAtForTests() { lastScannedAt.clear(); }
 
 export function requirePersistedScannerOpportunity<T>(value: T | null, strategyKey: string): T {
   if (value == null) throw new Error(`scanner persistence failed for ${strategyKey}`);
@@ -118,7 +126,7 @@ async function scanToken(entry: ExistingTokenUniverseEntry) {
   const prior = (monitor?.raw_data ?? {}) as ExistingTokenMonitorData;
   const existingRisk = (contexts ?? []).map(row => (row.raw_data ?? {}) as Record<string, unknown>)
     .find(raw => raw.confirmedDevSell === true || raw.criticalSecurity === true || raw.liquidityCritical === true) ?? {};
-  const market = await getRobinhoodMarketSnapshot(entry.token); if (!market) throw new Error('verified market unavailable');
+  const market = await getRobinhoodMarketSnapshot(entry.token, { priority: 'BACKGROUND', caller: 'existing_token_scanner' }); if (!market) throw new Error('verified market unavailable');
   const observedAt = new Date(market.timestamp).toISOString();
   const minimumSeparationSeconds = entry.tier === 'HOT' ? config.existingTokenHotScanSeconds : config.existingTokenWarmScanSeconds;
   if (!existingTokenObservationIsSeparated(prior.observations, observedAt, minimumSeparationSeconds)) {
@@ -164,27 +172,52 @@ async function scanToken(entry: ExistingTokenUniverseEntry) {
   return { candidate: result.alertable, qualified, emitted };
 }
 
+export async function runExistingTokenProviderBatch<T>(entries: ExistingTokenUniverseEntry[], process: (entry: ExistingTokenUniverseEntry) => Promise<T>,
+  options: { concurrency?: number; budgetMs?: number; now?: () => number; backoffActive?: () => boolean } = {}) {
+  const started = (options.now ?? Date.now)(); let next = 0, providerBackoff = false;
+  const completed: Array<{ entry: ExistingTokenUniverseEntry; result: T }> = [];
+  const failed: Array<{ entry: ExistingTokenUniverseEntry; error: unknown }> = [];
+  const backoffActive = options.backoffActive ?? (() => getDexScreenerBackoffState().active);
+  const worker = async () => {
+    while (!providerBackoff && next < entries.length && (options.now ?? Date.now)() - started < (options.budgetMs ?? CYCLE_BUDGET_MS)) {
+      if (backoffActive()) { providerBackoff = true; break; }
+      const entry = entries[next++];
+      try { completed.push({ entry, result: await process(entry) }); }
+      catch (error) {
+        if (isDexScreenerProviderBackoffError(error) || backoffActive()) { providerBackoff = true; continue; }
+        failed.push({ entry, error });
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(options.concurrency ?? MAX_CONCURRENCY, entries.length) }, () => worker()));
+  return { completed, failed, providerBackoff, skipped: Math.max(0, entries.length - completed.length - failed.length) };
+}
+
 export async function refreshExistingTokenOpportunityScanner() {
   if (scannerRunning) return { skipped: true };
   scannerRunning = true; const started = Date.now();
   const metrics = { health: 'HEALTHY', universe_size: 0, tokens_due: 0, tokens_scanned: 0, candidates: 0, qualified: 0,
     actionable_emitted: 0, delivered: null, deduped: null, fresh_wallet_blocked: null, failures: 0,
-    failure_reasons: {} as Record<string, number>, duration_ms: 0 };
+    failure_reasons: {} as Record<string, number>, provider_backoff: false, provider_backoff_skipped: 0, duration_ms: 0 };
   try {
     const universe = await loadUniverse(); metrics.universe_size = universe.length;
     const due = selectDueExistingTokens(universe); hotCursor = due.nextHotCursor; warmCursor = due.nextWarmCursor; metrics.tokens_due = due.dueCount;
-    let next = 0;
-    const worker = async () => {
-      while (next < due.selected.length && Date.now() - started < CYCLE_BUDGET_MS) {
-        const entry = due.selected[next++];
-        try { const result = await scanToken(entry); lastScannedAt.set(entry.token, Date.now()); metrics.tokens_scanned++; metrics.candidates += Number(result.candidate); metrics.qualified += Number(result.qualified); metrics.actionable_emitted += Number(result.emitted); }
-        catch (error) { metrics.failures++; const reason = error instanceof Error ? error.message : String(error);
-          const category = reason.startsWith('scanner persistence failed') ? 'PERSISTENCE_FAILED' : reason === 'verified market unavailable' ? 'MARKET_UNAVAILABLE' : 'TOKEN_SCAN_FAILED';
-          metrics.failure_reasons[category] = (metrics.failure_reasons[category] ?? 0) + 1;
-          console.warn('[ExistingTokenScanner] token failed', { token: entry.token, category, reason }); }
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENCY, due.selected.length) }, () => worker()));
+    if (getDexScreenerBackoffState().active) {
+      metrics.health = 'DEGRADED'; metrics.failures = 1; metrics.provider_backoff = true;
+      metrics.provider_backoff_skipped = due.selected.length; metrics.failure_reasons.DEXSCREENER_BACKOFF = 1;
+      return metrics;
+    }
+    const batch = await runExistingTokenProviderBatch(due.selected, scanToken);
+    recordCompletedExistingTokenScans(batch.completed.map(row => row.entry));
+    for (const { result } of batch.completed) { metrics.tokens_scanned++;
+      metrics.candidates += Number(result.candidate); metrics.qualified += Number(result.qualified); metrics.actionable_emitted += Number(result.emitted); }
+    for (const { entry, error } of batch.failed) { metrics.failures++; const reason = error instanceof Error ? error.message : String(error);
+      const category = reason.startsWith('scanner persistence failed') ? 'PERSISTENCE_FAILED' : reason === 'verified market unavailable' ? 'MARKET_UNAVAILABLE' : 'TOKEN_SCAN_FAILED';
+      metrics.failure_reasons[category] = (metrics.failure_reasons[category] ?? 0) + 1;
+      console.warn('[ExistingTokenScanner] token failed', { token: entry.token, category, reason }); }
+    if (batch.providerBackoff) { metrics.provider_backoff = true; metrics.failures += 1;
+      metrics.failure_reasons.DEXSCREENER_BACKOFF = 1;
+      metrics.provider_backoff_skipped = batch.skipped; }
     metrics.health = metrics.failures ? 'DEGRADED' : metrics.tokens_scanned < metrics.tokens_due ? 'CATCHING_UP' : 'HEALTHY';
     return metrics;
   } catch (error) { metrics.failures++; metrics.health = 'DEGRADED'; console.error('[ExistingTokenScanner] cycle failed', { reason: error instanceof Error ? error.message : String(error) }); return metrics; }

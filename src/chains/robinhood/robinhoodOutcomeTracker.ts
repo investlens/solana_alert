@@ -1188,6 +1188,7 @@ if (
   const market =
     await getRobinhoodMarketSnapshot(
       row.token_address,
+      { priority: 'HIGH', caller: 'robinhood_outcome_tracker' },
     );
 
   if (!market) {

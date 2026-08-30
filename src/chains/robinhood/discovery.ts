@@ -5,6 +5,7 @@ import type {
 import {
   getRobinhoodMarketSnapshot,
 } from './market.js';
+import { governedDexScreenerJson } from '../../services/dexscreenerRequestGovernor.js';
 
 const ROBINHOOD_CHAIN_ID =
   'robinhood';
@@ -59,26 +60,8 @@ export type RobinhoodDiscoveryCandidate = {
 async function fetchJson<T>(
   url: string,
 ): Promise<T> {
-  const response =
-    await fetch(url, {
-      headers: {
-        Accept: 'application/json',
-      },
-    });
-
-  if (!response.ok) {
-    const text =
-      await response
-        .text()
-        .catch(() => '');
-
-    throw new Error(
-      `Robinhood discovery request failed: ` +
-      `${response.status} ${text}`,
-    );
-  }
-
-  return (await response.json()) as T;
+  return (await governedDexScreenerJson<T>({ url, caller: 'robinhood_discovery', priority: 'BACKGROUND',
+    endpoint: url === TOKEN_PROFILES_URL ? 'PROFILES' : 'BOOSTS', cacheTtlMs: url === TOKEN_PROFILES_URL ? 60_000 : 90_000 })).value;
 }
 
 function calculateBuyRatio(
@@ -379,6 +362,7 @@ export async function discoverRobinhoodCandidates(
       const snapshot =
         await getRobinhoodMarketSnapshot(
           sourceInfo.tokenAddress,
+          { priority: 'BACKGROUND', caller: 'robinhood_discovery' },
         );
 
       if (!snapshot) {
@@ -489,6 +473,7 @@ export async function discoverRobinhoodSnapshots(
     const snapshot =
       await getRobinhoodMarketSnapshot(
         candidate.tokenAddress,
+        { priority: 'BACKGROUND', caller: 'robinhood_discovery' },
       );
 
     if (snapshot) {

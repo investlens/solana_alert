@@ -35,6 +35,8 @@ export type ChainMarketSnapshot = {
   chartUrl?: string;
 
   timestamp: number;
+  fetchedAt?: string;
+  source?: 'DEXSCREENER';
 };
 
 export type ChainTradeRequest = {
