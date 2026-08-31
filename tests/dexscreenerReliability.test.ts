@@ -2,10 +2,13 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  DEXSCREENER_REQUESTS_PER_SECOND, DexScreenerProviderBackoffError, getDexScreenerBackoffState, getDexScreenerGovernorMetrics,
+  DEXSCREENER_EXECUTION_TIMEOUT_MS, DEXSCREENER_REQUESTS_PER_SECOND, DexScreenerHttpTimeoutError, DexScreenerMalformedResponseError,
+  DexScreenerProviderBackoffError, DexScreenerProviderHttpError, DexScreenerQueueCapacityError,
+  getDexScreenerBackoffState, getDexScreenerGovernorMetrics,
   governedDexScreenerJson, resetDexScreenerGovernorForTests,
 } from '../src/services/dexscreenerRequestGovernor.js';
-import { existingTokenLastScannedAtForTests, recordCompletedExistingTokenScans, resetExistingTokenLastScannedAtForTests,
+import { EXISTING_TOKEN_SCANNER_QUEUE_WAIT_MS, EXISTING_TOKEN_SCANNER_SUSTAINABLE_QUOTA,
+  existingTokenLastScannedAtForTests, recordCompletedExistingTokenScans, resetExistingTokenLastScannedAtForTests,
   runExistingTokenProviderBatch } from '../src/chains/robinhood/existingTokenOpportunityScanner.js';
 import { buildAlphaOutcomeCheckpoint } from '../src/services/alphaAlertOutcomeCheckpoints.js';
 import { getRobinhoodMarketSnapshot } from '../src/chains/robinhood/market.js';
@@ -117,6 +120,86 @@ describe('shared DexScreener request governor', () => {
     assert.deepEqual(order, ['blocker', 'high', 'background']);
   });
 
+  it('does not consume the HTTP execution timeout while waiting in the queue', async () => {
+    let release!: () => void;
+    resetDexScreenerGovernorForTests({ maxConcurrency: 1, fetch: async url => {
+      if (String(url).endsWith('/blocker')) await new Promise<void>(resolve => { release = resolve; });
+      else await new Promise(resolve => setTimeout(resolve, 10));
+      return jsonResponse({ token: 'ok' });
+    } });
+    const blocker = request('blocker'); await new Promise(resolve => setImmediate(resolve));
+    const queued = request('queued', { queueWaitTimeoutMs: 200, httpTimeoutMs: 30 });
+    await new Promise(resolve => setTimeout(resolve, 60)); release();
+    assert.equal((await queued).value.token, 'ok'); await blocker;
+  });
+
+  it('returns typed queue-capacity deferral without starting HTTP', async () => {
+    let release!: () => void; let calls = 0;
+    resetDexScreenerGovernorForTests({ maxConcurrency: 1, fetch: async url => { calls++;
+      if (String(url).endsWith('/blocker')) await new Promise<void>(resolve => { release = resolve; });
+      return jsonResponse({ token: 'ok' }); } });
+    const blocker = request('blocker'); await new Promise(resolve => setImmediate(resolve));
+    await assert.rejects(request('deferred', { queueWaitTimeoutMs: 20, httpTimeoutMs: 2_500 }), DexScreenerQueueCapacityError);
+    assert.equal(calls, 1); release(); await blocker;
+  });
+
+  it('starts a full HTTP timeout only after admission and preserves external cancellation', async () => {
+    resetDexScreenerGovernorForTests({ fetch: async (_url, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(init.signal?.reason ?? new DOMException('Aborted', 'AbortError')), { once: true });
+    }) });
+    await assert.rejects(request('http-timeout', { httpTimeoutMs: 20 }), DexScreenerHttpTimeoutError);
+    const external = new AbortController(); const pending = request('external-cancel', { signal: external.signal, httpTimeoutMs: 2_500 });
+    setTimeout(() => external.abort(new Error('caller cancelled')), 10);
+    await assert.rejects(pending, /caller cancelled/);
+  });
+
+  it('settles two non-cooperative hung executions, releases both slots and drains queued work', async () => {
+    let calls = 0;
+    resetDexScreenerGovernorForTests({ maxConcurrency: 2, rateLimitPerSecond: Number.POSITIVE_INFINITY,
+      fetch: async () => { calls += 1; if (calls <= 2) return new Promise<Response>(() => {});
+        return jsonResponse({ token: 'recovered' }); } });
+    const first = request('hung-a', { httpTimeoutMs: 25 });
+    const second = request('hung-b', { httpTimeoutMs: 25 });
+    const queued = request('queued-after-hang', { httpTimeoutMs: 100 });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(getDexScreenerGovernorMetrics().activeRequests, 2);
+    assert.equal(getDexScreenerGovernorMetrics().activeRequestDetails.length, 2);
+    const [a, b, resumed] = await Promise.all([first.catch(error => error), second.catch(error => error), queued]);
+    assert.ok(a instanceof DexScreenerHttpTimeoutError); assert.ok(b instanceof DexScreenerHttpTimeoutError);
+    assert.equal(resumed.value.token, 'recovered');
+    await new Promise(resolve => setImmediate(resolve));
+    const settled = getDexScreenerGovernorMetrics();
+    assert.equal(settled.activeRequests, 0); assert.equal(settled.queueDepth, 0);
+    assert.equal(settled.activeRequestDetails.length, 0);
+    assert.equal(settled.recentCompletions.filter(row => row.classification === 'HTTP_TIMEOUT').length, 2);
+    assert.equal((await request('hung-a', { httpTimeoutMs: 100 })).value.token, 'recovered');
+  });
+
+  it('applies a mandatory conservative default execution timeout to every governed request', () => {
+    assert.equal(DEXSCREENER_EXECUTION_TIMEOUT_MS, 10_000);
+    resetDexScreenerGovernorForTests();
+    assert.equal(getDexScreenerGovernorMetrics().executionTimeoutMs, 10_000);
+  });
+
+  it('keeps provider HTTP failures distinct from malformed responses and no-pair results', async () => {
+    resetDexScreenerGovernorForTests({ fetch: async () => jsonResponse({ problem: true }, 503) });
+    await assert.rejects(request('provider-error'), DexScreenerProviderHttpError);
+    assert.equal(getDexScreenerGovernorMetrics().activeRequests, 0);
+    resetDexScreenerGovernorForTests({ fetch: async () => jsonResponse({ pairs: [] }) });
+    await assert.rejects(getRobinhoodMarketSnapshot('0xmalformed'), DexScreenerMalformedResponseError);
+    assert.equal(getDexScreenerGovernorMetrics().activeRequests, 0);
+    resetDexScreenerGovernorForTests({ fetch: async () => jsonResponse([]) });
+    assert.equal(await getRobinhoodMarketSnapshot('0xno-pair'), null);
+  });
+
+  it('reports sampled per-caller queue, HTTP, cache, dedup and outcome metrics', async () => {
+    resetDexScreenerGovernorForTests({ fetch: async () => jsonResponse({ token: 'ok' }) });
+    await request('metrics'); await request('metrics');
+    const metrics = getDexScreenerGovernorMetrics().callers.find(row => row.caller === 'test');
+    assert.equal(metrics?.enqueued, 1); assert.equal(metrics?.admitted, 1); assert.equal(metrics?.success, 1);
+    assert.equal(metrics?.cacheHit, 1); assert.ok((metrics?.httpDurationMs ?? -1) >= 0);
+  });
+
   it('allows exactly one recovery probe and resumes queued work only after probe success', async () => {
     let calls = 0, now = 50_000; let releaseProbe!: () => void;
     resetDexScreenerGovernorForTests({ now: () => now, maxConcurrency: 2, fetch: async () => {
@@ -213,6 +296,38 @@ describe('existing-token scanner provider short-circuit', () => {
     assert.equal(existingTokenLastScannedAtForTests(entries[0].token), 123_456);
     assert.equal(existingTokenLastScannedAtForTests(entries[1].token), 123_456);
     for (const entry of entries.slice(2)) assert.equal(existingTokenLastScannedAtForTests(entry.token), null);
+  });
+
+  it('uses a sustainable bounded quota while retaining the 20-second cycle envelope', () => {
+    assert.equal(EXISTING_TOKEN_SCANNER_SUSTAINABLE_QUOTA, 6);
+    assert.equal(EXISTING_TOKEN_SCANNER_QUEUE_WAIT_MS, 10_000);
+    assert.equal(DEXSCREENER_REQUESTS_PER_SECOND, 2);
+    resetDexScreenerGovernorForTests({ maxConcurrency: 2, rateLimitPerSecond: 2 });
+    const metrics = getDexScreenerGovernorMetrics();
+    assert.equal(metrics.maxConcurrency, 2); assert.equal(metrics.requestsPerSecond, 2);
+  });
+
+  it('allows a timed-out worker cycle to settle so the next scheduled cycle can run', async () => {
+    const cycleEntries = [{ token: '0xhang', tier: 'HOT' as const, lastSeenAt: '2026-08-29T00:00:00Z' }];
+    let calls = 0;
+    resetDexScreenerGovernorForTests({ fetch: async () => { calls += 1;
+      if (calls === 1) return new Promise<Response>(() => {}); return jsonResponse({ token: 'ok' }); } });
+    const first = await runExistingTokenProviderBatch(cycleEntries,
+      entry => request(entry.token, { httpTimeoutMs: 20 }), { concurrency: 1, budgetMs: 100 });
+    assert.equal(first.failed.length, 1); assert.ok(first.failed[0].error instanceof DexScreenerHttpTimeoutError);
+    const second = await runExistingTokenProviderBatch(cycleEntries,
+      entry => request(entry.token, { httpTimeoutMs: 100 }), { concurrency: 1, budgetMs: 100 });
+    assert.equal(second.completed.length, 1); assert.equal(getDexScreenerGovernorMetrics().activeRequests, 0);
+  });
+
+  it('keeps all affected production worker running guards protected by finally', () => {
+    const workers = [
+      ['src/chains/robinhood/existingTokenOpportunityScanner.ts', /finally\s*\{[^}]*scannerRunning\s*=\s*false/s],
+      ['src/chains/robinhood/robinhoodObserver.ts', /finally\s*\{[^}]*observerRunning\s*=\s*false/s],
+      ['src/chains/robinhood/robinhoodOutcomeTracker.ts', /finally\s*\{[^}]*trackerRunning\s*=\s*false/s],
+      ['src/services/outcomeTracker.ts', /finally\s*\{[^}]*trackingCycleRunning\s*=\s*false/s],
+    ] as const;
+    for (const [file, pattern] of workers) assert.match(readFileSync(file, 'utf8'), pattern);
   });
 });
 

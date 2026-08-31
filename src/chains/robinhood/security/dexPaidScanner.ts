@@ -14,6 +14,24 @@ type DexScreenerOrder = {
     number;
 };
 
+type DexScreenerOrdersPayload = { orders?: unknown; boosts?: unknown };
+
+function isDexScreenerOrder(value: unknown): value is DexScreenerOrder {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const order = value as Record<string, unknown>;
+  return (order.type == null || typeof order.type === 'string') &&
+    (order.status == null || typeof order.status === 'string') &&
+    (order.paymentTimestamp == null || typeof order.paymentTimestamp === 'number');
+}
+
+export function parseDexScreenerPaidOrders(payload: unknown): { orders: DexScreenerOrder[]; malformed: boolean } {
+  const candidate = Array.isArray(payload) ? payload
+    : payload && typeof payload === 'object' && Array.isArray((payload as DexScreenerOrdersPayload).orders)
+      ? (payload as DexScreenerOrdersPayload).orders as unknown[] : null;
+  if (candidate && candidate.every(isDexScreenerOrder)) return { orders: candidate, malformed: false };
+  return { orders: [], malformed: true };
+}
+
 export type RobinhoodDexPaidResult = {
   tokenAddress: string;
 
@@ -55,11 +73,9 @@ export async function scanRobinhoodDexPaid(
     const payload = (await governedDexScreenerJson<unknown>({ url, caller: 'robinhood_dex_paid', priority: 'NORMAL',
       endpoint: 'ORDERS', cacheKey: `orders:robinhood:${tokenAddress.trim().toLowerCase()}`, cacheTtlMs: 120_000 })).value;
 
-    const orders:
-      DexScreenerOrder[] =
-      Array.isArray(payload)
-        ? payload
-        : [];
+    const parsed = parseDexScreenerPaidOrders(payload);
+    if (parsed.malformed) throw new Error('DexScreener orders response was malformed');
+    const orders = parsed.orders;
 
     /*
      * A payment timestamp is the strongest

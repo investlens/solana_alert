@@ -13,6 +13,7 @@ import { scanRobinhoodDevTokenFlow } from './security/devTokenFlowScanner.js';
 
 import {
   scanRobinhoodDexPaid,
+  type RobinhoodDexPaidResult,
 } from './security/dexPaidScanner.js';
 
 import {
@@ -100,6 +101,7 @@ const MAX_ALERT_DEV_HOLDING_PERCENT =
 
 const MAX_ALERTS_PER_CYCLE =
   3;
+const MAX_DEX_PAID_CHECKS_PER_CYCLE = 6;
 
 /*
  * In-memory dedupe for the first observation version.
@@ -119,6 +121,8 @@ let observerRunning =
 let observerInterval:
   | ReturnType<typeof setInterval>
   | null = null;
+let dexPaidCursor = 0;
+const dexPaidEvidence = new Map<string, RobinhoodDexPaidResult>();
 
 function normalize(
   value: string,
@@ -615,6 +619,10 @@ async function evaluateCandidate(
   token:
     RobinhoodDiscoveredToken,
 ): Promise<boolean> {
+  const dexPaid = dexPaidEvidence.get(normalize(token.tokenAddress)) ?? {
+    tokenAddress: token.tokenAddress, dexPaid: null, status: 'UNKNOWN' as const,
+    orderTypes: [], orderStatuses: [], latestPaymentTimestamp: null, warnings: [], scannedAt: Date.now(),
+  };
   const tokenKey =
     normalize(
       token.tokenAddress,
@@ -1117,57 +1125,13 @@ if (!isVerifiedSource) {
     return false;
   }
 
-  const [
-  devHolding,
-  dexPaid,
-] =
-  await Promise.all([
-    scanRobinhoodDevTokenFlow(
-      token.tokenAddress,
-    ),
-
-    scanRobinhoodDexPaid(
-      token.tokenAddress,
-    ),
-  ]);
+  const devHolding = await scanRobinhoodDevTokenFlow(token.tokenAddress);
 
 
 const creatorRisk =
   await evaluateRobinhoodCreatorRisk(
     devHolding.deployerAddress,
   );
-
-if (dexPaid.dexPaid === true && dexPaid.latestPaymentTimestamp != null) {
-  const semanticEvent = await persistOrLoadAlphaSemanticEventRecord({
-    identity: `${token.tokenAddress.toLowerCase()}:${dexPaid.latestPaymentTimestamp}`,
-    type: 'DEX_PAID', assetId: token.tokenAddress, chain: 'robinhood',
-    intelligenceState: 'FORMING', symbol: token.symbol ?? market.symbol,
-    rawSnapshot: { paymentTimestamp: dexPaid.latestPaymentTimestamp, orderTypes: dexPaid.orderTypes,
-      price: market.priceUsd, priceProvenance: 'DEXSCREENER_VERIFIED_BASE_PAIR',
-      marketCap: market.marketCapUsd, fdv: market.fdvUsd, liquidity: market.liquidityUsd,
-      volume5m: market.volume5mUsd, devHoldingPercent: devHolding.devHoldingPercent,
-      burnedPercent: devHolding.totalBurnPercent, chartUrl: market.chartUrl },
-  });
-  if (semanticEvent) {
-    await deliverAlphaSemanticEvent({ event: { id: semanticEvent.id, eventIdentity: semanticEvent.event_identity,
-      type: 'DEX_PAID', assetId: token.tokenAddress, chain: 'robinhood' }, message: buildPremiumTokenNotification({
-      state: 'DEX_PAID', symbol: token.symbol ?? market.symbol, name: token.name ?? market.name,
-      address: token.tokenAddress,
-      market: normalizeNotificationMarketContext({ marketCap: market.marketCapUsd, fdv: market.fdvUsd,
-        price: market.priceUsd, liquidity: market.liquidityUsd, volume5m: market.volume5mUsd, chartUrl: market.chartUrl }),
-      evidence: normalizeCoreDecisionMetrics({ devHoldingPercent: devHolding.devHoldingPercent,
-        devHoldingEvidence: devHolding.devHoldingPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
-        totalBurnPercent: devHolding.totalBurnPercent,
-        burnEvidence: devHolding.totalBurnPercent == null ? 'UNAVAILABLE' : 'VERIFIED' }),
-      insightTitle: 'VERIFIED EVENT', insight: ['A verified Dex visibility payment was detected.'],
-      statusTitle: '💎 STATUS', status: 'Dex Paid confirmed · evaluate live market conditions.',
-    }), buttons: buildAlphaMarketActions({ chartUrl: market.chartUrl,
-      tokenUrl: `https://robinhoodchain.blockscout.com/token/${token.tokenAddress}`,
-      fullIntelCallback: `FI_RH_${token.tokenAddress}`,
-      copyContractCallback: `COPY_CA_${token.tokenAddress}` }) });
-  }
-}
-
 
 if (
   creatorRisk?.status ===
@@ -2155,6 +2119,47 @@ if (!observationId) {
   return true;
 }
 
+export async function processRobinhoodDexPaidSignal(token: RobinhoodDiscoveredToken): Promise<boolean> {
+  const dexPaid = await scanRobinhoodDexPaid(token.tokenAddress);
+  dexPaidEvidence.set(normalize(token.tokenAddress), dexPaid);
+  if (dexPaid.dexPaid !== true || dexPaid.latestPaymentTimestamp == null) return false;
+  const chartUrl = token.pairAddress
+    ? `https://dexscreener.com/robinhood/${encodeURIComponent(token.pairAddress)}` : buildChartUrl(token.tokenAddress);
+  const semanticEvent = await persistOrLoadAlphaSemanticEventRecord({
+    identity: `${token.tokenAddress.toLowerCase()}:${dexPaid.latestPaymentTimestamp}`,
+    type: 'DEX_PAID', assetId: token.tokenAddress, chain: 'robinhood', intelligenceState: 'FORMING',
+    symbol: token.symbol ?? null, rawSnapshot: { paymentTimestamp: dexPaid.latestPaymentTimestamp,
+      orderTypes: dexPaid.orderTypes, orderStatuses: dexPaid.orderStatuses, chartUrl },
+  });
+  const result = await deliverAlphaSemanticEvent({ event: { id: semanticEvent.id,
+    eventIdentity: semanticEvent.event_identity, type: 'DEX_PAID', assetId: token.tokenAddress, chain: 'robinhood' },
+    message: buildPremiumTokenNotification({ state: 'DEX_PAID', symbol: token.symbol, name: token.name,
+      address: token.tokenAddress, market: normalizeNotificationMarketContext({ chartUrl }),
+      insightTitle: 'VERIFIED EVENT', insight: ['A verified Dex visibility payment was detected.'],
+      statusTitle: '💎 STATUS', status: 'Dex Paid confirmed · evaluate live market conditions.' }),
+    buttons: buildAlphaMarketActions({ chartUrl, tokenUrl: buildExplorerUrl(token.tokenAddress),
+      fullIntelCallback: `FI_RH_${token.tokenAddress}`, copyContractCallback: `COPY_CA_${token.tokenAddress}` }) });
+  console.log('[RobinhoodObserver] DEX PAID semantic delivery:', { token: token.tokenAddress,
+    paymentTimestamp: dexPaid.latestPaymentTimestamp, delivered: result.delivered, failed: result.failed });
+  return true;
+}
+
+export async function processRobinhoodDexPaidDiscoverySlice(tokens: RobinhoodDiscoveredToken[]) {
+  const candidates = tokens;
+  if (!candidates.length) return { selected: 0, detected: 0, failed: 0 };
+  const start = dexPaidCursor % candidates.length;
+  const rotated = [...candidates.slice(start), ...candidates.slice(0, start)];
+  const selected = rotated.slice(0, MAX_DEX_PAID_CHECKS_PER_CYCLE);
+  dexPaidCursor = (start + selected.length) % candidates.length;
+  let detected = 0, failed = 0;
+  for (const token of selected) {
+    try { detected += Number(await processRobinhoodDexPaidSignal(token)); }
+    catch (error) { failed += 1; console.error('[RobinhoodObserver] DEX PAID processing failed:', {
+      token: token.tokenAddress, reason: error instanceof Error ? error.message : String(error) }); }
+  }
+  return { selected: selected.length, detected, failed };
+}
+
 export async function refreshRobinhoodObserver():
   Promise<void> {
   if (observerRunning) {
@@ -2178,6 +2183,8 @@ export async function refreshRobinhoodObserver():
         50,
       );
 
+    dexPaidEvidence.clear();
+
     console.log(
       '[RobinhoodObserver] Discovery:',
       {
@@ -2191,6 +2198,9 @@ export async function refreshRobinhoodObserver():
           discovery.sources,
       },
     );
+
+    const dexPaid = await processRobinhoodDexPaidDiscoverySlice(discovery.tokens);
+    console.log('[RobinhoodObserver] DEX PAID cycle:', dexPaid);
 
     /*
      * On the first cycle, we DO evaluate current

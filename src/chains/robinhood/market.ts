@@ -1,7 +1,8 @@
 import type {
   ChainMarketSnapshot,
 } from '../shared/types.js';
-import { governedDexScreenerJson, type DexScreenerPriority } from '../../services/dexscreenerRequestGovernor.js';
+import { DexScreenerMalformedResponseError, governedDexScreenerJson, recordDexScreenerCallerOutcome,
+  type DexScreenerPriority } from '../../services/dexscreenerRequestGovernor.js';
 
 const DEXSCREENER_CHAIN_ID = 'robinhood';
 
@@ -103,7 +104,7 @@ export function verifiedRobinhoodChartUrl(pair: DexScreenerPair): string | undef
 
 export async function fetchRobinhoodPairs(
   tokenAddress: string,
-  options: { signal?: AbortSignal; priority?: DexScreenerPriority; caller?: string } = {},
+  options: { signal?: AbortSignal; priority?: DexScreenerPriority; caller?: string; queueWaitTimeoutMs?: number } = {},
 ): Promise<DexScreenerPair[]> {
   const address =
     tokenAddress.trim();
@@ -117,26 +118,23 @@ export async function fetchRobinhoodPairs(
     `token-pairs/v1/${DEXSCREENER_CHAIN_ID}/` +
     encodeURIComponent(address);
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 2_500);
-  const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
-  try {
-    const result = await governedDexScreenerJson<unknown>({
-      url, signal, priority: options.priority ?? 'NORMAL', caller: options.caller ?? 'robinhood_market',
+  const priority = options.priority ?? 'NORMAL'; const caller = options.caller ?? 'robinhood_market';
+  const result = await governedDexScreenerJson<unknown>({
+      url, signal: options.signal, priority, caller,
       endpoint: 'TOKEN_PAIRS_ROBINHOOD', cacheKey: `robinhood:${address.toLowerCase()}`,
-      cacheTtlMs: ROBINHOOD_MARKET_CACHE_MS,
+      cacheTtlMs: ROBINHOOD_MARKET_CACHE_MS, queueWaitTimeoutMs: options.queueWaitTimeoutMs, httpTimeoutMs: 2_500,
     });
     const data = result.value;
-    if (!Array.isArray(data)) return [];
+    if (!Array.isArray(data)) {
+      recordDexScreenerCallerOutcome(caller, priority, 'MALFORMED_RESPONSE');
+      throw new DexScreenerMalformedResponseError('DexScreener token-pairs response was not an array');
+    }
     const pairs = data.filter(
       (pair): pair is DexScreenerPair => Boolean(pair && typeof pair === 'object' &&
         (pair as DexScreenerPair).chainId === DEXSCREENER_CHAIN_ID),
     );
     pairFetchMetadata.set(pairs, { fetchedAt: result.fetchedAt, source: result.source });
     return pairs;
-  } finally {
-    clearTimeout(timeout);
-  }
 }
 
 export function selectVerifiedQuoteUsdObservation(args: {
@@ -191,7 +189,7 @@ export async function getVerifiedRobinhoodQuoteUsd(
 
 export async function getRobinhoodMarketSnapshot(
   tokenAddress: string,
-  options: { priority?: DexScreenerPriority; caller?: string } = {},
+  options: { priority?: DexScreenerPriority; caller?: string; queueWaitTimeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<ChainMarketSnapshot | null> {
   const pairs =
     await fetchRobinhoodPairs(

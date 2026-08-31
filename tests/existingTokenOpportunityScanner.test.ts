@@ -80,4 +80,15 @@ describe('existing-token continuous opportunity scanner', () => {
     const allDueAgain = selectDueExistingTokens(universe, { now, max: 25, lastScanned: new Map(), hotStart: first.nextHotCursor, warmStart: first.nextWarmCursor });
     assert.equal(allDueAgain.selected.some(x => x.token === '0xhot24'), true);
   });
+
+  it('prioritizes explicitly watched tokens while retaining bounded HOT/WARM progress', () => {
+    const universe = [
+      ...Array.from({ length: 8 }, (_, i) => ({ token: `0xhot${i}`, tier: 'HOT' as const, lastSeenAt: new Date(now).toISOString() })),
+      { token: '0xwatched', tier: 'HOT' as const, lastSeenAt: new Date(now - 1_000).toISOString(), watched: true },
+      { token: '0xwarm', tier: 'WARM' as const, lastSeenAt: new Date(now).toISOString() },
+    ];
+    const selected = selectDueExistingTokens(universe, { now, max: 6, lastScanned: new Map() }).selected;
+    assert.equal(selected[0].token, '0xwatched'); assert.equal(selected.some(row => row.token === '0xwarm'), true);
+    assert.equal(selected.length, 6);
+  });
 });
