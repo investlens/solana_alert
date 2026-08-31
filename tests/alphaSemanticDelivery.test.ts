@@ -5,17 +5,21 @@ import test from 'node:test';
 
 import { deliverAlphaSemanticEvent, type UserFacingSemanticEvent } from '../src/services/alphaSemanticDeliveryService.js';
 import { accessProfileForTier, hasCapability } from '../src/product/capabilities.js';
+import { defaultStrategyEnabledForUser } from '../src/services/strategyService.js';
 
 const user = (telegram_id: string, tier: 'admin' | 'paid' | 'free') => ({ telegram_id, tier,
   username: null, first_name: null, subscription_status: tier === 'paid' ? 'active' as const : 'none' as const,
   free_trial_used: 0, free_trial_limit: 5, paid_active_until: null, is_blocked: false });
 
-function harness(users = [user('admin', 'admin'), user('pro', 'paid'), user('free', 'free'), user('muted', 'free')]) {
-  const reservations = new Set<string>(); const sends: string[] = []; const completed: string[] = [];
-  return { sends, completed, dependencies: {
+function harness(users = [user('admin', 'admin'), user('pro', 'paid'), user('free', 'free'), user('muted', 'free')],
+  preferences: Record<string, Record<string, boolean>> = {}) {
+  const reservations = new Set<string>(); const reservationAttempts: string[] = []; const sends: string[] = []; const completed: string[] = [];
+  return { sends, completed, reservationAttempts, dependencies: {
     getUsers: async () => users,
-    strategyEnabled: async (telegramId: string) => telegramId !== 'muted',
+    strategyEnabled: async (telegramId: string, strategyKey: string) =>
+      preferences[telegramId]?.[strategyKey] ?? (telegramId !== 'muted' && defaultStrategyEnabledForUser(strategyKey)),
     reserve: async (event: UserFacingSemanticEvent, recipient: ReturnType<typeof user>) => {
+      reservationAttempts.push(recipient.telegram_id);
       const key = `${event.id}:${recipient.telegram_id}`; if (reservations.has(key)) return false; reservations.add(key); return true;
     },
     complete: async (_event: UserFacingSemanticEvent, recipient: ReturnType<typeof user>) => { completed.push(recipient.telegram_id); },
@@ -37,12 +41,32 @@ test('BOOST and MAJOR BOOST fan out once to Admin, Pro and Free while honoring m
   }
 });
 
-test('DEX_PAID uses the same eligible per-user semantic delivery architecture', async () => {
-  const run = harness([user('admin', 'admin'), user('pro', 'paid'), user('free', 'free')]);
+test('DEX_PAID defaults off and only explicit ON reserves and sends, including for Admin', async () => {
+  const run = harness([user('admin', 'admin'), user('pro', 'paid'), user('free', 'free')], {
+    admin: { DEX_PAID: false }, pro: { DEX_PAID: true }, free: { DEX_PAID: false },
+  });
   const event = { id: 26000, eventIdentity: 'v2:DEX_PAID:26000', type: 'DEX_PAID',
     assetId: '0x2222222222222222222222222222222222222222', chain: 'robinhood' };
   await deliverAlphaSemanticEvent({ event, message: 'DEX PAID' }, run.dependencies);
-  assert.deepEqual(run.sends, ['admin', 'pro', 'free']);
+  assert.deepEqual(run.reservationAttempts, ['pro']);
+  assert.deepEqual(run.sends, ['pro']);
+  assert.deepEqual(run.completed, ['pro']);
+  await deliverAlphaSemanticEvent({ event, message: 'DEX PAID' }, run.dependencies);
+  assert.deepEqual(run.sends, ['pro'], 'deterministic semantic delivery must remain deduplicated');
+});
+
+test('DEX_PAID absent preference reserves nothing while BOOST preference behavior is unchanged', async () => {
+  const users = [user('admin', 'admin'), user('pro', 'paid'), user('free', 'free')];
+  const dex = harness(users);
+  await deliverAlphaSemanticEvent({ event: { id: 26002, eventIdentity: 'v2:DEX_PAID:26002', type: 'DEX_PAID',
+    assetId: '0x2222222222222222222222222222222222222222', chain: 'robinhood' }, message: 'DEX PAID' }, dex.dependencies);
+  assert.deepEqual(dex.reservationAttempts, []);
+  assert.deepEqual(dex.sends, []);
+
+  const boost = harness(users);
+  await deliverAlphaSemanticEvent({ event: { id: 26003, eventIdentity: 'v2:BOOST:26003', type: 'BOOST',
+    assetId: '0x2222222222222222222222222222222222222222', chain: 'robinhood' }, message: 'BOOST' }, boost.dependencies);
+  assert.deepEqual(boost.sends, ['admin', 'pro', 'free']);
 });
 
 test('one recipient failure cannot starve later eligible testers', async () => {
@@ -79,4 +103,22 @@ test('semantic delivery migration provides durable per-user reservation and dedu
   assert.match(sql, /reserve_alpha_semantic_delivery/);
   assert.match(sql, /metadata ->> 'state' = 'RESERVED'/);
   assert.doesNotMatch(sql, /on delete cascade|drop table|truncate/i);
+});
+
+test('DEX_PAID UI and delivery share the durable database-backed preference key', async () => {
+  assert.equal(defaultStrategyEnabledForUser('DEX_PAID'), false);
+  assert.equal(defaultStrategyEnabledForUser('PONS_BREAKOUT'), true);
+  const [delivery, strategies, controls, observer] = await Promise.all([
+    readFile(new URL('../src/services/alphaSemanticDeliveryService.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/services/strategyService.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/bot/strategyControls.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/chains/robinhood/robinhoodObserver.ts', import.meta.url), 'utf8'),
+  ]);
+  assert.match(delivery, /event\.type === 'DEX_PAID'.*DEX_PAID_STRATEGY_KEY/);
+  assert.match(controls, /STRAT_TOGGLE_\$\{strategy\.strategy_key\}/);
+  assert.match(strategies, /strategy_key: args\.strategyKey[\s\S]*onConflict: 'telegram_id,strategy_key'/);
+  assert.match(strategies, /eq\('telegram_id', telegramId\)[\s\S]*eq\('strategy_key', strategyKey\)/);
+  assert.doesNotMatch(strategies, /Map<string, boolean>\(\).*cache|preferenceCache/);
+  assert.ok(observer.indexOf('persistOrLoadAlphaSemanticEventRecord({') < observer.indexOf("eventIdentity: semanticEvent.event_identity, type: 'DEX_PAID'"),
+    'internal semantic persistence must precede preference-gated delivery');
 });

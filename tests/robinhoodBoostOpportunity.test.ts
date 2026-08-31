@@ -62,8 +62,8 @@ test('>=200 indexed boost renders high-attention state and verified current mark
   assert.match(message, /Liquidity\s+<b>\$23\.1K<\/b>/);
   assert.match(message, /5m volume\s+<b>\$6\.8K<\/b>/);
   assert.match(message, /Move\s+<b>\+12\.4%<\/b>/);
-  assert.match(message, /Dev:<\/b> Holds 0%/);
-  assert.doesNotMatch(message, /Dev:<\/b>[^\n]*Burned/);
+  assert.match(message, /Dev holding\s+<b>0%<\/b>/);
+  assert.doesNotMatch(message, /Burned/);
   assert.doesNotMatch(message, /FDV|INDEXING/);
 });
 

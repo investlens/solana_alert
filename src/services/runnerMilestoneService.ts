@@ -5,7 +5,8 @@ import { deliverAlphaSemanticEvent } from './alphaSemanticDeliveryService.js';
 import { compareVerifiedPrices, type PriceEvidence } from './priceComparability.js';
 import { supabase } from './supabase.js';
 
-export const NEW_ATH_ALERT_MIN_INCREASE_PCT = Number(process.env.NEW_ATH_ALERT_MIN_INCREASE_PCT ?? 5);
+export const ATH_ALERT_EXPANSION_PERCENT = 30;
+export const NEW_ATH_ALERT_MIN_INCREASE_PCT = ATH_ALERT_EXPANSION_PERCENT;
 export const runnerMilestoneIdentity = (canonicalThesis: string, threshold: 50 | 100) =>
   `runner:${canonicalThesis}:${threshold}`;
 export const athObservationIdentity = (canonicalThesis: string, observationIdentity: number | string) =>
@@ -43,6 +44,17 @@ export type RunnerMilestonePlan = {
   runner50: boolean; runner100: boolean; newAthObserved: boolean; athAlert: boolean;
   previousAth: number | null; newAth: number | null; lastAlertedAth: number | null;
 };
+
+export type WinnerDeliveryKind = 'RUNNER_50' | 'RUNNER_100' | 'NEW_ATH';
+
+export function selectWinnerDelivery(args: {
+  runner50: boolean; runner100: boolean; athAlert: boolean;
+}): WinnerDeliveryKind | null {
+  if (args.runner100) return 'RUNNER_100';
+  if (args.runner50) return 'RUNNER_50';
+  if (args.athAlert) return 'NEW_ATH';
+  return null;
+}
 
 const positive = (value: unknown): number | null => {
   const parsed = Number(value); return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
@@ -91,12 +103,12 @@ export function planRunnerMilestones(args: {
   const newAthObserved = previousAth != null && currentPrice != null && currentPrice > previousAth;
   const lastAlertedAth = positive(args.lastAlertedAth);
   const alertReference = lastAlertedAth ?? positive(args.athNotificationBaseline);
-  const minimum = Number.isFinite(args.athAlertMinIncreasePct) ? Number(args.athAlertMinIncreasePct) : NEW_ATH_ALERT_MIN_INCREASE_PCT;
+  const minimum = Number.isFinite(args.athAlertMinIncreasePct) ? Number(args.athAlertMinIncreasePct) : ATH_ALERT_EXPANSION_PERCENT;
   const athIncrease = newAthObserved && alertReference ? ((currentPrice! - alertReference) / alertReference) * 100 : 0;
   return { comparable: true, reason: null, roi: comparison.changePct,
     runner50: comparison.changePct >= 50 && !semantic.has('RUNNER_50'),
     runner100: comparison.changePct >= 100 && !semantic.has('RUNNER_100'),
-    newAthObserved, athAlert: newAthObserved && athIncrease >= minimum,
+    newAthObserved, athAlert: newAthObserved && athIncrease + 1e-9 >= minimum,
     previousAth, newAth: newAthObserved ? currentPrice : previousAth, lastAlertedAth };
 }
 
@@ -134,31 +146,32 @@ function interpretation(entry: RunnerEntry, observation: RunnerObservation, majo
 }
 
 export function renderRunnerMilestone(args: { kind: 'RUNNER_50' | 'RUNNER_100'; entry: RunnerEntry;
-  observation: RunnerObservation; roi: number }): string {
+  observation: RunnerObservation; roi: number; ath?: { baseline: number; current: number; expansionPct: number } | null }): string {
   const symbol = escapeHtml(args.entry.symbol ?? args.entry.asset_id);
   const entry = price(Number(args.entry.price)), current = price(Number(args.observation.currentPrice));
   const view = escapeHtml(interpretation(args.entry, args.observation, args.kind === 'RUNNER_100'));
-  const momentum = escapeHtml(args.observation.intelligenceState ?? args.entry.intelligence_state ?? 'Verified market observation');
-  const volume = positive(args.observation.volume5m ?? args.entry.volume_5m);
+  const ath = args.ath ? ['', `AlphaOS ATH: <b>${price(args.ath.current)}</b>`,
+    `ATH Expansion: <b>+${args.ath.expansionPct.toFixed(1)}%</b>`] : [];
   if (args.kind === 'RUNNER_100') return [
-    `🔥 <b>MAJOR RUNNER +100% — ${symbol}</b>`, '', `${symbol} has doubled since the AlphaOS entry.`, '',
+    `🔥 <b>+100% MAJOR RUNNER — ${symbol}</b>`, '',
     `AlphaOS Entry: <b>${entry}</b>`, `Current: <b>${current}</b>`, `Return: <b>+${args.roi.toFixed(1)}%</b>`, '',
-    '<b>AlphaOS View</b>', view,
+    '🏆 AlphaOS entry has doubled.', ...ath, '', '<b>AlphaOS View</b>', view,
   ].join('\n');
   return [
-    `🚀 <b>RUNNER +50% — ${symbol}</b>`, '', `AlphaOS Entry: <b>${entry}</b>`, `Current: <b>${current}</b>`,
-    `Return: <b>+${args.roi.toFixed(1)}%</b>`, '', `Momentum: <b>${momentum}</b>`,
-    `Volume: <b>${volume == null ? 'Not available' : `$${Math.round(volume).toLocaleString('en-US')} / 5m`}</b>`, '',
-    '<b>AlphaOS View</b>', view,
+    `🚀 <b>+50% RUNNER — ${symbol}</b>`, '', `AlphaOS Entry: <b>${entry}</b>`, `Current: <b>${current}</b>`,
+    `Return: <b>+${args.roi.toFixed(1)}%</b>`, '', '🎯 AlphaOS entry is running.', ...ath,
+    '', '<b>AlphaOS View</b>', view,
   ].join('\n');
 }
 
 export function renderAthMilestone(args: { entry: RunnerEntry; observation: RunnerObservation; previousAth: number;
   newAth: number; roi: number }): string {
   const symbol = escapeHtml(args.entry.symbol ?? args.entry.asset_id);
-  return [`👑 <b>NEW ALL-TIME HIGH — ${symbol}</b>`, '', `Previous Verified ATH: <b>${price(args.previousAth)}</b>`,
-    `New Verified ATH: <b>${price(args.newAth)}</b>`, `Since AlphaOS Entry: <b>+${args.roi.toFixed(1)}%</b>`, '',
-    '<b>AlphaOS View</b>', `Price discovery — ${escapeHtml(interpretation(args.entry, args.observation, false))}`].join('\n');
+  const expansion = ((args.newAth - args.previousAth) / args.previousAth) * 100;
+  return [`👑 <b>ATH BREAKOUT — ${symbol}</b>`, '', `AlphaOS Entry: <b>${price(Number(args.entry.price))}</b>`,
+    `Current ATH: <b>${price(args.newAth)}</b>`, `Return Since Entry: <b>+${args.roi.toFixed(1)}%</b>`, '',
+    `Previous Alerted/Baseline ATH: <b>${price(args.previousAth)}</b>`,
+    `ATH Expansion: <b>+${expansion.toFixed(1)}%</b>`, '', '🏆 New verified AlphaOS market high.'].join('\n');
 }
 
 function milestoneButtons(entry: RunnerEntry) {
@@ -253,6 +266,8 @@ export async function processRunnerMilestones(observation: RunnerObservation): P
     .includes(String(row.semanticType ?? '')));
   lastAlertedAth = null;
   athNotificationBaseline = null;
+  let deliverableAth: { event: { id: number; event_identity: string }; observation: RunnerObservation;
+    previousAth: number; newAth: number; roi: number; expansionPct: number } | null = null;
   for (const tracked of storedObservations) {
     const athPlan = planRunnerMilestones({ entry, observation: tracked, history: evolvingHistory,
       existingSemanticTypes, lastAlertedAth, athNotificationBaseline });
@@ -265,26 +280,43 @@ export async function processRunnerMilestones(observation: RunnerObservation): P
       observedAt: tracked.measuredAt, semanticType: 'ATH_OBSERVATION' });
     if (athNotificationBaseline == null) { athNotificationBaseline = athPlan.newAth; continue; }
     if (!athPlan.athAlert) continue;
+    const alertBaseline = lastAlertedAth ?? athNotificationBaseline;
     const alertEvent = await persistMilestone('NEW_ATH', athAlertIdentity(thesis, tracked.outcomeId ?? tracked.measuredAt),
       entry, tracked, athPlan.roi, { previousVerifiedAth: athPlan.previousAth, newVerifiedAth: athPlan.newAth,
-        lastAlertedAth });
-    await deliverAlphaSemanticEvent({ event: { id: alertEvent.id, eventIdentity: alertEvent.event_identity, type: 'NEW_ATH',
-      assetId: entry.asset_id, chain: entry.chain, strategyKey: entry.strategy_key },
-      message: renderAthMilestone({ entry, observation: tracked, previousAth: athPlan.previousAth,
-        newAth: athPlan.newAth, roi: athPlan.roi }), buttons: milestoneButtons(entry), preserveMessage: true });
+        lastAlertedAth, alertBaseline, coalescingEligible: true });
     evolvingHistory.push({ id: alertEvent.id, chain: entry.chain, token: entry.asset_id, price: athPlan.newAth,
       provenance: tracked.priceProvenance, marketIndexState: entry.market_index_state,
       observedAt: tracked.measuredAt, semanticType: 'NEW_ATH' });
+    const sameObservation = (tracked.outcomeId != null && tracked.outcomeId === milestoneObservation.outcomeId) ||
+      tracked.measuredAt === milestoneObservation.measuredAt;
+    if (sameObservation) deliverableAth = { event: alertEvent, observation: tracked,
+      previousAth: alertBaseline, newAth: athPlan.newAth, roi: athPlan.roi,
+      expansionPct: ((athPlan.newAth - alertBaseline) / alertBaseline) * 100 };
     lastAlertedAth = athPlan.newAth;
     athNotificationBaseline = athPlan.newAth;
   }
+  const runnerEvents = new Map<'RUNNER_50' | 'RUNNER_100', { id: number; event_identity: string }>();
   for (const kind of ['RUNNER_50', 'RUNNER_100'] as const) {
     if (!plan[kind === 'RUNNER_50' ? 'runner50' : 'runner100']) continue;
     const event = await persistMilestone(kind, runnerMilestoneIdentity(thesis, kind === 'RUNNER_50' ? 50 : 100), entry, milestoneObservation, plan.roi);
-    await deliverAlphaSemanticEvent({ event: { id: event.id, eventIdentity: event.event_identity, type: kind,
+    runnerEvents.set(kind, event);
+  }
+  const primary = selectWinnerDelivery({ runner50: plan.runner50, runner100: plan.runner100,
+    athAlert: deliverableAth != null });
+  if (primary === 'RUNNER_50' || primary === 'RUNNER_100') {
+    const event = runnerEvents.get(primary)!;
+    await deliverAlphaSemanticEvent({ event: { id: event.id, eventIdentity: event.event_identity, type: primary,
       assetId: entry.asset_id, chain: entry.chain, strategyKey: entry.strategy_key },
-      message: renderRunnerMilestone({ kind, entry, observation: milestoneObservation, roi: plan.roi }), buttons: milestoneButtons(entry),
-      preserveMessage: true });
+      message: renderRunnerMilestone({ kind: primary, entry, observation: milestoneObservation, roi: plan.roi!,
+        ath: deliverableAth ? { baseline: deliverableAth.previousAth, current: deliverableAth.newAth,
+          expansionPct: deliverableAth.expansionPct } : null }), buttons: milestoneButtons(entry), preserveMessage: true });
+  } else if (primary === 'NEW_ATH' && deliverableAth) {
+    await deliverAlphaSemanticEvent({ event: { id: deliverableAth.event.id,
+      eventIdentity: deliverableAth.event.event_identity, type: 'NEW_ATH', assetId: entry.asset_id,
+      chain: entry.chain, strategyKey: entry.strategy_key },
+      message: renderAthMilestone({ entry, observation: deliverableAth.observation,
+        previousAth: deliverableAth.previousAth, newAth: deliverableAth.newAth, roi: deliverableAth.roi }),
+      buttons: milestoneButtons(entry), preserveMessage: true });
   }
   return plan;
 }

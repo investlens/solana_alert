@@ -23,6 +23,12 @@ export type UserStrategyPreference = {
   enabled: boolean;
 };
 
+export const DEX_PAID_STRATEGY_KEY = 'DEX_PAID';
+
+export function defaultStrategyEnabledForUser(strategyKey: string): boolean {
+  return strategyKey !== DEX_PAID_STRATEGY_KEY;
+}
+
 export async function getEnabledStrategies(): Promise<
   StrategyDefinition[]
 > {
@@ -101,7 +107,7 @@ export async function getUserStrategyPreferences(
  *
  * 1. Globally disabled strategy = OFF for everyone.
  * 2. User preference exists = honour preference.
- * 3. No user preference = enabled by default.
+ * 3. No user preference = use the notification-safe strategy default.
  */
 export async function isStrategyEnabledForUser(
   telegramId: string,
@@ -135,7 +141,7 @@ export async function isStrategyEnabledForUser(
   }
 
   if (!preference) {
-    return true;
+    return defaultStrategyEnabledForUser(strategyKey);
   }
 
   return Boolean(preference.enabled);
@@ -221,7 +227,7 @@ export async function getUserStrategyState(
         (
           preferences.get(
             strategy.strategy_key,
-          ) ?? true
+          ) ?? defaultStrategyEnabledForUser(strategy.strategy_key)
         ),
     }),
   );

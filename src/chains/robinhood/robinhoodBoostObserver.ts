@@ -16,14 +16,9 @@ import {
   getRobinhoodMarketSnapshot,
 } from './market.js';
 
-import { scanRobinhoodDevTokenFlow } from './security/devTokenFlowScanner.js';
 import { persistOrLoadAlphaSemanticEventRecord } from '../../services/alphaSemanticEventService.js';
 import { deliverAlphaSemanticEvent } from '../../services/alphaSemanticDeliveryService.js';
-import { buildPremiumTokenNotification } from '../../ui/premiumTokenNotification.js';
-
-import {
-  scanRobinhoodHolderRisk,
-} from './security/holderRiskScanner.js';
+import { buildPremiumTokenNotification, verifiedPairAge } from '../../ui/premiumTokenNotification.js';
 
 
 const BOOST_INTERVAL_MS =
@@ -245,13 +240,6 @@ function contextNumber(context: Record<string, unknown>, key: string): number | 
   const value = Number(context[key]);
   return Number.isFinite(value) ? value : null;
 }
-
-function contextAge(context: Record<string, unknown>): string | null {
-  const seconds = contextNumber(context, 'elapsedSec');
-  if (seconds == null || seconds < 0) return null;
-  return seconds < 60 ? `${Math.round(seconds)}s` : `${Math.round(seconds / 60)}m`;
-}
-
 
 async function saveBoostEvent(args: {
   tokenAddress: string;
@@ -539,8 +527,12 @@ async function processBoost(
   const market =
     await getRobinhoodMarketSnapshot(
       boost.tokenAddress,
-      { priority: 'NORMAL', caller: 'robinhood_boost_observer' },
-    );
+      { priority: 'NORMAL', caller: 'robinhood_boost_observer', queueWaitTimeoutMs: 750 },
+    ).catch((error) => {
+      console.warn('[RobinhoodBoostObserver] Optional market context unavailable:',
+        error instanceof Error ? error.message : String(error));
+      return null;
+    });
   const previousBoostMarket = await getPreviousBoostMarket(boost.tokenAddress).catch(() => null);
 
   const opportunity = await getBoostOpportunityContext(boost.tokenAddress);
@@ -549,60 +541,12 @@ async function processBoost(
     { address: boost.tokenAddress },
   );
 
-  if (!market && !opportunityMarket.preIndexValuation) {
-    console.log(
-      '[RobinhoodBoostObserver] Waiting for market indexing:',
-      boost.tokenAddress,
-    );
-
-    return false;
-  }
-
-
-  const [
-    devHolding,
-    holderRisk,
-  ] =
-    await Promise.all([
-      scanRobinhoodDevTokenFlow(
-        boost.tokenAddress,
-      ).catch(
-        (error) => {
-          console.error(
-            '[RobinhoodBoostObserver] Dev scan failed:',
-            error,
-          );
-
-          return null;
-        },
-      ),
-
-      scanRobinhoodHolderRisk(
-        boost.tokenAddress,
-      ).catch(
-        (error) => {
-          console.error(
-            '[RobinhoodBoostObserver] Holder scan failed:',
-            error,
-          );
-
-          return null;
-        },
-      ),
-    ]);
-
-
-  const devHoldingPercent =
-    devHolding?.devHoldingPercent ??
-    null;
-
-  const burnedPercent =
-    devHolding?.totalBurnPercent ??
-    null;
-
-  const holderTop1Percent =
-    holderRisk?.top1Pct ??
-    null;
+  const existingEvidence = normalizeCoreDecisionMetrics(opportunity?.rawData);
+  const devHoldingPercent = existingEvidence.devHoldingEvidence === 'VERIFIED'
+    ? existingEvidence.devHoldingPercent : null;
+  const burnedPercent = existingEvidence.burnEvidence === 'VERIFIED'
+    ? existingEvidence.burnedPercent : null;
+  const holderTop1Percent = null;
 
 
   const eventId = market
@@ -660,7 +604,10 @@ async function processBoost(
       marketCap: market?.marketCapUsd ?? null, fdv: market?.fdvUsd ?? null,
       liquidity: market?.liquidityUsd ?? null, volume5m: market?.volume5mUsd ?? null,
       buys5m: market?.buys5m ?? null, sells5m: market?.sells5m ?? null,
-      devHoldingPercent, burnedPercent, chartUrl: market?.chartUrl ?? null },
+      pairCreatedAt: market?.pairCreatedAt ?? null,
+      devHoldingPercent, devHoldingEvidence: devHoldingPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
+      burnedPercent, burnEvidence: burnedPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
+      chartUrl: market?.chartUrl ?? null },
   });
   const volumeDecision = volumeIgnitionDecision({ previousVolume5m: previousBoostMarket?.volume5m ?? null,
     currentVolume5m: market?.volume5mUsd ?? null, previousPrice: previousBoostMarket?.price ?? null,
@@ -733,7 +680,7 @@ async function processBoost(
       sells5m:
         market?.sells5m,
 
-      age: contextAge(opportunity?.rawData ?? {}),
+      age: verifiedPairAge(market?.pairCreatedAt),
       move: contextNumber(opportunity?.rawData ?? {}, 'currentRoi'),
       momentum: contextNumber(opportunity?.rawData ?? {}, 'roiChange'),
       confidence: opportunity?.confidence,

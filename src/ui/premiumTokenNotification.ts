@@ -10,6 +10,15 @@ const percent = (value: number) => `${Number(value.toFixed(2))}%`;
 const price = (value: number) => value >= 1 ? `$${value.toLocaleString('en-US', { maximumFractionDigits: 4 })}`
   : `$${value.toPrecision(5).replace(/0+$/, '').replace(/\.$/, '')}`;
 
+export function verifiedPairAge(pairCreatedAt: number | null | undefined, now = Date.now()): string | null {
+  const created = Number(pairCreatedAt);
+  if (!Number.isFinite(created) || created <= 0 || created > now) return null;
+  const minutes = Math.floor((now - created) / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 48 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
+}
+
 export function buildPremiumTokenNotification(args: {
   state: PremiumState; symbol?: string | null; name?: string | null; address: string;
   age?: string | null; market: NotificationMarketContext; evidence?: CoreDecisionMetricContext | null;
@@ -24,21 +33,25 @@ export function buildPremiumTokenNotification(args: {
 }) {
   const marketCap = args.market.marketCap;
   const fdv = marketCap == null ? args.market.fdv : null;
+  const lightweightContext = ['DEX_PAID', 'BOOST', 'MAJOR_BOOST'].includes(args.state);
   const metrics = [
     ...(args.market.price == null ? [] : [{ icon: '💰', label: 'Price', value: price(args.market.price) }]),
     ...(args.age ? [{ icon: '⏱', label: 'Age', value: args.age }] : []),
-    ...(marketCap == null ? [] : [{ icon: '💰', label: 'Market cap', value: formatUsd(marketCap) }]),
+    ...(marketCap == null ? [] : [{ icon: lightweightContext ? '💵' : '💰', label: 'Market cap', value: formatUsd(marketCap) }]),
     ...(fdv == null ? [] : [{ icon: '💰', label: 'FDV', value: formatUsd(fdv) }]),
+    ...(lightweightContext && args.evidence?.devHoldingEvidence === 'VERIFIED' && args.evidence.devHoldingPercent != null
+      ? [{ icon: '👨‍💻', label: 'Dev holding', value: percent(args.evidence.devHoldingPercent) }] : []),
     ...(args.market.liquidity == null ? [] : [{ icon: '💧', label: 'Liquidity', value: formatUsd(args.market.liquidity) }]),
-    ...(args.market.volume5m == null ? [] : [{ icon: '🔥', label: '5m volume', value: formatUsd(args.market.volume5m) }]),
+    ...(args.market.volume5m == null ? [] : [{ icon: lightweightContext ? '📊' : '🔥', label: '5m volume', value: formatUsd(args.market.volume5m) }]),
     ...(args.volumeMultiple == null ? [] : [{ icon: '📈', label: 'Volume', value: `${args.volumeMultiple.toFixed(1)}×` }]),
+    ...(args.boostTotal == null ? [] : [{ icon: lightweightContext ? '⚡' : '🚀', label: 'Boost',
+      value: `${args.boostTotal} total${args.boostIncrement == null ? '' : ` (+${args.boostIncrement})`}` }]),
     ...(args.move == null ? [] : [{ icon: '📊', label: 'Move', value: `${args.move >= 0 ? '+' : ''}${args.move.toFixed(1)}%` }]),
     ...(args.peakMove == null ? [] : [{ icon: '🏔', label: 'Peak', value: `${args.peakMove >= 0 ? '+' : ''}${args.peakMove.toFixed(1)}%` }]),
     ...(args.retainedPeakPercent == null ? [] : [{ icon: '🛡', label: 'Retained', value: `${args.retainedPeakPercent}%` }]),
-    ...(args.boostTotal == null ? [] : [{ icon: '🚀', label: 'Boost', value: `${args.boostTotal} total${args.boostIncrement == null ? '' : ` (+${args.boostIncrement})`}` }]),
   ];
   const developerParts = [
-    ...(args.evidence?.devHoldingEvidence === 'VERIFIED' && args.evidence.devHoldingPercent != null
+    ...(!lightweightContext && args.evidence?.devHoldingEvidence === 'VERIFIED' && args.evidence.devHoldingPercent != null
       ? [`Holds ${percent(args.evidence.devHoldingPercent)}`] : []),
     ...(args.devBurnPercent != null && Number.isFinite(args.devBurnPercent)
       ? [`Burned ${percent(args.devBurnPercent)}`] : []),

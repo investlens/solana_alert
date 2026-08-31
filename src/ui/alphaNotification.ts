@@ -190,9 +190,11 @@ export function renderAlphaNotification(alert: AlphaNotification): string {
 
   const take = (...labels: string[]) => metrics.find(metric => labels.includes(metric.label.toLowerCase()));
   const price = take('price'), marketCap = take('market cap', 'market cap', 'fdv'), liquidity = take('liquidity'), volume = take('5m volume');
-  if (price || marketCap) lines.push('', `${price ? `💰 Price <b>${escapeAlphaHtml(boundedAlphaText(price.value, 80))}</b>` : ''}${price && marketCap ? '  •  ' : ''}${marketCap ? `${marketCap.label} <b>${escapeAlphaHtml(boundedAlphaText(marketCap.value, 80))}</b>` : ''}`);
-  if (liquidity || volume) lines.push(`${liquidity ? `💧 Liquidity <b>${escapeAlphaHtml(boundedAlphaText(liquidity.value, 80))}</b>` : ''}${liquidity && volume ? '  •  ' : ''}${volume ? `5m volume <b>${escapeAlphaHtml(boundedAlphaText(volume.value, 80))}</b>` : ''}`);
-  const secondary = metrics.filter(metric => ![price, marketCap, liquidity, volume].includes(metric)).slice(0, 3);
+  const lightweightMarketContext = ['DEX_PAID', 'BOOST', 'MAJOR_BOOST'].includes(alert.state);
+  if (price || marketCap) lines.push('', `${price ? `💰 Price <b>${escapeAlphaHtml(boundedAlphaText(price.value, 80))}</b>` : ''}${price && marketCap ? '  •  ' : ''}${marketCap ? `${lightweightMarketContext ? '💵 ' : ''}${marketCap.label} <b>${escapeAlphaHtml(boundedAlphaText(marketCap.value, 80))}</b>` : ''}`);
+  if (liquidity || volume) lines.push(`${liquidity ? `💧 Liquidity <b>${escapeAlphaHtml(boundedAlphaText(liquidity.value, 80))}</b>` : ''}${liquidity && volume ? '  •  ' : ''}${volume ? `${lightweightMarketContext ? '📊 ' : ''}5m volume <b>${escapeAlphaHtml(boundedAlphaText(volume.value, 80))}</b>` : ''}`);
+  const secondary = metrics.filter(metric => ![price, marketCap, liquidity, volume].includes(metric))
+    .slice(0, lightweightMarketContext ? 4 : 3);
   for (const metric of secondary) lines.push(`${metric.icon ? `${escapeAlphaHtml(metric.icon)} ` : ''}${escapeAlphaHtml(boundedAlphaText(metric.label, 24))} <b>${escapeAlphaHtml(boundedAlphaText(metric.value, 80))}</b>`);
 
   if (intent === 'MOMENTUM_UPDATE' && alert.comparison) {

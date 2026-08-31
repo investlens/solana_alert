@@ -266,6 +266,9 @@ export async function getRobinhoodMarketSnapshot(
     dexId:
       pair.dexId,
 
+    pairCreatedAt: Number.isFinite(Number(pair.pairCreatedAt)) && Number(pair.pairCreatedAt) > 0
+      ? Number(pair.pairCreatedAt) : undefined,
+
     chartUrl: verifiedRobinhoodChartUrl(pair),
 
     timestamp: fetchMetadata ? Date.parse(fetchMetadata.fetchedAt) : Date.now(),
@@ -285,6 +288,9 @@ export function robinhoodMarketSnapshotFromPairs(tokenAddress: string, pairs: De
     marketCapUsd: finiteNumber(pair.marketCap), fdvUsd: finiteNumber(pair.fdv),
     liquidityUsd: finiteNumber(pair.liquidity?.usd), volume5mUsd: finiteNumber(pair.volume?.m5),
     buys5m: finiteNumber(pair.txns?.m5?.buys), sells5m: finiteNumber(pair.txns?.m5?.sells),
-    pairAddress: pair.pairAddress, dexId: pair.dexId, chartUrl: verifiedRobinhoodChartUrl(pair),
+    pairAddress: pair.pairAddress, dexId: pair.dexId,
+    pairCreatedAt: Number.isFinite(Number(pair.pairCreatedAt)) && Number(pair.pairCreatedAt) > 0
+      ? Number(pair.pairCreatedAt) : undefined,
+    chartUrl: verifiedRobinhoodChartUrl(pair),
     timestamp: fetchMetadata ? Date.parse(fetchMetadata.fetchedAt) : Date.now(), fetchedAt: fetchMetadata?.fetchedAt, source: fetchMetadata?.source };
 }

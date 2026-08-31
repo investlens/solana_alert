@@ -6,6 +6,7 @@ import { buildAlphaOutcomeCheckpoint } from '../src/services/alphaAlertOutcomeCh
 import { mergeTokenAth } from '../src/services/tokenIntelligenceService.js';
 import { canonicalRunnerEntry, planRunnerMilestones, renderRunnerMilestone,
   runnerMilestoneIdentity, athObservationIdentity, athAlertIdentity, highestComparableRunnerObservation,
+  ATH_ALERT_EXPANSION_PERCENT, selectWinnerDelivery,
   type RunnerEntry, type RunnerHistoryPrice, type RunnerObservation } from '../src/services/runnerMilestoneService.js';
 
 const entry = (overrides: Partial<RunnerEntry> = {}): RunnerEntry => ({ id: 10, event_identity: 'v1:entry:10', opportunity_id: 7,
@@ -98,13 +99,14 @@ test('canonical entry is the first delivered comparable BUY/CHECK_ENTRY and mome
   assert.equal(canonicalRunnerEntry([first], new Set()), null);
 });
 
-test('ATH updates are monotonic while tiny highs are stored without an alert and 5% is alertable', () => {
+test('ATH updates are monotonic while intermediate highs are stored and 30% is alertable', () => {
   const below = planRunnerMilestones({ entry: entry(), observation: observation(1.9), history: history([1, 2]), lastAlertedAth: 2 });
   assert.equal(below.newAthObserved, false); assert.equal(below.athAlert, false);
   const tiny = planRunnerMilestones({ entry: entry(), observation: observation(2.099), history: history([1, 2]), lastAlertedAth: 2 });
   assert.equal(tiny.newAthObserved, true); assert.equal(tiny.athAlert, false); assert.equal(tiny.newAth, 2.099);
-  const material = planRunnerMilestones({ entry: entry(), observation: observation(2.1), history: history([1, 2]), lastAlertedAth: 2 });
+  const material = planRunnerMilestones({ entry: entry(), observation: observation(2.6), history: history([1, 2]), lastAlertedAth: 2 });
   assert.equal(material.athAlert, true);
+  assert.equal(ATH_ALERT_EXPANSION_PERCENT, 30);
   const merged = mergeTokenAth({ previous: { priceUsd: 2, priceObservedAt: '2026-08-30T00:00:00Z', priceSource: 'DEXSCREENER_VERIFIED_BASE_PAIR',
     marketCapUsd: 100, marketCapObservedAt: '2026-08-30T00:00:00Z', marketCapSource: 'VERIFIED_MARKET_INDEX',
     distanceFromPricePct: null, distanceFromMarketCapPct: null }, currentPrice: 1.5, currentMc: 500,
@@ -112,7 +114,7 @@ test('ATH updates are monotonic while tiny highs are stored without an alert and
   assert.equal(merged.priceUsd, 2); assert.equal(merged.marketCapUsd, 500);
 });
 
-test('first tracked ATH is a silent baseline and only a later 5% step alerts once', () => {
+test('first tracked ATH is a silent baseline and only a later 30% step alerts once', () => {
   const first = planRunnerMilestones({ entry: entry(), observation: observation(1.06), history: history(),
     lastAlertedAth: null, athNotificationBaseline: null });
   assert.equal(first.newAthObserved, true); assert.equal(first.newAth, 1.06); assert.equal(first.athAlert, false);
@@ -120,18 +122,36 @@ test('first tracked ATH is a silent baseline and only a later 5% step alerts onc
   const small = planRunnerMilestones({ entry: entry(), observation: observation(1.08), history: firstStored,
     lastAlertedAth: null, athNotificationBaseline: 1.06 });
   assert.equal(small.newAthObserved, true); assert.equal(small.athAlert, false);
-  const material = planRunnerMilestones({ entry: entry(), observation: observation(1.114), history: history([1, 1.06, 1.08]),
+  const under = planRunnerMilestones({ entry: entry(), observation: observation(1.3778), history: history([1, 1.06, 1.08]),
+    lastAlertedAth: null, athNotificationBaseline: 1.06 });
+  assert.equal(under.athAlert, false);
+  const material = planRunnerMilestones({ entry: entry(), observation: observation(1.378), history: history([1, 1.06, 1.08]),
     lastAlertedAth: null, athNotificationBaseline: 1.06 });
   assert.equal(material.athAlert, true);
-  const restart = planRunnerMilestones({ entry: entry(), observation: observation(1.114),
-    history: history([1, 1.06, 1.08, 1.114]), lastAlertedAth: 1.114, athNotificationBaseline: 1.114 });
+  const restart = planRunnerMilestones({ entry: entry(), observation: observation(1.378),
+    history: history([1, 1.06, 1.08, 1.378]), lastAlertedAth: 1.378, athNotificationBaseline: 1.378 });
   assert.equal(restart.newAthObserved, false); assert.equal(restart.athAlert, false);
-  const underNextStep = planRunnerMilestones({ entry: entry(), observation: observation(1.15), history: history([1, 1.114]),
-    lastAlertedAth: 1.114, athNotificationBaseline: 1.114 });
+  const underNextStep = planRunnerMilestones({ entry: entry(), observation: observation(1.78), history: history([1, 1.378, 1.7]),
+    lastAlertedAth: 1.378, athNotificationBaseline: 1.378 });
   assert.equal(underNextStep.newAthObserved, true); assert.equal(underNextStep.athAlert, false);
-  const nextStep = planRunnerMilestones({ entry: entry(), observation: observation(1.17), history: history([1, 1.15]),
-    lastAlertedAth: 1.114, athNotificationBaseline: 1.114 });
+  const nextStep = planRunnerMilestones({ entry: entry(), observation: observation(1.7915), history: history([1, 1.378, 1.78]),
+    lastAlertedAth: 1.378, athNotificationBaseline: 1.378 });
   assert.equal(nextStep.athAlert, true);
+});
+
+test('winner coalescing records both crossed thresholds but selects one highest-priority delivery', () => {
+  const crossed = planRunnerMilestones({ entry: entry(), observation: observation(2.12), history: history([1, 1.42]) });
+  assert.equal(crossed.runner50, true); assert.equal(crossed.runner100, true);
+  assert.equal(selectWinnerDelivery({ runner50: crossed.runner50, runner100: crossed.runner100, athAlert: true }), 'RUNNER_100');
+  assert.equal(selectWinnerDelivery({ runner50: true, runner100: false, athAlert: true }), 'RUNNER_50');
+  assert.equal(selectWinnerDelivery({ runner50: false, runner100: false, athAlert: true }), 'NEW_ATH');
+});
+
+test('runner presentation can carry a coalesced AlphaOS ATH without a second alert', () => {
+  const message = renderRunnerMilestone({ kind: 'RUNNER_100', entry: entry(), observation: observation(2.12), roi: 112,
+    ath: { baseline: 1.6, current: 2.12, expansionPct: 32.5 } });
+  assert.match(message, /\+100% MAJOR RUNNER/); assert.match(message, /AlphaOS ATH/);
+  assert.match(message, /ATH Expansion: <b>\+32\.5%/); assert.doesNotMatch(message, /Trade/);
 });
 
 test('incomparable PONS curve/index provenance creates neither runner nor fake ATH', () => {

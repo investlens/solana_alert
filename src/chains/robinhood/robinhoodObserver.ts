@@ -3,7 +3,7 @@ import { buildAlphaMarketActions } from '../../ui/alphaNotificationActions.js';
 import { coreDecisionEvidenceMetrics, marketContextMetrics, normalizeCoreDecisionMetrics, normalizeNotificationMarketContext } from '../../ui/notificationMarketContext.js';
 import { persistOrLoadAlphaSemanticEventRecord } from '../../services/alphaSemanticEventService.js';
 import { deliverAlphaSemanticEvent } from '../../services/alphaSemanticDeliveryService.js';
-import { buildPremiumTokenNotification } from '../../ui/premiumTokenNotification.js';
+import { buildPremiumTokenNotification, verifiedPairAge } from '../../ui/premiumTokenNotification.js';
 
 import {
   startPostAlertDevWatch,
@@ -2123,18 +2123,31 @@ export async function processRobinhoodDexPaidSignal(token: RobinhoodDiscoveredTo
   const dexPaid = await scanRobinhoodDexPaid(token.tokenAddress);
   dexPaidEvidence.set(normalize(token.tokenAddress), dexPaid);
   if (dexPaid.dexPaid !== true || dexPaid.latestPaymentTimestamp == null) return false;
-  const chartUrl = token.pairAddress
-    ? `https://dexscreener.com/robinhood/${encodeURIComponent(token.pairAddress)}` : buildChartUrl(token.tokenAddress);
+  const market = await getRobinhoodMarketSnapshot(token.tokenAddress, { priority: 'NORMAL',
+    caller: 'robinhood_dex_paid_context', queueWaitTimeoutMs: 750 }).catch(() => null);
+  const chartUrl = market?.chartUrl ?? (token.pairAddress
+    ? `https://dexscreener.com/robinhood/${encodeURIComponent(token.pairAddress)}` : buildChartUrl(token.tokenAddress));
+  const marketContext = normalizeNotificationMarketContext(market ? {
+    symbol: market.symbol, name: market.name, address: token.tokenAddress, price: market.priceUsd,
+    marketCap: market.marketCapUsd, fdv: market.fdvUsd, liquidity: market.liquidityUsd,
+    volume5m: market.volume5mUsd, chartUrl,
+  } : null, token.metadata, { symbol: token.symbol, name: token.name, address: token.tokenAddress, chartUrl });
+  const evidence = normalizeCoreDecisionMetrics(token.metadata);
+  const age = verifiedPairAge(market?.pairCreatedAt);
   const semanticEvent = await persistOrLoadAlphaSemanticEventRecord({
     identity: `${token.tokenAddress.toLowerCase()}:${dexPaid.latestPaymentTimestamp}`,
     type: 'DEX_PAID', assetId: token.tokenAddress, chain: 'robinhood', intelligenceState: 'FORMING',
-    symbol: token.symbol ?? null, rawSnapshot: { paymentTimestamp: dexPaid.latestPaymentTimestamp,
-      orderTypes: dexPaid.orderTypes, orderStatuses: dexPaid.orderStatuses, chartUrl },
+    symbol: marketContext.symbol ?? token.symbol ?? null, rawSnapshot: { paymentTimestamp: dexPaid.latestPaymentTimestamp,
+      orderTypes: dexPaid.orderTypes, orderStatuses: dexPaid.orderStatuses, chartUrl,
+      price: marketContext.price, priceProvenance: market ? 'DEXSCREENER_VERIFIED_BASE_PAIR' : null,
+      marketCap: marketContext.marketCap, fdv: marketContext.fdv, liquidity: marketContext.liquidity,
+      volume5m: marketContext.volume5m, pairCreatedAt: market?.pairCreatedAt ?? null,
+      devHoldingPercent: evidence.devHoldingPercent, devHoldingEvidence: evidence.devHoldingEvidence },
   });
   const result = await deliverAlphaSemanticEvent({ event: { id: semanticEvent.id,
     eventIdentity: semanticEvent.event_identity, type: 'DEX_PAID', assetId: token.tokenAddress, chain: 'robinhood' },
-    message: buildPremiumTokenNotification({ state: 'DEX_PAID', symbol: token.symbol, name: token.name,
-      address: token.tokenAddress, market: normalizeNotificationMarketContext({ chartUrl }),
+    message: buildPremiumTokenNotification({ state: 'DEX_PAID', symbol: marketContext.symbol, name: marketContext.name,
+      address: token.tokenAddress, market: marketContext, evidence, age,
       insightTitle: 'VERIFIED EVENT', insight: ['A verified Dex visibility payment was detected.'],
       statusTitle: '💎 STATUS', status: 'Dex Paid confirmed · evaluate live market conditions.' }),
     buttons: buildAlphaMarketActions({ chartUrl, tokenUrl: buildExplorerUrl(token.tokenAddress),

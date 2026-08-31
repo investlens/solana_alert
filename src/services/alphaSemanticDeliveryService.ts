@@ -1,7 +1,7 @@
 import { getDeliverableUsers, markTelegramUserBlocked, type DeliverableUser } from '../core/delivery.js';
 import { accessProfileForUser, hasCapability } from '../product/capabilities.js';
 import { createLeaseToken, DELIVERY_LEASE_SECONDS } from './reservationLease.js';
-import { isStrategyEnabledForUser } from './strategyService.js';
+import { DEX_PAID_STRATEGY_KEY, isStrategyEnabledForUser } from './strategyService.js';
 import { supabase } from './supabase.js';
 import { sendTelegram } from './telegram.js';
 import { deliverReservedTelegram } from './telegramDeliveryContract.js';
@@ -24,6 +24,11 @@ type SemanticDeliveryDependencies = {
   send: (telegramId: string, message: string, buttons?: InlineButton[][]) => Promise<void>;
   blocked: (telegramId: string) => Promise<void>;
 };
+
+export function preferenceKeyForSemanticEvent(event: UserFacingSemanticEvent): string | null {
+  if (event.type === 'DEX_PAID') return DEX_PAID_STRATEGY_KEY;
+  return event.strategyKey ?? null;
+}
 
 async function reserve(event: UserFacingSemanticEvent, user: DeliverableUser, leaseToken: string): Promise<boolean> {
   const { data, error } = await supabase.rpc('reserve_alpha_semantic_delivery', {
@@ -82,7 +87,8 @@ export async function deliverAlphaSemanticEvent(args: {
   for (const user of users) {
     if (!hasCapability(accessProfileForUser(user), 'opportunities.realtime')) continue;
     try {
-      if (args.event.strategyKey && !await dependencies.strategyEnabled(user.telegram_id, args.event.strategyKey)) continue;
+      const preferenceKey = preferenceKeyForSemanticEvent(args.event);
+      if (preferenceKey && !await dependencies.strategyEnabled(user.telegram_id, preferenceKey)) continue;
       const leaseToken = createLeaseToken();
       if (!await dependencies.reserve(args.event, user, leaseToken)) continue;
       const result = await deliverReservedTelegram({
