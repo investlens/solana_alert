@@ -1,6 +1,7 @@
 export type ConversationInputState =
   | 'NONE'
   | 'ADD_WALLET'
+  | 'ADD_X_REPUTED_ACCOUNT'
   | 'SUBMIT_PAYMENT_HASH';
 
 const states = new Map<string, ConversationInputState>();

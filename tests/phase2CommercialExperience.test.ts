@@ -92,6 +92,7 @@ test('production navigation callbacks have registered handlers', async () => {
     '../src/bot/walletTracking.ts',
     '../src/bot/strategyControls.ts',
     '../src/bot/admin/terminal.ts',
+    '../src/bot/xIntelligenceAdmin.ts',
   ].map(path => readFile(new URL(path, import.meta.url), 'utf8')));
   const handlers = files.join('\n');
   const callbacks = new Set(

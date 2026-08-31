@@ -1,7 +1,7 @@
 import { getDeliverableUsers, markTelegramUserBlocked, type DeliverableUser } from '../core/delivery.js';
 import { accessProfileForUser, hasCapability } from '../product/capabilities.js';
 import { createLeaseToken, DELIVERY_LEASE_SECONDS } from './reservationLease.js';
-import { DEX_PAID_STRATEGY_KEY, isStrategyEnabledForUser } from './strategyService.js';
+import { DEX_PAID_STRATEGY_KEY, isStrategyEnabledForUser, X_REPUTED_MENTION_STRATEGY_KEY } from './strategyService.js';
 import { supabase } from './supabase.js';
 import { sendTelegram } from './telegram.js';
 import { deliverReservedTelegram } from './telegramDeliveryContract.js';
@@ -27,6 +27,7 @@ type SemanticDeliveryDependencies = {
 
 export function preferenceKeyForSemanticEvent(event: UserFacingSemanticEvent): string | null {
   if (event.type === 'DEX_PAID') return DEX_PAID_STRATEGY_KEY;
+  if (event.type === 'X_REPUTED_MENTION') return X_REPUTED_MENTION_STRATEGY_KEY;
   return event.strategyKey ?? null;
 }
 

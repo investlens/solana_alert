@@ -69,6 +69,20 @@ test('DEX_PAID absent preference reserves nothing while BOOST preference behavio
   assert.deepEqual(boost.sends, ['admin', 'pro', 'free']);
 });
 
+test('X_REPUTED_MENTION absent and explicit OFF reserve nothing while explicit ON has no Admin bypass', async () => {
+  const users = [user('admin', 'admin'), user('pro', 'paid'), user('free', 'free')];
+  const event = { id: 26004, eventIdentity: 'v2:X_REPUTED_MENTION:account:post:token', type: 'X_REPUTED_MENTION',
+    assetId: '0x2222222222222222222222222222222222222222', chain: 'robinhood' };
+  const absent = harness(users);
+  await deliverAlphaSemanticEvent({ event, message: 'X MENTION' }, absent.dependencies);
+  assert.deepEqual(absent.reservationAttempts, []); assert.deepEqual(absent.sends, []);
+
+  const explicit = harness(users, { admin: { X_REPUTED_MENTION: false }, pro: { X_REPUTED_MENTION: true },
+    free: { X_REPUTED_MENTION: false } });
+  await deliverAlphaSemanticEvent({ event, message: 'X MENTION' }, explicit.dependencies);
+  assert.deepEqual(explicit.reservationAttempts, ['pro']); assert.deepEqual(explicit.sends, ['pro']);
+});
+
 test('one recipient failure cannot starve later eligible testers', async () => {
   const run = harness([user('admin', 'admin'), user('free', 'free')]);
   const originalReserve = run.dependencies.reserve;

@@ -39,6 +39,10 @@ export function intelligenceMenu(access: AccessProfile) {
     rows.push([Markup.button.callback('⭐ Unlock Full Intelligence', 'MEMBERSHIP_PLANS')]);
   }
 
+  if (hasCapability(access, 'trading.admin')) {
+    rows.push([Markup.button.callback('🐦 X Intelligence', 'X_INTEL_HOME')]);
+  }
+
   rows.push([Markup.button.callback('🏠 Home', 'MAIN_MENU')]);
   return Markup.inlineKeyboard(rows);
 }

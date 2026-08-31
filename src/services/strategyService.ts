@@ -24,9 +24,10 @@ export type UserStrategyPreference = {
 };
 
 export const DEX_PAID_STRATEGY_KEY = 'DEX_PAID';
+export const X_REPUTED_MENTION_STRATEGY_KEY = 'X_REPUTED_MENTION';
 
 export function defaultStrategyEnabledForUser(strategyKey: string): boolean {
-  return strategyKey !== DEX_PAID_STRATEGY_KEY;
+  return strategyKey !== DEX_PAID_STRATEGY_KEY && strategyKey !== X_REPUTED_MENTION_STRATEGY_KEY;
 }
 
 export async function getEnabledStrategies(): Promise<
