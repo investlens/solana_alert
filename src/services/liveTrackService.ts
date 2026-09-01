@@ -7,6 +7,8 @@ export const LIVE_TRACK_DURATION_MS = 15 * 60_000;
 export const LIVE_TRACK_FAST_PHASE_MS = 2 * 60_000;
 export const LIVE_TRACK_FAST_INTERVAL_MS = 15_000;
 export const LIVE_TRACK_NORMAL_INTERVAL_MS = 30_000;
+export const LIVE_TRACK_MARKET_STALE_MS = 75_000;
+export const LIVE_TRACK_HYDRATION_BUDGET_MS = 1_200;
 const WORKER_TICK_MS = 5_000;
 const MEANINGFUL_STATES = new Set([
   'MOMENTUM_ACCELERATING', 'ENTRY_CONFIRMING', 'BREAKOUT', 'RUNNER', 'MOMENTUM_WEAKENING',
@@ -20,6 +22,8 @@ export type LiveTrackSnapshot = {
   buys5m: NullableNumber; sells5m: NullableNumber; devHolding: NullableNumber; devBurn: NullableNumber;
   devSell: boolean | null; devTransfer: boolean | null; boostTotal: NullableNumber; dexPaid: boolean | null;
   intelligenceState: string | null; lifecycleState: string | null; chartUrl: string | null;
+  fieldFreshness?: Record<string, { verifiedAt: string; source: string | null }>;
+  marketRefreshMiss?: boolean;
 };
 
 export type LiveTrackSession = {
@@ -36,6 +40,9 @@ type TrackDependencies = {
   evidence: (chain: string, token: string, raw: Record<string, unknown> | null) => Promise<Partial<LiveTrackSnapshot>>;
   send: typeof sendTelegramWithMessageId; edit: typeof editTelegramMessage;
 };
+
+const MARKET_FIELDS = ['price', 'marketCap', 'liquidity', 'volume5m', 'buys5m', 'sells5m', 'name', 'symbol', 'chartUrl'] as const;
+const INTELLIGENCE_FIELDS = ['devHolding', 'devBurn', 'devSell', 'devTransfer', 'boostTotal', 'dexPaid', 'intelligenceState', 'lifecycleState'] as const;
 
 function finite(value: unknown): number | null {
   if (value == null || value === '') return null;
@@ -114,14 +121,40 @@ export async function captureLiveTrackSnapshot(args: { chain: string; token: str
     dependencies.market(args.chain, args.token).catch(() => null),
     dependencies.evidence(args.chain, args.token, args.raw ?? null).catch(() => ({} as Partial<LiveTrackSnapshot>)),
   ]);
-  return { observedAt, source: market?.source ?? null, name: market?.name ?? evidence.name ?? text(args.raw?.name),
+  const result: LiveTrackSnapshot = { observedAt, source: market?.source ?? null, name: market?.name ?? evidence.name ?? text(args.raw?.name),
     symbol: market?.symbol ?? evidence.symbol ?? text(args.raw?.symbol), price: market?.price ?? null,
     marketCap: market?.marketCap ?? null, liquidity: market?.liquidity ?? null, volume5m: market?.volume5m ?? null,
     buys5m: market?.buys5m ?? null, sells5m: market?.sells5m ?? null, devHolding: evidence.devHolding ?? null,
     devBurn: evidence.devBurn ?? null, devSell: evidence.devSell ?? null, devTransfer: evidence.devTransfer ?? null,
     boostTotal: evidence.boostTotal ?? null, dexPaid: evidence.dexPaid ?? null,
     intelligenceState: evidence.intelligenceState ?? null, lifecycleState: evidence.lifecycleState ?? null,
-    chartUrl: market?.chartUrl ?? text(args.raw?.chartUrl) };
+    chartUrl: market?.chartUrl ?? text(args.raw?.chartUrl), marketRefreshMiss: market == null };
+  result.fieldFreshness = {};
+  for (const field of MARKET_FIELDS) if (result[field] != null)
+    result.fieldFreshness[field] = { verifiedAt: observedAt, source: result.source };
+  for (const field of INTELLIGENCE_FIELDS) if (result[field] != null)
+    result.fieldFreshness[field] = { verifiedAt: observedAt, source: 'ALPHAOS_PERSISTED_INTELLIGENCE' };
+  return result;
+}
+
+/** Missing refresh fields carry forward, while explicit verified values replace prior values. */
+export function mergeLiveTrackSnapshot(previous: LiveTrackSnapshot, refresh: LiveTrackSnapshot): LiveTrackSnapshot {
+  const effective = { ...previous, observedAt: refresh.observedAt, marketRefreshMiss: refresh.marketRefreshMiss,
+    fieldFreshness: { ...(previous.fieldFreshness ?? {}) } } as LiveTrackSnapshot;
+  for (const field of [...MARKET_FIELDS, ...INTELLIGENCE_FIELDS] as const) {
+    if (refresh[field] != null) {
+      (effective as any)[field] = refresh[field];
+      const freshness = refresh.fieldFreshness?.[field];
+      if (freshness) effective.fieldFreshness![field] = freshness;
+    }
+  }
+  if (refresh.source != null) effective.source = refresh.source;
+  return effective;
+}
+
+export function marketFreshnessAgeMs(snapshot: LiveTrackSnapshot): number | null {
+  const verifiedAt = snapshot.fieldFreshness?.price?.verifiedAt;
+  return verifiedAt ? Math.max(0, Date.parse(snapshot.observedAt) - Date.parse(verifiedAt)) : null;
 }
 
 function money(value: number | null): string { if (value == null) return 'Unavailable';
@@ -139,6 +172,12 @@ export function renderLiveTrackMessage(session: Pick<LiveTrackSession, 'id' | 'c
   const volumeAcceleration = baseline.volume5m != null && baseline.volume5m > 0 && latest.volume5m != null
     ? `${(latest.volume5m / baseline.volume5m).toFixed(2)}x vs Track` : 'Unavailable';
   const interpretation = latest.intelligenceState ?? latest.lifecycleState ?? 'Gathering verified observations';
+  const marketAge = marketFreshnessAgeMs(latest);
+  const marketWarning = latest.marketRefreshMiss && marketAge != null
+    ? marketAge >= LIVE_TRACK_MARKET_STALE_MS
+      ? `⚠️ <b>STALE</b> · last verified ${duration(latest.fieldFreshness!.price.verifiedAt, latest.observedAt)} ago`
+      : `⚠️ Market refresh delayed · last verified ${Math.round(marketAge / 1000)}s ago`
+    : null;
   return ['👁 <b>ALPHAOS LIVE TRACK</b>', '',
     `<b>${html(latest.name ?? 'Token')}</b>${latest.symbol ? ` · $${html(latest.symbol)}` : ''}`,
     `<code>${html(session.token_address)}</code>`, '',
@@ -146,7 +185,8 @@ export function renderLiveTrackMessage(session: Pick<LiveTrackSession, 'id' | 'c
     `Market Cap  <b>${money(latest.marketCap)}</b>  (${pct(latest.marketCap, baseline.marketCap)})`,
     `Liquidity  <b>${money(latest.liquidity)}</b>`, `5m volume  <b>${money(latest.volume5m)}</b>`,
     `Volume acceleration  <b>${volumeAcceleration}</b>`,
-    `Buys / sells  <b>${latest.buys5m ?? 'Unavailable'} / ${latest.sells5m ?? 'Unavailable'}</b>`, '',
+    `Buys / sells  <b>${latest.buys5m ?? 'Unavailable'} / ${latest.sells5m ?? 'Unavailable'}</b>`,
+    ...(marketWarning ? ['', marketWarning] : []), '',
     `Dev holding  <b>${latest.devHolding == null ? 'Unknown' : `${latest.devHolding.toFixed(2)}%`}</b>`,
     `Dev burn  <b>${latest.devBurn == null ? 'Unknown' : `${latest.devBurn.toFixed(2)}%`}</b>`,
     `Dev sell  <b>${knownBool(latest.devSell, 'Detected', 'Not detected')}</b>`,
@@ -180,11 +220,15 @@ function peaks(previous: Record<string, unknown>, snapshot: LiveTrackSnapshot) {
   return result;
 }
 
-async function insertObservation(session: LiveTrackSession, snapshot: LiveTrackSnapshot): Promise<void> {
+async function insertObservation(session: LiveTrackSession, snapshot: LiveTrackSnapshot,
+  rawRefresh: LiveTrackSnapshot = snapshot): Promise<void> {
   const { error } = await supabase.from('alpha_live_track_observations').insert({ session_id: session.id,
     observed_at: snapshot.observedAt, elapsed_seconds: Math.max(0, Math.round((Date.parse(snapshot.observedAt) - Date.parse(session.started_at)) / 1000)),
-    snapshot, source_freshness: { market: snapshot.source, market_observed_at: snapshot.observedAt,
-      intelligence: 'PERSISTED_CACHE_ONLY' } });
+    snapshot, source_freshness: { market: snapshot.source,
+      market_observed_at: snapshot.fieldFreshness?.price?.verifiedAt ?? null,
+      market_refresh_miss: rawRefresh.marketRefreshMiss === true,
+      carried_forward_fields: MARKET_FIELDS.filter(field => rawRefresh[field] == null && snapshot[field] != null),
+      raw_refresh: rawRefresh, intelligence: 'PERSISTED_CACHE_ONLY' } });
   if (error) throw error;
 }
 
@@ -220,7 +264,7 @@ export async function startLiveTrack(args: { userId: string; chatId: string; opp
   const chain = args.opportunity.chain === 'robinhood' ? 'robinhood' : 'solana';
   const now = dependencies.now();
   const baseline = await captureLiveTrackSnapshot({ chain, token: args.opportunity.asset_id,
-    raw: args.opportunity.raw_data }, dependencies);
+    raw: args.opportunity.raw_data }, { ...dependencies, evidence: async () => ({}) });
   baseline.lifecycleState ??= text(args.opportunity.recommended_action) ?? text(args.opportunity.status);
   if (baseline.price == null) throw new Error('Verified current price is unavailable; Track was not started.');
   const expiresAt = new Date(now.getTime() + LIVE_TRACK_DURATION_MS).toISOString();
@@ -244,6 +288,25 @@ export async function startLiveTrack(args: { userId: string; chatId: string; opp
     const update = await supabase.from('alpha_live_track_sessions').update({ telegram_message_id: messageId }).eq('id', session.id);
     if (update.error) throw update.error;
   }
+  // One bounded start hydration. A slow cache/evidence read cannot block Track; its result enriches the same message.
+  const hydration = dependencies.evidence(chain, args.opportunity.asset_id, args.opportunity.raw_data).catch(() => ({}));
+  const bounded = await Promise.race([hydration.then(value => ({ value, late: false })),
+    new Promise<{ value: Partial<LiveTrackSnapshot>; late: boolean }>(resolve =>
+      setTimeout(() => resolve({ value: {}, late: true }), LIVE_TRACK_HYDRATION_BUDGET_MS))]);
+  const applyHydration = async (value: Partial<LiveTrackSnapshot>) => {
+    const hydratedRaw = { ...baseline, ...value, observedAt: dependencies.now().toISOString(), marketRefreshMiss: false,
+      fieldFreshness: { ...(baseline.fieldFreshness ?? {}) } } as LiveTrackSnapshot;
+    for (const field of INTELLIGENCE_FIELDS) if (value[field] != null)
+      hydratedRaw.fieldFreshness![field] = { verifiedAt: hydratedRaw.observedAt, source: 'ALPHAOS_PERSISTED_INTELLIGENCE' };
+    const hydrated = mergeLiveTrackSnapshot(session.latest, hydratedRaw);
+    session.latest = hydrated;
+    await supabase.from('alpha_live_track_sessions').update({ latest: hydrated, updated_at: hydrated.observedAt }).eq('id', session.id);
+    if (session.telegram_message_id != null) await dependencies.edit(session.telegram_chat_id,
+      session.telegram_message_id, renderLiveTrackMessage(session), buildLiveTrackButtons(session));
+  };
+  if (bounded.late) void hydration.then(applyHydration).catch(error =>
+    console.warn('[LiveTrack] Late intelligence hydration failed:', error instanceof Error ? error.message : String(error)));
+  else await applyHydration(bounded.value);
   return session;
 }
 
@@ -255,14 +318,9 @@ export async function updateLiveTrackSession(session: LiveTrackSession,
     return;
   }
   const snapshot = await captureLiveTrackSnapshot({ chain: session.chain, token: session.token_address }, dependencies);
-  const latest = { ...session.latest, ...snapshot,
-    devHolding: snapshot.devHolding ?? session.latest.devHolding, devBurn: snapshot.devBurn ?? session.latest.devBurn,
-    devSell: snapshot.devSell ?? session.latest.devSell, devTransfer: snapshot.devTransfer ?? session.latest.devTransfer,
-    boostTotal: snapshot.boostTotal ?? session.latest.boostTotal, dexPaid: snapshot.dexPaid ?? session.latest.dexPaid,
-    intelligenceState: snapshot.intelligenceState ?? session.latest.intelligenceState,
-    lifecycleState: snapshot.lifecycleState ?? session.latest.lifecycleState };
+  const latest = mergeLiveTrackSnapshot(session.latest, snapshot);
   const next = new Date(now.getTime() + nextLiveTrackDelayMs(session.started_at, now)).toISOString();
-  await insertObservation(session, latest);
+  await insertObservation(session, latest, snapshot);
   const peak = peaks(session.peak, latest);
   const update = await supabase.from('alpha_live_track_sessions').update({ latest, peak, last_observed_at: latest.observedAt,
     next_update_at: next, updated_at: now.toISOString() }).eq('id', session.id).eq('status', 'ACTIVE');

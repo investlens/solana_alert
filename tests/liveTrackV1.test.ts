@@ -4,7 +4,8 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
   LIVE_TRACK_FAST_INTERVAL_MS, LIVE_TRACK_NORMAL_INTERVAL_MS, buildLiveTrackButtons,
-  captureLiveTrackSnapshot, meaningfulLiveTrackTransitions, nextLiveTrackDelayMs, renderLiveTrackMessage,
+  captureLiveTrackSnapshot, marketFreshnessAgeMs, meaningfulLiveTrackTransitions, mergeLiveTrackSnapshot,
+  nextLiveTrackDelayMs, renderLiveTrackMessage,
   type LiveTrackSession, type LiveTrackSnapshot,
 } from '../src/services/liveTrackService.js';
 import { boostMetadataFallback, mergeBoostMetadata } from '../src/chains/robinhood/boostMetadataResolver.js';
@@ -37,6 +38,38 @@ test('cadence is 15s for first two minutes then 30s', () => {
   const start = new Date('2026-09-01T00:00:00Z');
   assert.equal(nextLiveTrackDelayMs(start, new Date(start.getTime() + 119_999)), LIVE_TRACK_FAST_INTERVAL_MS);
   assert.equal(nextLiveTrackDelayMs(start, new Date(start.getTime() + 120_000)), LIVE_TRACK_NORMAL_INTERVAL_MS);
+});
+
+test('last-known-good market and identity survive misses, then recovered verified fields replace them', () => {
+  const good = snapshot({ observedAt: '2026-09-01T00:00:00Z', fieldFreshness: {
+    price: { verifiedAt: '2026-09-01T00:00:00Z', source: 'DEXSCREENER' },
+    marketCap: { verifiedAt: '2026-09-01T00:00:00Z', source: 'DEXSCREENER' },
+    liquidity: { verifiedAt: '2026-09-01T00:00:00Z', source: 'DEXSCREENER' },
+    name: { verifiedAt: '2026-09-01T00:00:00Z', source: 'DEXSCREENER' },
+    symbol: { verifiedAt: '2026-09-01T00:00:00Z', source: 'DEXSCREENER' },
+  } });
+  const miss = snapshot({ observedAt: '2026-09-01T00:00:20Z', source: null, name: null, symbol: null,
+    price: null, marketCap: null, liquidity: null, volume5m: null, buys5m: null, sells5m: null,
+    chartUrl: null, marketRefreshMiss: true, fieldFreshness: {} });
+  const carried = mergeLiveTrackSnapshot(good, miss);
+  assert.equal(carried.price, 1); assert.equal(carried.marketCap, 100_000); assert.equal(carried.liquidity, 20_000);
+  assert.equal(carried.name, 'Alpha'); assert.equal(carried.symbol, 'ALPHA'); assert.equal(marketFreshnessAgeMs(carried), 20_000);
+  assert.match(renderLiveTrackMessage(session(carried)), /Market refresh delayed · last verified 20s ago/);
+  const repeated = mergeLiveTrackSnapshot(carried, { ...miss, observedAt: '2026-09-01T00:01:20Z' });
+  assert.equal(marketFreshnessAgeMs(repeated), 80_000);
+  assert.match(renderLiveTrackMessage(session(repeated)), /STALE.*last verified 1m 20s ago/s);
+  const recovered = mergeLiveTrackSnapshot(repeated, snapshot({ observedAt: '2026-09-01T00:01:40Z', price: 1.2,
+    marketCap: 120_000, fieldFreshness: { price: { verifiedAt: '2026-09-01T00:01:40Z', source: 'DEXSCREENER' },
+      marketCap: { verifiedAt: '2026-09-01T00:01:40Z', source: 'DEXSCREENER' } } }));
+  assert.equal(recovered.price, 1.2); assert.equal(recovered.marketCap, 120_000); assert.equal(marketFreshnessAgeMs(recovered), 0);
+});
+
+test('unknown intelligence cannot erase evidence, while verified dev SELL updates immediately', () => {
+  const known = snapshot({ devHolding: 3.5, devSell: null });
+  const unknown = mergeLiveTrackSnapshot(known, snapshot({ devHolding: null, devSell: null }));
+  assert.equal(unknown.devHolding, 3.5); assert.equal(unknown.devSell, null);
+  const sell = mergeLiveTrackSnapshot(unknown, snapshot({ devHolding: null, devSell: true }));
+  assert.equal(sell.devHolding, 3.5); assert.equal(sell.devSell, true);
 });
 
 test('Telegram UX edits one durable message and never labels FDV as market cap', async () => {
@@ -72,6 +105,11 @@ test('Stop, Extend, restart recovery and provider governance are wired without t
   ]);
   assert.match(actions, /LT_STOP_/); assert.match(actions, /LT_EXT_/); assert.match(main, /startLiveTrackService\(\)/);
   assert.match(service, /status: 'EXPIRED'/); assert.match(service, /caller: 'alpha_live_track'/);
+  assert.match(service, /raw_refresh/); assert.match(service, /carried_forward_fields/);
+  assert.match(service, /LIVE_TRACK_HYDRATION_BUDGET_MS/); assert.match(service, /Late intelligence hydration/);
+  assert.match(service, /evidence: async \(\) => \(\{\}\)/); // baseline market fetch does not duplicate hydration
+  assert.match(service, /session\.telegram_message_id[\s\S]*dependencies\.edit/); // late hydration edits durable message
+  assert.doesNotMatch(service, /setInterval\([\s\S]{0,120}evidence/); // no new intelligence polling loop
   assert.match(market, /governedDexScreenerJson/); assert.doesNotMatch(service, /executeTrade|autoBuy|CHECK_ENTRY|BUY/);
 });
 
