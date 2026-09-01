@@ -21,6 +21,7 @@ import {
 } from './walletInput.js';
 import { requireCapability } from './accessControl.js';
 import { strategyDisplay } from '../product/strategyPresentation.js';
+import { extendLiveTrack, startLiveTrack, stopLiveTrack } from '../services/liveTrackService.js';
 
 type OpportunityRow = {
   id: number;
@@ -29,6 +30,8 @@ type OpportunityRow = {
   strategy_key: string | null;
   recommended_action: string | null;
   status: string | null;
+  raw_data: Record<string, unknown> | null;
+  title?: string | null;
 };
 
 function telegramId(
@@ -57,7 +60,9 @@ async function loadOpportunity(
         chain,
         strategy_key,
         recommended_action,
-        status
+        status,
+        raw_data,
+        title
       `)
       .eq(
         'id',
@@ -122,27 +127,7 @@ registerOpportunityActions(
             userId,
         });
 
-        await ctx.reply(
-          [
-            '👀 <b>TRACKING</b>',
-            '',
-            'AlphaOS will keep this opportunity in your tracked set.',
-            '',
-            `<code>${escapeTelegramHtml(opportunity.asset_id)}</code>`,
-          ].join(
-            '\n',
-          ),
-          {
-            parse_mode:
-              'HTML',
-            reply_markup: {
-              inline_keyboard: [[
-                { text: '👀 Watchlist', callback_data: 'OPP_WATCHLIST' },
-                { text: '🏠 Home', callback_data: 'MAIN_MENU' },
-              ]],
-            },
-          },
-        );
+        await startLiveTrack({ userId, chatId: String(ctx.chat?.id ?? userId), opportunity });
       } catch (error) {
         console.error(
           '[OpportunityActions] Track failed:',
@@ -167,6 +152,31 @@ registerOpportunityActions(
       }
     },
   );
+
+  bot.action(/^LT_STOP_([0-9a-f-]{36})$/i, async ctx => {
+    const userId = telegramId(ctx); if (!userId) return;
+    try {
+      const stopped = await stopLiveTrack(ctx.match[1], userId);
+      await ctx.answerCbQuery(stopped ? 'Live Track stopped' : 'Track is no longer active');
+      if (stopped) await ctx.editMessageText(`${String((ctx.callbackQuery as any)?.message?.text ?? '👁 ALPHAOS LIVE TRACK')}\n\n⏹ TRACK STOPPED`,
+        { reply_markup: { inline_keyboard: [] } }).catch(() => {});
+    } catch (error) {
+      console.error('[OpportunityActions] Stop Live Track failed:', error);
+      await ctx.answerCbQuery('Could not stop Track', { show_alert: true }).catch(() => {});
+    }
+  });
+
+  bot.action(/^LT_EXT_([0-9a-f-]{36})$/i, async ctx => {
+    const userId = telegramId(ctx); if (!userId) return;
+    try {
+      const extended = await extendLiveTrack(ctx.match[1], userId);
+      await ctx.answerCbQuery(extended ? 'Track extended by 15 minutes' : 'Track is no longer active',
+        { show_alert: !extended });
+    } catch (error) {
+      console.error('[OpportunityActions] Extend Live Track failed:', error);
+      await ctx.answerCbQuery('Could not extend Track', { show_alert: true }).catch(() => {});
+    }
+  });
 
   bot.action(
     /^OPP_UNTRACK_(\d+)$/,

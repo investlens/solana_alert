@@ -19,6 +19,8 @@ import {
 import { persistOrLoadAlphaSemanticEventRecord } from '../../services/alphaSemanticEventService.js';
 import { deliverAlphaSemanticEvent } from '../../services/alphaSemanticDeliveryService.js';
 import { buildPremiumTokenNotification, verifiedPairAge } from '../../ui/premiumTokenNotification.js';
+import { boostMetadataFallback, resolveBoostMetadata } from './boostMetadataResolver.js';
+import { editTelegramMessage } from '../../services/telegram.js';
 
 
 const BOOST_INTERVAL_MS =
@@ -441,6 +443,53 @@ export function buildBoostActions(args: {
   });
 }
 
+export async function enrichDeliveredBoostAlert(args: {
+  eventId: number; tokenAddress: string; original: any;
+}, options: { delayMs?: number } = {}): Promise<number> {
+  if ((options.delayMs ?? 2_000) > 0) await new Promise(resolve => setTimeout(resolve, options.delayMs ?? 2_000));
+  const metadata = await resolveBoostMetadata(args.tokenAddress, null, 1_200);
+  if (!metadata.name && !metadata.symbol) return 0;
+  const original = args.original;
+  const message = buildBoostMessage({
+    symbol: metadata.symbol ?? boostMetadataFallback(args.tokenAddress).symbol!, name: metadata.name,
+    tokenAddress: args.tokenAddress, boostAmount: original.boostAdded,
+    totalBoostAmount: original.totalBoostAmount, price: original.market?.priceUsd,
+    marketCap: original.market?.marketCapUsd, fdv: original.market?.fdvUsd,
+    liquidity: original.market?.liquidityUsd, volume5m: original.market?.volume5mUsd,
+    buys5m: original.market?.buys5m, sells5m: original.market?.sells5m,
+    age: verifiedPairAge(original.market?.pairCreatedAt),
+    move: contextNumber(original.opportunity?.rawData ?? {}, 'currentRoi'),
+    momentum: contextNumber(original.opportunity?.rawData ?? {}, 'roiChange'),
+    confidence: original.opportunity?.confidence, risk: original.opportunity?.risk,
+    rawData: original.opportunity?.rawData,
+    marketContext: original.market ? { symbol: metadata.symbol, name: metadata.name,
+      address: args.tokenAddress, price: original.market.priceUsd, marketCap: original.market.marketCapUsd,
+      fdv: original.market.fdvUsd ?? null, liquidity: original.market.liquidityUsd,
+      volume5m: original.market.volume5mUsd, chartUrl: original.market.chartUrl ?? null }
+      : { ...original.opportunityMarket, symbol: metadata.symbol, name: metadata.name },
+    devHoldingPercent: original.devHoldingPercent, burnedPercent: original.burnedPercent,
+    holderTop1Percent: original.holderTop1Percent, eventType: original.eventType,
+  });
+  const buttons = buildBoostActions({ tokenAddress: args.tokenAddress, chartUrl: original.market?.chartUrl,
+    opportunityId: original.opportunity?.id, strategyKey: original.opportunity?.strategyKey,
+    rawData: original.opportunity?.rawData });
+  const { data, error } = await supabase.from('alpha_alert_event_deliveries').select('id,telegram_id,metadata')
+    .eq('alert_event_id', args.eventId).eq('delivery_channel', 'telegram').not('delivered_at', 'is', null);
+  if (error) throw error;
+  let edited = 0;
+  for (const delivery of data ?? []) {
+    const messageId = Number((delivery.metadata as any)?.telegram_message_id);
+    if (!Number.isFinite(messageId)) continue;
+    await editTelegramMessage(delivery.telegram_id, messageId, message, buttons);
+    await supabase.from('alpha_alert_event_deliveries').update({ metadata: {
+      ...(delivery.metadata as Record<string, unknown>), metadata_enriched: true,
+      metadata_source: metadata.source, metadata_enriched_at: new Date().toISOString(),
+    } }).eq('id', delivery.id);
+    edited += 1;
+  }
+  return edited;
+}
+
 
 async function processBoost(
   boost: {
@@ -547,6 +596,13 @@ async function processBoost(
   const burnedPercent = existingEvidence.burnEvidence === 'VERIFIED'
     ? existingEvidence.burnedPercent : null;
   const holderTop1Percent = null;
+  const resolvedMetadata = await resolveBoostMetadata(boost.tokenAddress, {
+    symbol: market?.symbol ?? opportunityMarket.symbol,
+    name: market?.name ?? opportunityMarket.name,
+    source: market ? 'DEXSCREENER_MARKET' : 'OPPORTUNITY_CONTEXT',
+  }, 650).catch(() => boostMetadataFallback(boost.tokenAddress));
+  const deliveryMetadata = resolvedMetadata.symbol || resolvedMetadata.name
+    ? resolvedMetadata : boostMetadataFallback(boost.tokenAddress);
 
 
   const eventId = market
@@ -617,7 +673,7 @@ async function processBoost(
     const volumeEvent = await persistOrLoadAlphaSemanticEventRecord({ identity: `${eventId}:volume-surge`,
     type: 'VOLUME_SURGE', assetId: boost.tokenAddress, chain: 'robinhood',
     intelligenceState: 'BUILDING', strategyKey: opportunity?.strategyKey,
-    symbol: market?.symbol ?? opportunityMarket.symbol,
+    symbol: deliveryMetadata.symbol,
     rawSnapshot: { previousVolume5m: previousBoostMarket?.volume5m, currentVolume5m: market?.volume5mUsd,
       previousPrice: previousBoostMarket?.price, currentPrice: market?.priceUsd,
       price: market?.priceUsd, priceProvenance: 'DEXSCREENER_VERIFIED_BASE_PAIR',
@@ -644,11 +700,9 @@ async function processBoost(
 
   const message =
     buildBoostMessage({
-      symbol:
-        market?.symbol ?? opportunityMarket.symbol ?? 'UNKNOWN',
+      symbol: deliveryMetadata.symbol ?? boostMetadataFallback(boost.tokenAddress).symbol!,
 
-      name:
-        market?.name ?? opportunityMarket.name,
+      name: deliveryMetadata.name,
 
       tokenAddress:
         boost.tokenAddress,
@@ -713,6 +767,14 @@ async function processBoost(
       strategyKey: opportunity?.strategyKey,
       rawData: opportunity?.rawData,
     }) });
+
+  if (boostEvent && (!resolvedMetadata.name || resolvedMetadata.source === 'SHORTENED_TOKEN_ADDRESS')) {
+    void enrichDeliveredBoostAlert({ eventId: boostEvent.id, tokenAddress: boost.tokenAddress,
+      original: { boostAdded, totalBoostAmount: boost.totalAmount, market, opportunity, opportunityMarket,
+        devHoldingPercent, burnedPercent, holderTop1Percent, eventType } }).catch(error =>
+      console.warn('[RobinhoodBoostObserver] Late metadata enrichment failed:',
+        error instanceof Error ? error.message : String(error)));
+  }
 
 
   boostTotals.set(

@@ -99,6 +99,7 @@ import {
 import { enrichTokenByMintAddress } from './services/dexscreener.js';
 import { fmtUsd } from './utils/format.js';
 import { sleep } from './utils/format.js';
+import { startLiveTrackService } from './services/liveTrackService.js';
 
 const tokenStates = new Map<string, TokenState>();
 const seenTokens = new Set<string>();
@@ -1427,6 +1428,7 @@ async function main() {
   startOpportunityDeliveryService();
   startOpportunityFreshnessService();
   startAlphaOutcomeCheckpointService();
+  startLiveTrackService();
 
   console.log(
     '🔥🔥🔥 PONS SHADOW STARTUP ENTERED 🔥🔥🔥',

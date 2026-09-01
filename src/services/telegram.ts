@@ -47,8 +47,8 @@ export function buildAlphaReportUrl(tokenMint: string, context?: { engine?: stri
   return `${base}/report/${encodeURIComponent(tokenMint)}?${params.toString()}`;
 }
 
-export async function sendTelegram(chatId: string, text: string, buttons?: InlineButton[][]) {
-  if (!chatId) return;
+async function sendTelegramRequest(chatId: string, text: string, buttons?: InlineButton[][]): Promise<number | null> {
+  if (!chatId) return null;
 
   const body: Record<string, unknown> = {
     chat_id: chatId,
@@ -61,7 +61,7 @@ export async function sendTelegram(chatId: string, text: string, buttons?: Inlin
 
   if (config.dryRun) {
     console.log(`\n--- MESSAGE TO ${chatId} ---\n${text}\nButtons: ${JSON.stringify(buttons ?? [])}\n---------------------------\n`);
-    return;
+    return null;
   }
 
   const res = await fetch(`https://api.telegram.org/bot${config.botToken}/sendMessage`, {
@@ -73,5 +73,36 @@ export async function sendTelegram(chatId: string, text: string, buttons?: Inlin
   if (!res.ok) {
     const bodyText = await res.text().catch(() => '');
     throw new Error(`Telegram send failed: ${res.status} ${bodyText}`);
+  }
+  const payload = await res.json() as { result?: { message_id?: number } };
+  return Number.isFinite(Number(payload.result?.message_id)) ? Number(payload.result?.message_id) : null;
+}
+
+export async function sendTelegram(chatId: string, text: string, buttons?: InlineButton[][]): Promise<void> {
+  await sendTelegramRequest(chatId, text, buttons);
+}
+
+export async function sendTelegramWithMessageId(chatId: string, text: string,
+  buttons?: InlineButton[][]): Promise<number | null> {
+  return sendTelegramRequest(chatId, text, buttons);
+}
+
+export async function editTelegramMessage(chatId: string, messageId: number, text: string,
+  buttons?: InlineButton[][]): Promise<void> {
+  if (!chatId || !Number.isFinite(messageId)) return;
+  if (config.dryRun) {
+    console.log(`\n--- EDIT MESSAGE ${messageId} TO ${chatId} ---\n${text}\nButtons: ${JSON.stringify(buttons ?? [])}\n---------------------------\n`);
+    return;
+  }
+  const res = await fetch(`https://api.telegram.org/bot${config.botToken}/editMessageText`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+      chat_id: chatId, message_id: messageId, text, parse_mode: 'HTML', disable_web_page_preview: true,
+      reply_markup: { inline_keyboard: buttons ?? [] },
+    }),
+  });
+  if (!res.ok) {
+    const bodyText = await res.text().catch(() => '');
+    if (res.status === 400 && bodyText.includes('message is not modified')) return;
+    throw new Error(`Telegram edit failed: ${res.status} ${bodyText}`);
   }
 }

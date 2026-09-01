@@ -3,7 +3,7 @@ import { accessProfileForUser, hasCapability } from '../product/capabilities.js'
 import { createLeaseToken, DELIVERY_LEASE_SECONDS } from './reservationLease.js';
 import { DEX_PAID_STRATEGY_KEY, isStrategyEnabledForUser, X_REPUTED_MENTION_STRATEGY_KEY } from './strategyService.js';
 import { supabase } from './supabase.js';
-import { sendTelegram } from './telegram.js';
+import { sendTelegramWithMessageId } from './telegram.js';
 import { deliverReservedTelegram } from './telegramDeliveryContract.js';
 import { loadPriorDeliveredAlertComparison, renderMomentumUpdate } from './alertComparisonService.js';
 
@@ -18,10 +18,10 @@ type SemanticDeliveryDependencies = {
   getUsers: () => Promise<DeliverableUser[]>;
   strategyEnabled: (telegramId: string, strategyKey: string) => Promise<boolean>;
   reserve: (event: UserFacingSemanticEvent, user: DeliverableUser, leaseToken: string) => Promise<boolean>;
-  complete: (event: UserFacingSemanticEvent, user: DeliverableUser, leaseToken: string) => Promise<void>;
+  complete: (event: UserFacingSemanticEvent, user: DeliverableUser, leaseToken: string, messageId?: number | null) => Promise<void>;
   release: (event: UserFacingSemanticEvent, user: DeliverableUser, leaseToken: string) => Promise<void>;
   sentUnconfirmed: (event: UserFacingSemanticEvent, user: DeliverableUser, leaseToken: string) => Promise<void>;
-  send: (telegramId: string, message: string, buttons?: InlineButton[][]) => Promise<void>;
+  send: (telegramId: string, message: string, buttons?: InlineButton[][]) => Promise<number | null | void>;
   blocked: (telegramId: string) => Promise<void>;
 };
 
@@ -54,14 +54,15 @@ const productionDependencies: SemanticDeliveryDependencies = {
   getUsers: getDeliverableUsers,
   strategyEnabled: isStrategyEnabledForUser,
   reserve,
-  complete: (event, user, leaseToken) => updateLease(event, user, leaseToken,
-    { state: 'DELIVERED', event_identity: event.eventIdentity, semantic_event_type: event.type }, new Date().toISOString()),
+  complete: (event, user, leaseToken, messageId) => updateLease(event, user, leaseToken,
+    { state: 'DELIVERED', event_identity: event.eventIdentity, semantic_event_type: event.type,
+      ...(messageId != null ? { telegram_message_id: messageId } : {}) }, new Date().toISOString()),
   release: (event, user, leaseToken) => updateLease(event, user, leaseToken,
     { state: 'RESERVED', lease_token: leaseToken, reserved_at: new Date(0).toISOString(), retry_pending: true,
       event_identity: event.eventIdentity, semantic_event_type: event.type }),
   sentUnconfirmed: (event, user, leaseToken) => updateLease(event, user, leaseToken,
     { state: 'SENT_UNCONFIRMED', event_identity: event.eventIdentity, semantic_event_type: event.type }),
-  send: sendTelegram,
+  send: sendTelegramWithMessageId,
   blocked: markTelegramUserBlocked,
 };
 
@@ -94,7 +95,8 @@ export async function deliverAlphaSemanticEvent(args: {
       if (!await dependencies.reserve(args.event, user, leaseToken)) continue;
       const result = await deliverReservedTelegram({
         send: () => dependencies.send(user.telegram_id, deliveryMessage, args.buttons),
-        complete: () => dependencies.complete(args.event, user, leaseToken),
+        complete: sendResult => dependencies.complete(args.event, user, leaseToken,
+          Number.isFinite(Number(sendResult)) ? Number(sendResult) : null),
         release: () => dependencies.release(args.event, user, leaseToken),
       });
       if (result.recorded) { delivered += 1; continue; }
