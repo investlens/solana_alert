@@ -9,6 +9,8 @@ export const LIVE_TRACK_FAST_INTERVAL_MS = 15_000;
 export const LIVE_TRACK_NORMAL_INTERVAL_MS = 30_000;
 export const LIVE_TRACK_MARKET_STALE_MS = 75_000;
 export const LIVE_TRACK_HYDRATION_BUDGET_MS = 1_200;
+export const LIVE_TRACK_EVENT_HISTORY_LIMIT = 100;
+export const LIVE_TRACK_EVENT_HISTORY_WINDOW_MS = 90 * 24 * 60 * 60_000;
 const WORKER_TICK_MS = 5_000;
 const MEANINGFUL_STATES = new Set([
   'MOMENTUM_ACCELERATING', 'ENTRY_CONFIRMING', 'BREAKOUT', 'RUNNER', 'MOMENTUM_WEAKENING',
@@ -22,8 +24,17 @@ export type LiveTrackSnapshot = {
   buys5m: NullableNumber; sells5m: NullableNumber; devHolding: NullableNumber; devBurn: NullableNumber;
   devSell: boolean | null; devTransfer: boolean | null; boostTotal: NullableNumber; dexPaid: boolean | null;
   intelligenceState: string | null; lifecycleState: string | null; chartUrl: string | null;
-  fieldFreshness?: Record<string, { verifiedAt: string; source: string | null }>;
+  fieldFreshness?: Record<string, { verifiedAt: string; source: string | null;
+    semanticEventType?: string | null; verificationStatus?: string | null }>;
   marketRefreshMiss?: boolean;
+};
+
+export type LiveTrackSemanticEvent = {
+  semantic_event_type?: string | null; intelligence_state?: string | null; boost_total?: number | string | null;
+  raw_snapshot?: Record<string, unknown> | null; alerted_at?: string | null; created_at?: string | null;
+  dev_holding_percent?: number | string | null; dev_holding_evidence?: string | null;
+  burned_percent?: number | string | null; burn_evidence?: string | null;
+  developer_transferred_percent?: number | string | null;
 };
 
 export type LiveTrackSession = {
@@ -85,30 +96,97 @@ async function marketSnapshot(chain: string, token: string): Promise<Partial<Liv
     chartUrl: pair.url ?? null };
 }
 
+function evidenceTimestamp(event: LiveTrackSemanticEvent): string | null {
+  return text(event.alerted_at) ?? text(event.created_at);
+}
+
+function semanticProvenance(event: LiveTrackSemanticEvent, verificationStatus: string):
+NonNullable<LiveTrackSnapshot['fieldFreshness']>[string] {
+  const eventRaw = event.raw_snapshot ?? {};
+  return { verifiedAt: evidenceTimestamp(event) ?? new Date(0).toISOString(),
+    source: text(eventRaw.source) ?? text(eventRaw.provenance) ?? 'ALPHA_ALERT_EVENTS',
+    semanticEventType: text(event.semantic_event_type), verificationStatus };
+}
+
+/** Resolve durable semantic facts independently; later unrelated nulls never erase older evidence. */
+export function resolveLiveTrackSemanticEvidence(events: LiveTrackSemanticEvent[]): Partial<LiveTrackSnapshot> {
+  const ordered = [...events].sort((left, right) =>
+    Date.parse(evidenceTimestamp(right) ?? '1970-01-01') - Date.parse(evidenceTimestamp(left) ?? '1970-01-01'));
+  const result: Partial<LiveTrackSnapshot> = { fieldFreshness: {} };
+  const freshness = result.fieldFreshness!;
+  const first = (predicate: (event: LiveTrackSemanticEvent) => boolean) => ordered.find(predicate);
+
+  const boost = first(event => ['BOOST', 'MAJOR_BOOST'].includes(text(event.semantic_event_type) ?? '') &&
+    finite(event.boost_total ?? event.raw_snapshot?.boostTotal) != null);
+  if (boost) {
+    result.boostTotal = finite(boost.boost_total ?? boost.raw_snapshot?.boostTotal);
+    freshness.boostTotal = semanticProvenance(boost, 'PERSISTED_SEMANTIC_EVENT');
+  }
+  const dexPaid = first(event => text(event.semantic_event_type) === 'DEX_PAID');
+  if (dexPaid) { result.dexPaid = true; freshness.dexPaid = semanticProvenance(dexPaid, 'PERSISTED_SEMANTIC_EVENT'); }
+  const devSell = first(event => text(event.semantic_event_type) === 'DEV_SELL');
+  if (devSell) { result.devSell = true; freshness.devSell = semanticProvenance(devSell, 'PERSISTED_SEMANTIC_EVENT'); }
+  const devTransfer = first(event => text(event.semantic_event_type) === 'DEV_TRANSFER');
+  if (devTransfer) { result.devTransfer = true; freshness.devTransfer = semanticProvenance(devTransfer, 'PERSISTED_SEMANTIC_EVENT'); }
+  const devBurn = first(event => text(event.semantic_event_type) === 'DEV_BURN' &&
+    finite(event.burned_percent ?? event.raw_snapshot?.burnedPercent) != null);
+  if (devBurn) {
+    result.devBurn = finite(devBurn.burned_percent ?? devBurn.raw_snapshot?.burnedPercent);
+    freshness.devBurn = semanticProvenance(devBurn, text(devBurn.burn_evidence) ?? 'PERSISTED_SEMANTIC_EVENT');
+  }
+  const devHolding = first(event => text(event.dev_holding_evidence)?.toUpperCase() === 'VERIFIED' &&
+    finite(event.dev_holding_percent ?? event.raw_snapshot?.devHoldingPercent) != null);
+  if (devHolding) {
+    result.devHolding = finite(devHolding.dev_holding_percent ?? devHolding.raw_snapshot?.devHoldingPercent);
+    freshness.devHolding = semanticProvenance(devHolding, 'VERIFIED');
+  }
+  const state = first(event => text(event.intelligence_state) != null);
+  if (state) {
+    result.intelligenceState = text(state.intelligence_state);
+    freshness.intelligenceState = semanticProvenance(state, 'PERSISTED_STATE');
+  }
+  return result;
+}
+
 async function cachedEvidence(chain: string, token: string, raw: Record<string, unknown> | null): Promise<Partial<LiveTrackSnapshot>> {
+  const historyStart = new Date(Date.now() - LIVE_TRACK_EVENT_HISTORY_WINDOW_MS).toISOString();
   const [intelResult, eventResult] = await Promise.all([
-    supabase.from('token_intelligence_cache').select('result,expires_at').eq('chain', chain)
+    supabase.from('token_intelligence_cache').select('result,analyzed_at,expires_at').eq('chain', chain)
       .ilike('token_address', token).gt('expires_at', new Date().toISOString()).maybeSingle(),
-    supabase.from('alpha_alert_events').select('semantic_event_type,intelligence_state,boost_total,raw_snapshot')
-      .eq('chain', chain).ilike('asset_id', token).order('alerted_at', { ascending: false }).limit(1).maybeSingle(),
+    supabase.from('alpha_alert_events').select('semantic_event_type,intelligence_state,boost_total,raw_snapshot,alerted_at,created_at,dev_holding_percent,dev_holding_evidence,burned_percent,burn_evidence,developer_transferred_percent')
+      .eq('chain', chain).ilike('asset_id', token).gte('alerted_at', historyStart)
+      .order('alerted_at', { ascending: false }).limit(LIVE_TRACK_EVENT_HISTORY_LIMIT),
   ]);
   const intel = (intelResult.data?.result ?? {}) as any;
-  const event = eventResult.data as any;
-  const eventRaw = (event?.raw_snapshot ?? {}) as Record<string, unknown>;
+  const semanticEvidence = resolveLiveTrackSemanticEvidence((eventResult.data ?? []) as LiveTrackSemanticEvent[]);
   const developer = intel.developer ?? {};
   const security = intel.security ?? {};
-  const semantic = text(event?.semantic_event_type);
-  return {
+  const result: Partial<LiveTrackSnapshot> = {
     name: text(intel.name) ?? text(raw?.name), symbol: text(intel.symbol) ?? text(raw?.symbol),
-    devHolding: finite(developer.holdingPct) ?? rawNumber(raw, 'devHoldingPercent'),
-    devBurn: finite(developer.burnedPct) ?? finite(security.tokenBurnedPct) ?? rawNumber(raw, 'burnedPercent'),
-    devSell: bool(developer.sold) ?? rawBool(raw, 'devSold', 'developerSold') ?? (semantic === 'DEV_SELL' ? true : null),
-    devTransfer: developer.transferredPct != null ? Number(developer.transferredPct) > 0 : semantic === 'DEV_TRANSFER' ? true : null,
-    boostTotal: finite(security.boostTotal) ?? finite(event?.boost_total) ?? rawNumber(eventRaw, 'boostTotal') ?? rawNumber(raw, 'boostTotal'),
-    dexPaid: bool(security.dexPaid) ?? rawBool(raw, 'dexPaid') ?? (semantic === 'DEX_PAID' ? true : null),
-    intelligenceState: text(event?.intelligence_state) ?? text(intel.alpha?.state) ?? text(raw?.intelligenceState),
+    devHolding: finite(developer.holdingPct) ?? semanticEvidence.devHolding ?? rawNumber(raw, 'devHoldingPercent'),
+    devBurn: semanticEvidence.devBurn ?? finite(developer.burnedPct) ?? finite(security.tokenBurnedPct) ?? rawNumber(raw, 'burnedPercent'),
+    devSell: semanticEvidence.devSell ?? bool(developer.sold) ?? rawBool(raw, 'devSold', 'developerSold'),
+    devTransfer: semanticEvidence.devTransfer ?? (developer.transferredPct != null ? Number(developer.transferredPct) > 0 : null),
+    boostTotal: finite(security.boostTotal) ?? semanticEvidence.boostTotal ?? rawNumber(raw, 'boostTotal'),
+    dexPaid: semanticEvidence.dexPaid ?? bool(security.dexPaid) ?? rawBool(raw, 'dexPaid'),
+    intelligenceState: semanticEvidence.intelligenceState ?? text(intel.alpha?.state) ?? text(raw?.intelligenceState),
     lifecycleState: text(raw?.lifecycleState) ?? text(raw?.lifecycle_state),
+    fieldFreshness: { ...(semanticEvidence.fieldFreshness ?? {}) },
   };
+  const cachedAt = text(intelResult.data?.analyzed_at) ?? new Date().toISOString();
+  const cacheProvenance = { verifiedAt: cachedAt, source: 'TOKEN_INTELLIGENCE_CACHE', verificationStatus: 'ACTIVE_CACHE' };
+  if (finite(developer.holdingPct) != null) result.fieldFreshness!.devHolding = cacheProvenance;
+  if (semanticEvidence.devBurn == null && (finite(developer.burnedPct) != null || finite(security.tokenBurnedPct) != null))
+    result.fieldFreshness!.devBurn = cacheProvenance;
+  if (semanticEvidence.devSell == null && bool(developer.sold) != null) result.fieldFreshness!.devSell = cacheProvenance;
+  if (semanticEvidence.devTransfer == null && developer.transferredPct != null) result.fieldFreshness!.devTransfer = cacheProvenance;
+  if (finite(security.boostTotal) != null) result.fieldFreshness!.boostTotal = cacheProvenance;
+  if (semanticEvidence.dexPaid == null && bool(security.dexPaid) != null) result.fieldFreshness!.dexPaid = cacheProvenance;
+  if (!semanticEvidence.intelligenceState && text(intel.alpha?.state)) result.fieldFreshness!.intelligenceState = cacheProvenance;
+  for (const field of INTELLIGENCE_FIELDS) if (result[field] != null && !result.fieldFreshness?.[field])
+    result.fieldFreshness![field] = { verifiedAt: new Date().toISOString(), source: 'OPPORTUNITY_RAW_DATA',
+      verificationStatus: 'PERSISTED_RAW_EVIDENCE' };
+  return result;
 }
 
 const productionDependencies: TrackDependencies = { now: () => new Date(), market: marketSnapshot,
@@ -133,7 +211,8 @@ export async function captureLiveTrackSnapshot(args: { chain: string; token: str
   for (const field of MARKET_FIELDS) if (result[field] != null)
     result.fieldFreshness[field] = { verifiedAt: observedAt, source: result.source };
   for (const field of INTELLIGENCE_FIELDS) if (result[field] != null)
-    result.fieldFreshness[field] = { verifiedAt: observedAt, source: 'ALPHAOS_PERSISTED_INTELLIGENCE' };
+    result.fieldFreshness[field] = evidence.fieldFreshness?.[field] ??
+      { verifiedAt: observedAt, source: 'ALPHAOS_PERSISTED_INTELLIGENCE' };
   return result;
 }
 
@@ -297,7 +376,8 @@ export async function startLiveTrack(args: { userId: string; chatId: string; opp
     const hydratedRaw = { ...baseline, ...value, observedAt: dependencies.now().toISOString(), marketRefreshMiss: false,
       fieldFreshness: { ...(baseline.fieldFreshness ?? {}) } } as LiveTrackSnapshot;
     for (const field of INTELLIGENCE_FIELDS) if (value[field] != null)
-      hydratedRaw.fieldFreshness![field] = { verifiedAt: hydratedRaw.observedAt, source: 'ALPHAOS_PERSISTED_INTELLIGENCE' };
+      hydratedRaw.fieldFreshness![field] = value.fieldFreshness?.[field] ??
+        { verifiedAt: hydratedRaw.observedAt, source: 'ALPHAOS_PERSISTED_INTELLIGENCE' };
     const hydrated = mergeLiveTrackSnapshot(session.latest, hydratedRaw);
     session.latest = hydrated;
     await supabase.from('alpha_live_track_sessions').update({ latest: hydrated, updated_at: hydrated.observedAt }).eq('id', session.id);

@@ -5,7 +5,7 @@ import test from 'node:test';
 import {
   LIVE_TRACK_FAST_INTERVAL_MS, LIVE_TRACK_NORMAL_INTERVAL_MS, buildLiveTrackButtons,
   captureLiveTrackSnapshot, marketFreshnessAgeMs, meaningfulLiveTrackTransitions, mergeLiveTrackSnapshot,
-  nextLiveTrackDelayMs, renderLiveTrackMessage,
+  nextLiveTrackDelayMs, renderLiveTrackMessage, resolveLiveTrackSemanticEvidence, LIVE_TRACK_EVENT_HISTORY_LIMIT,
   type LiveTrackSession, type LiveTrackSnapshot,
 } from '../src/services/liveTrackService.js';
 import { boostMetadataFallback, mergeBoostMetadata } from '../src/chains/robinhood/boostMetadataResolver.js';
@@ -70,6 +70,55 @@ test('unknown intelligence cannot erase evidence, while verified dev SELL update
   assert.equal(unknown.devHolding, 3.5); assert.equal(unknown.devSell, null);
   const sell = mergeLiveTrackSnapshot(unknown, snapshot({ devHolding: null, devSell: true }));
   assert.equal(sell.devHolding, 3.5); assert.equal(sell.devSell, true);
+});
+
+test('semantic evidence resolves per field across newer unrelated events with provenance', () => {
+  const resolved = resolveLiveTrackSemanticEvidence([
+    { semantic_event_type: 'DEX_PAID', alerted_at: '2026-09-01T10:00:00Z', raw_snapshot: { source: 'DEX_PAID_OBSERVER' } },
+    { semantic_event_type: 'BOOST', boost_total: 100, alerted_at: '2026-09-01T10:01:00Z' },
+    { semantic_event_type: 'NEW_ATH', boost_total: null, alerted_at: '2026-09-01T10:02:00Z', intelligence_state: 'RUNNER' },
+  ]);
+  assert.equal(resolved.dexPaid, true); assert.equal(resolved.boostTotal, 100);
+  assert.equal(resolved.intelligenceState, 'RUNNER');
+  assert.equal(resolved.fieldFreshness?.dexPaid?.semanticEventType, 'DEX_PAID');
+  assert.equal(resolved.fieldFreshness?.dexPaid?.source, 'DEX_PAID_OBSERVER');
+  assert.equal(resolved.fieldFreshness?.boostTotal?.verifiedAt, '2026-09-01T10:01:00Z');
+});
+
+test('latest verified field evidence wins while null and unrelated events cannot erase it', () => {
+  const resolved = resolveLiveTrackSemanticEvidence([
+    { semantic_event_type: 'BOOST', boost_total: 50, alerted_at: '2026-09-01T10:00:00Z' },
+    { semantic_event_type: 'DEV_BURN', burned_percent: 2.5, burn_evidence: 'VERIFIED', alerted_at: '2026-09-01T10:01:00Z' },
+    { semantic_event_type: 'RUNNER', boost_total: null, alerted_at: '2026-09-01T10:02:00Z' },
+    { semantic_event_type: 'BOOST', boost_total: 125, alerted_at: '2026-09-01T10:03:00Z' },
+    { semantic_event_type: 'ATH_OBSERVATION', burned_percent: null, alerted_at: '2026-09-01T10:04:00Z' },
+  ]);
+  assert.equal(resolved.boostTotal, 125); assert.equal(resolved.devBurn, 2.5);
+  assert.equal(resolved.fieldFreshness?.devBurn?.verificationStatus, 'VERIFIED');
+});
+
+test('verified developer semantics survive later events and genuinely unknown remains unknown', () => {
+  const resolved = resolveLiveTrackSemanticEvidence([
+    { semantic_event_type: 'CHECK_ENTRY', dev_holding_percent: 4.25, dev_holding_evidence: 'VERIFIED',
+      alerted_at: '2026-09-01T09:59:00Z' },
+    { semantic_event_type: 'DEV_TRANSFER', alerted_at: '2026-09-01T10:00:00Z' },
+    { semantic_event_type: 'DEV_SELL', alerted_at: '2026-09-01T10:01:00Z' },
+    { semantic_event_type: 'ATH_OBSERVATION', alerted_at: '2026-09-01T10:02:00Z' },
+  ]);
+  assert.equal(resolved.devHolding, 4.25); assert.equal(resolved.devTransfer, true); assert.equal(resolved.devSell, true);
+  assert.equal(resolved.fieldFreshness?.devHolding?.verificationStatus, 'VERIFIED');
+  const unknown = resolveLiveTrackSemanticEvidence([{ semantic_event_type: 'NEW_ATH', alerted_at: '2026-09-01T11:00:00Z' }]);
+  assert.equal(unknown.dexPaid, undefined); assert.equal(unknown.boostTotal, undefined);
+  assert.equal(unknown.devSell, undefined); assert.equal(unknown.devBurn, undefined);
+});
+
+test('semantic hydration query is bounded and remains a one-time start hydration', async () => {
+  assert.equal(LIVE_TRACK_EVENT_HISTORY_LIMIT, 100);
+  const source = await readFile(new URL('../src/services/liveTrackService.ts', import.meta.url), 'utf8');
+  assert.match(source, /gte\('alerted_at', historyStart\)/);
+  assert.match(source, /limit\(LIVE_TRACK_EVENT_HISTORY_LIMIT\)/);
+  assert.match(source, /evidence: async \(\) => \(\{\}\)/);
+  assert.doesNotMatch(source, /setInterval\([\s\S]{0,120}cachedEvidence/);
 });
 
 test('Telegram UX edits one durable message and never labels FDV as market cap', async () => {
