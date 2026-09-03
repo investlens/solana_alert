@@ -1,6 +1,8 @@
 export type ConversationInputState =
   | 'NONE'
   | 'ADD_WALLET'
+  | 'NAME_WALLET'
+  | 'RENAME_WALLET'
   | 'ADD_X_REPUTED_ACCOUNT'
   | 'SUBMIT_PAYMENT_HASH';
 

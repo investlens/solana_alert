@@ -29,6 +29,17 @@ function normalizeAddress(
   return address.trim();
 }
 
+export const TRACKED_WALLET_LABEL_MAX_LENGTH = 64;
+
+export function normalizeTrackedWalletLabel(value: unknown): string | null {
+  const normalized = String(value ?? '')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) return null;
+  return [...normalized].slice(0, TRACKED_WALLET_LABEL_MAX_LENGTH).join('');
+}
+
 export function resolveTrackedWalletChain(
   family: 'solana' | 'evm',
   requested?: string,
@@ -174,6 +185,17 @@ addTrackedWallet(args: {
   const walletAddress = detected.normalizedAddress;
   const chain = resolveTrackedWalletChain(detected.family, args.chain);
   const liveMonitoring = walletFamilyHasLiveMonitoring(chain);
+  const label = normalizeTrackedWalletLabel(args.label);
+  const payload: Record<string, unknown> = {
+    telegram_id: args.telegramId,
+    wallet_address: walletAddress,
+    chain,
+    is_active: liveMonitoring,
+    alerts_enabled: liveMonitoring,
+    updated_at: new Date().toISOString(),
+  };
+  // An empty optional label is omitted so an idempotent add cannot erase an existing name.
+  if (label) payload.label = label;
 
   const {
     error,
@@ -183,28 +205,7 @@ addTrackedWallet(args: {
         'user_tracked_wallets',
       )
       .upsert(
-        {
-          telegram_id:
-            args.telegramId,
-
-          wallet_address:
-            walletAddress,
-
-          chain,
-
-          label:
-            args.label ??
-            null,
-
-          is_active:
-            liveMonitoring,
-
-          alerts_enabled:
-            liveMonitoring,
-
-          updated_at:
-            new Date().toISOString(),
-        },
+        payload,
         {
           onConflict:
             'telegram_id,chain,wallet_address',
@@ -214,6 +215,23 @@ addTrackedWallet(args: {
   if (error) {
     throw error;
   }
+}
+
+export async function updateTrackedWalletLabel(args: {
+  telegramId: string;
+  id: number;
+  label: string | null;
+}): Promise<TrackedWallet> {
+  const { data, error } = await supabase
+    .from('user_tracked_wallets')
+    .update({ label: normalizeTrackedWalletLabel(args.label), updated_at: new Date().toISOString() })
+    .eq('id', args.id)
+    .eq('telegram_id', args.telegramId)
+    .select('*')
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error('Wallet not found');
+  return data as TrackedWallet;
 }
 
 export async function

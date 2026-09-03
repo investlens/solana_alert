@@ -14,6 +14,8 @@ import {
   getLatestWalletActivityForUser,
   removeTrackedWallet,
   setTrackedWalletActive,
+  normalizeTrackedWalletLabel,
+  updateTrackedWalletLabel,
 } from '../services/trackedWalletService.js';
 import {
   clearConversationState,
@@ -66,6 +68,38 @@ function userId(
 
 type PendingEvmWallet = { address: string; label: string | null };
 const pendingEvmWallets = new Map<string, PendingEvmWallet>();
+type PendingWalletName = { address: string; chain: string };
+const pendingWalletNames = new Map<string, PendingWalletName>();
+const pendingWalletRenames = new Map<string, number>();
+
+async function askForWalletName(ctx: any, telegramId: string, wallet: PendingWalletName) {
+  pendingWalletNames.set(telegramId, wallet);
+  setConversationState(telegramId, 'NAME_WALLET');
+  await ctx.reply([
+    '🏷 <b>NAME THIS WALLET</b>', '', 'Name this wallet (optional)', '',
+    'Example: <b>Project X Dev</b>', '', `<code>${escapeTelegramHtml(shortAddress(wallet.address))}</code>`,
+  ].join('\n'), { parse_mode: 'HTML', reply_markup: Markup.inlineKeyboard([
+    [Markup.button.callback('Skip', 'WALLET_NAME_SKIP')],
+    [Markup.button.callback('✖️ Cancel', 'WALLET_ADD_CANCEL')],
+  ]).reply_markup });
+}
+
+async function finishWalletAdd(ctx: any, telegramId: string, requestedLabel: string | null) {
+  const pending = pendingWalletNames.get(telegramId);
+  if (!pending) throw new Error('Wallet naming session expired');
+  const label = normalizeTrackedWalletLabel(requestedLabel);
+  await addTrackedWallet({ telegramId, walletAddress: pending.address, chain: pending.chain, label });
+  pendingWalletNames.delete(telegramId);
+  pendingEvmWallets.delete(telegramId);
+  clearConversationState(telegramId);
+  await ctx.reply(['✅ <b>WALLET ADDED</b>', '',
+    ...(label ? [`👛 <b>${escapeTelegramHtml(label)}</b>`] : []),
+    `<code>${escapeTelegramHtml(shortAddress(pending.address))}</code>`, walletNetworkLabel(pending.chain), '',
+    walletFamilyHasLiveMonitoring(pending.chain) ? 'Live monitoring · <b>ON</b>' : 'Saved wallet · Monitoring unavailable',
+  ].join('\n'), { parse_mode: 'HTML', reply_markup: Markup.inlineKeyboard([[
+    Markup.button.callback('🐋 View Wallets', 'WALLET_TRACKING'), Markup.button.callback('🏠 Home', 'MAIN_MENU'),
+  ]]).reply_markup });
+}
 
 async function showEvmNetworkSelection(ctx: any, telegramId: string, wallet: PendingEvmWallet) {
   pendingEvmWallets.set(telegramId, wallet);
@@ -297,12 +331,9 @@ async function renderWalletCenter(
   ) {
     const liveMonitoring = walletFamilyHasLiveMonitoring(wallet.chain);
     lines.push(
-      `${liveMonitoring && wallet.is_active ? '🟢' : '⚪'} <b>${escapeTelegramHtml(walletNetworkLabel(wallet.chain))}</b> · ${wallet.label
-        ? `<b>${escapeTelegramHtml(wallet.label)}</b> · `
-        : ''
-      }<code>${escapeTelegramHtml(shortAddress(
-        wallet.wallet_address,
-      ))}</code>`,
+      wallet.label
+        ? `👛 <b>${escapeTelegramHtml(wallet.label)}</b>\n<code>${escapeTelegramHtml(shortAddress(wallet.wallet_address))}</code>\n${escapeTelegramHtml(walletNetworkLabel(wallet.chain))}`
+        : `${liveMonitoring && wallet.is_active ? '🟢' : '⚪'} <b>${escapeTelegramHtml(walletNetworkLabel(wallet.chain))}</b> · <code>${escapeTelegramHtml(shortAddress(wallet.wallet_address))}</code>`,
       `<i>${walletCoverageText(wallet.chain, wallet.is_active)}</i>`,
       `<i>Monitoring ${liveMonitoring && wallet.is_active ? 'ON' : 'OFF'} · Last activity ${latestActivity.get(wallet.wallet_address.toLowerCase()) ?? 'not detected'}</i>`,
     );
@@ -355,6 +386,7 @@ async function renderWalletCenter(
       );
     }
     if (wallet.chain === 'robinhood') row.push(Markup.button.callback('🧠 Intelligence', `WALLET_INTEL_${wallet.id}`));
+    row.push(Markup.button.callback('✏️ Rename', `WALLET_RENAME_${wallet.id}`));
     row.push(Markup.button.callback('🗑', `WALLET_REMOVE_CONFIRM_${wallet.id}`));
     buttons.push(row);
   }
@@ -405,10 +437,12 @@ registerWalletTracking(
     const walletFlow = Boolean(
       callback.startsWith('WALLET_') ||
       command === '/trackwallet' ||
-      (telegramId && getConversationState(telegramId) === 'ADD_WALLET')
+      (telegramId && ['ADD_WALLET', 'NAME_WALLET', 'RENAME_WALLET'].includes(getConversationState(telegramId)))
     );
 
-    if (callback === 'MAIN_MENU' && telegramId) pendingEvmWallets.delete(telegramId);
+    if (callback === 'MAIN_MENU' && telegramId) {
+      pendingEvmWallets.delete(telegramId); pendingWalletNames.delete(telegramId); pendingWalletRenames.delete(telegramId);
+    }
 
     if (!walletFlow) return next();
 
@@ -428,6 +462,8 @@ registerWalletTracking(
       if (telegramId) {
         clearConversationState(telegramId);
         pendingEvmWallets.delete(telegramId);
+        pendingWalletNames.delete(telegramId);
+        pendingWalletRenames.delete(telegramId);
       }
 
       await renderWalletCenter(
@@ -503,6 +539,8 @@ registerWalletTracking(
       if (telegramId) {
         clearConversationState(telegramId);
         pendingEvmWallets.delete(telegramId);
+        pendingWalletNames.delete(telegramId);
+        pendingWalletRenames.delete(telegramId);
       }
 
       await ctx.answerCbQuery(
@@ -573,6 +611,11 @@ registerWalletTracking(
         if (detected.family === 'evm') {
           setConversationState(telegramId, 'ADD_WALLET');
           await showEvmNetworkSelection(ctx, telegramId, { address, label });
+          return;
+        }
+
+        if (!label) {
+          await askForWalletName(ctx, telegramId, { address, chain: detected.family });
           return;
         }
 
@@ -648,30 +691,27 @@ registerWalletTracking(
       return;
     }
     try {
-      await addTrackedWallet({
-        telegramId, walletAddress: pending.address, chain: 'robinhood', label: pending.label,
-      });
-      pendingEvmWallets.delete(telegramId);
-      clearConversationState(telegramId);
-      await ctx.answerCbQuery('Robinhood monitoring enabled');
-      await ctx.reply([
-        '✅ <b>WALLET ADDED</b>', '',
-        `Robinhood · <code>${escapeTelegramHtml(shortAddress(pending.address))}</code>`,
-        pending.label ? `<b>${escapeTelegramHtml(pending.label)}</b>` : '', '',
-        'Live monitoring · <b>ON</b>', '',
-        'AlphaOS watches this public wallet for token activity.', '',
-        '<i>Public wallet addresses only. Never share private keys or seed phrases.</i>',
-      ].filter(Boolean).join('\n'), {
-        parse_mode: 'HTML',
-        reply_markup: Markup.inlineKeyboard([[
-          Markup.button.callback('🐋 View Wallets', 'WALLET_TRACKING'),
-          Markup.button.callback('🏠 Home', 'MAIN_MENU'),
-        ]]).reply_markup,
-      });
+      await ctx.answerCbQuery('Robinhood selected');
+      pendingWalletNames.set(telegramId, { address: pending.address, chain: 'robinhood' });
+      if (pending.label) {
+        await finishWalletAdd(ctx, telegramId, pending.label);
+        return;
+      }
+      await askForWalletName(ctx, telegramId, { address: pending.address, chain: 'robinhood' });
     } catch (error) {
       console.error('[WalletTracking] Robinhood wallet add failed:', error);
       await ctx.answerCbQuery('Could not add wallet', { show_alert: true }).catch(() => {});
     }
+  });
+
+  bot.action('WALLET_NAME_SKIP', async ctx => {
+    const telegramId = userId(ctx); if (!telegramId) return;
+    if (getConversationState(telegramId) !== 'NAME_WALLET' || !pendingWalletNames.has(telegramId)) {
+      await ctx.answerCbQuery('Wallet naming session expired', { show_alert: true }); return;
+    }
+    await ctx.answerCbQuery('Wallet saved without a name');
+    try { await finishWalletAdd(ctx, telegramId, null); }
+    catch (error) { console.error('[WalletTracking] Wallet add failed:', error); await ctx.reply('Could not add that wallet.'); }
   });
 
   bot.action(
@@ -842,6 +882,38 @@ registerWalletTracking(
       }
     },
   );
+
+  bot.action(
+    /^WALLET_RENAME_(\d+)$/,
+    async ctx => {
+      const telegramId = userId(ctx); if (!telegramId) return;
+      const wallet = await getTrackedWalletByIdForUser({ telegramId, id: Number(ctx.match[1]) });
+      if (!wallet) { await ctx.answerCbQuery('Wallet not found', { show_alert: true }); return; }
+      pendingWalletRenames.set(telegramId, wallet.id);
+      setConversationState(telegramId, 'RENAME_WALLET');
+      await ctx.answerCbQuery('Enter wallet name');
+      await ctx.reply(['✏️ <b>RENAME WALLET</b>', '',
+        `Current name: <b>${escapeTelegramHtml(wallet.label ?? 'None')}</b>`,
+        `<code>${escapeTelegramHtml(shortAddress(wallet.wallet_address))}</code>`, '',
+        'Send the new name.',
+      ].join('\n'), { parse_mode: 'HTML', reply_markup: Markup.inlineKeyboard([
+        ...(wallet.label ? [[Markup.button.callback('Remove name', `WALLET_RENAME_REMOVE_${wallet.id}`)]] : []),
+        [Markup.button.callback('✖️ Cancel', 'WALLET_TRACKING')],
+      ]).reply_markup });
+    },
+  );
+
+  bot.action(/^WALLET_RENAME_REMOVE_(\d+)$/, async ctx => {
+    const telegramId = userId(ctx); if (!telegramId) return;
+    try {
+      await updateTrackedWalletLabel({ telegramId, id: Number(ctx.match[1]), label: null });
+      pendingWalletRenames.delete(telegramId); clearConversationState(telegramId);
+      await ctx.answerCbQuery('Wallet name removed'); await renderWalletCenter(ctx);
+    } catch (error) {
+      console.error('[WalletTracking] Remove wallet name failed:', error);
+      await ctx.answerCbQuery('Could not remove wallet name', { show_alert: true });
+    }
+  });
 
   bot.action(
     /^WALLET_REMOVE_CONFIRM_(\d+)$/,
@@ -1219,10 +1291,7 @@ registerWalletTracking(
           ctx,
         );
 
-      if (
-        !telegramId ||
-        getConversationState(telegramId) !== 'ADD_WALLET'
-      ) {
+      if (!telegramId || !['ADD_WALLET', 'NAME_WALLET', 'RENAME_WALLET'].includes(getConversationState(telegramId))) {
         return next();
       }
 
@@ -1243,6 +1312,8 @@ registerWalletTracking(
         ) {
           clearConversationState(telegramId);
           pendingEvmWallets.delete(telegramId);
+          pendingWalletNames.delete(telegramId);
+          pendingWalletRenames.delete(telegramId);
 
           await ctx.reply(
             'Wallet add cancelled.',
@@ -1252,6 +1323,27 @@ registerWalletTracking(
         }
 
         return next();
+      }
+
+      if (getConversationState(telegramId) === 'NAME_WALLET') {
+        try { await finishWalletAdd(ctx, telegramId, value); }
+        catch (error) { console.error('[WalletTracking] Named wallet add failed:', error); await ctx.reply('Could not add that wallet.'); }
+        return;
+      }
+
+      if (getConversationState(telegramId) === 'RENAME_WALLET') {
+        const id = pendingWalletRenames.get(telegramId);
+        if (!id) { clearConversationState(telegramId); await ctx.reply('Wallet rename session expired.'); return; }
+        try {
+          const wallet = await updateTrackedWalletLabel({ telegramId, id, label: value });
+          pendingWalletRenames.delete(telegramId); clearConversationState(telegramId);
+          await ctx.reply(['✅ <b>WALLET RENAMED</b>', '', `👛 <b>${escapeTelegramHtml(wallet.label ?? '')}</b>`,
+            `<code>${escapeTelegramHtml(shortAddress(wallet.wallet_address))}</code>`, walletNetworkLabel(wallet.chain),
+          ].join('\n'), { parse_mode: 'HTML', reply_markup: Markup.inlineKeyboard([[
+            Markup.button.callback('⬅️ Wallets', 'WALLET_TRACKING'),
+          ]]).reply_markup });
+        } catch (error) { console.error('[WalletTracking] Rename failed:', error); await ctx.reply('Could not rename that wallet.'); }
+        return;
       }
 
       try {
@@ -1265,47 +1357,7 @@ registerWalletTracking(
           await showEvmNetworkSelection(ctx, telegramId, { address, label: null });
           return;
         }
-
-        await addTrackedWallet({
-          telegramId,
-
-          walletAddress:
-            address,
-
-          chain: detected.family,
-        });
-
-        clearConversationState(telegramId);
-
-        await ctx.reply(
-          [
-            detected.liveMonitoringAvailable
-              ? '✅ <b>SOLANA WALLET ADDED</b>'
-              : '✅ <b>EVM WALLET SAVED</b>',
-            '',
-            `<code>${address}</code>`,
-            '',
-            detected.liveMonitoringAvailable
-              ? 'Live activity tracking is available.'
-              : 'Live activity monitoring is not available for this wallet yet.',
-          ].join(
-            '\n',
-          ),
-          {
-            parse_mode:
-              'HTML',
-
-            reply_markup:
-              Markup.inlineKeyboard([
-                [
-                  Markup.button.callback(
-                    '🐋 View Wallets',
-                    'WALLET_TRACKING',
-                  ),
-                ],
-              ]).reply_markup,
-          },
-        );
+        await askForWalletName(ctx, telegramId, { address, chain: detected.family });
       } catch {
         await ctx.reply(
           [
