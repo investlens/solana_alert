@@ -9,7 +9,14 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/**/*.test.ts",
     "release:check": "tsx scripts/releaseSafetyCheck.ts",
-    "audit:alert-quality": "tsx scripts/analyzeUserFacingAlertQuality.ts"
+    "audit:alert-quality": "tsx scripts/analyzeUserFacingAlertQuality.ts",
+    "pons:backfill-devs": "tsx scripts/backfillPonsDeveloperLaunches.ts",
+    "pons:dev-report": "tsx scripts/reportPonsDevelopers.ts",
+    "pons:outcome-report": "tsx scripts/reportPonsOutcomes.ts",
+    "pons:collect-outcomes": "tsx scripts/collectPonsOutcomes.ts",
+    "pons:refresh-dev-registry": "tsx scripts/refreshPonsDeveloperRegistry.ts",
+    "pons:live-dev": "tsx scripts/runPonsLiveDev.ts",
+    "pons:learn-devs": "tsx scripts/learnPonsDevelopers.ts"
   },
   "dependencies": {
     "@solana/web3.js": "^1.98.4",

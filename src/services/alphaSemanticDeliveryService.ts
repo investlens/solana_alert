@@ -68,6 +68,7 @@ const productionDependencies: SemanticDeliveryDependencies = {
 
 export async function deliverAlphaSemanticEvent(args: {
   event: UserFacingSemanticEvent; message: string; buttons?: InlineButton[][]; preserveMessage?: boolean;
+  onFailure?: (error: unknown) => void;
 }, dependencies: SemanticDeliveryDependencies = productionDependencies): Promise<{ delivered: number; failed: number }> {
   let deliveryMessage = args.message;
   if (dependencies === productionDependencies && !args.preserveMessage) {
@@ -104,6 +105,7 @@ export async function deliverAlphaSemanticEvent(args: {
       if (result.sent) await dependencies.sentUnconfirmed(args.event, user, leaseToken).catch(error =>
         console.error('[AlphaSemanticDelivery] Could not preserve sent-unconfirmed state:', error));
       const reason = result.error instanceof Error ? result.error.message : String(result.error ?? 'unknown');
+      args.onFailure?.(result.error);
       if (reason.includes('403')) await dependencies.blocked(user.telegram_id);
       console.error('[AlphaSemanticDelivery] Delivery failed:', { alertEventId: args.event.id,
         semanticEventType: args.event.type, recipientCount: users.length, renderedCharacters, renderedBytes,
@@ -111,6 +113,7 @@ export async function deliverAlphaSemanticEvent(args: {
         telegramId: user.telegram_id, sent: result.sent, reason });
     } catch (error) {
       failed += 1;
+      args.onFailure?.(error);
       console.error('[AlphaSemanticDelivery] Recipient processing failed:', { alertEventId: args.event.id,
         semanticEventType: args.event.type, telegramId: user.telegram_id,
         reason: error instanceof Error ? error.message : String(error) });
