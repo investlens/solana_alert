@@ -1,0 +1,11 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { encodeAbiParameters, encodeEventTopics, parseAbiItem, parseAbiParameters } from 'viem';
+import { getPonsFactoryDeployments } from '../src/chains/robinhood/ponsContracts.js';
+import { pollPonsLiveLaunchesOnce } from '../src/chains/robinhood/ponsLiveLaunchDetector.js';
+const factory=getPonsFactoryDeployments().find(x=>x.id==='v2-current')!;
+const token='0x1111111111111111111111111111111111111111',curve='0x2222222222222222222222222222222222222222',deployer='0x3333333333333333333333333333333333333333',pair='0x4444444444444444444444444444444444444444';
+const event=parseAbiItem(factory.tokenLaunchedEvent);const log={topics:encodeEventTopics({abi:[event],eventName:'TokenLaunched',args:{token,curve,deployer}}),data:encodeAbiParameters(parseAbiParameters('address,uint256,uint256'),[pair,1n,2n]),blockNumber:20n,transactionHash:`0x${'ab'.repeat(32)}` as const,logIndex:1};
+const retry={attempts:3,baseDelayMs:0,maxDelayMs:0,jitterMs:0,sleep:async()=>{},random:()=>0,onRetry:()=>{}};
+test('live polling retries transient RPC failure and advances only its dedicated checkpoint',async()=>{let calls=0;const checkpoints:Array<[string,bigint]>=[];const handled:string[]=[];const result=await pollPonsLiveLaunchesOnce({getBlockNumber:async()=>20n,getLogs:async()=>{calls++;if(calls===1)throw new TypeError('fetch failed');return[log]},getBlock:async()=>({timestamp:1_700_000_000n})} as never,{getLiveCheckpoint:async()=>19n,persistLaunches:async()=>{},setLiveCheckpoint:async(f,b)=>{checkpoints.push([f.id,b])}},async launch=>{handled.push(launch.token_address)},{factories:[factory],retry,log:()=>{}});assert.equal(calls,2);assert.deepEqual(handled,[token]);assert.deepEqual(checkpoints,[['v2-current',20n]]);assert.equal(result.handled,1)});
+test('duplicate event in one poll is handled once',async()=>{let handled=0;const result=await pollPonsLiveLaunchesOnce({getBlockNumber:async()=>20n,getLogs:async()=>[log,log],getBlock:async()=>({timestamp:1_700_000_000n})} as never,{getLiveCheckpoint:async()=>19n,persistLaunches:async rows=>{assert.equal(rows.length,1)},setLiveCheckpoint:async()=>{}},async()=>{handled++},{factories:[factory],retry,log:()=>{}});assert.equal(handled,1);assert.equal(result.duplicates,1)});
