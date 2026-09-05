@@ -1,7 +1,8 @@
 import type { PonsDeveloperRegistryEntry } from './ponsDeveloperRegistry.js';
+import type { PonsDeveloperTier } from './ponsDeveloperIntelligence.js';
 import type { PonsLaunch } from './ponsHistoricalLaunchScanner.js';
 
-const icon = { GEM: '💎', KING: '👑', LEGEND: '🏆' } as const;
+const icon: Partial<Record<PonsDeveloperTier, string>> = { GEM: '💎', KING: '👑', LEGEND: '🏆' };
 const money = (value: number | null) => value == null
   ? 'unknown'
   : `$${value.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
@@ -12,7 +13,7 @@ export type PonsProvenDeveloperAlert = {
   launchIdentity: string;
   tokenAddress: string;
   developerAddress: string;
-  developerTier: 'GEM' | 'KING' | 'LEGEND';
+  developerTier: PonsDeveloperTier;
   text: string;
 };
 
@@ -21,7 +22,7 @@ export function createPonsProvenDeveloperAlert(
   developer: PonsDeveloperRegistryEntry,
   identity: string,
 ): PonsProvenDeveloperAlert {
-  const tier = developer.tier as keyof typeof icon;
+  const tier = developer.tier;
   return {
     kind: 'PONS_PROVEN_DEV_LAUNCH',
     priority: 'HIGH',
@@ -30,8 +31,8 @@ export function createPonsProvenDeveloperAlert(
     developerAddress: launch.deployer_address,
     developerTier: tier,
     text: [
-      '🚨 PONS PROVEN DEV LAUNCH', '',
-      `Tier: ${icon[tier]} ${tier}`,
+      '🔥 SUCCESSFUL DEV LAUNCH', '',
+      `Tier: ${icon[tier] ?? '✅'} ${tier}`,
       `Developer: ${launch.deployer_address}`,
       `Token: ${launch.token_address}`, '',
       'History:',

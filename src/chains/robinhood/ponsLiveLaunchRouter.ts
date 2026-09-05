@@ -53,7 +53,9 @@ export function createPonsLiveLaunchRouter(overrides: Partial<PonsLiveRouterDepe
       dependencies.log(`[PonsLive] ignored deployer=${launch.deployer_address} tier=${ignore.tier} reason=${ignore.reason ?? 'blocked'}`);
       return { status: 'IGNORED', reason: ignore.reason ?? 'blocked developer', provenDeveloper: false, alert: null, decision: null, developerTier: ignore.tier, validation: 'NOT_RUN', alertDelivery: 'NOT_APPLICABLE' };
     }
-    if (!developer || !['GEM', 'KING', 'LEGEND'].includes(developer.tier) || developer.isBlocked || developer.riskTier) {
+    const verifiedPeak = developer?.bestVerifiedPeakMarketCap;
+    if (!developer || developer.isBlocked || developer.riskTier || verifiedPeak == null
+      || !Number.isFinite(verifiedPeak) || verifiedPeak < dependencies.config.successfulDeveloperMinPeakMarketCap) {
       return { status: 'NORMAL_PATH', reason: 'developer follows normal Pons path', provenDeveloper: false, alert: null, decision: null, developerTier: developer?.tier ?? 'UNKNOWN', validation: 'NOT_RUN', alertDelivery: 'NOT_APPLICABLE' };
     }
 
