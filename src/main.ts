@@ -100,6 +100,11 @@ import { enrichTokenByMintAddress } from './services/dexscreener.js';
 import { fmtUsd } from './utils/format.js';
 import { sleep } from './utils/format.js';
 import { startLiveTrackService } from './services/liveTrackService.js';
+import { logUnhandledRejection } from './services/backgroundPromiseSafety.js';
+
+process.on('unhandledRejection', reason => {
+  logUnhandledRejection(reason);
+});
 
 const tokenStates = new Map<string, TokenState>();
 const seenTokens = new Set<string>();

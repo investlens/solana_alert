@@ -4,6 +4,7 @@ import { supabase } from './supabase.js';
 import { isDexScreenerProviderBackoffError } from './dexscreenerRequestGovernor.js';
 import { compareVerifiedPrices } from './priceComparability.js';
 import { processRunnerMilestones } from './runnerMilestoneService.js';
+import { describeBackgroundError } from './backgroundPromiseSafety.js';
 
 export const ALPHA_OUTCOME_CHECKPOINTS = [30, 60, 180, 300, 900, 1800, 3600] as const;
 export const OUTCOME_ELIGIBLE_SEMANTIC_TYPES = ['DEX_PAID', 'BOOST', 'VOLUME_SURGE', 'DEV_BURN', 'DEV_SELL', 'LIQUIDITY_RISK'] as const;
@@ -131,6 +132,7 @@ export async function runAlphaOutcomeCheckpointCycle(now = new Date()): Promise<
 let started = false;
 export function startAlphaOutcomeCheckpointService(): void {
   if (started) return; started = true;
-  const run = () => void runAlphaOutcomeCheckpointCycle().catch(error => console.warn('[AlphaOutcomeCheckpoints] Cycle failed:', error));
+  const run = () => void runAlphaOutcomeCheckpointCycle().catch(error =>
+    console.warn(`[AlphaOutcomeCheckpoints] Cycle failed: ${describeBackgroundError(error)}`));
   run(); setInterval(run, Number(process.env.ALPHA_OUTCOME_CHECKPOINT_POLL_MS ?? 15_000));
 }

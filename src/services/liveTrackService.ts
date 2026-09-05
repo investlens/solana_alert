@@ -2,6 +2,7 @@ import { chooseBestPair, fetchPairs } from './dexscreener.js';
 import { getRobinhoodMarketSnapshot } from '../chains/robinhood/market.js';
 import { supabase } from './supabase.js';
 import { editTelegramMessage, sendTelegramWithMessageId, type InlineButton } from './telegram.js';
+import { protectBackgroundPromise } from './backgroundPromiseSafety.js';
 
 export const LIVE_TRACK_DURATION_MS = 15 * 60_000;
 export const LIVE_TRACK_FAST_PHASE_MS = 2 * 60_000;
@@ -442,6 +443,11 @@ export async function runLiveTrackCycle(dependencies: TrackDependencies = produc
   } finally { workerRunning = false; }
 }
 export function startLiveTrackService(): ReturnType<typeof setInterval> | null {
-  if (workerStarted) return null; workerStarted = true; void runLiveTrackCycle();
-  const timer = setInterval(() => void runLiveTrackCycle(), WORKER_TICK_MS); timer.unref?.(); return timer;
+  if (workerStarted) return null;
+  workerStarted = true;
+  const runSafely = () => protectBackgroundPromise('LiveTrack', runLiveTrackCycle());
+  void runSafely();
+  const timer = setInterval(() => { void runSafely(); }, WORKER_TICK_MS);
+  timer.unref?.();
+  return timer;
 }
