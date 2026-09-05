@@ -4,7 +4,7 @@ import { refreshScoreBands } from "./scoreBands.js";
 import { refreshSummary } from "./summary.js";
 
 
-const ANALYTICS_INTERVAL_MS = 60_000;
+const ANALYTICS_INTERVAL_MS = 5 * 60_000;
 
 let analyticsCycleRunning = false;
 let analyticsInterval:
