@@ -32,7 +32,7 @@ async function fetchLatestPairPrice(chain: string, pairAddress: string): Promise
   const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
     const payload = (await governedDexScreenerJson<DexPairResponse>({
-      url, caller: 'legacy_outcome_tracker', priority: 'LOW', endpoint: 'PAIR_PRICE',
+      url, caller: 'legacy_outcome_tracker', priority: 'BACKGROUND', endpoint: 'PAIR_PRICE',
       cacheKey: `pair:${chain.toLowerCase()}:${pairAddress.toLowerCase()}`, cacheTtlMs: 30_000, signal: controller.signal,
     })).value;
     const price = Number(payload.pairs?.[0]?.priceUsd);
