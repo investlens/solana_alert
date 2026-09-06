@@ -18,7 +18,7 @@ const OUTCOME_CANDIDATE_LIMIT = 50;
 const OUTCOME_POLL_MS = 120_000;
 
 type EventRow = { id: number; asset_id: string; chain: string; price: number | string | null; price_provenance?: string | null; market_index_state?: string | null; alerted_at: string; semantic_event_type?: string | null; alert_type?: string | null };
-type PriorRow = { alert_event_id?: number; checkpoint_seconds: number; current_price: number | string | null; peak_price: number | string | null; peak_roi: number | string | null; time_to_peak_seconds: number | null };
+type PriorRow = { alert_event_id?: number; checkpoint_seconds?: number; current_price: number | string | null; peak_price: number | string | null; peak_roi: number | string | null; time_to_peak_seconds: number | null };
 const positive = (value: unknown): number | null => { const number = Number(value); return Number.isFinite(number) && number > 0 ? number : null; };
 
 export function buildAlphaOutcomeCheckpoint(args: {
@@ -42,8 +42,7 @@ export function buildAlphaOutcomeCheckpoint(args: {
     current_price: current, peak_price: previousPrices.length ? Math.max(...previousPrices) : null,
     measurement_source: args.source, price_provenance: args.provenance, measured_at: measuredAt,
     status: 'UNAVAILABLE', completeness: { entryPrice: entry != null, currentPrice: current != null,
-      reason: entry == null ? 'MISSING_ENTRY_PRICE' : current == null ? (args.unavailableReason ?? 'MISSING_CURRENT_PRICE')
-        : priceUnavailableReason },
+      reason: entry == null ? 'MISSING_ENTRY_PRICE' : current == null ? (args.unavailableReason ?? 'MISSING_CURRENT_PRICE') : priceUnavailableReason },
   };
   const peak = Math.max(entry, current, ...previousPrices);
   const currentRoi = ((current - entry) / entry) * 100; const peakRoi = ((peak - entry) / entry) * 100;
@@ -110,12 +109,8 @@ async function runAlphaOutcomeCheckpointDatabaseWork(now: Date): Promise<number>
   if (!selectedIds.length) return 0;
 
   const [{ data: fullEvents, error: fullEventsError }, { data: priorRows, error: priorError }] = await Promise.all([
-    supabase.from('alpha_alert_events')
-      .select('id,asset_id,chain,price,price_provenance,market_index_state,alerted_at,semantic_event_type,alert_type')
-      .in('id', selectedIds),
-    supabase.from('alpha_alert_outcomes')
-      .select('alert_event_id,checkpoint_seconds,current_price,peak_price,peak_roi,time_to_peak_seconds')
-      .in('alert_event_id', selectedIds),
+    supabase.from('alpha_alert_events').select('id,asset_id,chain,price,price_provenance,market_index_state,alerted_at,semantic_event_type,alert_type').in('id', selectedIds),
+    supabase.from('alpha_alert_outcomes').select('alert_event_id,checkpoint_seconds,current_price,peak_price,peak_roi,time_to_peak_seconds').in('alert_event_id', selectedIds),
   ]);
   if (fullEventsError) throw fullEventsError;
   if (priorError) throw priorError;
@@ -136,8 +131,7 @@ async function runAlphaOutcomeCheckpointDatabaseWork(now: Date): Promise<number>
     if (!due) continue;
 
     attempted += 1;
-    let measurement = { price: null as number | null, source: null as string | null, provenance: null as string | null,
-      reason: 'HISTORICAL_CHECKPOINT_PRICE_UNAVAILABLE' as string | null };
+    let measurement = { price: null as number | null, source: null as string | null, provenance: null as string | null, reason: 'HISTORICAL_CHECKPOINT_PRICE_UNAVAILABLE' as string | null };
     if (checkpointCanUseCurrentPrice(ageSeconds, due)) {
       measurement.reason = 'PRICE_ACQUISITION_FAILED';
       try { measurement = await currentPrice(event); }
@@ -151,8 +145,7 @@ async function runAlphaOutcomeCheckpointDatabaseWork(now: Date): Promise<number>
   }
 
   if (!pendingRows.length) return 0;
-  const { error: insertError } = await supabase.from('alpha_alert_outcomes')
-    .upsert(pendingRows, { onConflict: 'alert_event_id,checkpoint_seconds', ignoreDuplicates: true });
+  const { error: insertError } = await supabase.from('alpha_alert_outcomes').upsert(pendingRows, { onConflict: 'alert_event_id,checkpoint_seconds', ignoreDuplicates: true });
   if (insertError) throw insertError;
 
   for (const row of measuredRows) {
@@ -179,8 +172,7 @@ let started = false;
 export function startAlphaOutcomeCheckpointService(): void {
   if (started) return;
   started = true;
-  const run = () => void runAlphaOutcomeCheckpointCycle().catch(error =>
-    console.warn(`[AlphaOutcomeCheckpoints] Cycle failed: ${describeBackgroundError(error)}`));
+  const run = () => void runAlphaOutcomeCheckpointCycle().catch(error => console.warn(`[AlphaOutcomeCheckpoints] Cycle failed: ${describeBackgroundError(error)}`));
   run();
   setInterval(run, Number(process.env.ALPHA_OUTCOME_CHECKPOINT_POLL_MS ?? OUTCOME_POLL_MS));
 }
