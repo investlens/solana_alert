@@ -40,7 +40,6 @@ test('add, skip, rename and remove-name UX preserve canonical tracked-wallet ide
   const ui = await readFile(new URL('../src/bot/walletTracking.ts', import.meta.url), 'utf8');
   const service = await readFile(new URL('../src/services/trackedWalletService.ts', import.meta.url), 'utf8');
   const baseMigration = await readFile(new URL('../supabase/migrations/20260823131500_user_tracked_wallets.sql', import.meta.url), 'utf8');
-  const labelMigration = await readFile(new URL('../supabase/migrations/20260902160000_tracked_wallet_label_constraints.sql', import.meta.url), 'utf8');
 
   assert.match(ui, /Name this wallet \(optional\)/);
   assert.match(ui, /WALLET_NAME_SKIP/);
@@ -51,8 +50,7 @@ test('add, skip, rename and remove-name UX preserve canonical tracked-wallet ide
   assert.match(service, /\.eq\('id', args\.id\)[\s\S]*\.eq\('telegram_id', args\.telegramId\)/);
   assert.doesNotMatch(service, /updateTrackedWalletLabel[\s\S]{0,500}(wallet_address|chain|is_active|alerts_enabled):/);
   assert.match(baseMigration, /unique\s*\(\s*telegram_id,\s*chain,\s*wallet_address\s*\)/s);
-  assert.doesNotMatch(labelMigration, /unique[\s\S]*label/i);
-  assert.match(labelMigration, /char_length\(label\) between 1 and 64/);
+  assert.equal([...normalizeTrackedWalletLabel('x'.repeat(100))!].length, 64);
 });
 
 test('custom wallet names do not introduce Proven Dev auto-tracking', async () => {
