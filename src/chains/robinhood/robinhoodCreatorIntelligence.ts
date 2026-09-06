@@ -24,8 +24,10 @@ type CreatorLaunchComparable = {
   symbol: string | null;
   name: string | null;
   initial_market_cap: number | null;
+  alert_market_cap: number | null;
   current_market_cap: number | null;
   peak_market_cap: number | null;
+  launched_at: string | null;
   crossed_50k: boolean | null;
   crossed_100k: boolean | null;
   crossed_250k: boolean | null;
@@ -35,6 +37,8 @@ type CreatorLaunchComparable = {
   catastrophic_crash: boolean | null;
   return_5m_pct: number | null;
   return_15m_pct: number | null;
+  max_return_pct: number | null;
+  tracking_complete: boolean | null;
 };
 
 const OBSERVATION_LIMIT = 500;
@@ -68,7 +72,7 @@ function materiallyChanged(existing: CreatorLaunchComparable | undefined, desire
   for (const key of ['creator_wallet', 'symbol', 'name', 'crossed_50k', 'crossed_100k', 'crossed_250k', 'crossed_500k', 'crossed_1m', 'severe_crash', 'catastrophic_crash'] as const) {
     if ((existing[key] ?? null) !== (desired[key] ?? null)) return true;
   }
-  for (const key of ['initial_market_cap', 'current_market_cap', 'peak_market_cap', 'return_5m_pct', 'return_15m_pct'] as const) {
+  for (const key of ['current_market_cap', 'peak_market_cap', 'return_5m_pct', 'return_15m_pct', 'max_return_pct'] as const) {
     if (!sameNumber(existing[key], desired[key])) return true;
   }
   return false;
@@ -108,6 +112,17 @@ function buildLaunch(row: RobinhoodCreatorObservation, checkedAt: string) {
   };
 }
 
+function preserveLaunchEvidence(desired: ReturnType<typeof buildLaunch>, existing?: CreatorLaunchComparable) {
+  if (!existing) return desired;
+  return {
+    ...desired,
+    initial_market_cap: existing.initial_market_cap ?? desired.initial_market_cap,
+    alert_market_cap: existing.alert_market_cap ?? desired.alert_market_cap,
+    launched_at: existing.launched_at ?? desired.launched_at,
+    tracking_complete: existing.tracking_complete ?? desired.tracking_complete,
+  };
+}
+
 async function syncCreatorIntelligenceOnce(): Promise<void> {
   const { data, error } = await supabase
     .from('robinhood_observations')
@@ -126,7 +141,7 @@ async function syncCreatorIntelligenceOnce(): Promise<void> {
   const tokens = [...new Set(desired.map(row => row.token))];
   const { data: existingRows, error: existingError } = await supabase
     .from('creator_launches')
-    .select('token,creator_wallet,symbol,name,initial_market_cap,current_market_cap,peak_market_cap,crossed_50k,crossed_100k,crossed_250k,crossed_500k,crossed_1m,severe_crash,catastrophic_crash,return_5m_pct,return_15m_pct')
+    .select('token,creator_wallet,symbol,name,initial_market_cap,alert_market_cap,current_market_cap,peak_market_cap,launched_at,crossed_50k,crossed_100k,crossed_250k,crossed_500k,crossed_1m,severe_crash,catastrophic_crash,return_5m_pct,return_15m_pct,max_return_pct,tracking_complete')
     .eq('chain', 'robinhood')
     .in('token', tokens);
   if (existingError) throw existingError;
@@ -134,7 +149,9 @@ async function syncCreatorIntelligenceOnce(): Promise<void> {
   const existing = new Map<string, CreatorLaunchComparable>(
     ((existingRows ?? []) as unknown as CreatorLaunchComparable[]).map(row => [row.token.toLowerCase(), row]),
   );
-  const changed = desired.filter(row => materiallyChanged(existing.get(row.token), row));
+  const changed = desired
+    .filter(row => materiallyChanged(existing.get(row.token), row))
+    .map(row => preserveLaunchEvidence(row, existing.get(row.token)));
 
   let synced = 0;
   for (let offset = 0; offset < changed.length; offset += UPSERT_BATCH_SIZE) {
