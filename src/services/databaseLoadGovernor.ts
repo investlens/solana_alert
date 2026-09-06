@@ -54,7 +54,17 @@ export function recordDatabaseSuccess(workClass: DatabaseWorkClass) {
 }
 
 export function recordDatabaseFailure(error: unknown, workClass: DatabaseWorkClass, now = Date.now()) {
-  if (workClass !== 'BACKGROUND' || !isTransientDatabaseError(error)) return;
+  if (workClass !== 'BACKGROUND') return;
+
+  if (!isTransientDatabaseError(error)) {
+    if (state === 'HALF_OPEN') {
+      consecutiveFailures = 0;
+      openUntil = 0;
+      state = 'CLOSED';
+    }
+    return;
+  }
+
   consecutiveFailures += 1;
   if (consecutiveFailures < FAILURE_THRESHOLD && state !== 'HALF_OPEN') return;
   const exponent = Math.max(0, consecutiveFailures - FAILURE_THRESHOLD);
