@@ -32,14 +32,15 @@ test('scanner persistence null is a token failure while a persisted row is accep
   assert.equal(requirePersistedScannerOpportunity(row, 'EXISTING_TOKEN_MONITOR'), row);
 });
 
-test('outcome eligibility is applied before the batch limit so internal volume cannot starve alerts', () => {
+test('outcome eligibility is applied before the batch limit so internal volume cannot starve semantic alerts', () => {
   const internal = Array.from({ length: 500 }, (_, id) => ({ id, asset_id: `internal-${id}`, chain: 'robinhood',
     price: 1, alerted_at: '2026-08-29T00:00:00Z', semantic_event_type: 'DANGER', alert_type: 'OBSERVE' }));
   const eligible = Array.from({ length: 10 }, (_, index) => ({ id: 1000 + index, asset_id: `eligible-${index}`, chain: 'robinhood',
     price: 1, alerted_at: '2026-08-29T00:00:00Z', semantic_event_type: index % 2 ? 'BOOST' : null, alert_type: index % 2 ? null : 'CHECK_ENTRY' }));
-  assert.deepEqual(selectOutcomeEligibleCandidates([...internal, ...eligible], 200).map(row => row.id), eligible.map(row => row.id));
+  const semanticEligible = eligible.filter(row => row.semantic_event_type === 'BOOST');
+  assert.deepEqual(selectOutcomeEligibleCandidates([...internal, ...eligible], 200).map(row => row.id), semanticEligible.map(row => row.id));
   assert.deepEqual([...OUTCOME_ELIGIBLE_SEMANTIC_TYPES], ['DEX_PAID', 'BOOST', 'VOLUME_SURGE', 'DEV_BURN', 'DEV_SELL', 'LIQUIDITY_RISK']);
-  assert.deepEqual([...OUTCOME_ELIGIBLE_ALERT_TYPES], ['ENTRY', 'CHECK_ENTRY', 'OPPORTUNITY']);
+  assert.deepEqual([...OUTCOME_ELIGIBLE_ALERT_TYPES], []);
 });
 
 test('malformed provider identity is bounded before HTML rendering and actions stay callback-safe', () => {
