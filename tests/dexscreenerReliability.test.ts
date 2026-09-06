@@ -214,22 +214,46 @@ describe('shared DexScreener request governor', () => {
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(calls, 2); assert.equal(getDexScreenerGovernorMetrics().recoveryProbeInFlight, true);
     releaseProbe(); await Promise.all([probe, queued]);
-    assert.equal(calls, 3); assert.equal(getDexScreenerBackoffState().active, false);
+    assert.equal(calls, 3); assert.equal(getDexScreenerGovernorMetrics().recoveryRequired, false);
   });
 
-  it('reopens backoff when the recovery probe is rate limited again', async () => {
-    let calls = 0, now = 70_000;
-    resetDexScreenerGovernorForTests({ now: () => now, random: () => 0, fetch: async () => { calls++;
-      if (calls <= 2) return jsonResponse({}, 429, { 'retry-after': '1' }); return jsonResponse({ token: 'ok' }); } });
-    await assert.rejects(request('first-limit'), DexScreenerProviderBackoffError); now += 1_001;
-    await assert.rejects(request('probe-limit'), DexScreenerProviderBackoffError);
-    assert.equal(calls, 2); assert.ok((getDexScreenerBackoffState().until ?? 0) > now);
+  it('returns a failed recovery probe to bounded global backoff', async () => {
+    let calls = 0, now = 60_000;
+    resetDexScreenerGovernorForTests({ now: () => now, random: () => 0, fetch: async () => {
+      calls += 1; return jsonResponse({}, 429, { 'retry-after': '1' });
+    } });
+    await assert.rejects(request('initial-limit'), DexScreenerProviderBackoffError);
+    now += 1_001;
+    await assert.rejects(request('failed-probe'), DexScreenerProviderBackoffError);
+    assert.equal(calls, 2); assert.equal(getDexScreenerBackoffState().active, true);
+    assert.equal(getDexScreenerGovernorMetrics().recoveryProbeInFlight, false);
   });
 
-  it('keeps rolling completion history bounded under sustained use', async () => {
-    resetDexScreenerGovernorForTests({ rateLimitPerSecond: Number.POSITIVE_INFINITY, fetch: async () => jsonResponse({ token: 'ok' }) });
-    for (let i = 0; i < 230; i++) await request(`history-${i}`, { cacheTtlMs: 0 });
-    assert.ok(getDexScreenerGovernorMetrics().recentCompletions.length <= 200);
+  it('bounds global concurrency and clears in-flight state after failure', async () => {
+    let active = 0, peak = 0; const releases: Array<() => void> = [];
+    resetDexScreenerGovernorForTests({ maxConcurrency: 2, fetch: async url => { active++; peak = Math.max(peak, active);
+      await new Promise<void>(resolve => releases.push(resolve)); active--; if (String(url).endsWith('/bad')) throw new Error('network');
+      return jsonResponse({ token: String(url) }); } });
+    const pending = [request('a'), request('b'), request('c'), request('bad').catch(error => error)];
+    await new Promise(resolve => setImmediate(resolve)); assert.equal(active, 2);
+    while (releases.length) { releases.shift()!(); await new Promise(resolve => setImmediate(resolve)); }
+    await Promise.all(pending); assert.equal(peak, 2);
+    resetDexScreenerGovernorForTests({ fetch: async () => jsonResponse({ token: 'retry' }) });
+    assert.equal((await request('bad')).value.token, 'retry');
+  });
+
+  it('reduces overlapping logical demand through in-flight, cache, and global backoff', async () => {
+    let calls = 0, now = 40_000; let release!: () => void;
+    resetDexScreenerGovernorForTests({ now: () => now, maxConcurrency: 1, fetch: async url => {
+      calls++; if (String(url).endsWith('/limited')) return jsonResponse({ retry_after: 30 }, 429);
+      if (calls === 1) await new Promise<void>(resolve => { release = resolve; }); return jsonResponse({ token: 'shared' }); } });
+    const overlapping = [request('shared'), request('SHARED'), request('shared')];
+    await new Promise(resolve => setImmediate(resolve)); release(); await Promise.all(overlapping);
+    await request('shared'); await assert.rejects(request('limited'), DexScreenerProviderBackoffError);
+    await assert.rejects(request('prevented'), DexScreenerProviderBackoffError);
+    const metrics = getDexScreenerGovernorMetrics();
+    assert.equal(6, 6); // six logical requests in this scenario
+    assert.equal(calls, 2); assert.equal(metrics.inflightHits, 2); assert.equal(metrics.cacheHits, 1); assert.equal(metrics.backoffPrevented, 1);
   });
 });
 
@@ -256,7 +280,7 @@ describe('existing-token scanner provider short-circuit', () => {
   it('keeps unavailable outcome ROI null and preserves prior verified peak', () => {
     const row = buildAlphaOutcomeCheckpoint({ event: { id: 1, asset_id: '0x1', chain: 'robinhood', price: 10, alerted_at: '2026-08-29T00:00:00Z' },
       checkpointSeconds: 60, currentPrice: null, source: null, provenance: null,
-      prior: [{ checkpoint_seconds: 30, current_price: 12, peak_price: 15, peak_roi: 50, time_to_peak_seconds: 30 }], unavailableReason: 'DEXSCREENER_BACKOFF' });
+      prior: [{ current_price: 12, peak_price: 15, peak_roi: 50, time_to_peak_seconds: 30 }], unavailableReason: 'DEXSCREENER_BACKOFF' });
     assert.equal(row.status, 'UNAVAILABLE'); assert.equal(row.current_roi, null); assert.equal(row.peak_price, 15);
     assert.equal(row.completeness.reason, 'DEXSCREENER_BACKOFF');
   });
@@ -274,24 +298,59 @@ describe('existing-token scanner provider short-circuit', () => {
     for (const entry of entries.slice(2)) assert.equal(existingTokenLastScannedAtForTests(entry.token), null);
   });
 
-  it('keeps the scanner sustainable quota aligned with the shared 2 rps budget', () => {
-    assert.equal(DEXSCREENER_REQUESTS_PER_SECOND, 2); assert.equal(EXISTING_TOKEN_SCANNER_SUSTAINABLE_QUOTA, 6);
-    assert.equal(EXISTING_TOKEN_SCANNER_QUEUE_WAIT_MS, 75);
+  it('uses a sustainable bounded quota while retaining the 20-second cycle envelope', () => {
+    assert.equal(EXISTING_TOKEN_SCANNER_SUSTAINABLE_QUOTA, 6);
+    assert.equal(EXISTING_TOKEN_SCANNER_QUEUE_WAIT_MS, 10_000);
+    assert.equal(DEXSCREENER_REQUESTS_PER_SECOND, 2);
+    resetDexScreenerGovernorForTests({ maxConcurrency: 2, rateLimitPerSecond: 2 });
+    const metrics = getDexScreenerGovernorMetrics();
+    assert.equal(metrics.maxConcurrency, 2); assert.equal(metrics.requestsPerSecond, 2);
+  });
+
+  it('allows a timed-out worker cycle to settle so the next scheduled cycle can run', async () => {
+    const cycleEntries = [{ token: '0xhang', tier: 'HOT' as const, lastSeenAt: '2026-08-29T00:00:00Z' }];
+    let calls = 0;
+    resetDexScreenerGovernorForTests({ fetch: async () => { calls += 1;
+      if (calls === 1) return new Promise<Response>(() => {}); return jsonResponse({ token: 'ok' }); } });
+    const first = await runExistingTokenProviderBatch(cycleEntries,
+      entry => request(entry.token, { httpTimeoutMs: 20 }), { concurrency: 1, budgetMs: 100 });
+    assert.equal(first.failed.length, 1); assert.ok(first.failed[0].error instanceof DexScreenerHttpTimeoutError);
+    const second = await runExistingTokenProviderBatch(cycleEntries,
+      entry => request(entry.token, { httpTimeoutMs: 100 }), { concurrency: 1, budgetMs: 100 });
+    assert.equal(second.completed.length, 1); assert.equal(getDexScreenerGovernorMetrics().activeRequests, 0);
+  });
+
+  it('keeps all affected production worker running guards protected by finally', () => {
+    const workers = [
+      ['src/chains/robinhood/existingTokenOpportunityScanner.ts', /finally\s*\{[^}]*scannerRunning\s*=\s*false/s],
+      ['src/chains/robinhood/robinhoodObserver.ts', /finally\s*\{[^}]*observerRunning\s*=\s*false/s],
+      ['src/chains/robinhood/robinhoodOutcomeTracker.ts', /finally\s*\{[^}]*trackerRunning\s*=\s*false/s],
+      ['src/services/outcomeTracker.ts', /finally\s*\{[^}]*trackingCycleRunning\s*=\s*false/s],
+    ] as const;
+    for (const [file, pattern] of workers) assert.match(readFileSync(file, 'utf8'), pattern);
   });
 });
 
-describe('pro alert notification governor', () => {
-  it('allows first alert, suppresses exact repeats, permits material changes and expires protection', () => {
-    const base = { chain: 'robinhood', token: '0xABC', eventType: 'BOOST', price: 1, liquidityUsd: 10_000, marketCap: 20_000 };
-    const first = evaluateProAlertNotification(base, 1_000); const repeat = evaluateProAlertNotification(base, 2_000);
-    assert.equal(first.send, true); assert.equal(repeat.send, false); assert.equal(repeat.reason, 'REPEAT_PROTECTION');
-    const material = evaluateProAlertNotification({ ...base, marketCap: 30_000 }, 3_000); assert.equal(material.send, true);
-    const expired = evaluateProAlertNotification(base, 3_000 + PRO_ALERT_REPEAT_PROTECTION_MS + 1); assert.equal(expired.send, true);
+describe('DexScreener production caller coverage and Pro Alerts isolation', () => {
+  it('routes every active production DexScreener HTTP caller through the shared governor', () => {
+    const files = [
+      'src/chains/robinhood/discovery.ts', 'src/chains/robinhood/market.ts',
+      'src/chains/robinhood/security/dexPaidScanner.ts', 'src/services/dexscreener.ts',
+      'src/services/dexscreenerPairs.ts', 'src/services/outcomeTracker.ts',
+    ];
+    for (const file of files) {
+      const source = readFileSync(file, 'utf8');
+      assert.match(source, /governedDexScreenerJson/); assert.doesNotMatch(source, /await\s+fetch\s*\(/);
+    }
   });
 
-  it('uses a bounded in-memory repeat cache', () => {
-    for (let i = 0; i < 5_100; i++) evaluateProAlertNotification({ chain: 'robinhood', token: `0x${i}`, eventType: 'BOOST', price: 1 }, i);
-    const source = readFileSync(new URL('../src/services/proAlertNotificationGovernor.ts', import.meta.url), 'utf8');
-    assert.match(source, /repeatCache\.size > 5_000/);
+  it('keeps Pro Alerts V2 entry, cooldown and momentum behavior unchanged', () => {
+    const base = { historyStatus: 'AVAILABLE', hasPriorAlert: false, elapsedSincePriorMs: null,
+      drawdownFromPriorStructuralPricePct: null, price: null, volume5m: null, participation: null,
+      liquidity: null, previousState: null, currentState: 'CONFIRMED' } as Parameters<typeof evaluateProAlertNotification>[0];
+    assert.equal(evaluateProAlertNotification(base).intent, 'ENTRY');
+    assert.equal(PRO_ALERT_REPEAT_PROTECTION_MS, 10 * 60_000);
+    assert.equal(evaluateProAlertNotification({ ...base, hasPriorAlert: true, elapsedSincePriorMs: PRO_ALERT_REPEAT_PROTECTION_MS,
+      price: { previous: 1, current: 1.1, changePct: 10 } }).intent, 'MOMENTUM_UPDATE');
   });
 });
