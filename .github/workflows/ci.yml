@@ -10,6 +10,15 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      TELEGRAM_BOT_TOKEN: test-token
+      OWNER_CHAT_ID: "1"
+      ADMIN_TELEGRAM_ID: "1"
+      SUPABASE_URL: http://127.0.0.1:54321
+      SUPABASE_SERVICE_ROLE_KEY: test-service-role-key
+      ADMIN_TRADING_ENABLED: "false"
+      AUTO_TRADE_MODE: paper
+      PONS_SHADOW_ENABLED: "false"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
