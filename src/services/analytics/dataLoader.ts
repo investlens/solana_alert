@@ -1,58 +1,40 @@
+import { runDatabaseWork } from "../databaseLoadGovernor.js";
 import { supabase } from "../supabase.js";
 import type {
   AlertOutcomeRow,
   AnalyticsDataset,
 } from "./types.js";
 
-const PAGE_SIZE = 1000;
+const ANALYTICS_OUTCOME_LIMIT = 5_000;
 
-async function fetchAllAlertOutcomes(): Promise<AlertOutcomeRow[]> {
-  const allRows: AlertOutcomeRow[] = [];
+async function fetchBoundedAlertOutcomes(): Promise<AlertOutcomeRow[]> {
+  const { data, error } = await supabase
+    .from("alert_outcomes")
+    .select(`
+      symbol,
+      roi_current,
+      roi_peak,
+      max_drawdown,
+      alert_score,
+      status
+    `)
+    .order("updated_at", { ascending: false })
+    .limit(ANALYTICS_OUTCOME_LIMIT);
 
-  let from = 0;
-
-  while (true) {
-    const to = from + PAGE_SIZE - 1;
-
-    const { data, error } = await supabase
-      .from("alert_outcomes")
-      .select(
-        `
-            symbol,
-            roi_current,
-            roi_peak,
-            max_drawdown,
-            alert_score,
-            status
-        `,
-        )
-      .range(from, to);
-
-    if (error) {
-      throw new Error(
-        `[AnalyticsDataLoader] Failed to load alert outcomes: ${error.message}`,
-      );
-    }
-
-    const rows = (data ?? []) as AlertOutcomeRow[];
-
-    allRows.push(...rows);
-
-    if (rows.length < PAGE_SIZE) {
-      break;
-    }
-
-    from += PAGE_SIZE;
+  if (error) {
+    throw new Error(
+      `[AnalyticsDataLoader] Failed to load alert outcomes: ${error.message}`,
+    );
   }
 
-  return allRows;
+  return (data ?? []) as AlertOutcomeRow[];
 }
 
-async function getTotalAlertCount(): Promise<number> {
+async function getApproximateAlertCount(): Promise<number> {
   const { count, error } = await supabase
     .from("alerts")
     .select("id", {
-      count: "exact",
+      count: "planned",
       head: true,
     });
 
@@ -67,13 +49,12 @@ async function getTotalAlertCount(): Promise<number> {
 
 async function getAlertsTodayCount(): Promise<number> {
   const startOfTodayUtc = new Date();
-
   startOfTodayUtc.setUTCHours(0, 0, 0, 0);
 
   const { count, error } = await supabase
     .from("alerts")
     .select("id", {
-      count: "exact",
+      count: "planned",
       head: true,
     })
     .gte("alerted_at", startOfTodayUtc.toISOString());
@@ -87,10 +68,10 @@ async function getAlertsTodayCount(): Promise<number> {
   return count ?? 0;
 }
 
-export async function loadAnalyticsDataset(): Promise<AnalyticsDataset> {
+async function loadAnalyticsDatasetOnce(): Promise<AnalyticsDataset> {
   const [outcomes, totalAlerts, alertsToday] = await Promise.all([
-    fetchAllAlertOutcomes(),
-    getTotalAlertCount(),
+    fetchBoundedAlertOutcomes(),
+    getApproximateAlertCount(),
     getAlertsTodayCount(),
   ]);
 
@@ -98,6 +79,7 @@ export async function loadAnalyticsDataset(): Promise<AnalyticsDataset> {
     outcomes: outcomes.length,
     totalAlerts,
     alertsToday,
+    bounded: outcomes.length >= ANALYTICS_OUTCOME_LIMIT,
   });
 
   return {
@@ -105,4 +87,8 @@ export async function loadAnalyticsDataset(): Promise<AnalyticsDataset> {
     totalAlerts,
     alertsToday,
   };
+}
+
+export async function loadAnalyticsDataset(): Promise<AnalyticsDataset | null> {
+  return runDatabaseWork("BACKGROUND", loadAnalyticsDatasetOnce);
 }

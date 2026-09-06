@@ -5,12 +5,20 @@ import { isDexScreenerProviderBackoffError } from './dexscreenerRequestGovernor.
 import { compareVerifiedPrices } from './priceComparability.js';
 import { processRunnerMilestones } from './runnerMilestoneService.js';
 import { describeBackgroundError } from './backgroundPromiseSafety.js';
+import { runDatabaseWork } from './databaseLoadGovernor.js';
 
 export const ALPHA_OUTCOME_CHECKPOINTS = [30, 60, 180, 300, 900, 1800, 3600] as const;
-export const OUTCOME_ELIGIBLE_SEMANTIC_TYPES = ['DEX_PAID', 'BOOST', 'VOLUME_SURGE', 'DEV_BURN', 'DEV_SELL', 'LIQUIDITY_RISK'] as const;
-export const OUTCOME_ELIGIBLE_ALERT_TYPES = ['ENTRY', 'CHECK_ENTRY', 'OPPORTUNITY'] as const;
+export const OUTCOME_ELIGIBLE_SEMANTIC_TYPES = [
+  'DEX_PAID', 'BOOST', 'REIGNITION', 'TREND_REVERSAL', 'PONS_PROVEN_DEV_LAUNCH', 'PROVEN_DEV_LAUNCH',
+  'VOLUME_SURGE', 'DEV_BURN', 'DEV_SELL', 'LIQUIDITY_RISK',
+] as const;
+export const OUTCOME_ELIGIBLE_ALERT_TYPES: readonly string[] = [];
+
+const OUTCOME_CANDIDATE_LIMIT = 50;
+const OUTCOME_POLL_MS = 120_000;
+
 type EventRow = { id: number; asset_id: string; chain: string; price: number | string | null; price_provenance?: string | null; market_index_state?: string | null; alerted_at: string; semantic_event_type?: string | null; alert_type?: string | null };
-type PriorRow = { current_price: number | string | null; peak_price: number | string | null; peak_roi: number | string | null; time_to_peak_seconds: number | null };
+type PriorRow = { alert_event_id?: number; checkpoint_seconds?: number; current_price: number | string | null; peak_price: number | string | null; peak_roi: number | string | null; time_to_peak_seconds: number | null };
 const positive = (value: unknown): number | null => { const number = Number(value); return Number.isFinite(number) && number > 0 ? number : null; };
 
 export function buildAlphaOutcomeCheckpoint(args: {
@@ -34,8 +42,7 @@ export function buildAlphaOutcomeCheckpoint(args: {
     current_price: current, peak_price: previousPrices.length ? Math.max(...previousPrices) : null,
     measurement_source: args.source, price_provenance: args.provenance, measured_at: measuredAt,
     status: 'UNAVAILABLE', completeness: { entryPrice: entry != null, currentPrice: current != null,
-      reason: entry == null ? 'MISSING_ENTRY_PRICE' : current == null ? (args.unavailableReason ?? 'MISSING_CURRENT_PRICE')
-        : priceUnavailableReason },
+      reason: entry == null ? 'MISSING_ENTRY_PRICE' : current == null ? (args.unavailableReason ?? 'MISSING_CURRENT_PRICE') : priceUnavailableReason },
   };
   const peak = Math.max(entry, current, ...previousPrices);
   const currentRoi = ((current - entry) / entry) * 100; const peakRoi = ((peak - entry) / entry) * 100;
@@ -64,11 +71,11 @@ async function currentPrice(event: EventRow): Promise<{ price: number | null; so
 }
 
 export function premiumEventNeedsOutcome(event: Pick<EventRow, 'semantic_event_type' | 'alert_type'>): boolean {
-  return (OUTCOME_ELIGIBLE_SEMANTIC_TYPES as readonly string[]).includes(String(event.semantic_event_type ?? '').toUpperCase()) ||
-    (OUTCOME_ELIGIBLE_ALERT_TYPES as readonly string[]).includes(String(event.alert_type ?? '').toUpperCase());
+  const semantic = String(event.semantic_event_type ?? '').toUpperCase();
+  return (OUTCOME_ELIGIBLE_SEMANTIC_TYPES as readonly string[]).includes(semantic);
 }
 
-export function selectOutcomeEligibleCandidates(events: EventRow[], limit = 200): EventRow[] {
+export function selectOutcomeEligibleCandidates(events: EventRow[], limit = OUTCOME_CANDIDATE_LIMIT): EventRow[] {
   return events.filter(premiumEventNeedsOutcome).slice(0, limit);
 }
 
@@ -76,63 +83,96 @@ export function checkpointCanUseCurrentPrice(ageSeconds: number, checkpointSecon
   return ageSeconds >= checkpointSeconds && ageSeconds - checkpointSeconds <= maximumLatenessSeconds;
 }
 
-export async function runAlphaOutcomeCheckpointCycle(now = new Date()): Promise<number> {
+function groupPrior(rows: PriorRow[]): Map<number, PriorRow[]> {
+  const grouped = new Map<number, PriorRow[]>();
+  for (const row of rows) {
+    const id = Number(row.alert_event_id);
+    if (!Number.isFinite(id)) continue;
+    const existing = grouped.get(id) ?? [];
+    existing.push(row);
+    grouped.set(id, existing);
+  }
+  return grouped;
+}
+
+async function runAlphaOutcomeCheckpointDatabaseWork(now: Date): Promise<number> {
   const started = Date.now();
   const oldest = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
   const latest = new Date(now.getTime() - 30_000).toISOString();
   const { data, error } = await supabase.rpc('select_alpha_outcome_candidates', {
-    p_oldest: oldest, p_latest: latest, p_now: now.toISOString(), p_limit: 200,
+    p_oldest: oldest, p_latest: latest, p_now: now.toISOString(), p_limit: OUTCOME_CANDIDATE_LIMIT,
   });
   if (error) throw error;
-  const selected = (data ?? []) as EventRow[];
-  const selectedIds = selected.map(event => event.id);
-  const { data: fullEvents, error: fullEventsError } = selectedIds.length
-    ? await supabase.from('alpha_alert_events')
-      .select('id,asset_id,chain,price,price_provenance,market_index_state,alerted_at,semantic_event_type,alert_type')
-      .in('id', selectedIds)
-    : { data: [] as EventRow[], error: null };
+
+  const selected = selectOutcomeEligibleCandidates((data ?? []) as EventRow[], OUTCOME_CANDIDATE_LIMIT);
+  const selectedIds = [...new Set(selected.map(event => Number(event.id)).filter(Number.isFinite))];
+  if (!selectedIds.length) return 0;
+
+  const [{ data: fullEvents, error: fullEventsError }, { data: priorRows, error: priorError }] = await Promise.all([
+    supabase.from('alpha_alert_events').select('id,asset_id,chain,price,price_provenance,market_index_state,alerted_at,semantic_event_type,alert_type').in('id', selectedIds),
+    supabase.from('alpha_alert_outcomes').select('alert_event_id,checkpoint_seconds,current_price,peak_price,peak_roi,time_to_peak_seconds').in('alert_event_id', selectedIds),
+  ]);
   if (fullEventsError) throw fullEventsError;
+  if (priorError) throw priorError;
+
   const fullById = new Map<number, EventRow>((fullEvents ?? []).map(event => [Number(event.id), event as EventRow] as const));
-  const candidates = selected.flatMap(event => {
-    const full = fullById.get(Number(event.id));
-    return full ? [full] : [];
-  });
-  let inserted = 0, attempted = 0, measured = 0, unavailable = 0, failed = 0;
-  for (const event of candidates) {
+  const priorByEvent = groupPrior((priorRows ?? []) as PriorRow[]);
+  const pendingRows: ReturnType<typeof buildAlphaOutcomeCheckpoint>[] = [];
+  const measuredRows: ReturnType<typeof buildAlphaOutcomeCheckpoint>[] = [];
+  let attempted = 0;
+
+  for (const id of selectedIds) {
+    const event = fullById.get(id);
+    if (!event || !premiumEventNeedsOutcome(event)) continue;
+    const prior = priorByEvent.get(id) ?? [];
     const ageSeconds = Math.floor((now.getTime() - new Date(event.alerted_at).getTime()) / 1000);
-    const { data: existing, error: existingError } = await supabase.from('alpha_alert_outcomes')
-      .select('checkpoint_seconds,current_price,peak_price,peak_roi,time_to_peak_seconds').eq('alert_event_id', event.id);
-    if (existingError) throw existingError;
-    const done = new Set((existing ?? []).map(row => Number(row.checkpoint_seconds)));
+    const done = new Set(prior.map(row => Number(row.checkpoint_seconds)));
     const due = ALPHA_OUTCOME_CHECKPOINTS.find(seconds => ageSeconds >= seconds && !done.has(seconds));
     if (!due) continue;
+
     attempted += 1;
-    let measurement = { price: null as number | null, source: null as string | null, provenance: null as string | null,
-      reason: 'HISTORICAL_CHECKPOINT_PRICE_UNAVAILABLE' as string | null };
+    let measurement = { price: null as number | null, source: null as string | null, provenance: null as string | null, reason: 'HISTORICAL_CHECKPOINT_PRICE_UNAVAILABLE' as string | null };
     if (checkpointCanUseCurrentPrice(ageSeconds, due)) {
       measurement.reason = 'PRICE_ACQUISITION_FAILED';
       try { measurement = await currentPrice(event); }
-      catch (error) { if (isDexScreenerProviderBackoffError(error)) measurement.reason = 'DEXSCREENER_BACKOFF'; /* persist unavailable; never synthesize */ }
+      catch (error) { if (isDexScreenerProviderBackoffError(error)) measurement.reason = 'DEXSCREENER_BACKOFF'; }
     }
-    const row = buildAlphaOutcomeCheckpoint({ event, checkpointSeconds: due, currentPrice: measurement.price, source: measurement.source, provenance: measurement.provenance, prior: (existing ?? []) as PriorRow[], measuredAt: now.toISOString(), unavailableReason: measurement.reason });
-    const { error: insertError } = await supabase.from('alpha_alert_outcomes').upsert(row, { onConflict: 'alert_event_id,checkpoint_seconds', ignoreDuplicates: true });
-    if (insertError) { failed += 1; console.warn('[AlphaOutcomeCheckpoints] Checkpoint persistence failed', { alertEventId: event.id,
-      checkpointSeconds: due, reason: insertError.message }); continue; }
-    inserted += 1; if (row.status === 'MEASURED') measured += 1; else unavailable += 1;
-    if (row.status === 'MEASURED') await processRunnerMilestones({ alertEventId: event.id,
-      currentPrice: row.current_price, priceProvenance: row.price_provenance, measuredAt: row.measured_at,
-      measurementSource: row.measurement_source }).catch(error => console.warn('[RunnerMilestones] Evaluation failed', {
-        alertEventId: event.id, checkpointSeconds: due, reason: error instanceof Error ? error.message : String(error) }));
+
+    const row = buildAlphaOutcomeCheckpoint({ event, checkpointSeconds: due, currentPrice: measurement.price,
+      source: measurement.source, provenance: measurement.provenance, prior, measuredAt: now.toISOString(), unavailableReason: measurement.reason });
+    pendingRows.push(row);
+    if (row.status === 'MEASURED') measuredRows.push(row);
   }
-  console.log('alpha_outcome_checkpoint_cycle', { eligible_candidates: selected.length, selected: candidates.length,
-    checkpoints_attempted: attempted, measured, unavailable, failed, duration_ms: Date.now() - started });
-  return inserted;
+
+  if (!pendingRows.length) return 0;
+  const { error: insertError } = await supabase.from('alpha_alert_outcomes').upsert(pendingRows, { onConflict: 'alert_event_id,checkpoint_seconds', ignoreDuplicates: true });
+  if (insertError) throw insertError;
+
+  for (const row of measuredRows) {
+    await processRunnerMilestones({ alertEventId: row.alert_event_id, currentPrice: row.current_price,
+      priceProvenance: row.price_provenance, measuredAt: row.measured_at, measurementSource: row.measurement_source })
+      .catch(error => console.warn('[RunnerMilestones] Evaluation failed', {
+        alertEventId: row.alert_event_id, checkpointSeconds: row.checkpoint_seconds,
+        reason: error instanceof Error ? error.message : String(error),
+      }));
+  }
+
+  console.log('alpha_outcome_checkpoint_cycle', {
+    eligible_candidates: selected.length, checkpoints_attempted: attempted, persisted: pendingRows.length,
+    measured: measuredRows.length, unavailable: pendingRows.length - measuredRows.length, duration_ms: Date.now() - started,
+  });
+  return pendingRows.length;
+}
+
+export async function runAlphaOutcomeCheckpointCycle(now = new Date()): Promise<number> {
+  return (await runDatabaseWork('BACKGROUND', () => runAlphaOutcomeCheckpointDatabaseWork(now))) ?? 0;
 }
 
 let started = false;
 export function startAlphaOutcomeCheckpointService(): void {
-  if (started) return; started = true;
-  const run = () => void runAlphaOutcomeCheckpointCycle().catch(error =>
-    console.warn(`[AlphaOutcomeCheckpoints] Cycle failed: ${describeBackgroundError(error)}`));
-  run(); setInterval(run, Number(process.env.ALPHA_OUTCOME_CHECKPOINT_POLL_MS ?? 15_000));
+  if (started) return;
+  started = true;
+  const run = () => void runAlphaOutcomeCheckpointCycle().catch(error => console.warn(`[AlphaOutcomeCheckpoints] Cycle failed: ${describeBackgroundError(error)}`));
+  run();
+  setInterval(run, Number(process.env.ALPHA_OUTCOME_CHECKPOINT_POLL_MS ?? OUTCOME_POLL_MS));
 }
