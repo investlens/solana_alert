@@ -22,9 +22,9 @@ describe('existing-token continuous opportunity scanner', () => {
     assert.equal(universe.length, 2);
   });
 
-  it('ages inactive tokens out but retains explicitly watched and active runner tokens', () => {
+  it('ages inactive events out but retains explicit watchlist and active opportunity state', () => {
     assert.equal(buildExistingTokenUniverse({ now, events: [{ asset_id: '0xold', alerted_at: '2026-08-26T00:00:00.000Z' }] }).length, 0);
-    assert.equal(buildExistingTokenUniverse({ now, opportunities: [{ asset_id: '0xmonitor', strategy_key: 'EXISTING_TOKEN_MONITOR', status: 'WATCHING', updated_at: '2026-08-26T00:00:00.000Z' }] }).length, 0);
+    assert.equal(buildExistingTokenUniverse({ now, opportunities: [{ asset_id: '0xmonitor', strategy_key: 'EXISTING_TOKEN_MONITOR', status: 'WATCHING', updated_at: '2026-08-26T00:00:00.000Z' }] }).length, 1);
     assert.equal(buildExistingTokenUniverse({ now, watched: [{ opportunities: { asset_id: '0xOLD', chain: 'robinhood' }, updated_at: '2026-08-26T00:00:00.000Z' }] }).length, 1);
     assert.equal(buildExistingTokenUniverse({ now, opportunities: [{ asset_id: '0xrunner', strategy_key: 'EXISTING_TOKEN_RUNNER', status: 'NEW', updated_at: '2026-08-26T00:00:00.000Z' }] }).length, 1);
   });
