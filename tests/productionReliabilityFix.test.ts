@@ -39,7 +39,7 @@ test('outcome eligibility is applied before the batch limit so internal volume c
     price: 1, alerted_at: '2026-08-29T00:00:00Z', semantic_event_type: index % 2 ? 'BOOST' : null, alert_type: index % 2 ? null : 'CHECK_ENTRY' }));
   const semanticEligible = eligible.filter(row => row.semantic_event_type === 'BOOST');
   assert.deepEqual(selectOutcomeEligibleCandidates([...internal, ...eligible], 200).map(row => row.id), semanticEligible.map(row => row.id));
-  assert.deepEqual([...OUTCOME_ELIGIBLE_SEMANTIC_TYPES], ['DEX_PAID', 'BOOST', 'VOLUME_SURGE', 'DEV_BURN', 'DEV_SELL', 'LIQUIDITY_RISK']);
+  assert.deepEqual([...OUTCOME_ELIGIBLE_SEMANTIC_TYPES], ['DEX_PAID', 'BOOST', 'REIGNITION', 'TREND_REVERSAL', 'PONS_PROVEN_DEV_LAUNCH', 'PROVEN_DEV_LAUNCH', 'VOLUME_SURGE', 'DEV_BURN', 'DEV_SELL', 'LIQUIDITY_RISK']);
   assert.deepEqual([...OUTCOME_ELIGIBLE_ALERT_TYPES], []);
 });
 
