@@ -1,472 +1,72 @@
 import bs58 from 'bs58';
-import { Connection, Keypair, PublicKey, VersionedTransaction } from '@solana/web3.js';
+import { Keypair } from '@solana/web3.js';
 import { config } from '../config.js';
 
-const SOL_MINT = 'So11111111111111111111111111111111111111112';
+/**
+ * AlphaOS is intentionally alert-only.
+ *
+ * This execution-layer guard is deliberately independent of runtime settings.
+ * Even if a caller, environment variable, database setting, or future code path
+ * attempts to enable trading, no on-chain buy/sell can be submitted from this
+ * module. Manual external trading links remain unaffected.
+ */
+export const ONCHAIN_ADMIN_TRADING_PERMANENTLY_DISABLED = true as const;
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+export type AdminBuyResult = {
+  signature: string;
+  quote: unknown;
+  walletAddress: string;
+  requestedSolAmount: number;
+  submittedLamports: string;
+  tokenBalanceBefore: string;
+  tokenBalanceAfter: string;
+  tokensReceivedRaw: string;
+  verified: boolean;
+  balanceCheckFailed: boolean;
+  reconciliationRequired: boolean;
+};
+
+export type AdminSellResult = {
+  signature: string;
+  quote: unknown;
+  beforeBalance?: string;
+  afterBalance?: string;
+  balanceCheckFailed?: boolean;
+};
+
+function tradingDisabledError(): Error {
+  return new Error('AlphaOS on-chain admin trading is permanently disabled; alerts only');
 }
 
-function getConnection() {
-  return new Connection(config.solanaRpcUrl, 'confirmed');
+export async function adminBuyToken(_args: {
+  outputMint: string;
+  amountSol: number;
+  slippageBps?: number;
+}): Promise<AdminBuyResult> {
+  throw tradingDisabledError();
 }
 
-function getAdminKeypair() {
+export async function adminSellTokenPercent(_args: {
+  inputMint: string;
+  percent: 25 | 50 | 100;
+  slippageBps?: number;
+  priorityFeeLamports?: number | 'auto';
+}): Promise<AdminSellResult> {
+  throw tradingDisabledError();
+}
+
+export async function adminSellTokenPercentWithRetry(_args: {
+  inputMint: string;
+  percent: 25 | 50 | 100;
+}): Promise<AdminSellResult> {
+  throw tradingDisabledError();
+}
+
+export function getAdminTradingWalletAddress(): string {
   if (!config.adminTradingPrivateKey) {
     throw new Error('Missing ADMIN_TRADING_PRIVATE_KEY');
   }
 
   const secret = bs58.decode(config.adminTradingPrivateKey);
-  return Keypair.fromSecretKey(secret);
-}
-
-function getJupiterHeaders() {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-
-  if (config.jupiterApiKey) {
-    headers['x-api-key'] = config.jupiterApiKey;
-  }
-
-  return headers;
-}
-
-async function getQuote(args: {
-  inputMint: string;
-  outputMint: string;
-  amount: string;
-  slippageBps: number;
-}) {
-  const params = new URLSearchParams({
-    inputMint: args.inputMint,
-    outputMint: args.outputMint,
-    amount: args.amount,
-    slippageBps: String(args.slippageBps),
-    restrictIntermediateTokens: 'true',
-  });
-
-  const res = await fetch(`https://api.jup.ag/swap/v1/quote?${params.toString()}`, {
-    headers: config.jupiterApiKey ? { 'x-api-key': config.jupiterApiKey } : undefined,
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Jupiter quote failed: ${res.status} ${text}`);
-  }
-
-  return res.json();
-}
-
-async function buildSwapTransaction(args: {
-  quoteResponse: any;
-  userPublicKey: string;
-  priorityFeeLamports?: number | 'auto';
-}) {
-  const res = await fetch('https://api.jup.ag/swap/v1/swap', {
-    method: 'POST',
-    headers: getJupiterHeaders(),
-    body: JSON.stringify({
-      quoteResponse: args.quoteResponse,
-      userPublicKey: args.userPublicKey,
-      wrapAndUnwrapSol: true,
-      dynamicComputeUnitLimit: true,
-      prioritizationFeeLamports: args.priorityFeeLamports ?? 'auto',
-    }),
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Jupiter swap build failed: ${res.status} ${text}`);
-  }
-
-  return res.json();
-}
-
-async function signAndSendSerializedSwap(swapTransactionB64: string) {
-  const connection = getConnection();
-  const signer = getAdminKeypair();
-
-  const txBuf = Buffer.from(swapTransactionB64, 'base64');
-  const tx = VersionedTransaction.deserialize(txBuf);
-
-  tx.sign([signer]);
-
-  const signature = await connection.sendTransaction(tx, {
-    skipPreflight: false,
-    maxRetries: 5,
-  });
-
-  const latest = await connection.getLatestBlockhash();
-
-  const confirmation = await connection.confirmTransaction(
-    {
-      signature,
-      blockhash: latest.blockhash,
-      lastValidBlockHeight: latest.lastValidBlockHeight,
-    },
-    'confirmed'
-  );
-
-  if (confirmation.value.err) {
-    throw new Error(`Transaction failed on-chain: ${JSON.stringify(confirmation.value.err)}`);
-  }
-
-  return signature;
-}
-
-async function getAdminTokenRawBalance(inputMint: string): Promise<bigint> {
-  const connection = getConnection();
-  const owner = getAdminKeypair().publicKey;
-
-  const accounts = await connection.getParsedTokenAccountsByOwner(owner, {
-    mint: new PublicKey(inputMint),
-  });
-
-  if (!accounts.value.length) {
-    return 0n;
-  }
-
-  let total = 0n;
-
-  for (const account of accounts.value) {
-    const amount = account.account.data.parsed.info.tokenAmount.amount as string;
-    total += BigInt(amount);
-  }
-
-  return total;
-}
-
-async function waitForTokenBalanceIncrease(args: {
-  mint: string;
-  beforeBalance: bigint;
-  attempts?: number;
-  delayMs?: number;
-}): Promise<bigint | null> {
-  const attempts = args.attempts ?? 6;
-  const delayMs = args.delayMs ?? 1_500;
-
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    await sleep(delayMs);
-
-    try {
-      const currentBalance = await getAdminTokenRawBalance(args.mint);
-
-      console.log('[AdminTrading] Buy balance verification:', {
-        mint: args.mint,
-        attempt,
-        beforeBalance: args.beforeBalance.toString(),
-        currentBalance: currentBalance.toString(),
-      });
-
-      if (currentBalance > args.beforeBalance) {
-        return currentBalance;
-      }
-    } catch (error) {
-      console.log('[AdminTrading] Buy balance check failed:', {
-        mint: args.mint,
-        attempt,
-        error:
-          error instanceof Error
-            ? error.message
-            : String(error),
-      });
-    }
-  }
-
-  return null;
-}
-
-
-export async function adminBuyToken(args: {
-  outputMint: string;
-  amountSol: number;
-  slippageBps?: number;
-}) {
-  if (!config.adminTradingEnabled) {
-    throw new Error('Admin trading is disabled');
-  }
-
-  const signer = getAdminKeypair();
-  const connection = getConnection();
-
-  const solBalanceBefore = await connection.getBalance(
-    signer.publicKey,
-  );
-
-  const requestedLamports = Math.floor(
-    args.amountSol * 1_000_000_000,
-  );
-
-  const safeLamports = Math.floor(
-    Math.min(
-      solBalanceBefore * 0.8,
-      requestedLamports,
-    ),
-  );
-
-  if (safeLamports < 10_000_000) {
-    throw new Error(
-      'Not enough SOL to safely execute trade',
-    );
-  }
-
-  /*
-   * Capture the token balance before submitting the swap.
-   * This allows AlphaOS to calculate the actual number of
-   * tokens received rather than relying only on the quote.
-   */
-  const tokenBalanceBefore =
-    await getAdminTokenRawBalance(args.outputMint);
-
-  const quote = await getQuote({
-    inputMint: SOL_MINT,
-    outputMint: args.outputMint,
-    amount: safeLamports.toString(),
-    slippageBps:
-      args.slippageBps ??
-      config.adminMaxSlippageBps,
-  });
-
-  const built = await buildSwapTransaction({
-    quoteResponse: quote,
-    userPublicKey: signer.publicKey.toBase58(),
-  });
-
-  const signature = await signAndSendSerializedSwap(
-    built.swapTransaction,
-  );
-
-  /*
-   * The transaction is already confirmed at this point.
-   * Never submit another buy merely because the RPC has
-   * not indexed the new token balance yet.
-   */
-  const tokenBalanceAfter =
-    await waitForTokenBalanceIncrease({
-      mint: args.outputMint,
-      beforeBalance: tokenBalanceBefore,
-    });
-
-  if (tokenBalanceAfter === null) {
-    console.warn(
-      '[AdminTrading] Buy confirmed but balance requires reconciliation:',
-      {
-        mint: args.outputMint,
-        signature,
-        tokenBalanceBefore:
-          tokenBalanceBefore.toString(),
-      },
-    );
-
-    return {
-      signature,
-      quote,
-      walletAddress: signer.publicKey.toBase58(),
-
-      requestedSolAmount: args.amountSol,
-      submittedLamports: safeLamports.toString(),
-
-      tokenBalanceBefore:
-        tokenBalanceBefore.toString(),
-      tokenBalanceAfter: 'unknown',
-      tokensReceivedRaw: 'unknown',
-
-      verified: false,
-      balanceCheckFailed: true,
-      reconciliationRequired: true,
-    };
-  }
-
-  const tokensReceivedRaw =
-    tokenBalanceAfter - tokenBalanceBefore;
-
-  console.log('[AdminTrading] Buy verified:', {
-    mint: args.outputMint,
-    signature,
-    walletAddress: signer.publicKey.toBase58(),
-    submittedLamports: safeLamports.toString(),
-    tokenBalanceBefore:
-      tokenBalanceBefore.toString(),
-    tokenBalanceAfter:
-      tokenBalanceAfter.toString(),
-    tokensReceivedRaw:
-      tokensReceivedRaw.toString(),
-  });
-
-  return {
-    signature,
-    quote,
-    walletAddress: signer.publicKey.toBase58(),
-
-    requestedSolAmount: args.amountSol,
-    submittedLamports: safeLamports.toString(),
-
-    tokenBalanceBefore:
-      tokenBalanceBefore.toString(),
-    tokenBalanceAfter:
-      tokenBalanceAfter.toString(),
-    tokensReceivedRaw:
-      tokensReceivedRaw.toString(),
-
-    verified: true,
-    balanceCheckFailed: false,
-    reconciliationRequired: false,
-  };
-}
-
-export async function adminSellTokenPercent(args: {
-  inputMint: string;
-  percent: 25 | 50 | 100;
-  slippageBps?: number;
-  priorityFeeLamports?: number | 'auto';
-}) {
-  if (!config.adminTradingEnabled) {
-    throw new Error('Admin trading is disabled');
-  }
-
-  const connection = getConnection();
-  const signer = getAdminKeypair();
-  const owner = signer.publicKey;
-
-  const accounts = await connection.getParsedTokenAccountsByOwner(owner, {
-    mint: new PublicKey(args.inputMint),
-  });
-
-  const tokenAccount = accounts.value[0];
-  if (!tokenAccount) {
-    throw new Error('No token balance found for this mint');
-  }
-
-  const rawAmount = BigInt(
-    tokenAccount.account.data.parsed.info.tokenAmount.amount as string
-  );
-
-  if (rawAmount <= 0n) {
-    throw new Error('Token balance is zero');
-  }
-
-  const sellRaw =
-    args.percent === 100
-      ? rawAmount
-      : (rawAmount * BigInt(args.percent)) / 100n;
-
-  if (sellRaw <= 0n) {
-    throw new Error('Calculated sell amount is zero');
-  }
-
-  const quote = await getQuote({
-    inputMint: args.inputMint,
-    outputMint: SOL_MINT,
-    amount: sellRaw.toString(),
-    slippageBps: args.slippageBps ?? config.adminMaxSlippageBps,
-  });
-
-  const built = await buildSwapTransaction({
-    quoteResponse: quote,
-    userPublicKey: owner.toBase58(),
-    priorityFeeLamports: args.priorityFeeLamports ?? 'auto',
-  });
-
-  const signature = await signAndSendSerializedSwap(built.swapTransaction);
-
-  return {
-    signature,
-    quote,
-  };
-}
-
-export async function adminSellTokenPercentWithRetry(args: {
-  inputMint: string;
-  percent: 25 | 50 | 100;
-}) {
-  const attempts = [
-    { slippageBps: config.adminMaxSlippageBps, priorityFeeLamports: 'auto' as const },
-    { slippageBps: 2500, priorityFeeLamports: 250_000 },
-    { slippageBps: 4000, priorityFeeLamports: 500_000 },
-    { slippageBps: 6500, priorityFeeLamports: 900_000 },
-    { slippageBps: 9000, priorityFeeLamports: 1_500_000 },
-  ];
-
-  let lastError: unknown = null;
-
-  for (let i = 0; i < attempts.length; i++) {
-    try {
-      console.log('SELL ATTEMPT:', {
-        mint: args.inputMint,
-        percent: args.percent,
-        attempt: i + 1,
-        ...attempts[i],
-      });
-
-      const beforeBalance = await getAdminTokenRawBalance(args.inputMint);
-
-      const result = await adminSellTokenPercent({
-        inputMint: args.inputMint,
-        percent: args.percent,
-        slippageBps: attempts[i].slippageBps,
-        priorityFeeLamports: attempts[i].priorityFeeLamports,
-      });
-
-      await sleep(2500);
-
-      let afterBalance: bigint | null = null;
-
-      try {
-        afterBalance = await getAdminTokenRawBalance(args.inputMint);
-      } catch (balanceError) {
-        console.log('SELL BALANCE CHECK FAILED AFTER CONFIRMED TX:', {
-          mint: args.inputMint,
-          signature: result.signature,
-          error: balanceError instanceof Error ? balanceError.message : String(balanceError),
-        });
-
-        // Important: tx already confirmed, so do NOT retry and accidentally double-sell.
-        return {
-          ...result,
-          beforeBalance: beforeBalance.toString(),
-          afterBalance: 'unknown',
-          balanceCheckFailed: true,
-        };
-      }
-
-      if (args.percent === 100 && afterBalance > 0n && afterBalance >= beforeBalance) {
-        throw new Error('Sell tx confirmed but token balance did not decrease');
-      }
-
-      console.log('SELL SUCCESS:', {
-        mint: args.inputMint,
-        signature: result.signature,
-        beforeBalance: beforeBalance.toString(),
-        afterBalance: afterBalance.toString(),
-      });
-
-      return {
-        ...result,
-        beforeBalance: beforeBalance.toString(),
-        afterBalance: afterBalance.toString(),
-      };
-    } catch (error) {
-      lastError = error;
-
-      console.log('SELL ATTEMPT FAILED:', {
-        mint: args.inputMint,
-        attempt: i + 1,
-        error: error instanceof Error ? error.message : String(error),
-      });
-
-      await sleep(2500);
-    }
-  }
-
-  throw new Error(
-    `Sell failed after retries: ${
-      lastError instanceof Error ? lastError.message : String(lastError)
-    }`
-  );
-}
-
-export function getAdminTradingWalletAddress() {
-  return getAdminKeypair().publicKey.toBase58();
+  return Keypair.fromSecretKey(secret).publicKey.toBase58();
 }
