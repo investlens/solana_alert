@@ -1,4 +1,5 @@
 import { supabase } from '../../services/supabase.js';
+import { runDatabaseWork } from '../../services/databaseLoadGovernor.js';
 
 type RobinhoodCreatorObservation = {
   token_address: string;
@@ -107,18 +108,14 @@ function buildLaunch(row: RobinhoodCreatorObservation, checkedAt: string) {
   };
 }
 
-export async function syncRobinhoodCreatorIntelligence(): Promise<void> {
+async function syncCreatorIntelligenceOnce(): Promise<void> {
   const { data, error } = await supabase
     .from('robinhood_observations')
     .select('token_address,symbol,name,deployer_address,first_seen_at,decision_at,market_cap_at_decision,current_market_cap,peak_market_cap,roi_1m_percent,roi_3m_percent,roi_5m_percent,roi_15m_percent,roi_high_percent')
     .not('deployer_address', 'is', null)
     .order('decision_at', { ascending: false })
     .limit(OBSERVATION_LIMIT);
-
-  if (error) {
-    console.error('[RobinhoodCreatorIntel] Observation load failed:', error.message);
-    return;
-  }
+  if (error) throw error;
 
   const rows = (data ?? []) as unknown as RobinhoodCreatorObservation[];
   const valid = rows.filter(row => row.deployer_address && row.token_address);
@@ -132,11 +129,7 @@ export async function syncRobinhoodCreatorIntelligence(): Promise<void> {
     .select('token,creator_wallet,symbol,name,initial_market_cap,current_market_cap,peak_market_cap,crossed_50k,crossed_100k,crossed_250k,crossed_500k,crossed_1m,severe_crash,catastrophic_crash,return_5m_pct,return_15m_pct')
     .eq('chain', 'robinhood')
     .in('token', tokens);
-
-  if (existingError) {
-    console.error('[RobinhoodCreatorIntel] Existing launch load failed:', existingError.message);
-    return;
-  }
+  if (existingError) throw existingError;
 
   const existing = new Map<string, CreatorLaunchComparable>(
     ((existingRows ?? []) as unknown as CreatorLaunchComparable[]).map(row => [row.token.toLowerCase(), row]),
@@ -147,12 +140,18 @@ export async function syncRobinhoodCreatorIntelligence(): Promise<void> {
   for (let offset = 0; offset < changed.length; offset += UPSERT_BATCH_SIZE) {
     const batch = changed.slice(offset, offset + UPSERT_BATCH_SIZE);
     const { error: launchError } = await supabase.from('creator_launches').upsert(batch, { onConflict: 'chain,token' });
-    if (launchError) {
-      console.error('[RobinhoodCreatorIntel] Batch sync failed:', { batchSize: batch.length, error: launchError.message });
-      return;
-    }
+    if (launchError) throw launchError;
     synced += batch.length;
   }
 
   console.log('[RobinhoodCreatorIntel] Sync complete:', { observations: rows.length, candidates: desired.length, changed: changed.length, synced });
+}
+
+export async function syncRobinhoodCreatorIntelligence(): Promise<void> {
+  try {
+    const result = await runDatabaseWork('BACKGROUND', syncCreatorIntelligenceOnce);
+    if (result === null) console.log('[RobinhoodCreatorIntel] Skipped while database governor is protecting critical work.');
+  } catch (error) {
+    console.error('[RobinhoodCreatorIntel] Sync failed:', error instanceof Error ? error.message : String(error));
+  }
 }
