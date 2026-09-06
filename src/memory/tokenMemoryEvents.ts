@@ -32,17 +32,22 @@ function normalizeEventType(value?: string | null) {
   return String(value ?? 'SNAPSHOT').trim().toUpperCase();
 }
 
-function recentlyRecorded(chain: string, token: string, eventType: string, now = Date.now()) {
-  const key = `${chain.toLowerCase()}:${token.toLowerCase()}:${eventType}`;
+function eventKey(chain: string, token: string, eventType: string) {
+  return `${chain.toLowerCase()}:${token.toLowerCase()}:${eventType}`;
+}
+
+function recentlyRecorded(key: string, now = Date.now()) {
   const prior = recentEvents.get(key);
-  if (prior != null && now - prior < RECENT_EVENT_TTL_MS) return true;
+  return prior != null && now - prior < RECENT_EVENT_TTL_MS;
+}
+
+function markRecorded(key: string, now = Date.now()) {
   recentEvents.set(key, now);
   if (recentEvents.size > 5_000) {
     for (const [candidate, at] of recentEvents) {
       if (now - at >= RECENT_EVENT_TTL_MS) recentEvents.delete(candidate);
     }
   }
-  return false;
 }
 
 async function hasExistingAlertCreated(token: string, chain: string) {
@@ -68,12 +73,14 @@ export async function recordTokenMemoryEvent(input: TokenMemoryEventInput) {
   const chain = String(input.chain ?? 'solana').toLowerCase();
   const token = input.token.trim();
 
-  // Token memory is an event log, not a telemetry sink. Current state belongs in
-  // token_memory/tokens; high-frequency observations must not grow this table.
   if (NON_PERSISTED_EVENT_TYPES.has(eventType)) return;
-  if (recentlyRecorded(chain, token, eventType)) return;
+  const key = eventKey(chain, token, eventType);
+  if (recentlyRecorded(key)) return;
 
-  if (eventType === 'ALERT_CREATED' && await hasExistingAlertCreated(token, chain)) return;
+  if (eventType === 'ALERT_CREATED' && await hasExistingAlertCreated(token, chain)) {
+    markRecorded(key);
+    return;
+  }
 
   const { error } = await supabase.from('token_memory_events').insert({
     token,
@@ -95,5 +102,9 @@ export async function recordTokenMemoryEvent(input: TokenMemoryEventInput) {
     raw: input.raw ?? null,
   });
 
-  if (error) console.log('recordTokenMemoryEvent error:', { token, error: error.message });
+  if (error) {
+    console.log('recordTokenMemoryEvent error:', { token, error: error.message });
+    return;
+  }
+  markRecorded(key);
 }
