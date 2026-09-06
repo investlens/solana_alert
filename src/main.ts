@@ -41,7 +41,7 @@ import { runSignalPerformanceEngine } from './engines/signalPerformanceEngine.js
 import { buildPumpfunEarlyMessage } from './ui/pumpfunMessageBuilder.js';
 import {
   runAutoTradeManager,
-  restoreOpenTrades,
+  restoreOpenTradesForStartup,
   startAdminAutoTrade,
 } from './core/autoTradeManager.js';
 import { runCreatorMarketTracker } from './agents/creatorMarketTrackerAgent.js';
@@ -1447,7 +1447,7 @@ async function main() {
   );
 
   // Restore active trades from Supabase BEFORE starting scanners
-  await restoreOpenTrades();
+  await restoreOpenTradesForStartup();
 
   const tasks = [
     startScanner(),

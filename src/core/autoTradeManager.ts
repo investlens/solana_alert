@@ -31,8 +31,10 @@ import {
   type EmergencyExitReason,
 } from "../services/emergencyExitManager.js";
 import { buildExecutionNotification } from '../ui/alphaNotificationPresets.js';
+import { describeBackgroundError } from '../services/backgroundPromiseSafety.js';
 
 let autoTradePaused = false;
+let tradingRestorationStatus: 'PENDING' | 'READY' | 'FAILED' = 'PENDING';
 
 const recentlyRejected = new Map<string, number>();
 const REJECT_COOLDOWN_MS = 15 * 60 * 1000;
@@ -47,6 +49,10 @@ export function resumeAutoTrade() {
 
 export function isAutoTradePaused() {
   return autoTradePaused;
+}
+
+export function getTradingRestorationStatus() {
+  return tradingRestorationStatus;
 }
 
 type AutoTrade = {
@@ -103,6 +109,7 @@ let lastRunAt = 0;
 export async function canStartNewTrade(
   token: string,
 ): Promise<boolean> {
+  if (tradingRestorationStatus !== 'READY') return false;
   if (autoTradePaused) return false;
   if (activeTrades.has(token)) return false;
 
@@ -268,6 +275,10 @@ export async function startAdminAutoTrade(args: {
   amountSol?: number;
   initialLiquidityUsd?: number | null;
 }) {
+  if (tradingRestorationStatus !== 'READY') {
+    console.error('[AutoTrade] Entry blocked: trading state restoration is unavailable.');
+    return;
+  }
   const settings = await getAlphaSettings();
 
   console.log("========================================");
@@ -1184,8 +1195,11 @@ console.log("[AutoTrade] Trailing stop updated.", {
   }
 }
 
-export async function restoreOpenTrades() {
-  const positions = await restoreActivePositions();
+export async function restoreOpenTrades(dependencies: {
+  restorePositions?: typeof restoreActivePositions;
+} = {}) {
+  tradingRestorationStatus = 'PENDING';
+  const positions = await (dependencies.restorePositions ?? restoreActivePositions)();
 
   for (const position of positions) {
     if (
@@ -1229,6 +1243,29 @@ export async function restoreOpenTrades() {
   console.log(
     `[AutoTrade] Restored ${activeTrades.size} active trade(s).`,
   );
+  tradingRestorationStatus = 'READY';
+}
+
+export async function restoreOpenTradesForStartup(dependencies: {
+  restore?: typeof restoreOpenTrades;
+  log?: (message: string) => void;
+} = {}): Promise<boolean> {
+  try {
+    await (dependencies.restore ?? restoreOpenTrades)();
+    return true;
+  } catch (error) {
+    tradingRestorationStatus = 'FAILED';
+    autoTradePaused = true;
+    (dependencies.log ?? (message => console.error(message)))(
+      `[AutoTrade] Startup restoration failed; trading unavailable: ${describeBackgroundError(error)}`,
+    );
+    return false;
+  }
+}
+
+export function resetTradingRestorationForTests(): void {
+  tradingRestorationStatus = 'PENDING';
+  autoTradePaused = false;
 }
 
 export function getAutoTradeStats() {

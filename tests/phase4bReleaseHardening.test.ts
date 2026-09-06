@@ -67,9 +67,9 @@ test('payment exits clear payment ownership on Back, start, Cancel, Home and suc
   assert.match(source, /invalid payment signature|does not look like a valid Solana transaction signature/i);
 });
 
-test('restoreOpenTrades executes exactly once during startup', async () => {
+test('contained trading restoration executes exactly once during startup', async () => {
   const source = await readFile(new URL('../src/main.ts', import.meta.url), 'utf8');
-  assert.equal((source.match(/await restoreOpenTrades\(\)/g) ?? []).length, 1);
+  assert.equal((source.match(/await restoreOpenTradesForStartup\(\)/g) ?? []).length, 1);
 });
 
 test('release safety check reports only state and never secret values', async () => {
