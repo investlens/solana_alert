@@ -24,6 +24,7 @@ import {
 import {
   startPonsShadowOutcomeTracker,
 } from './chains/robinhood/ponsShadowOutcomeTracker.js';
+import { startPonsShadowServices } from './chains/robinhood/ponsShadowStartup.js';
 
 import {
   syncRobinhoodCreatorIntelligence,
@@ -1435,16 +1436,10 @@ async function main() {
   startAlphaOutcomeCheckpointService();
   startLiveTrackService();
 
-  console.log(
-    '🔥🔥🔥 PONS SHADOW STARTUP ENTERED 🔥🔥🔥',
-  );
-
-  startPonsShadowSniper();
-  startPonsShadowOutcomeTracker();
-
-  console.log(
-    '🔥🔥🔥 PONS SHADOW STARTUP COMPLETED 🔥🔥🔥',
-  );
+  startPonsShadowServices(config.ponsShadowEnabled, {
+    startSniper: startPonsShadowSniper,
+    startTracker: startPonsShadowOutcomeTracker,
+  });
 
   // Restore active trades from Supabase BEFORE starting scanners
   await restoreOpenTradesForStartup();

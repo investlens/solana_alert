@@ -43,6 +43,7 @@ export const config = {
   existingTokenRetentionHours: num('ACTIVE_TOKEN_RETENTION_HOURS', 24),
   existingTokenMaxPerCycle: num('ACTIVE_TOKEN_MAX_PER_CYCLE', 25),
   existingTokenAlertCooldownMinutes: num('EXISTING_TOKEN_ALERT_COOLDOWN_MINUTES', 15),
+  ponsShadowEnabled: bool('PONS_SHADOW_ENABLED', false),
 
   autoTradeMode: (process.env.AUTO_TRADE_MODE ?? 'paper').toLowerCase(),
   autoTradeMaxOpenPositions: num('AUTO_TRADE_MAX_OPEN_POSITIONS', 3),
