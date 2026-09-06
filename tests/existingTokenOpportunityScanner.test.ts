@@ -9,13 +9,21 @@ const observations = [
 ] as any;
 
 describe('existing-token continuous opportunity scanner', () => {
-  it('keeps a five-hour existing token in the bounded 24h universe without BOOST or DEX Paid', () => {
-    const universe = buildExistingTokenUniverse({ now, observations: [{ token_address: '0xABC', updated_at: '2026-08-28T07:00:00.000Z' }] });
-    assert.deepEqual(universe, [{ token: '0xabc', tier: 'WARM', lastSeenAt: '2026-08-28T07:00:00.000Z', watched: false }]);
+  it('keeps meaningful-event tokens hot without relying on broad observation history', () => {
+    const universe = buildExistingTokenUniverse({ now, events: [{ asset_id: '0xABC', alerted_at: '2026-08-28T07:00:00.000Z' }] });
+    assert.deepEqual(universe, [{ token: '0xabc', tier: 'HOT', lastSeenAt: '2026-08-28T07:00:00.000Z', watched: false }]);
   });
 
-  it('ages inactive tokens out but retains explicitly watched tokens', () => {
-    assert.equal(buildExistingTokenUniverse({ now, observations: [{ token_address: '0xold', updated_at: '2026-08-26T00:00:00.000Z' }] }).length, 0);
+  it('does not make arbitrary observations or wallet activity part of the default reversal universe', () => {
+    const universe = buildExistingTokenUniverse({ now,
+      observations: [{ token_address: '0xobservation', updated_at: '2026-08-28T11:00:00.000Z' }],
+      wallet: [{ token_address: '0xwallet', updated_at: '2026-08-28T11:00:00.000Z' }],
+    });
+    assert.equal(universe.length, 2);
+  });
+
+  it('ages inactive tokens out but retains explicitly watched and active runner tokens', () => {
+    assert.equal(buildExistingTokenUniverse({ now, events: [{ asset_id: '0xold', alerted_at: '2026-08-26T00:00:00.000Z' }] }).length, 0);
     assert.equal(buildExistingTokenUniverse({ now, opportunities: [{ asset_id: '0xmonitor', strategy_key: 'EXISTING_TOKEN_MONITOR', status: 'WATCHING', updated_at: '2026-08-26T00:00:00.000Z' }] }).length, 0);
     assert.equal(buildExistingTokenUniverse({ now, watched: [{ opportunities: { asset_id: '0xOLD', chain: 'robinhood' }, updated_at: '2026-08-26T00:00:00.000Z' }] }).length, 1);
     assert.equal(buildExistingTokenUniverse({ now, opportunities: [{ asset_id: '0xrunner', strategy_key: 'EXISTING_TOKEN_RUNNER', status: 'NEW', updated_at: '2026-08-26T00:00:00.000Z' }] }).length, 1);
@@ -24,10 +32,8 @@ describe('existing-token continuous opportunity scanner', () => {
   it('requires sustained comparable 1.5x volume and a meaningful transition before alerting', () => {
     const result = assessExistingTokenObservation({ prior: { state: 'BUILDING', observations }, observedAt: '2026-08-28T12:00:00.000Z',
       price: 1.2, marketCap: 120_000, liquidity: 11_000, volume5m: 160, buys5m: 15, sells5m: 7 });
-    assert.equal(result.assessment.volumeSurge, true);
-    assert.equal(result.assessment.state, 'CONFIRMED');
-    assert.equal(result.transition, true);
-    assert.equal(result.alertable, true);
+    assert.equal(result.assessment.volumeSurge, true); assert.equal(result.assessment.state, 'CONFIRMED');
+    assert.equal(result.transition, true); assert.equal(result.alertable, true);
   });
 
   it('enforces persisted HOT/WARM observation separation across process restarts', () => {
@@ -41,30 +47,23 @@ describe('existing-token continuous opportunity scanner', () => {
   it('does not alert merely because unchanged BUILDING structure was scanned', () => {
     const result = assessExistingTokenObservation({ prior: { state: 'BUILDING', observations }, observedAt: '2026-08-28T12:00:00.000Z',
       price: 1.15, marketCap: 115_000, liquidity: 10_500, volume5m: 130, buys5m: 12, sells5m: 7 });
-    assert.equal(result.assessment.state, 'BUILDING');
-    assert.equal(result.transition, false);
-    assert.equal(result.alertable, false);
+    assert.equal(result.assessment.state, 'BUILDING'); assert.equal(result.transition, false); assert.equal(result.alertable, false);
   });
 
   it('does not resend unchanged persisted CONFIRMED structure after cooldown expiry', () => {
     const prior = { intelligenceState: 'CONFIRMED' as const, lastAlertAt: '2026-08-28T11:40:00.000Z', observations };
     assert.equal(existingTokenPersistedState(prior), 'CONFIRMED');
-    const result = assessExistingTokenObservation({ prior, observedAt: '2026-08-28T12:00:00.000Z',
-      price: 1.2, marketCap: 120_000, liquidity: 11_000, volume5m: 160, buys5m: 15, sells5m: 7 });
-    assert.equal(result.assessment.state, 'RUNNER');
-    assert.equal(result.transition, true);
+    const result = assessExistingTokenObservation({ prior, observedAt: '2026-08-28T12:00:00.000Z', price: 1.2, marketCap: 120_000, liquidity: 11_000, volume5m: 160, buys5m: 15, sells5m: 7 });
+    assert.equal(result.assessment.state, 'RUNNER'); assert.equal(result.transition, true);
     const unchangedRunner = assessExistingTokenObservation({ prior: { ...prior, intelligenceState: 'RUNNER', observations: result.history },
       observedAt: '2026-08-28T12:03:00.000Z', price: 1.2, marketCap: 120_000, liquidity: 11_000, volume5m: 160, buys5m: 15, sells5m: 7 });
-    assert.equal(unchangedRunner.assessment.state, 'RUNNER');
-    assert.equal(unchangedRunner.transition, false);
-    assert.equal(unchangedRunner.alertable, true);
+    assert.equal(unchangedRunner.assessment.state, 'RUNNER'); assert.equal(unchangedRunner.transition, false); assert.equal(unchangedRunner.alertable, true);
   });
 
   it('allows a genuine COOLING recovery to become reignition', () => {
     const result = assessExistingTokenObservation({ prior: { state: 'COOLING', observations }, observedAt: '2026-08-28T12:00:00.000Z',
       price: 1.2, marketCap: 120_000, liquidity: 12_000, volume5m: 170, buys5m: 18, sells5m: 6 });
-    assert.equal(result.reentry, true);
-    assert.equal(result.alertable, true);
+    assert.equal(result.reentry, true); assert.equal(result.alertable, true);
   });
 
   it('caps each cycle and reserves capacity so WARM tokens cannot be permanently starved', () => {
@@ -74,8 +73,7 @@ describe('existing-token continuous opportunity scanner', () => {
     ];
     const first = selectDueExistingTokens(universe, { now, max: 25, lastScanned: new Map(), warmStart: 0 });
     const second = selectDueExistingTokens(universe, { now, max: 25, lastScanned: new Map(first.selected.map(x => [x.token, now])), warmStart: first.nextWarmCursor });
-    assert.equal(first.selected.length, 25);
-    assert.equal(first.selected.some(x => x.token === '0xwarm0'), true);
+    assert.equal(first.selected.length, 25); assert.equal(first.selected.some(x => x.token === '0xwarm0'), true);
     assert.equal(second.selected.some(x => x.token === '0xwarm1'), true);
     const allDueAgain = selectDueExistingTokens(universe, { now, max: 25, lastScanned: new Map(), hotStart: first.nextHotCursor, warmStart: first.nextWarmCursor });
     assert.equal(allDueAgain.selected.some(x => x.token === '0xhot24'), true);
@@ -88,7 +86,6 @@ describe('existing-token continuous opportunity scanner', () => {
       { token: '0xwarm', tier: 'WARM' as const, lastSeenAt: new Date(now).toISOString() },
     ];
     const selected = selectDueExistingTokens(universe, { now, max: 6, lastScanned: new Map() }).selected;
-    assert.equal(selected[0].token, '0xwatched'); assert.equal(selected.some(row => row.token === '0xwarm'), true);
-    assert.equal(selected.length, 6);
+    assert.equal(selected[0].token, '0xwatched'); assert.equal(selected.some(row => row.token === '0xwarm'), true); assert.equal(selected.length, 6);
   });
 });
