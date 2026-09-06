@@ -5,6 +5,7 @@ import { isDexScreenerProviderBackoffError } from './dexscreenerRequestGovernor.
 import { compareVerifiedPrices } from './priceComparability.js';
 import { processRunnerMilestones } from './runnerMilestoneService.js';
 import { describeBackgroundError } from './backgroundPromiseSafety.js';
+import { runDatabaseWork } from './databaseLoadGovernor.js';
 
 export const ALPHA_OUTCOME_CHECKPOINTS = [30, 60, 180, 300, 900, 1800, 3600] as const;
 export const OUTCOME_ELIGIBLE_SEMANTIC_TYPES = [
@@ -95,7 +96,7 @@ function groupPrior(rows: PriorRow[]): Map<number, PriorRow[]> {
   return grouped;
 }
 
-export async function runAlphaOutcomeCheckpointCycle(now = new Date()): Promise<number> {
+async function runAlphaOutcomeCheckpointDatabaseWork(now: Date): Promise<number> {
   const started = Date.now();
   const oldest = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
   const latest = new Date(now.getTime() - 30_000).toISOString();
@@ -168,6 +169,10 @@ export async function runAlphaOutcomeCheckpointCycle(now = new Date()): Promise<
     measured: measuredRows.length, unavailable: pendingRows.length - measuredRows.length, duration_ms: Date.now() - started,
   });
   return pendingRows.length;
+}
+
+export async function runAlphaOutcomeCheckpointCycle(now = new Date()): Promise<number> {
+  return (await runDatabaseWork('BACKGROUND', () => runAlphaOutcomeCheckpointDatabaseWork(now))) ?? 0;
 }
 
 let started = false;
