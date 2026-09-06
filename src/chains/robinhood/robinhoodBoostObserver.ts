@@ -20,7 +20,8 @@ import { persistOrLoadAlphaSemanticEventRecord } from '../../services/alphaSeman
 import { deliverAlphaSemanticEvent } from '../../services/alphaSemanticDeliveryService.js';
 import { buildPremiumTokenNotification, verifiedPairAge } from '../../ui/premiumTokenNotification.js';
 import { boostMetadataFallback, resolveBoostMetadata } from './boostMetadataResolver.js';
-import { editTelegramMessage } from '../../services/telegram.js';
+import { editTelegramMessage, sendTelegramWithMessageId } from '../../services/telegram.js';
+import { config } from '../../config.js';
 
 
 const BOOST_INTERVAL_MS =
@@ -50,15 +51,86 @@ export function boostPresentationState(totalBoostAmount: number) {
 const boostTotals =
   new Map<string, number>();
 
+const acceptedAdminBoostNotifications = new Set<string>();
+
+export function boostFallbackIdentity(tokenAddress: string, totalBoostAmount: number): string {
+  return `${normalize(tokenAddress)}:${totalBoostAmount}`;
+}
+
+export function recordAcceptedAdminBoostNotification(tokenAddress: string, totalBoostAmount: number): void {
+  acceptedAdminBoostNotifications.add(boostFallbackIdentity(tokenAddress, totalBoostAmount));
+}
+
+export async function deliverAdminBoostFallback(args: {
+  tokenAddress: string;
+  totalBoostAmount: number;
+  message: string;
+  buttons?: Array<Array<{ text: string; callback_data?: string; url?: string }>>;
+}, dependencies: {
+  send?: typeof sendTelegramWithMessageId;
+  adminTelegramId?: string;
+  log?: (event: string, details: Record<string, unknown>) => void;
+} = {}): Promise<boolean> {
+  const identity = boostFallbackIdentity(args.tokenAddress, args.totalBoostAmount);
+  if (acceptedAdminBoostNotifications.has(identity)) return false;
+  const log = dependencies.log ?? ((event, details) => console.log(`[RobinhoodBoostObserver] ${event}`, details));
+  try {
+    await (dependencies.send ?? sendTelegramWithMessageId)(
+      dependencies.adminTelegramId ?? config.adminTelegramId,
+      args.message,
+      args.buttons,
+    );
+    acceptedAdminBoostNotifications.add(identity);
+    log('BOOST_FALLBACK_SENT', { token: normalize(args.tokenAddress), totalBoost: args.totalBoostAmount });
+    return true;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    log('BOOST_FALLBACK_FAILED', { token: normalize(args.tokenAddress), totalBoost: args.totalBoostAmount,
+      reason: reason.replace(/\s+/g, ' ').slice(0, 240) });
+    return false;
+  }
+}
+
+export function resetRobinhoodBoostFallbackForTests(): void {
+  acceptedAdminBoostNotifications.clear();
+}
+
 let boostObserverStarted =
   false;
 
 let boostObserverRunning =
   false;
 
+let boostBaselineReady = false;
+let boostBaselinePromise: Promise<boolean> | null = null;
+
 let boostObserverInterval:
   | ReturnType<typeof setInterval>
   | null = null;
+
+async function ensureBoostBaseline(): Promise<boolean> {
+  if (boostBaselineReady) return true;
+  if (boostBaselinePromise) return boostBaselinePromise;
+  boostBaselinePromise = (async () => {
+    try {
+      const boosts = await fetchRobinhoodBoosts();
+      for (const boost of boosts) {
+        const storedTotal = await getLastStoredBoostTotal(boost.tokenAddress);
+        boostTotals.set(normalize(boost.tokenAddress), storedTotal ?? boost.totalAmount);
+      }
+      boostBaselineReady = true;
+      console.log('[RobinhoodBoostObserver] Baseline ready:', { tokens: boosts.length });
+      return true;
+    } catch (error) {
+      console.error('[RobinhoodBoostObserver] Baseline failed:',
+        error instanceof Error ? error.message : String(error));
+      return false;
+    } finally {
+      boostBaselinePromise = null;
+    }
+  })();
+  return boostBaselinePromise;
+}
 
 
 function normalize(
@@ -346,7 +418,7 @@ async function saveBoostEvent(args: {
       },
     );
 
-    return null;
+    return `preindex:${normalize(args.tokenAddress)}:${args.totalBoostAmount}`;
   }
 
   return (
@@ -647,25 +719,30 @@ async function processBoost(
     : `preindex:${boost.tokenAddress}:${boost.totalAmount}`;
 
 
-  if (!eventId) {
-    return false;
-  }
-
+  let semanticPersistenceFailed = false;
   const boostEvent = await persistOrLoadAlphaSemanticEventRecord({
-    identity: String(eventId), type: 'BOOST', assetId: boost.tokenAddress, chain: 'robinhood',
-    intelligenceState: boostNotificationState(boost.totalAmount) === 'BUILDING' ? 'BUILDING' : null,
-    strategyKey: opportunity?.strategyKey, symbol: market?.symbol ?? opportunityMarket.symbol,
-    rawSnapshot: { boostIncrement: boostAdded, boostTotal: boost.totalAmount, eventType,
-      price: market?.priceUsd ?? null, priceProvenance: market ? 'DEXSCREENER_VERIFIED_BASE_PAIR' : null,
-      marketCap: market?.marketCapUsd ?? null, fdv: market?.fdvUsd ?? null,
-      liquidity: market?.liquidityUsd ?? null, volume5m: market?.volume5mUsd ?? null,
-      buys5m: market?.buys5m ?? null, sells5m: market?.sells5m ?? null,
-      pairCreatedAt: market?.pairCreatedAt ?? null,
-      devHoldingPercent, devHoldingEvidence: devHoldingPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
-      burnedPercent, burnEvidence: burnedPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
-      chartUrl: market?.chartUrl ?? null },
-  });
-  const volumeDecision = volumeIgnitionDecision({ previousVolume5m: previousBoostMarket?.volume5m ?? null,
+      identity: String(eventId), type: 'BOOST', assetId: boost.tokenAddress, chain: 'robinhood',
+      intelligenceState: boostNotificationState(boost.totalAmount) === 'BUILDING' ? 'BUILDING' : null,
+      strategyKey: opportunity?.strategyKey, symbol: market?.symbol ?? opportunityMarket.symbol,
+      rawSnapshot: { boostIncrement: boostAdded, boostTotal: boost.totalAmount, eventType,
+        price: market?.priceUsd ?? null, priceProvenance: market ? 'DEXSCREENER_VERIFIED_BASE_PAIR' : null,
+        marketCap: market?.marketCapUsd ?? null, fdv: market?.fdvUsd ?? null,
+        liquidity: market?.liquidityUsd ?? null, volume5m: market?.volume5mUsd ?? null,
+        buys5m: market?.buys5m ?? null, sells5m: market?.sells5m ?? null,
+        pairCreatedAt: market?.pairCreatedAt ?? null,
+        devHoldingPercent, devHoldingEvidence: devHoldingPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
+        burnedPercent, burnEvidence: burnedPercent == null ? 'UNAVAILABLE' : 'VERIFIED',
+        chartUrl: market?.chartUrl ?? null },
+    }).catch(error => {
+      semanticPersistenceFailed = true;
+      console.warn('[RobinhoodBoostObserver] Semantic event unavailable; admin fallback eligible:', {
+        token: boost.tokenAddress,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    });
+  try {
+    const volumeDecision = volumeIgnitionDecision({ previousVolume5m: previousBoostMarket?.volume5m ?? null,
     currentVolume5m: market?.volume5mUsd ?? null, previousPrice: previousBoostMarket?.price ?? null,
     currentPrice: market?.priceUsd ?? null, currentLiquidity: market?.liquidityUsd ?? null,
     buys5m: market?.buys5m ?? null, sells5m: market?.sells5m ?? null });
@@ -695,6 +772,12 @@ async function processBoost(
       }), buttons: buildBoostActions({ tokenAddress: boost.tokenAddress, chartUrl: market.chartUrl,
         opportunityId: opportunity?.id, strategyKey: opportunity?.strategyKey, rawData: opportunity?.rawData }) });
     }
+    }
+  } catch (error) {
+    console.warn('[RobinhoodBoostObserver] Optional volume event unavailable:', {
+      token: boost.tokenAddress,
+      reason: error instanceof Error ? error.message : String(error),
+    });
   }
 
 
@@ -758,15 +841,51 @@ async function processBoost(
     });
 
 
-  if (boostEvent) await deliverAlphaSemanticEvent({ event: { id: boostEvent.id,
-    eventIdentity: boostEvent.event_identity, type: 'BOOST', assetId: boost.tokenAddress,
-    chain: 'robinhood', strategyKey: opportunity?.strategyKey }, message, buttons: buildBoostActions({
+  const buttons = buildBoostActions({
+    tokenAddress: boost.tokenAddress,
+    chartUrl: market?.chartUrl,
+    opportunityId: opportunity?.id,
+    strategyKey: opportunity?.strategyKey,
+    rawData: opportunity?.rawData,
+  });
+  const fallbackIdentity = boostFallbackIdentity(boost.tokenAddress, boost.totalAmount);
+  let adminDeliveryFailed = semanticPersistenceFailed;
+  let adminTelegramFailed = false;
+  if (boostEvent) {
+    try {
+      await deliverAlphaSemanticEvent({ event: { id: boostEvent.id,
+        eventIdentity: boostEvent.event_identity, type: 'BOOST', assetId: boost.tokenAddress,
+        chain: 'robinhood', strategyKey: opportunity?.strategyKey }, message, buttons,
+        onTelegramAccepted: user => {
+          if (user.tier === 'admin' || user.telegram_id === config.adminTelegramId) {
+            recordAcceptedAdminBoostNotification(boost.tokenAddress, boost.totalAmount);
+          }
+        },
+        onRecipientFailure: (user, _error, stage) => {
+          if (user.tier === 'admin' || user.telegram_id === config.adminTelegramId) {
+            if (stage === 'telegram_send') adminTelegramFailed = true;
+            else adminDeliveryFailed = true;
+          }
+        },
+      });
+    } catch (error) {
+      adminDeliveryFailed = true;
+      console.warn('[RobinhoodBoostObserver] Semantic delivery unavailable; admin fallback eligible:', {
+        token: boost.tokenAddress,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  let notificationHandled = !adminDeliveryFailed;
+  if (adminDeliveryFailed && !adminTelegramFailed && !acceptedAdminBoostNotifications.has(fallbackIdentity)) {
+    notificationHandled = await deliverAdminBoostFallback({
       tokenAddress: boost.tokenAddress,
-      chartUrl: market?.chartUrl,
-      opportunityId: opportunity?.id,
-      strategyKey: opportunity?.strategyKey,
-      rawData: opportunity?.rawData,
-    }) });
+      totalBoostAmount: boost.totalAmount,
+      message,
+      buttons,
+    });
+  }
 
   if (boostEvent && (!resolvedMetadata.name || resolvedMetadata.source === 'SHORTENED_TOKEN_ADDRESS')) {
     void enrichDeliveredBoostAlert({ eventId: boostEvent.id, tokenAddress: boost.tokenAddress,
@@ -777,10 +896,9 @@ async function processBoost(
   }
 
 
-  boostTotals.set(
-    tokenKey,
-    boost.totalAmount,
-  );
+  if (!adminTelegramFailed && (notificationHandled || acceptedAdminBoostNotifications.has(fallbackIdentity))) {
+    boostTotals.set(tokenKey, boost.totalAmount);
+  }
 
 
   console.log(
@@ -805,7 +923,7 @@ async function processBoost(
   );
 
 
-  return true;
+  return !adminTelegramFailed && (notificationHandled || acceptedAdminBoostNotifications.has(fallbackIdentity));
 }
 
 
@@ -819,6 +937,7 @@ Promise<void> {
     true;
 
   try {
+    if (!await ensureBoostBaseline()) return;
     const boosts =
       await fetchRobinhoodBoosts();
 
@@ -899,43 +1018,7 @@ ReturnType<typeof setInterval> | null {
    * Railway restart does not blast Telegram with
    * every currently boosted token.
    */
-  void (async () => {
-    try {
-      const boosts =
-        await fetchRobinhoodBoosts();
-
-      for (
-        const boost
-        of boosts
-      ) {
-        const storedTotal =
-          await getLastStoredBoostTotal(
-            boost.tokenAddress,
-          );
-
-        boostTotals.set(
-          normalize(
-            boost.tokenAddress,
-          ),
-          storedTotal ??
-            boost.totalAmount,
-        );
-      }
-
-      console.log(
-        '[RobinhoodBoostObserver] Baseline ready:',
-        {
-          tokens:
-            boosts.length,
-        },
-      );
-    } catch (error) {
-      console.error(
-        '[RobinhoodBoostObserver] Baseline failed:',
-        error,
-      );
-    }
-  })();
+  void ensureBoostBaseline();
 
 
   boostObserverInterval =

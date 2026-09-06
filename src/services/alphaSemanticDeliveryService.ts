@@ -69,6 +69,9 @@ const productionDependencies: SemanticDeliveryDependencies = {
 export async function deliverAlphaSemanticEvent(args: {
   event: UserFacingSemanticEvent; message: string; buttons?: InlineButton[][]; preserveMessage?: boolean;
   onFailure?: (error: unknown) => void;
+  onTelegramAccepted?: (user: DeliverableUser) => void;
+  onRecipientFailure?: (user: DeliverableUser, error: unknown,
+    stage: 'recipient_setup' | 'telegram_send' | 'delivery_completion') => void;
 }, dependencies: SemanticDeliveryDependencies = productionDependencies): Promise<{ delivered: number; failed: number }> {
   let deliveryMessage = args.message;
   if (dependencies === productionDependencies && !args.preserveMessage) {
@@ -100,8 +103,10 @@ export async function deliverAlphaSemanticEvent(args: {
           Number.isFinite(Number(sendResult)) ? Number(sendResult) : null),
         release: () => dependencies.release(args.event, user, leaseToken),
       });
+      if (result.sent) args.onTelegramAccepted?.(user);
       if (result.recorded) { delivered += 1; continue; }
       failed += 1;
+      args.onRecipientFailure?.(user, result.error, result.sent ? 'delivery_completion' : 'telegram_send');
       if (result.sent) await dependencies.sentUnconfirmed(args.event, user, leaseToken).catch(error =>
         console.error('[AlphaSemanticDelivery] Could not preserve sent-unconfirmed state:', error));
       const reason = result.error instanceof Error ? result.error.message : String(result.error ?? 'unknown');
@@ -114,6 +119,7 @@ export async function deliverAlphaSemanticEvent(args: {
     } catch (error) {
       failed += 1;
       args.onFailure?.(error);
+      args.onRecipientFailure?.(user, error, 'recipient_setup');
       console.error('[AlphaSemanticDelivery] Recipient processing failed:', { alertEventId: args.event.id,
         semanticEventType: args.event.type, telegramId: user.telegram_id,
         reason: error instanceof Error ? error.message : String(error) });

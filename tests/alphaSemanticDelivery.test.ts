@@ -96,6 +96,24 @@ test('one recipient failure cannot starve later eligible testers', async () => {
   assert.deepEqual(run.sends, ['free']);
 });
 
+test('Telegram acceptance is reported before a delivery-ledger completion failure', async () => {
+  const run = harness([user('admin', 'admin')]);
+  run.dependencies.complete = async () => { throw new Error('schema cache unavailable'); };
+  const accepted: string[] = [];
+  const failures: string[] = [];
+  const result = await deliverAlphaSemanticEvent({
+    event: { id: 26005, eventIdentity: 'v2:BOOST:26005', type: 'BOOST',
+      assetId: '0x4444444444444444444444444444444444444444', chain: 'robinhood' },
+    message: 'BOOST',
+    onTelegramAccepted: recipient => accepted.push(recipient.telegram_id),
+    onRecipientFailure: (recipient, _error, stage) => failures.push(`${recipient.telegram_id}:${stage}`),
+  }, run.dependencies);
+  assert.deepEqual(result, { delivered: 0, failed: 1 });
+  assert.deepEqual(accepted, ['admin']);
+  assert.deepEqual(failures, ['admin:delivery_completion']);
+  assert.deepEqual(run.sends, ['admin']);
+});
+
 test('tester fanout never grants private trading and internal observations have no broadcaster', async () => {
   assert.equal(hasCapability(accessProfileForTier('free'), 'trading.admin'), false);
   assert.equal(hasCapability(accessProfileForTier('pro'), 'trading.admin'), false);
