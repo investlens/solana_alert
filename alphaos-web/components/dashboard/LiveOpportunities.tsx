@@ -1,458 +1,128 @@
 "use client";
 
 import Link from "next/link";
-import {
-  useCallback,
-  useEffect,
-  useState,
-} from "react";
-import type {
-  ApiResponse,
-  LiveOpportunity,
-  OpportunitiesResponse,
-  OpportunityStatus,
-  RiskLevel,
-} from "@/lib/dashboard/types";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ApiResponse, Chain, LiveOpportunity, OpportunitiesResponse } from "@/lib/dashboard/types";
 
-function formatCompactCurrency(
-  value: number | null
-): string {
-  if (value === null) {
-    return "Unavailable";
-  }
+type ChainFilter = "all" | "solana" | "robinhood";
 
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(value);
+function money(value: number | null) {
+  if (value === null) return "—";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 }).format(value);
 }
 
-function formatPercent(
-  value: number | null
-): string {
-  if (value === null) {
-    return "Not estimated";
-  }
-
-  const prefix = value > 0 ? "+" : "";
-
-  return `${prefix}${value.toFixed(1)}%`;
+function relative(value: string) {
+  const ms = Date.now() - new Date(value).getTime();
+  if (!Number.isFinite(ms) || ms < 60_000) return "now";
+  const min = Math.floor(ms / 60_000);
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h`;
+  return `${Math.floor(hr / 24)}d`;
 }
 
-function formatRelativeTime(value: string): string {
-  const timestamp = new Date(value).getTime();
-
-  if (!Number.isFinite(timestamp)) {
-    return "Recently";
-  }
-
-  const seconds = Math.max(
-    0,
-    Math.floor((Date.now() - timestamp) / 1000)
-  );
-
-  if (seconds < 60) {
-    return "Just now";
-  }
-
-  const minutes = Math.floor(seconds / 60);
-
-  if (minutes < 60) {
-    return `${minutes}m ago`;
-  }
-
-  const hours = Math.floor(minutes / 60);
-
-  if (hours < 24) {
-    return `${hours}h ago`;
-  }
-
-  const days = Math.floor(hours / 24);
-
-  return `${days}d ago`;
+function chainMeta(chain: Chain) {
+  if (chain === "robinhood") return { label: "ROBINHOOD · PONS", dot: "bg-emerald-400", pill: "border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-300" };
+  if (chain === "solana") return { label: "SOLANA", dot: "bg-violet-400", pill: "border-violet-400/20 bg-violet-400/[0.08] text-violet-300" };
+  return { label: chain.toUpperCase(), dot: "bg-zinc-500", pill: "border-white/10 bg-white/[0.04] text-zinc-400" };
 }
 
-function getRiskClasses(
-  riskLevel: RiskLevel
-): string {
-  switch (riskLevel) {
-    case "LOW":
-      return "border-emerald-400/20 bg-emerald-400/10 text-emerald-300";
-
-    case "MEDIUM":
-      return "border-amber-400/20 bg-amber-400/10 text-amber-300";
-
-    case "HIGH":
-      return "border-red-400/20 bg-red-400/10 text-red-300";
-
-    default:
-      return "border-white/10 bg-white/[0.04] text-zinc-400";
-  }
+function stage(opportunity: LiveOpportunity) {
+  if (opportunity.status === "APPROVED" || opportunity.status === "EXECUTED") return "ENTRY READY";
+  if (opportunity.status === "NEW") return "NEW SIGNAL";
+  return "BUILDING";
 }
 
-function getStatusClasses(
-  status: OpportunityStatus
-): string {
-  switch (status) {
-    case "NEW":
-      return "border-cyan-400/20 bg-cyan-400/10 text-cyan-300";
-
-    case "WATCHING":
-      return "border-violet-400/20 bg-violet-400/10 text-violet-300";
-
-    case "APPROVED":
-      return "border-emerald-400/20 bg-emerald-400/10 text-emerald-300";
-
-    case "EXECUTED":
-      return "border-blue-400/20 bg-blue-400/10 text-blue-300";
-
-    case "REJECTED":
-      return "border-red-400/20 bg-red-400/10 text-red-300";
-
-    case "EXPIRED":
-      return "border-white/10 bg-white/[0.04] text-zinc-500";
-
-    default:
-      return "border-white/10 bg-white/[0.04] text-zinc-400";
-  }
-}
-
-function OpportunitySkeleton() {
+function RadarCard({ opportunity }: { opportunity: LiveOpportunity }) {
+  const meta = chainMeta(opportunity.chain);
   return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-      {Array.from({ length: 6 }).map(
-        (_, index) => (
-          <div
-            key={index}
-            className="h-72 animate-pulse rounded-2xl border border-white/10 bg-white/[0.025]"
-          />
-        )
-      )}
-    </div>
-  );
-}
-
-function EmptyOpportunities() {
-  return (
-    <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.015] px-6 py-14 text-center">
-      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-xl">
-        ◎
-      </div>
-
-      <h3 className="mt-5 text-base font-semibold text-white">
-        No active opportunities
-      </h3>
-
-      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-zinc-500">
-        AlphaOS is scanning continuously. New
-        investigations will appear here as soon as
-        they are registered.
-      </p>
-    </div>
-  );
-}
-
-function OpportunityCard({
-  opportunity,
-}: {
-  opportunity: LiveOpportunity;
-}) {
-  return (
-    <article className="group relative overflow-hidden rounded-2xl border border-white/10 bg-[#0b0d10] p-5 transition duration-300 hover:-translate-y-0.5 hover:border-emerald-400/25 hover:shadow-[0_20px_70px_rgba(0,0,0,0.35)]">
-      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-400/40 to-transparent opacity-0 transition group-hover:opacity-100" />
-
-      <div className="flex items-start justify-between gap-4">
+    <article className="rounded-2xl border border-white/[0.08] bg-[#0a0c0f] p-4 sm:p-5">
+      <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="truncate text-xl font-semibold tracking-tight text-white">
-              {opportunity.symbol}
-            </h3>
-
-            <span
-              className={[
-                "rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.13em]",
-                getStatusClasses(
-                  opportunity.status
-                ),
-              ].join(" ")}
-            >
-              {opportunity.status}
-            </span>
-          </div>
-
-          <p className="mt-1 truncate text-sm text-zinc-500">
-            {opportunity.title}
-          </p>
-        </div>
-
-        <div className="shrink-0 text-right">
-          <p className="text-2xl font-semibold tracking-tight text-emerald-300">
-            {opportunity.confidence}
-          </p>
-
-          <p className="text-[10px] uppercase tracking-[0.15em] text-zinc-600">
-            Confidence
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-white/[0.05]">
-        <div
-          className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-cyan-400 transition-all duration-700"
-          style={{
-            width: `${Math.max(
-              3,
-              opportunity.confidence
-            )}%`,
-          }}
-        />
-      </div>
-
-      <div className="mt-5 grid grid-cols-2 gap-3">
-        <div className="rounded-xl border border-white/[0.07] bg-black/20 p-3">
-          <p className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">
-            Market Cap
-          </p>
-
-          <p className="mt-1 text-sm font-medium text-zinc-200">
-            {formatCompactCurrency(
-              opportunity.marketCap
-            )}
-          </p>
-        </div>
-
-        <div className="rounded-xl border border-white/[0.07] bg-black/20 p-3">
-          <p className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">
-            Liquidity
-          </p>
-
-          <p className="mt-1 text-sm font-medium text-zinc-200">
-            {formatCompactCurrency(
-              opportunity.liquidity
-            )}
-          </p>
-        </div>
-
-        <div className="rounded-xl border border-white/[0.07] bg-black/20 p-3">
-          <p className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">
-            Expected Move
-          </p>
-
-          <p className="mt-1 text-sm font-medium text-zinc-200">
-            {formatPercent(
-              opportunity.expectedProfitPercent
-            )}
-          </p>
-        </div>
-
-        <div className="rounded-xl border border-white/[0.07] bg-black/20 p-3">
-          <p className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">
-            Risk
-          </p>
-
-          <span
-            className={[
-              "mt-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold",
-              getRiskClasses(
-                opportunity.riskLevel
-              ),
-            ].join(" ")}
-          >
-            {opportunity.riskLevel}
+          <span className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[9px] font-semibold tracking-[0.13em] ${meta.pill}`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />{meta.label}
           </span>
+          <div className="mt-3 flex items-center gap-2">
+            <h3 className="truncate text-2xl font-semibold tracking-tight text-white">{opportunity.symbol}</h3>
+            <span className="rounded-full border border-emerald-400/20 bg-emerald-400/[0.07] px-2 py-0.5 text-[9px] font-semibold text-emerald-300">{stage(opportunity)}</span>
+          </div>
+          <p className="mt-1 truncate text-xs text-zinc-600">{opportunity.title}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-3xl font-semibold tracking-[-0.05em] text-white">{opportunity.confidence}</p>
+          <p className="text-[9px] uppercase tracking-[0.14em] text-zinc-700">Alpha score</p>
         </div>
       </div>
 
-      <div className="mt-5 flex items-center justify-between border-t border-white/[0.07] pt-4">
+      <div className="mt-5 grid grid-cols-3 gap-2 border-y border-white/[0.06] py-4">
+        <div><p className="text-[9px] uppercase tracking-wider text-zinc-700">MC</p><p className="mt-1 text-sm font-medium text-zinc-200">{money(opportunity.marketCap)}</p></div>
+        <div><p className="text-[9px] uppercase tracking-wider text-zinc-700">Liquidity</p><p className="mt-1 text-sm font-medium text-zinc-200">{money(opportunity.liquidity)}</p></div>
+        <div><p className="text-[9px] uppercase tracking-wider text-zinc-700">Risk</p><p className={`mt-1 text-sm font-medium ${opportunity.riskLevel === "LOW" ? "text-emerald-300" : opportunity.riskLevel === "HIGH" ? "text-rose-300" : "text-amber-300"}`}>{opportunity.riskLevel}</p></div>
+      </div>
+
+      <div className="mt-4 flex items-center justify-between gap-3">
         <div>
-          <p className="text-xs text-zinc-500">
-            {opportunity.sourceAgent}
-          </p>
-
-          <p className="mt-0.5 text-[11px] text-zinc-700">
-            {formatRelativeTime(
-              opportunity.createdAt
-            )}
-          </p>
+          <p className="text-[10px] text-zinc-600">{opportunity.sourceAgent}</p>
+          <p className="mt-0.5 text-[9px] text-zinc-800">updated {relative(opportunity.createdAt)} ago</p>
         </div>
-
-        <Link
-          href={opportunity.reportUrl}
-          className="rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-2 text-xs font-semibold text-emerald-300 transition hover:border-emerald-400/40 hover:bg-emerald-400/15"
-        >
-          Investigate →
-        </Link>
+        <Link href={opportunity.reportUrl} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-emerald-400 px-4 text-xs font-semibold text-black transition hover:bg-emerald-300">Open Analysis →</Link>
       </div>
     </article>
   );
 }
 
 export default function LiveOpportunities() {
-  const [data, setData] =
-    useState<OpportunitiesResponse | null>(null);
+  const [data, setData] = useState<OpportunitiesResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<ChainFilter>("all");
 
-  const [loading, setLoading] =
-    useState(true);
-
-  const [refreshing, setRefreshing] =
-    useState(false);
-
-  const [error, setError] =
-    useState<string | null>(null);
-
-  const loadOpportunities = useCallback(
-    async (background = false) => {
-      try {
-        if (background) {
-          setRefreshing(true);
-        } else {
-          setLoading(true);
-        }
-
-        setError(null);
-
-        const response = await fetch(
-          "/api/opportunities",
-          {
-            cache: "no-store",
-          }
-        );
-
-        const payload =
-          (await response.json()) as ApiResponse<OpportunitiesResponse>;
-
-        if (!response.ok || !payload.success) {
-          throw new Error(
-            payload.success
-              ? "Unable to load opportunities"
-              : payload.error
-          );
-        }
-
-        setData(payload.data);
-      } catch (error) {
-        setError(
-          error instanceof Error
-            ? error.message
-            : "Unable to load opportunities"
-        );
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    },
-    []
-  );
+  const load = useCallback(async (background = false) => {
+    try {
+      background ? setRefreshing(true) : setLoading(true);
+      setError(null);
+      const response = await fetch("/api/opportunities", { cache: "no-store" });
+      const payload = (await response.json()) as ApiResponse<OpportunitiesResponse>;
+      if (!response.ok || !payload.success) throw new Error(payload.success ? "Unable to load Radar" : payload.error);
+      setData(payload.data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load Radar");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
 
   useEffect(() => {
-    void loadOpportunities();
+    void load();
+    const timer = window.setInterval(() => void load(true), 30_000);
+    return () => window.clearInterval(timer);
+  }, [load]);
 
-    const interval = window.setInterval(() => {
-      void loadOpportunities(true);
-    }, 30_000);
-
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [loadOpportunities]);
+  const items = useMemo(() => data?.items.filter((item) => filter === "all" || item.chain === filter) ?? [], [data, filter]);
+  const entryReady = data?.items.filter((item) => stage(item) === "ENTRY READY").length ?? 0;
+  const building = data?.items.filter((item) => stage(item) === "BUILDING").length ?? 0;
 
   return (
-    <section className="mt-8">
-      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
-            </span>
-
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-300">
-              Live Intelligence
-            </p>
-          </div>
-
-          <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">
-            Live Opportunities
-          </h2>
-
-          <p className="mt-1 text-sm text-zinc-500">
-            Independent opportunities currently being
-            tracked by AlphaOS agents.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          {refreshing ? (
-            <span className="text-xs text-zinc-600">
-              Refreshing…
-            </span>
-          ) : null}
-
-          <button
-            type="button"
-            onClick={() =>
-              void loadOpportunities(true)
-            }
-            disabled={refreshing}
-            className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs font-medium text-zinc-300 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Refresh
-          </button>
-        </div>
+    <section className="mt-5">
+      <div className="grid grid-cols-2 gap-3 sm:max-w-md">
+        <div className="rounded-2xl border border-emerald-400/15 bg-emerald-400/[0.05] p-4"><p className="text-2xl font-semibold text-white">{entryReady}</p><p className="mt-1 text-[9px] uppercase tracking-[0.14em] text-emerald-300">Entry Ready</p></div>
+        <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4"><p className="text-2xl font-semibold text-white">{building}</p><p className="mt-1 text-[9px] uppercase tracking-[0.14em] text-zinc-600">Building</p></div>
       </div>
 
-      {loading && !data ? (
-        <OpportunitySkeleton />
-      ) : null}
-
-      {error && !data ? (
-        <div className="rounded-2xl border border-red-400/20 bg-red-400/[0.04] p-6">
-          <p className="text-sm font-medium text-red-300">
-            Live Opportunities unavailable
-          </p>
-
-          <p className="mt-2 text-sm text-zinc-500">
-            Hero Stats and all other AlphaOS modules
-            remain operational.
-          </p>
-
-          <button
-            type="button"
-            onClick={() =>
-              void loadOpportunities()
-            }
-            className="mt-5 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-medium text-white transition hover:bg-white/[0.08]"
-          >
-            Retry module
-          </button>
+      <div className="mt-5 flex items-center justify-between gap-3">
+        <div className="flex rounded-xl border border-white/[0.08] bg-white/[0.02] p-1">
+          {(["all", "solana", "robinhood"] as ChainFilter[]).map((value) => <button key={value} type="button" onClick={() => setFilter(value)} className={`rounded-lg px-3 py-2 text-[10px] font-semibold uppercase tracking-wider ${filter === value ? "bg-white/[0.08] text-white" : "text-zinc-600"}`}>{value === "all" ? "All" : value === "robinhood" ? "Robinhood" : "Solana"}</button>)}
         </div>
-      ) : null}
+        <button type="button" onClick={() => void load(true)} disabled={refreshing} className="text-xs text-zinc-600 hover:text-zinc-300">{refreshing ? "Refreshing…" : "Refresh"}</button>
+      </div>
 
-      {data && data.items.length === 0 ? (
-        <EmptyOpportunities />
-      ) : null}
-
-      {data && data.items.length > 0 ? (
-        <>
-          {error ? (
-            <div className="mb-4 rounded-xl border border-amber-400/20 bg-amber-400/[0.04] px-4 py-3 text-xs text-amber-300">
-              Refresh failed. Showing the last
-              successful opportunity data.
-            </div>
-          ) : null}
-
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {data.items.map((opportunity) => (
-              <OpportunityCard
-                key={String(opportunity.id)}
-                opportunity={opportunity}
-              />
-            ))}
-          </div>
-        </>
-      ) : null}
+      {loading && !data ? <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-64 animate-pulse rounded-2xl border border-white/[0.08] bg-white/[0.02]" />)}</div> : null}
+      {error && !data ? <div className="mt-5 rounded-2xl border border-rose-400/20 bg-rose-400/[0.04] p-5 text-sm text-rose-300">{error}</div> : null}
+      {data && items.length === 0 ? <div className="mt-5 rounded-2xl border border-dashed border-white/[0.08] p-10 text-center text-sm text-zinc-600">No active opportunities in this chain right now. AlphaOS is still scanning.</div> : null}
+      {items.length > 0 ? <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{items.map((item) => <RadarCard key={String(item.id)} opportunity={item} />)}</div> : null}
+      {error && data ? <p className="mt-3 text-xs text-amber-300">Refresh failed; showing the last successful Radar snapshot.</p> : null}
     </section>
   );
 }
