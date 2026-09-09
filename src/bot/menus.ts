@@ -1,8 +1,21 @@
 import { Markup } from 'telegraf';
 import { hasCapability, type AccessProfile } from '../product/capabilities.js';
 
+function alphaWebUrl(): string | null {
+  const value = String(process.env.ALPHAOS_WEB_URL ?? '').trim();
+  if (!/^https:\/\//i.test(value)) return null;
+  return value.replace(/\/+$/, '');
+}
+
 export function mainAlphaMenu(access: AccessProfile) {
-  return Markup.inlineKeyboard([
+  const rows: any[][] = [];
+  const appUrl = alphaWebUrl();
+
+  if (appUrl) {
+    rows.push([Markup.button.url('✦ Open AlphaOS App', appUrl)]);
+  }
+
+  rows.push(
     [
       Markup.button.callback('⚡ Radar', 'OPPORTUNITY_CENTER'),
       Markup.button.callback('🧠 Intelligence', 'INTELLIGENCE_CENTER'),
@@ -18,10 +31,13 @@ export function mainAlphaMenu(access: AccessProfile) {
       Markup.button.callback('⚙ Controls', 'SETTINGS'),
       Markup.button.callback('✦ Pro', 'MEMBERSHIP_HOME'),
     ],
-    ...(hasCapability(access, 'trading.admin')
-      ? [[Markup.button.callback('👑 Admin', 'ADMIN_TERMINAL_REFRESH')]]
-      : []),
-  ]);
+  );
+
+  if (hasCapability(access, 'trading.admin')) {
+    rows.push([Markup.button.callback('👑 Admin', 'ADMIN_TERMINAL_REFRESH')]);
+  }
+
+  return Markup.inlineKeyboard(rows);
 }
 
 export function intelligenceMenu(access: AccessProfile) {
