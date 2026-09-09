@@ -29,9 +29,7 @@ function numeric(value: unknown): number | null {
 export async function GET(request: NextRequest) {
   try {
     const requested = request.nextUrl.searchParams.get("window") as WindowKey | null;
-    const window: WindowKey = requested && ["today", "7d", "30d", "all"].includes(requested)
-      ? requested
-      : "today";
+    const window: WindowKey = requested && ["today", "7d", "30d", "all"].includes(requested) ? requested : "today";
 
     let query = supabaseAdmin
       .from("alerts")
@@ -46,32 +44,74 @@ export async function GET(request: NextRequest) {
     const { data, error } = await query;
     if (error) throw error;
 
-    const mapped = (data ?? []).map((row) => {
+    const rows = data ?? [];
+    const tokens = [...new Set(rows.map((row) => row.token_address ? String(row.token_address) : "").filter(Boolean))];
+    const earliestAlert = rows.length
+      ? rows.reduce((min, row) => {
+          const value = row.alerted_at ? String(row.alerted_at) : min;
+          return !min || (value && value < min) ? value : min;
+        }, "")
+      : "";
+
+    const eventMap = new Map<string, Array<{ price: number; createdAt: string }>>();
+    if (tokens.length && earliestAlert) {
+      const { data: events, error: eventError } = await supabaseAdmin
+        .from("token_memory_events")
+        .select("token, price, created_at")
+        .in("token", tokens)
+        .gte("created_at", earliestAlert)
+        .not("price", "is", null)
+        .order("created_at", { ascending: true })
+        .limit(10000);
+      if (eventError) console.error("top-alerts event history", eventError);
+      for (const event of events ?? []) {
+        const token = event.token ? String(event.token) : "";
+        const price = numeric(event.price);
+        const createdAt = event.created_at ? String(event.created_at) : "";
+        if (!token || price === null || !createdAt) continue;
+        const list = eventMap.get(token) ?? [];
+        list.push({ price, createdAt });
+        eventMap.set(token, list);
+      }
+    }
+
+    const mapped = rows.map((row) => {
+      const token = row.token_address ? String(row.token_address) : "";
+      const alertedAt = row.alerted_at ? String(row.alerted_at) : null;
       const alertPrice = numeric(row.alert_price);
-      const highPrice = numeric(row.high_price_after_alert);
+      const storedHighPrice = numeric(row.high_price_after_alert);
       const currentPrice = numeric(row.current_price);
-      const storedHigh = numeric(row.roi_high);
-      const computedHigh = alertPrice && highPrice
-        ? ((highPrice - alertPrice) / alertPrice) * 100
+
+      const eventPeak = alertedAt
+        ? (eventMap.get(token) ?? [])
+            .filter((event) => event.createdAt >= alertedAt)
+            .reduce<number | null>((max, event) => max === null || event.price > max ? event.price : max, null)
         : null;
-      const roiHigh = storedHigh ?? computedHigh;
-      const roiNow = alertPrice && currentPrice
+
+      const peakPrice = eventPeak !== null
+        ? Math.max(eventPeak, alertPrice ?? eventPeak)
+        : storedHighPrice;
+
+      const roiHigh = alertPrice !== null && alertPrice > 0 && peakPrice !== null
+        ? ((peakPrice - alertPrice) / alertPrice) * 100
+        : null;
+      const roiNow = alertPrice !== null && alertPrice > 0 && currentPrice !== null
         ? ((currentPrice - alertPrice) / alertPrice) * 100
         : null;
 
       return {
         id: String(row.id),
-        token: row.token_address ? String(row.token_address) : "",
+        token,
         symbol: row.symbol ? String(row.symbol) : "UNKNOWN",
         name: row.name ? String(row.name) : null,
-        chain: inferChain(row.token_address ? String(row.token_address) : null),
+        chain: inferChain(token || null),
         score: numeric(row.score_at_alert),
         alertPrice,
         currentPrice,
-        highPrice,
+        peakPrice,
         roiHigh,
         roiNow,
-        alertedAt: row.alerted_at ? String(row.alerted_at) : null,
+        alertedAt,
         alertType: row.alert_type ? String(row.alert_type) : null,
       };
     });
@@ -82,9 +122,8 @@ export async function GET(request: NextRequest) {
 
     const winners = items.filter((item) => (item.roiHigh ?? 0) > 0).length;
     const over100 = items.filter((item) => (item.roiHigh ?? 0) >= 100).length;
-    const medianPeak = items.length
-      ? [...items].map((item) => item.roiHigh ?? 0).sort((a, b) => a - b)[Math.floor(items.length / 2)]
-      : null;
+    const positivePeaks = items.map((item) => item.roiHigh).filter((value): value is number => value !== null && value > 0).sort((a, b) => a - b);
+    const medianPeak = positivePeaks.length ? positivePeaks[Math.floor(positivePeaks.length / 2)] : null;
 
     return NextResponse.json({
       success: true,
@@ -93,20 +132,12 @@ export async function GET(request: NextRequest) {
         top: items[0] ?? null,
         leaders: items.slice(0, 5),
         recent: mapped.slice(0, 8),
-        summary: {
-          tracked: items.length,
-          winners,
-          over100,
-          medianPeak,
-        },
+        summary: { tracked: items.length, winners, over100, medianPeak },
         generatedAt: new Date().toISOString(),
       },
     });
   } catch (error) {
     console.error("top-alerts", error);
-    return NextResponse.json(
-      { success: false, error: "Unable to load alert performance" },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: "Unable to load alert performance" }, { status: 500 });
   }
 }
