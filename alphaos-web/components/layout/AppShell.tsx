@@ -11,6 +11,7 @@ const navigationItems: NavigationItem[] = [
   { label: "Home", href: "/", description: "Proof and market snapshot", icon: "⌂" },
   { label: "Radar", href: "/opportunities", description: "Live market setups", icon: "⌁" },
   { label: "Intel", href: "/dashboard", description: "Research and intelligence", icon: "◇" },
+  { label: "Game", href: "/game", description: "Play and future rewards", icon: "◆" },
 ];
 
 function isActiveRoute(pathname: string, href: string) {
@@ -45,7 +46,6 @@ export default function AppShell({ children }: AppShellProps) {
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.08] bg-[#07090c]/95 px-2 pb-[max(8px,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl lg:hidden">
       <div className="mx-auto grid max-w-md grid-cols-5 gap-1">
         {navigationItems.map((item) => { const active = isActiveRoute(pathname, item.href); return <Link key={item.href} href={item.href} className={`flex min-h-12 flex-col items-center justify-center rounded-xl text-[9px] font-medium transition ${active ? "bg-emerald-400/[0.08] text-emerald-300" : "text-zinc-600"}`}><span className="mb-0.5 text-base leading-none">{item.icon}</span>{item.label}</Link>; })}
-        <div className="flex min-h-12 flex-col items-center justify-center rounded-xl text-[9px] font-medium text-zinc-700"><span className="mb-0.5 text-base leading-none">◉</span>Wallets</div>
         <div className="flex min-h-12 flex-col items-center justify-center rounded-xl text-[9px] font-medium text-zinc-700"><span className="mb-0.5 text-base leading-none">○</span>Me</div>
       </div>
     </nav>
