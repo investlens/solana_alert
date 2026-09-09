@@ -1,10 +1,23 @@
 import { Markup } from 'telegraf';
 import { hasCapability, type AccessProfile } from '../product/capabilities.js';
 
+function alphaWebUrl(): string | null {
+  const value = String(process.env.ALPHAOS_WEB_URL ?? '').trim();
+  if (!/^https:\/\//i.test(value)) return null;
+  return value.replace(/\/+$/, '');
+}
+
 export function mainAlphaMenu(access: AccessProfile) {
-  return Markup.inlineKeyboard([
+  const rows: any[][] = [];
+  const appUrl = alphaWebUrl();
+
+  if (appUrl) {
+    rows.push([Markup.button.url('✦ Open AlphaOS App', appUrl)]);
+  }
+
+  rows.push(
     [
-      Markup.button.callback('⚡ Opportunities', 'OPPORTUNITY_CENTER'),
+      Markup.button.callback('⚡ Radar', 'OPPORTUNITY_CENTER'),
       Markup.button.callback('🧠 Intelligence', 'INTELLIGENCE_CENTER'),
     ],
     [
@@ -15,35 +28,38 @@ export function mainAlphaMenu(access: AccessProfile) {
       Markup.button.callback('📈 Trading', 'TRADE_MENU'),
     ],
     [
-      Markup.button.callback('⚙️ Controls', 'SETTINGS'),
-      Markup.button.callback('⭐ Membership', 'MEMBERSHIP_HOME'),
+      Markup.button.callback('⚙ Controls', 'SETTINGS'),
+      Markup.button.callback('✦ Pro', 'MEMBERSHIP_HOME'),
     ],
-    ...(hasCapability(access, 'trading.admin')
-      ? [[Markup.button.callback('👑 Admin Trading', 'ADMIN_TERMINAL_REFRESH')]]
-      : []),
-  ]);
+  );
+
+  if (hasCapability(access, 'trading.admin')) {
+    rows.push([Markup.button.callback('👑 Admin', 'ADMIN_TERMINAL_REFRESH')]);
+  }
+
+  return Markup.inlineKeyboard(rows);
 }
 
 export function intelligenceMenu(access: AccessProfile) {
   const rows: any[][] = [
-    [Markup.button.callback('🔎 Investigations', 'INTEL_INVESTIGATIONS')],
+    [Markup.button.callback('🔎 Research', 'INTEL_INVESTIGATIONS')],
   ];
 
   if (hasCapability(access, 'intelligence.smartMoney')) {
     rows.push([
       Markup.button.callback('🐋 Smart Money', 'INTEL_SMART_MONEY'),
-      Markup.button.callback('👤 Creators', 'INTEL_CREATORS'),
+      Markup.button.callback('👤 Developers', 'INTEL_CREATORS'),
     ]);
-    rows.push([Markup.button.callback('📊 Performance', 'INTEL_PERFORMANCE')]);
+    rows.push([Markup.button.callback('📊 Track Record', 'INTEL_PERFORMANCE')]);
   } else {
-    rows.push([Markup.button.callback('⭐ Unlock Full Intelligence', 'MEMBERSHIP_PLANS')]);
+    rows.push([Markup.button.callback('✦ Unlock Intelligence', 'MEMBERSHIP_PLANS')]);
   }
 
   if (hasCapability(access, 'trading.admin')) {
-    rows.push([Markup.button.callback('🐦 X Intelligence', 'X_INTEL_HOME')]);
+    rows.push([Markup.button.callback('𝕏 X Intelligence', 'X_INTEL_HOME')]);
   }
 
-  rows.push([Markup.button.callback('🏠 Home', 'MAIN_MENU')]);
+  rows.push([Markup.button.callback('⌂ Home', 'MAIN_MENU')]);
   return Markup.inlineKeyboard(rows);
 }
 
@@ -55,24 +71,24 @@ export function tradingMenu(access: AccessProfile) {
         Markup.button.callback('🤖 Automation', 'AUTO_TRADE_STATUS'),
       ],
       [
-        Markup.button.callback('🛡 Risk Controls', 'ADMIN_TRADE_SETTINGS'),
+        Markup.button.callback('🛡 Risk', 'ADMIN_TRADE_SETTINGS'),
         Markup.button.callback('🧠 Learning', 'LEARNING_SUMMARY'),
       ],
-      [Markup.button.callback('🏠 Home', 'MAIN_MENU')],
+      [Markup.button.callback('⌂ Home', 'MAIN_MENU')],
     ]);
   }
 
   return Markup.inlineKeyboard([
-    [Markup.button.callback('⚡ Browse Opportunities', 'OPPORTUNITY_CENTER')],
-    [Markup.button.callback('🏠 Home', 'MAIN_MENU')],
+    [Markup.button.callback('⚡ Open Radar', 'OPPORTUNITY_CENTER')],
+    [Markup.button.callback('⌂ Home', 'MAIN_MENU')],
   ]);
 }
 
 export function backHome(parentLabel: string, parentCallback: string) {
   return Markup.inlineKeyboard([
     [
-      Markup.button.callback(`⬅️ ${parentLabel}`, parentCallback),
-      Markup.button.callback('🏠 Home', 'MAIN_MENU'),
+      Markup.button.callback(`‹ ${parentLabel}`, parentCallback),
+      Markup.button.callback('⌂ Home', 'MAIN_MENU'),
     ],
   ]);
 }
@@ -80,7 +96,7 @@ export function backHome(parentLabel: string, parentCallback: string) {
 export function backToMainMenu() {
   return {
     reply_markup: Markup.inlineKeyboard([
-      [Markup.button.callback('🏠 Home', 'MAIN_MENU')],
+      [Markup.button.callback('⌂ Home', 'MAIN_MENU')],
     ]).reply_markup,
   };
 }

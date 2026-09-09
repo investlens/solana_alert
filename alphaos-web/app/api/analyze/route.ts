@@ -4,10 +4,6 @@ import { buildAlphaContext } from '@/lib/alpha-context';
 
 export const runtime = 'nodejs';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
 function clean(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
@@ -55,17 +51,21 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!process.env.OPENAI_API_KEY) {
+    const apiKey = process.env.OPENAI_API_KEY;
+
+    if (!apiKey) {
       return NextResponse.json(
         {
           error:
             'AlphaOS AI is not configured on this environment.',
         },
         {
-          status: 500,
+          status: 503,
         }
       );
     }
+
+    const openai = new OpenAI({ apiKey });
 
     const response = await openai.responses.create({
       model: 'gpt-5.5',

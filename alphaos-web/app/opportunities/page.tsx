@@ -6,24 +6,19 @@ export const dynamic = "force-dynamic";
 export default function OpportunitiesPage() {
   return (
     <AppShell>
-      <main className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <main className="px-4 pb-28 pt-5 sm:px-6 lg:px-8 lg:pb-8 lg:pt-8">
         <div className="mx-auto max-w-[1500px]">
-          <section className="mb-8 rounded-3xl border border-white/[0.08] bg-white/[0.02] p-6 md:p-8">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-300">
-              AlphaOS Intelligence
-            </p>
-
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white md:text-5xl">
-              Opportunities
-            </h1>
-
-            <p className="mt-3 max-w-2xl text-sm leading-7 text-zinc-500 md:text-base">
-              Review the market setups currently being
-              tracked by AlphaOS and open a complete AI
-              investigation for deeper evidence.
-            </p>
+          <section className="mb-6">
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+              </span>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-300">Live AlphaOS</p>
+            </div>
+            <h1 className="mt-3 text-3xl font-semibold tracking-[-0.035em] text-white md:text-5xl">Radar</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">Live opportunities across Solana and Robinhood, ranked by AlphaOS intelligence.</p>
           </section>
-
           <LiveOpportunities />
         </div>
       </main>
