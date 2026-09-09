@@ -7,8 +7,205 @@ import {
   type OpportunityInput,
 } from '../core/opportunityRegistry.js';
 
+import {
+  scanRobinhoodSellability,
+} from '../chains/robinhood/security/sellabilityScanner.js';
+
 export type RecordOpportunityAndEmitInput =
   OpportunityInput;
+
+function numericPoolFee(
+  rawData: Record<string, unknown> | undefined,
+): number | null {
+  if (!rawData) {
+    return null;
+  }
+
+  const candidates = [
+    rawData.poolFee,
+    rawData.pool_fee,
+    rawData.fee,
+    rawData.feeTier,
+    rawData.fee_tier,
+  ];
+
+  for (const candidate of candidates) {
+    const value =
+      typeof candidate === 'number'
+        ? candidate
+        : typeof candidate === 'string'
+          ? Number(candidate)
+          : NaN;
+
+    if (
+      Number.isFinite(value) &&
+      value > 0
+    ) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function isPonsOpportunity(
+  args: RecordOpportunityAndEmitInput,
+): boolean {
+  const strategy =
+    String(
+      args.strategyKey ??
+      '',
+    ).toUpperCase();
+
+  const sourceAgent =
+    String(
+      args.sourceAgent ??
+      '',
+    ).toUpperCase();
+
+  return (
+    strategy.startsWith('PONS_') ||
+    sourceAgent.includes('PONS')
+  );
+}
+
+async function passesRobinhoodSellabilityGate(
+  args: RecordOpportunityAndEmitInput,
+  opportunityAction: string,
+): Promise<boolean> {
+  const chain =
+    String(
+      args.chain ??
+      '',
+    ).toLowerCase();
+
+  if (
+    chain !== 'robinhood' ||
+    ![
+      'BUY',
+      'CHECK_ENTRY',
+    ].includes(
+      opportunityAction,
+    )
+  ) {
+    return true;
+  }
+
+  const source =
+    isPonsOpportunity(args)
+      ? 'PONS'
+      : 'ONCHAIN';
+
+  try {
+    const sellability =
+      await scanRobinhoodSellability({
+        tokenAddress:
+          args.assetId,
+
+        source,
+
+        poolFee:
+          source === 'ONCHAIN'
+            ? numericPoolFee(
+                args.rawData,
+              )
+            : null,
+      });
+
+    const allowed =
+      sellability.status ===
+        'SELLABLE' &&
+      sellability.sellable ===
+        true &&
+      sellability.blockers.length ===
+        0;
+
+    if (!allowed) {
+      console.error(
+        '[RobinhoodSellabilityGate] BUY alert blocked:',
+        {
+          token:
+            args.assetId,
+
+          strategy:
+            args.strategyKey ??
+            null,
+
+          action:
+            opportunityAction,
+
+          source,
+
+          status:
+            sellability.status,
+
+          sellable:
+            sellability.sellable,
+
+          impactPercent:
+            sellability.estimatedImpactPercent,
+
+          blockers:
+            sellability.blockers,
+
+          warnings:
+            sellability.warnings,
+        },
+      );
+
+      return false;
+    }
+
+    console.log(
+      '[RobinhoodSellabilityGate] PASS:',
+      {
+        token:
+          args.assetId,
+
+        strategy:
+          args.strategyKey ??
+          null,
+
+        action:
+          opportunityAction,
+
+        source,
+
+        status:
+          sellability.status,
+
+        impactPercent:
+          sellability.estimatedImpactPercent,
+      },
+    );
+
+    return true;
+  } catch (error) {
+    console.error(
+      '[RobinhoodSellabilityGate] BUY alert blocked because sellability verification failed:',
+      {
+        token:
+          args.assetId,
+
+        strategy:
+          args.strategyKey ??
+          null,
+
+        action:
+          opportunityAction,
+
+        source,
+
+        error:
+          error instanceof Error
+            ? error.message
+            : String(error),
+      },
+    );
+
+    return false;
+  }
+}
 
 export async function recordOpportunityAndEmit(
   args: RecordOpportunityAndEmitInput,
@@ -159,6 +356,16 @@ export async function recordOpportunityAndEmit(
       opportunityAction,
     )
   ) {
+    const sellabilityVerified =
+      await passesRobinhoodSellabilityGate(
+        args,
+        opportunityAction,
+      );
+
+    if (!sellabilityVerified) {
+      return opportunity;
+    }
+
     try {
       await eventEngine.emit({
         eventType:
