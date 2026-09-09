@@ -21,6 +21,19 @@ function compactUsd(value: number | null) {
   }).format(value);
 }
 
+function intelligenceUrl(item: LiveOpportunity) {
+  const params = new URLSearchParams({
+    chain: item.chain,
+    symbol: item.symbol,
+    source: item.sourceAgent || "AlphaOS",
+    confidence: String(item.confidence),
+    risk: item.riskLevel,
+  });
+  if (item.marketCap !== null) params.set("marketCap", String(item.marketCap));
+  if (item.liquidity !== null) params.set("liquidity", String(item.liquidity));
+  return `/intelligence/${encodeURIComponent(item.token)}?${params}`;
+}
+
 export default function MissionBrief() {
   const [items, setItems] = useState<LiveOpportunity[]>([]);
   const [error, setError] = useState(false);
@@ -51,7 +64,6 @@ export default function MissionBrief() {
     const averageConfidence = active.length
       ? Math.round(active.reduce((sum, item) => sum + item.confidence, 0) / active.length)
       : 0;
-
     return { active, strongest, lowRisk, highRisk, averageConfidence };
   }, [items]);
 
@@ -64,27 +76,16 @@ export default function MissionBrief() {
           <div className="mt-3 flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
             <div>
               <h2 className="text-2xl font-semibold tracking-tight text-white md:text-3xl">
-                {brief.strongest
-                  ? `${brief.strongest.symbol} is the strongest live investigation`
-                  : "AlphaOS is scanning for the next asymmetric setup"}
+                {brief.strongest ? `${brief.strongest.symbol} is the strongest live investigation` : "AlphaOS is scanning for the next asymmetric setup"}
               </h2>
               <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-400">
                 {brief.strongest
-                  ? `Current confidence is ${brief.strongest.confidence}/100 with ${brief.strongest.riskLevel.toLowerCase()} assessed risk. AlphaOS is monitoring liquidity, wallet flow, creator behaviour and post-alert performance before conviction changes.`
-                  : "No active setup has cleared the current investigation threshold. Scanner, creator intelligence and Alpha Memory remain online."}
+                  ? `Current confidence is ${brief.strongest.confidence}/100 with ${brief.strongest.riskLevel.toLowerCase()} assessed risk. AlphaOS is tracking the market evidence actually available for this token and will update conviction as new observations arrive.`
+                  : "No active setup has cleared the current investigation threshold. AlphaOS continues scanning Solana and Robinhood · PONS."}
               </p>
             </div>
-
-            {brief.strongest ? (
-              <Link
-                href={`${brief.strongest.reportUrl}?source=mission-control&engine=${encodeURIComponent(brief.strongest.sourceAgent)}`}
-                className="alpha-button-primary shrink-0"
-              >
-                Open investigation
-              </Link>
-            ) : null}
+            {brief.strongest ? <Link href={intelligenceUrl(brief.strongest)} className="alpha-button-primary shrink-0">Open intelligence</Link> : null}
           </div>
-
           <div className="mt-7 grid grid-cols-2 gap-3 md:grid-cols-4">
             <BriefMetric label="Active cases" value={String(brief.active.length)} />
             <BriefMetric label="Avg confidence" value={`${brief.averageConfidence}/100`} />
@@ -96,39 +97,18 @@ export default function MissionBrief() {
 
       <article className="alpha-panel p-6 md:p-7">
         <div className="flex items-center justify-between gap-4">
-          <div>
-            <p className="alpha-eyebrow">Decision Queue</p>
-            <h2 className="mt-2 text-xl font-semibold text-white">Priority investigations</h2>
-          </div>
+          <div><p className="alpha-eyebrow">Decision Queue</p><h2 className="mt-2 text-xl font-semibold text-white">Priority investigations</h2></div>
           <span className="alpha-live-dot" aria-label="Live" />
         </div>
-
         <div className="mt-5 space-y-2">
           {brief.active.slice(0, 4).map((item, index) => (
-            <Link
-              key={String(item.id)}
-              href={`${item.reportUrl}?source=mission-control&engine=${encodeURIComponent(item.sourceAgent)}`}
-              className="flex items-center gap-3 rounded-2xl border border-white/[0.07] bg-black/15 px-4 py-3 transition hover:border-emerald-400/20 hover:bg-white/[0.035]"
-            >
+            <Link key={String(item.id)} href={intelligenceUrl(item)} className="flex items-center gap-3 rounded-2xl border border-white/[0.07] bg-black/15 px-4 py-3 transition hover:border-emerald-400/20 hover:bg-white/[0.035]">
               <span className="text-xs font-semibold text-zinc-700">0{index + 1}</span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-white">{item.symbol}</p>
-                <p className="mt-0.5 truncate text-[11px] text-zinc-600">
-                  {compactUsd(item.marketCap)} · {item.sourceAgent}
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-sm font-semibold text-emerald-300">{item.confidence}</p>
-                <p className={`text-[10px] font-semibold ${riskTone(item.riskLevel)}`}>{item.riskLevel}</p>
-              </div>
+              <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-white">{item.symbol}</p><p className="mt-0.5 truncate text-[11px] text-zinc-600">{compactUsd(item.marketCap)} · {item.chain === "robinhood" ? "Robinhood · PONS" : item.sourceAgent}</p></div>
+              <div className="text-right"><p className="text-sm font-semibold text-emerald-300">{item.confidence}</p><p className={`text-[10px] font-semibold ${riskTone(item.riskLevel)}`}>{item.riskLevel}</p></div>
             </Link>
           ))}
-
-          {!brief.active.length ? (
-            <div className="rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-zinc-600">
-              {error ? "Decision queue temporarily unavailable." : "No investigations in queue."}
-            </div>
-          ) : null}
+          {!brief.active.length ? <div className="rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-zinc-600">{error ? "Decision queue temporarily unavailable." : "No investigations in queue."}</div> : null}
         </div>
       </article>
     </section>
@@ -136,10 +116,5 @@ export default function MissionBrief() {
 }
 
 function BriefMetric({ label, value, tone = "text-white" }: { label: string; value: string; tone?: string }) {
-  return (
-    <div className="rounded-2xl border border-white/[0.07] bg-black/20 p-4">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-600">{label}</p>
-      <p className={`mt-2 text-xl font-semibold tracking-tight ${tone}`}>{value}</p>
-    </div>
-  );
+  return <div className="rounded-2xl border border-white/[0.07] bg-black/20 p-4"><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-600">{label}</p><p className={`mt-2 text-xl font-semibold tracking-tight ${tone}`}>{value}</p></div>;
 }

@@ -46,36 +46,37 @@ export async function GET(request: NextRequest) {
     const { data, error } = await query;
     if (error) throw error;
 
-    const items = (data ?? [])
-      .map((row) => {
-        const alertPrice = numeric(row.alert_price);
-        const highPrice = numeric(row.high_price_after_alert);
-        const currentPrice = numeric(row.current_price);
-        const storedHigh = numeric(row.roi_high);
-        const computedHigh = alertPrice && highPrice
-          ? ((highPrice - alertPrice) / alertPrice) * 100
-          : null;
-        const roiHigh = storedHigh ?? computedHigh;
-        const roiNow = alertPrice && currentPrice
-          ? ((currentPrice - alertPrice) / alertPrice) * 100
-          : null;
+    const mapped = (data ?? []).map((row) => {
+      const alertPrice = numeric(row.alert_price);
+      const highPrice = numeric(row.high_price_after_alert);
+      const currentPrice = numeric(row.current_price);
+      const storedHigh = numeric(row.roi_high);
+      const computedHigh = alertPrice && highPrice
+        ? ((highPrice - alertPrice) / alertPrice) * 100
+        : null;
+      const roiHigh = storedHigh ?? computedHigh;
+      const roiNow = alertPrice && currentPrice
+        ? ((currentPrice - alertPrice) / alertPrice) * 100
+        : null;
 
-        return {
-          id: String(row.id),
-          token: row.token_address ? String(row.token_address) : "",
-          symbol: row.symbol ? String(row.symbol) : "UNKNOWN",
-          name: row.name ? String(row.name) : null,
-          chain: inferChain(row.token_address ? String(row.token_address) : null),
-          score: numeric(row.score_at_alert),
-          alertPrice,
-          currentPrice,
-          highPrice,
-          roiHigh,
-          roiNow,
-          alertedAt: row.alerted_at ? String(row.alerted_at) : null,
-          alertType: row.alert_type ? String(row.alert_type) : null,
-        };
-      })
+      return {
+        id: String(row.id),
+        token: row.token_address ? String(row.token_address) : "",
+        symbol: row.symbol ? String(row.symbol) : "UNKNOWN",
+        name: row.name ? String(row.name) : null,
+        chain: inferChain(row.token_address ? String(row.token_address) : null),
+        score: numeric(row.score_at_alert),
+        alertPrice,
+        currentPrice,
+        highPrice,
+        roiHigh,
+        roiNow,
+        alertedAt: row.alerted_at ? String(row.alerted_at) : null,
+        alertType: row.alert_type ? String(row.alert_type) : null,
+      };
+    });
+
+    const items = mapped
       .filter((item) => item.roiHigh !== null)
       .sort((a, b) => (b.roiHigh ?? -Infinity) - (a.roiHigh ?? -Infinity));
 
@@ -91,6 +92,7 @@ export async function GET(request: NextRequest) {
         window,
         top: items[0] ?? null,
         leaders: items.slice(0, 5),
+        recent: mapped.slice(0, 8),
         summary: {
           tracked: items.length,
           winners,
