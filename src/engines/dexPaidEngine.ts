@@ -705,8 +705,6 @@ console.log('final intelligence decision:', {
       continue;
     }
 
-    seen.add(c.token);
-
     await upsertTokenMemory({
       token: c.token,
       symbol: c.symbol,
@@ -843,10 +841,6 @@ const investigation = buildInvestigation({
   },
 });
 
-    if (!canSendTokenAlert(c.token, 'DEX_PAID')) {
-  continue;
-}
-
 const minimumConfidenceByTier: Record<'P0' | 'P1' | 'P2', number> = {
   P0: 72,
   P1: 66,
@@ -857,7 +851,7 @@ const minimumRequiredConfidence =
   minimumConfidenceByTier[tier as 'P0' | 'P1' | 'P2'];
 
 if (confidenceResult.confidence < minimumRequiredConfidence) {
-  console.log('alert blocked by final confidence gate:', {
+  console.log('alert blocked by final confidence gate; candidate remains eligible for re-evaluation:', {
     token: c.token,
     symbol: c.symbol,
     tier,
@@ -882,7 +876,15 @@ console.log('alert approved by final intelligence gate:', {
   minimumRequiredConfidence,
 });
 
+// Consume the six-hour dedupe window only after every intelligence gate passes.
+// Previously this happened before the confidence gate, which could suppress a
+// future improved candidate even though no Telegram alert had actually fired.
+if (!canSendTokenAlert(c.token, 'DEX_PAID')) {
+  continue;
+}
+
 await sendAlphaAlertToUsers(investigation);
+seen.add(c.token);
   }
 
   console.log("runDexPaidEngine finished");
