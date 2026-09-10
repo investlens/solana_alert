@@ -100,13 +100,14 @@ async function previousCheckpoint(
   return (data as PreviousCheckpoint | null) ?? null;
 }
 
-async function alreadyPromoted(token: string): Promise<boolean> {
+async function hasCompetingActionableOpportunity(token: string): Promise<boolean> {
   const { data, error } = await supabase
     .from('opportunities')
-    .select('id,status,recommended_action')
+    .select('id,strategy_key,status,recommended_action')
     .eq('asset_id', token)
-    .eq('strategy_key', 'SOL_SECOND_CHANCE')
-    .in('status', ['NEW', 'WATCHING', 'ACTIVE'])
+    .in('strategy_key', ['SOL_SECOND_CHANCE', 'SOL_MOMENTUM', 'SOL_REENTRY'])
+    .in('status', ['NEW', 'ACTIVE'])
+    .in('recommended_action', ['BUY', 'CHECK_ENTRY'])
     .limit(1);
 
   if (error) {
@@ -126,11 +127,12 @@ export async function evaluateSecondChanceCheckpoint(
   const chain = String(input.chain ?? '').toLowerCase();
   const eventType = String(input.eventType ?? '').toUpperCase();
 
-  // Isolated Solana-only recovery path. Existing alert rules are untouched.
+  // This is an additive Solana-only path. The legacy scanner and its thresholds
+  // remain untouched. We only reconsider tokens that never produced an alert.
   if (chain !== 'solana' || !ELIGIBLE_CHECKPOINTS.has(eventType)) return;
 
   if (await alreadyAlerted(input.token)) return;
-  if (await alreadyPromoted(input.token)) return;
+  if (await hasCompetingActionableOpportunity(input.token)) return;
 
   const raw = input.raw ?? {};
   const returnPct = n(raw.returnPct, Number.NaN);
@@ -166,8 +168,8 @@ export async function evaluateSecondChanceCheckpoint(
     ratio >= 1.35 &&
     score >= 55;
 
-  // Very fast breakouts are allowed to trigger a review with a slightly
-  // lower buy ratio, but still require real liquidity and participation.
+  // Fast breakouts get a second review, not an automatic BUY. They still flow
+  // through the normal opportunity delivery/governor controls downstream.
   const breakoutAcceleration =
     returnPct >= 100 &&
     liquidity >= 25_000 &&
@@ -293,7 +295,7 @@ export async function evaluateSecondChanceCheckpoint(
     },
   });
 
-  console.log('[SECOND_CHANCE] promoted for full opportunity delivery checks', {
+  console.log('[SECOND_CHANCE] promoted for existing opportunity delivery checks', {
     token: input.token,
     eventType,
     trigger,
