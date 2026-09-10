@@ -1,4 +1,5 @@
 import {
+  decodeEventLog,
   getAddress,
   parseAbiItem,
   type Address,
@@ -78,11 +79,21 @@ export function classifyRobinhoodWalletTransaction(
   const spentQuote = sent.some(transfer => isQuoteToken(transfer.token) && transfer.value > 0n);
   const receivedQuote = received.some(transfer => isQuoteToken(transfer.token) && transfer.value > 0n);
   const spentNative = sameAddress(tx.from, wallet) && tx.value > 0n;
+  // Routed swaps often move WETH between router/pool contracts rather than directly
+  // from the tracked wallet. Require the tracked wallet to have initiated the tx,
+  // a non-WETH asset to arrive at it, and real WETH movement in the same receipt.
+  // Plain inbound token transfers therefore remain RECEIVE events.
+  const routedQuoteMovement = sameAddress(tx.from, wallet)
+    && tx.transfers.some(transfer => isQuoteToken(transfer.token) && transfer.value > 0n);
 
-  if (receivedAsset && (spentQuote || spentNative)) {
+  if (receivedAsset && (spentQuote || spentNative || routedQuoteMovement)) {
     return {
       kind: 'buy', token: receivedAsset.token, amountRaw: receivedAsset.value,
-      evidence: spentQuote ? 'Token received with verified quote-token spend' : 'Token received with verified native transaction value',
+      evidence: spentQuote
+        ? 'Token received with verified quote-token spend'
+        : spentNative
+          ? 'Token received with verified native transaction value'
+          : 'Token received in wallet-initiated transaction with verified routed WETH movement',
     };
   }
   if (sentAsset && receivedQuote) {
@@ -119,6 +130,31 @@ function chunks<T>(values: T[], size: number): T[][] {
   const result: T[][] = [];
   for (let index = 0; index < values.length; index += size) result.push(values.slice(index, index + size));
   return result;
+}
+
+function transferEvidenceFromReceipt(receipt: Awaited<ReturnType<typeof robinhoodPublicClient.getTransactionReceipt>>): RobinhoodTransferEvidence[] {
+  const transfers: RobinhoodTransferEvidence[] = [];
+  for (const log of receipt.logs) {
+    try {
+      const decoded = decodeEventLog({
+        abi: [transferEvent],
+        data: log.data,
+        topics: log.topics,
+        strict: true,
+      });
+      if (decoded.eventName !== 'Transfer') continue;
+      const args = decoded.args as { from: Address; to: Address; value: bigint };
+      transfers.push({
+        token: getAddress(log.address),
+        from: getAddress(args.from),
+        to: getAddress(args.to),
+        value: args.value,
+      });
+    } catch {
+      // Most receipt logs are not ERC-20 Transfer events.
+    }
+  }
+  return transfers;
 }
 
 export async function scanRobinhoodWalletActivity(args: {
@@ -158,11 +194,9 @@ export async function scanRobinhoodWalletActivity(args: {
       robinhoodPublicClient.getTransaction({ hash }),
       robinhoodPublicClient.getTransactionReceipt({ hash }),
     ]);
-    const transfers: RobinhoodTransferEvidence[] = [];
-    for (const log of transferLogs.filter(item => item.transactionHash === hash)) {
-      if (!log.args.from || !log.args.to || log.args.value == null) continue;
-      transfers.push({ token: getAddress(log.address), from: getAddress(log.args.from), to: getAddress(log.args.to), value: log.args.value });
-    }
+    // Decode the full receipt, not only logs directly touching the wallet. This
+    // preserves router/pool WETH evidence required to identify routed buys.
+    const transfers = transferEvidenceFromReceipt(receipt);
     const block = await robinhoodPublicClient.getBlock({ blockNumber: receipt.blockNumber });
     for (const wallet of args.wallets) {
       const launchedTokens = launchLogs
@@ -176,8 +210,12 @@ export async function scanRobinhoodWalletActivity(args: {
       const metadata = await tokenMetadata(classification.token).catch(() => null);
       const assetTransfer = transfers.find(transfer => sameAddress(transfer.token, classification.token) &&
         (sameAddress(transfer.to, wallet) || sameAddress(transfer.from, wallet)));
-      const quoteTransfer = transfers.find(transfer => isQuoteToken(transfer.token) &&
+      const directQuoteTransfer = transfers.find(transfer => isQuoteToken(transfer.token) &&
         (sameAddress(transfer.to, wallet) || sameAddress(transfer.from, wallet)));
+      const routedQuoteTransfer = classification.kind === 'buy'
+        ? transfers.find(transfer => isQuoteToken(transfer.token) && transfer.value > 0n)
+        : null;
+      const quoteTransfer = directQuoteTransfer ?? routedQuoteTransfer;
       const nativeAmount = (classification.kind === 'buy' && sameAddress(transaction.from, wallet) && transaction.value > 0n)
         ? Number(transaction.value) / 1e18
         : null;
@@ -248,13 +286,19 @@ export function walletCursorRecoveryDecision(args: {
 
 async function unresolvedWalletDeliveries(wallets: Address[]): Promise<Map<string, number>> {
   const { data, error } = await supabase.from('wallet_activity_deliveries')
-    .select('wallet_address,metadata').in('metadata->>state', ['RESERVED', 'SENT_UNCONFIRMED']);
+    .select('wallet_address,metadata,delivered_at').in('metadata->>state', ['RESERVED', 'SENT_UNCONFIRMED']);
   if (error) throw error;
   const monitored = new Set(wallets.map(wallet => wallet.toLowerCase()));
   const counts = new Map<string, number>();
-  for (const row of data ?? []) { const key = String(row.wallet_address).toLowerCase();
+  for (const row of data ?? []) {
+    const key = String(row.wallet_address).toLowerCase();
     const state = (row.metadata as Record<string, unknown> | null)?.state;
-    if (monitored.has(key) && (state === 'RESERVED' || state === 'SENT_UNCONFIRMED')) counts.set(key, (counts.get(key) ?? 0) + 1); }
+    // A delivered row is resolved even if stale metadata still says RESERVED.
+    if (row.delivered_at != null) continue;
+    if (monitored.has(key) && (state === 'RESERVED' || state === 'SENT_UNCONFIRMED')) {
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
   return counts;
 }
 
