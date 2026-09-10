@@ -2,168 +2,31 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
-
 type WindowKey = "today" | "7d";
+type AlertItem = { id:string; token:string; symbol:string; name:string|null; chain:"solana"|"robinhood"|"unknown"; score:number|null; alertPrice:number|null; currentPrice:number|null; peakPrice:number|null; roiHigh:number|null; roiNow:number|null; alertedAt:string|null; alertType:string|null };
+const numeric=(v:unknown)=>{if(v===null||v===undefined||v==="")return null;const n=Number(v);return Number.isFinite(n)?n:null};
+function sinceFor(w:WindowKey){const d=new Date();if(w==="today")d.setUTCHours(0,0,0,0);else d.setUTCDate(d.getUTCDate()-7);return d.toISOString()}
+function inferChain(t:string|null):"solana"|"robinhood"|"unknown"{if(!t)return"unknown";return t.startsWith("0x")?"robinhood":"solana"}
+function leadersFor(items:AlertItem[],chain:"solana"|"robinhood"){return items.filter(i=>i.chain===chain&&i.roiHigh!==null).sort((a,b)=>(b.roiHigh??-Infinity)-(a.roiHigh??-Infinity)).slice(0,5)}
 
-type AlertItem = {
-  id: string;
-  token: string;
-  symbol: string;
-  name: string | null;
-  chain: "solana" | "robinhood" | "unknown";
-  score: number | null;
-  alertPrice: number | null;
-  currentPrice: number | null;
-  peakPrice: number | null;
-  roiHigh: number | null;
-  roiNow: number | null;
-  alertedAt: string | null;
-  alertType: string | null;
-};
+export async function GET(request:NextRequest){try{
+  const window:WindowKey=request.nextUrl.searchParams.get("window")==="7d"?"7d":"today";
+  const since=sinceFor(window);
+  const {data,error}=await supabaseAdmin.from("alerts").select("id, token_address, symbol, name, score_at_alert, alert_price, current_price, high_price_after_alert, alerted_at, alert_type").not("alert_price","is",null).gte("alerted_at",since).order("alerted_at",{ascending:false}).limit(750);
+  if(error)throw error;
+  const rows=data??[];
+  const tokens=[...new Set(rows.map(r=>r.token_address?String(r.token_address):"").filter(Boolean))];
+  const eventMap=new Map<string,Array<{price:number;createdAt:string}>>();
+  if(tokens.length){const {data:events,error:eventError}=await supabaseAdmin.from("token_memory_events").select("token, price, created_at").in("token",tokens).gte("created_at",since).not("price","is",null).order("created_at",{ascending:true}).limit(15000);if(eventError)console.error("top-alerts event history",eventError);for(const e of events??[]){const token=e.token?String(e.token):"",p=numeric(e.price),createdAt=e.created_at?String(e.created_at):"";if(!token||p===null||!createdAt)continue;const list=eventMap.get(token)??[];list.push({price:p,createdAt});eventMap.set(token,list)}}
+  const solana:AlertItem[]=rows.map(r=>{const token=r.token_address?String(r.token_address):"",alertedAt=r.alerted_at?String(r.alerted_at):null,alertPrice=numeric(r.alert_price),storedHigh=numeric(r.high_price_after_alert),storedCurrent=numeric(r.current_price);const post=alertedAt?(eventMap.get(token)??[]).filter(e=>e.createdAt>=alertedAt):[];const eventPeak=post.reduce<number|null>((m,e)=>m===null||e.price>m?e.price:m,null);const latest=post.length?post[post.length-1].price:null;const peakPrice=eventPeak!==null?Math.max(eventPeak,alertPrice??eventPeak):storedHigh,currentPrice=latest??storedCurrent;return{id:String(r.id),token,symbol:r.symbol?String(r.symbol):"UNKNOWN",name:r.name?String(r.name):null,chain:inferChain(token),score:numeric(r.score_at_alert),alertPrice,currentPrice,peakPrice,roiHigh:alertPrice&&peakPrice!==null?((peakPrice-alertPrice)/alertPrice)*100:null,roiNow:alertPrice&&currentPrice!==null?((currentPrice-alertPrice)/alertPrice)*100:null,alertedAt,alertType:r.alert_type?String(r.alert_type):null}}).filter(i=>i.chain==="solana");
 
-function sinceFor(window: WindowKey): string {
-  const now = new Date();
-  if (window === "today") now.setUTCHours(0, 0, 0, 0);
-  else now.setUTCDate(now.getUTCDate() - 7);
-  return now.toISOString();
-}
+  let robinhood:AlertItem[]=[];
+  const {data:deliveries,error:deliveryError}=await supabaseAdmin.from("alpha_alert_event_deliveries").select("alert_event_id, delivered_at").not("delivered_at","is",null).gte("delivered_at",since).order("delivered_at",{ascending:false}).limit(500);
+  if(deliveryError)console.error("Robinhood delivered alerts",deliveryError);
+  const eventIds=[...new Set((deliveries??[]).map(d=>numeric(d.alert_event_id)).filter((v):v is number=>v!==null))];
+  if(eventIds.length){const {data:alertEvents,error:alertEventError}=await supabaseAdmin.from("alpha_alert_events").select("id, asset_id, chain, symbol, token_name, confidence, price, alerted_at, alert_type").in("id",eventIds).eq("chain","robinhood").not("price","is",null).order("alerted_at",{ascending:false});if(alertEventError)console.error("Robinhood alert events",alertEventError);const unique=new Map<string,any>();for(const e of alertEvents??[]){const token=String(e.asset_id??"").toLowerCase();if(token&&!unique.has(token))unique.set(token,e)}const assets=[...unique.keys()];const history=new Map<string,Array<{price:number;createdAt:string}>>();if(assets.length){const {data:rhHistory,error:rhError}=await supabaseAdmin.from("alpha_alert_events").select("asset_id, price, created_at").eq("chain","robinhood").in("asset_id",[...unique.values()].map(e=>String(e.asset_id))).gte("created_at",since).not("price","is",null).order("created_at",{ascending:true}).limit(15000);if(rhError)console.error("Robinhood price history",rhError);for(const e of rhHistory??[]){const token=String(e.asset_id??"").toLowerCase(),p=numeric(e.price),createdAt=String(e.created_at??"");if(!token||p===null||!createdAt)continue;const list=history.get(token)??[];list.push({price:p,createdAt});history.set(token,list)}}robinhood=[...unique.values()].map(e=>{const token=String(e.asset_id),key=token.toLowerCase(),alertedAt=e.alerted_at?String(e.alerted_at):null,alertPrice=numeric(e.price);const post=alertedAt?(history.get(key)??[]).filter(x=>x.createdAt>=alertedAt):[];const peakPrice=post.reduce<number|null>((m,x)=>m===null||x.price>m?x.price:m,alertPrice),currentPrice=post.length?post[post.length-1].price:alertPrice;return{id:`rh-${e.id}`,token,symbol:e.symbol?String(e.symbol):"UNKNOWN",name:e.token_name?String(e.token_name):null,chain:"robinhood" as const,score:numeric(e.confidence),alertPrice,currentPrice,peakPrice,roiHigh:alertPrice&&peakPrice!==null?((peakPrice-alertPrice)/alertPrice)*100:null,roiNow:alertPrice&&currentPrice!==null?((currentPrice-alertPrice)/alertPrice)*100:null,alertedAt,alertType:e.alert_type?String(e.alert_type):null}})}
 
-function inferChain(token: string | null): "solana" | "robinhood" | "unknown" {
-  if (!token) return "unknown";
-  if (token.startsWith("0x")) return "robinhood";
-  return "solana";
-}
-
-function numeric(value: unknown): number | null {
-  if (value === null || value === undefined || value === "") return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function leadersFor(items: AlertItem[], chain: "solana" | "robinhood") {
-  return items
-    .filter((item) => item.chain === chain && item.roiHigh !== null)
-    .sort((a, b) => (b.roiHigh ?? -Infinity) - (a.roiHigh ?? -Infinity))
-    .slice(0, 5);
-}
-
-export async function GET(request: NextRequest) {
-  try {
-    const requested = request.nextUrl.searchParams.get("window");
-    const window: WindowKey = requested === "7d" ? "7d" : "today";
-
-    const { data, error } = await supabaseAdmin
-      .from("alerts")
-      .select("id, token_address, symbol, name, score_at_alert, alert_price, current_price, high_price_after_alert, alerted_at, alert_type")
-      .not("alert_price", "is", null)
-      .gte("alerted_at", sinceFor(window))
-      .order("alerted_at", { ascending: false })
-      .limit(750);
-
-    if (error) throw error;
-
-    const rows = data ?? [];
-    const tokens = [...new Set(rows.map((row) => row.token_address ? String(row.token_address) : "").filter(Boolean))];
-    const earliestAlert = rows.length
-      ? rows.reduce((min, row) => {
-          const value = row.alerted_at ? String(row.alerted_at) : min;
-          return !min || (value && value < min) ? value : min;
-        }, "")
-      : "";
-
-    const eventMap = new Map<string, Array<{ price: number; createdAt: string }>>();
-    if (tokens.length && earliestAlert) {
-      const { data: events, error: eventError } = await supabaseAdmin
-        .from("token_memory_events")
-        .select("token, price, created_at")
-        .in("token", tokens)
-        .gte("created_at", earliestAlert)
-        .not("price", "is", null)
-        .order("created_at", { ascending: true })
-        .limit(15000);
-
-      if (eventError) console.error("top-alerts event history", eventError);
-
-      for (const event of events ?? []) {
-        const token = event.token ? String(event.token) : "";
-        const price = numeric(event.price);
-        const createdAt = event.created_at ? String(event.created_at) : "";
-        if (!token || price === null || !createdAt) continue;
-        const list = eventMap.get(token) ?? [];
-        list.push({ price, createdAt });
-        eventMap.set(token, list);
-      }
-    }
-
-    const mapped: AlertItem[] = rows.map((row) => {
-      const token = row.token_address ? String(row.token_address) : "";
-      const alertedAt = row.alerted_at ? String(row.alerted_at) : null;
-      const alertPrice = numeric(row.alert_price);
-      const storedHighPrice = numeric(row.high_price_after_alert);
-      const storedCurrentPrice = numeric(row.current_price);
-      const postAlertEvents = alertedAt
-        ? (eventMap.get(token) ?? []).filter((event) => event.createdAt >= alertedAt)
-        : [];
-
-      const eventPeak = postAlertEvents.reduce<number | null>(
-        (max, event) => max === null || event.price > max ? event.price : max,
-        null,
-      );
-      const latestEventPrice = postAlertEvents.length ? postAlertEvents[postAlertEvents.length - 1].price : null;
-      const peakPrice = eventPeak !== null
-        ? Math.max(eventPeak, alertPrice ?? eventPeak)
-        : storedHighPrice;
-      const currentPrice = latestEventPrice ?? storedCurrentPrice;
-      const roiHigh = alertPrice !== null && alertPrice > 0 && peakPrice !== null
-        ? ((peakPrice - alertPrice) / alertPrice) * 100
-        : null;
-      const roiNow = alertPrice !== null && alertPrice > 0 && currentPrice !== null
-        ? ((currentPrice - alertPrice) / alertPrice) * 100
-        : null;
-
-      return {
-        id: String(row.id),
-        token,
-        symbol: row.symbol ? String(row.symbol) : "UNKNOWN",
-        name: row.name ? String(row.name) : null,
-        chain: inferChain(token || null),
-        score: numeric(row.score_at_alert),
-        alertPrice,
-        currentPrice,
-        peakPrice,
-        roiHigh,
-        roiNow,
-        alertedAt,
-        alertType: row.alert_type ? String(row.alert_type) : null,
-      };
-    });
-
-    const solanaLeaders = leadersFor(mapped, "solana");
-    const robinhoodLeaders = leadersFor(mapped, "robinhood");
-    const ranked = [...mapped]
-      .filter((item) => item.roiHigh !== null)
-      .sort((a, b) => (b.roiHigh ?? -Infinity) - (a.roiHigh ?? -Infinity));
-    const winners = ranked.filter((item) => (item.roiHigh ?? 0) > 0).length;
-    const over100 = ranked.filter((item) => (item.roiHigh ?? 0) >= 100).length;
-    const positivePeaks = ranked
-      .map((item) => item.roiHigh)
-      .filter((value): value is number => value !== null && value > 0)
-      .sort((a, b) => a - b);
-    const medianPeak = positivePeaks.length ? positivePeaks[Math.floor(positivePeaks.length / 2)] : null;
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        window,
-        solanaLeaders,
-        robinhoodLeaders,
-        recent: mapped.slice(0, 12),
-        summary: { tracked: ranked.length, winners, over100, medianPeak },
-        generatedAt: new Date().toISOString(),
-      },
-    });
-  } catch (error) {
-    console.error("top-alerts", error);
-    return NextResponse.json({ success: false, error: "Unable to load alert performance" }, { status: 500 });
-  }
-}
+  const mapped=[...solana,...robinhood].sort((a,b)=>new Date(b.alertedAt??0).getTime()-new Date(a.alertedAt??0).getTime());
+  const ranked=mapped.filter(i=>i.roiHigh!==null).sort((a,b)=>(b.roiHigh??-Infinity)-(a.roiHigh??-Infinity)),winners=ranked.filter(i=>(i.roiHigh??0)>0).length,over100=ranked.filter(i=>(i.roiHigh??0)>=100).length,positive=ranked.map(i=>i.roiHigh).filter((v):v is number=>v!==null&&v>0).sort((a,b)=>a-b),medianPeak=positive.length?positive[Math.floor(positive.length/2)]:null;
+  return NextResponse.json({success:true,data:{window,solanaLeaders:leadersFor(mapped,"solana"),robinhoodLeaders:leadersFor(mapped,"robinhood"),recent:mapped.slice(0,10),summary:{tracked:ranked.length,winners,over100,medianPeak},generatedAt:new Date().toISOString()}});
+}catch(error){console.error("top-alerts",error);return NextResponse.json({success:false,error:"Unable to load alert performance"},{status:500})}}
