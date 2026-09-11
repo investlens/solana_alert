@@ -34,11 +34,16 @@ export async function getHolderRisk(
   const holders = await fetchTopHolders(mintAddress);
 
   if (!holders.length) {
-  return {
-    score: 0,
-    level: 'LOW',
-    reasons: ['Holder data not available yet'],
-    topHolderCount: 0,
+    // Safety-critical callers (notably the Solana DEX-paid engine) must not
+    // interpret missing holder evidence as proof of low risk. BONKAT exposed
+    // this fail-open: holder_score=0 / no holders was labelled LOW immediately
+    // before a catastrophic selloff. Keep the candidate eligible for a later
+    // re-check, but block an actionable alert until distribution is observable.
+    return {
+      score: 100,
+      level: 'HIGH',
+      reasons: ['Holder data unavailable — safety cannot be verified'],
+      topHolderCount: 0,
     };
   }
 
@@ -49,19 +54,16 @@ export async function getHolderRisk(
 
   if (!amounts.length) {
     return {
-      score: 35,
-      level: 'MEDIUM',
-      reasons: ['Holder data available but concentration could not be calculated'],
+      score: 70,
+      level: 'HIGH',
+      reasons: ['Holder data returned but concentration could not be calculated'],
       topHolderCount: holders.length,
     };
   }
 
   const total = amounts.reduce((sum, x) => sum + x, 0);
-
   const looksLikePercent = total <= 150;
-
-  const toPct = (value: number) =>
-    looksLikePercent ? value : (value / total) * 100;
+  const toPct = (value: number) => looksLikePercent ? value : (value / total) * 100;
 
   const top1 = toPct(amounts[0] ?? 0);
   const top3 = toPct(amounts.slice(0, 3).reduce((s, x) => s + x, 0));
@@ -104,18 +106,12 @@ export async function getHolderRisk(
   }
 
   score = Math.max(0, Math.min(100, score));
-
-  const level =
-    score >= 60 ? 'HIGH' :
-    score >= 30 ? 'MEDIUM' :
-    'LOW';
+  const level = score >= 60 ? 'HIGH' : score >= 30 ? 'MEDIUM' : 'LOW';
 
   return {
     score,
     level,
-    reasons: reasons.length
-      ? reasons
-      : ['Holder distribution looks acceptable'],
+    reasons: reasons.length ? reasons : ['Holder distribution looks acceptable'],
     topHolderCount: holders.length,
   };
 }
