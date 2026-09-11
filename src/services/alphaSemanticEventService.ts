@@ -3,6 +3,16 @@ import { normalizeCoreDecisionMetrics, normalizeNotificationMarketContext, verif
 
 export type AlphaSemanticEventType = 'DEX_PAID' | 'BOOST' | 'VOLUME_SURGE' | 'BUILDING' | 'CONFIRMED' | 'RUNNER' | 'COOLING' | 'WEAKENING' | 'DANGER' | 'DEV_TRANSFER' | 'DEV_SELL' | 'DEV_BURN' | 'LIQUIDITY_RISK' | 'WALLET_CLUSTER' | 'RUNNER_50' | 'RUNNER_100' | 'ATH_OBSERVATION' | 'NEW_ATH' | 'X_REPUTED_MENTION' | 'PONS_PROVEN_DEV_LAUNCH';
 
+const OUTCOME_PRICE_TYPES = new Set<AlphaSemanticEventType>([
+  'DEX_PAID',
+  'BOOST',
+  'VOLUME_SURGE',
+  'DEV_BURN',
+  'DEV_SELL',
+  'LIQUIDITY_RISK',
+  'PONS_PROVEN_DEV_LAUNCH',
+]);
+
 export function resolveVerifiedSemanticEntryPrice(
   raw: Record<string, unknown>,
   assetId: string,
@@ -29,6 +39,44 @@ export function resolveVerifiedSemanticEntryPrice(
   return { price: null, provenance: null };
 }
 
+async function ensureVerifiedOutcomeEntryPrice(args: {
+  type: AlphaSemanticEventType;
+  assetId: string;
+  chain: string;
+  rawSnapshot: Record<string, unknown>;
+}): Promise<Record<string, unknown>> {
+  const raw = structuredClone(args.rawSnapshot);
+  if (!OUTCOME_PRICE_TYPES.has(args.type)) return raw;
+  if (resolveVerifiedSemanticEntryPrice(raw, args.assetId).price != null) return raw;
+
+  const chain = args.chain.toLowerCase();
+  if (!['robinhood', 'pons'].includes(chain)) return raw;
+
+  try {
+    const { getRobinhoodMarketSnapshot } = await import('../chains/robinhood/market.js');
+    const market = await getRobinhoodMarketSnapshot(args.assetId, {
+      priority: 'HIGH',
+      caller: 'alpha_entry_price_capture',
+    });
+    const price = Number(market?.priceUsd);
+    if (!Number.isFinite(price) || price <= 0) return raw;
+
+    return {
+      ...raw,
+      priceUsd: price,
+      priceProvenance: 'DEXSCREENER_VERIFIED_BASE_PAIR',
+      marketIndexState: 'VERIFIED',
+    };
+  } catch (error) {
+    console.warn('[AlphaEntryPrice] Verified price capture failed; preserving event without fabricated price', {
+      assetId: args.assetId,
+      type: args.type,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    return raw;
+  }
+}
+
 export async function persistAlphaSemanticEvent(args: {
   identity: string; type: AlphaSemanticEventType; assetId: string; chain: string;
   intelligenceState?: string | null; strategyKey?: string | null; symbol?: string | null;
@@ -43,7 +91,8 @@ export async function persistAlphaSemanticEventRecord(args: {
   rawSnapshot: Record<string, unknown>; alertedAt?: string;
 }): Promise<{ id: number; event_identity: string } | null> {
   const alertedAt = args.alertedAt ?? new Date().toISOString();
-  const event = buildAlphaSemanticEvent(args, alertedAt);
+  const rawSnapshot = await ensureVerifiedOutcomeEntryPrice(args);
+  const event = buildAlphaSemanticEvent({ ...args, rawSnapshot }, alertedAt);
   const { data, error } = await supabase.from('alpha_alert_events').upsert(event,
     { onConflict: 'event_identity', ignoreDuplicates: true }).select('id,event_identity').maybeSingle();
   if (error) throw error;
