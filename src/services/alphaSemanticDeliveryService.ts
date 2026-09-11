@@ -1,5 +1,6 @@
 import { getDeliverableUsers, markTelegramUserBlocked, type DeliverableUser } from '../core/delivery.js';
 import { accessProfileForUser, hasCapability } from '../product/capabilities.js';
+import { evaluateDexPaidAlertSafety } from '../chains/robinhood/security/dexPaidAlertSafetyGate.js';
 import { createLeaseToken, DELIVERY_LEASE_SECONDS } from './reservationLease.js';
 import { DEX_PAID_STRATEGY_KEY, isStrategyEnabledForUser, X_REPUTED_MENTION_STRATEGY_KEY } from './strategyService.js';
 import { supabase } from './supabase.js';
@@ -73,6 +74,29 @@ export async function deliverAlphaSemanticEvent(args: {
   onRecipientFailure?: (user: DeliverableUser, error: unknown,
     stage: 'recipient_setup' | 'telegram_send' | 'delivery_completion') => void;
 }, dependencies: SemanticDeliveryDependencies = productionDependencies): Promise<{ delivered: number; failed: number }> {
+  if (dependencies === productionDependencies && args.event.type === 'DEX_PAID' && args.event.chain === 'robinhood') {
+    const safety = await evaluateDexPaidAlertSafety(args.event.assetId);
+    if (!safety.allowed) {
+      console.warn('[AlphaSemanticDelivery] Robinhood DEX_PAID suppressed by strict safety gate.', {
+        alertEventId: args.event.id,
+        token: args.event.assetId,
+        marketCapUsd: safety.marketCapUsd,
+        liquidityUsd: safety.liquidityUsd,
+        pairAgeMinutes: safety.pairAgeMinutes,
+        reasons: safety.reasons,
+      });
+      return { delivered: 0, failed: 0 };
+    }
+    console.log('[AlphaSemanticDelivery] Robinhood DEX_PAID passed strict safety gate.', {
+      alertEventId: args.event.id,
+      token: args.event.assetId,
+      marketCapUsd: safety.marketCapUsd,
+      liquidityUsd: safety.liquidityUsd,
+      pairAgeMinutes: safety.pairAgeMinutes,
+      ponsDeployer: safety.ponsDeployer,
+    });
+  }
+
   let deliveryMessage = args.message;
   if (dependencies === productionDependencies && !args.preserveMessage) {
     try {
