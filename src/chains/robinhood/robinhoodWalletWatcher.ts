@@ -9,6 +9,9 @@ import {
 import type { WalletWatchEvent } from '../../core/walletWatcher.js';
 import { getActiveTrackedWalletAddresses, getTrackedWalletAddressesForChain } from '../../services/trackedWalletService.js';
 import { supabase } from '../../services/supabase.js';
+import { recordWalletTrade } from '../../agents/smartWalletAgent.js';
+import { recordWalletBuy, recordWalletSell } from '../../agents/walletIntelligenceAgent.js';
+import { getRobinhoodMarketSnapshot } from './market.js';
 import { PONS_CONTRACTS } from './ponsContracts.js';
 import { robinhoodPublicClient } from './rpc.js';
 import { getRobinhoodTokenMetadata } from './tokenMetadata.js';
@@ -79,10 +82,6 @@ export function classifyRobinhoodWalletTransaction(
   const spentQuote = sent.some(transfer => isQuoteToken(transfer.token) && transfer.value > 0n);
   const receivedQuote = received.some(transfer => isQuoteToken(transfer.token) && transfer.value > 0n);
   const spentNative = sameAddress(tx.from, wallet) && tx.value > 0n;
-  // Routed swaps often move WETH between router/pool contracts rather than directly
-  // from the tracked wallet. Require the tracked wallet to have initiated the tx,
-  // a non-WETH asset to arrive at it, and real WETH movement in the same receipt.
-  // Plain inbound token transfers therefore remain RECEIVE events.
   const routedQuoteMovement = sameAddress(tx.from, wallet)
     && tx.transfers.some(transfer => isQuoteToken(transfer.token) && transfer.value > 0n);
 
@@ -102,12 +101,8 @@ export function classifyRobinhoodWalletTransaction(
       evidence: 'Token sent with verified quote-token receipt',
     };
   }
-  if (receivedAsset) {
-    return { kind: 'receive', token: receivedAsset.token, amountRaw: receivedAsset.value, evidence: 'Inbound ERC-20 transfer only' };
-  }
-  if (sentAsset) {
-    return { kind: 'send', token: sentAsset.token, amountRaw: sentAsset.value, evidence: 'Outbound ERC-20 transfer only' };
-  }
+  if (receivedAsset) return { kind: 'receive', token: receivedAsset.token, amountRaw: receivedAsset.value, evidence: 'Inbound ERC-20 transfer only' };
+  if (sentAsset) return { kind: 'send', token: sentAsset.token, amountRaw: sentAsset.value, evidence: 'Outbound ERC-20 transfer only' };
   return null;
 }
 
@@ -136,25 +131,59 @@ function transferEvidenceFromReceipt(receipt: Awaited<ReturnType<typeof robinhoo
   const transfers: RobinhoodTransferEvidence[] = [];
   for (const log of receipt.logs) {
     try {
-      const decoded = decodeEventLog({
-        abi: [transferEvent],
-        data: log.data,
-        topics: log.topics,
-        strict: true,
-      });
+      const decoded = decodeEventLog({ abi: [transferEvent], data: log.data, topics: log.topics, strict: true });
       if (decoded.eventName !== 'Transfer') continue;
       const args = decoded.args as { from: Address; to: Address; value: bigint };
-      transfers.push({
-        token: getAddress(log.address),
-        from: getAddress(args.from),
-        to: getAddress(args.to),
-        value: args.value,
-      });
-    } catch {
-      // Most receipt logs are not ERC-20 Transfer events.
-    }
+      transfers.push({ token: getAddress(log.address), from: getAddress(args.from), to: getAddress(args.to), value: args.value });
+    } catch {}
   }
   return transfers;
+}
+
+async function persistRobinhoodWalletIntelligence(event: WalletWatchEvent): Promise<void> {
+  if (!event.tokenMint || !['buy', 'sell'].includes(event.kind)) return;
+
+  if (event.kind === 'sell') {
+    await recordWalletSell({ wallet: event.wallet, token: event.tokenMint });
+    await recordWalletTrade({ wallet: event.wallet, token: event.tokenMint, action: 'SELL' });
+    return;
+  }
+
+  let marketCapAtAction: number | null = null;
+  let entryPrice: number | null = null;
+  let entryLiquidity: number | null = null;
+
+  try {
+    const market = await getRobinhoodMarketSnapshot(event.tokenMint, {
+      priority: 'HIGH',
+      caller: 'robinhood_wallet_intelligence',
+    });
+    marketCapAtAction = market?.marketCapUsd ?? null;
+    entryPrice = market?.priceUsd ?? null;
+    entryLiquidity = market?.liquidityUsd ?? null;
+    event.marketCap = marketCapAtAction;
+    event.liquidity = entryLiquidity;
+    event.volume5m = market?.volume5mUsd ?? null;
+    event.tokenSymbol = market?.symbol ?? event.tokenSymbol;
+    event.tokenName = market?.name ?? event.tokenName;
+  } catch (error) {
+    console.warn('[RobinhoodWalletIntel] market enrichment unavailable', {
+      wallet: event.wallet,
+      token: event.tokenMint,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  await recordWalletBuy({ wallet: event.wallet, token: event.tokenMint, amountSol: null });
+  await recordWalletTrade({
+    wallet: event.wallet,
+    token: event.tokenMint,
+    action: 'BUY',
+    amountSol: null,
+    marketCapAtAction,
+    entryPrice,
+    entryLiquidity,
+  });
 }
 
 export async function scanRobinhoodWalletActivity(args: {
@@ -174,14 +203,8 @@ export async function scanRobinhoodWalletActivity(args: {
   const launchLogs: any[] = [];
   for (const batch of chunks(args.wallets, ADDRESS_BATCH_SIZE)) {
     const [v1LaunchLogs, v2LaunchLogs] = await Promise.all([
-      robinhoodPublicClient.getLogs({
-        address: getAddress(PONS_CONTRACTS.factory), event: tokenLaunchedEvent,
-        args: { deployer: batch }, fromBlock: args.fromBlock, toBlock: args.toBlock,
-      }),
-      robinhoodPublicClient.getLogs({
-        address: getAddress(PONS_V2_LIVE_EMITTER), event: tokenLaunchedV2Event,
-        args: { deployer: batch }, fromBlock: args.fromBlock, toBlock: args.toBlock,
-      }),
+      robinhoodPublicClient.getLogs({ address: getAddress(PONS_CONTRACTS.factory), event: tokenLaunchedEvent, args: { deployer: batch }, fromBlock: args.fromBlock, toBlock: args.toBlock }),
+      robinhoodPublicClient.getLogs({ address: getAddress(PONS_V2_LIVE_EMITTER), event: tokenLaunchedV2Event, args: { deployer: batch }, fromBlock: args.fromBlock, toBlock: args.toBlock }),
     ]);
     launchLogs.push(...v1LaunchLogs, ...v2LaunchLogs);
   }
@@ -194,17 +217,13 @@ export async function scanRobinhoodWalletActivity(args: {
       robinhoodPublicClient.getTransaction({ hash }),
       robinhoodPublicClient.getTransactionReceipt({ hash }),
     ]);
-    // Decode the full receipt, not only logs directly touching the wallet. This
-    // preserves router/pool WETH evidence required to identify routed buys.
     const transfers = transferEvidenceFromReceipt(receipt);
     const block = await robinhoodPublicClient.getBlock({ blockNumber: receipt.blockNumber });
     for (const wallet of args.wallets) {
-      const launchedTokens = launchLogs
-        .filter(log => log.transactionHash === hash && log.args.deployer && sameAddress(log.args.deployer, wallet))
+      const launchedTokens = launchLogs.filter(log => log.transactionHash === hash && log.args.deployer && sameAddress(log.args.deployer, wallet))
         .flatMap(log => log.args.token ? [getAddress(log.args.token)] : []);
       const classification = classifyRobinhoodWalletTransaction(wallet, {
-        hash, from: getAddress(transaction.from), value: transaction.value,
-        transfers, launchedTokens,
+        hash, from: getAddress(transaction.from), value: transaction.value, transfers, launchedTokens,
       });
       if (!classification) continue;
       const metadata = await tokenMetadata(classification.token).catch(() => null);
@@ -213,34 +232,27 @@ export async function scanRobinhoodWalletActivity(args: {
       const directQuoteTransfer = transfers.find(transfer => isQuoteToken(transfer.token) &&
         (sameAddress(transfer.to, wallet) || sameAddress(transfer.from, wallet)));
       const routedQuoteTransfer = classification.kind === 'buy'
-        ? transfers.find(transfer => isQuoteToken(transfer.token) && transfer.value > 0n)
-        : null;
+        ? transfers.find(transfer => isQuoteToken(transfer.token) && transfer.value > 0n) : null;
       const quoteTransfer = directQuoteTransfer ?? routedQuoteTransfer;
       const nativeAmount = (classification.kind === 'buy' && sameAddress(transaction.from, wallet) && transaction.value > 0n)
-        ? Number(transaction.value) / 1e18
-        : null;
+        ? Number(transaction.value) / 1e18 : null;
       const quoteAmount = quoteTransfer ? Number(quoteTransfer.value) / 1e18 : null;
-      events.push({
-        kind: classification.kind,
-        chain: 'robinhood',
-        wallet,
-        signature: hash,
-        timestamp: Number(block.timestamp),
-        blockNumber: Number(receipt.blockNumber),
-        tokenMint: classification.token,
+      const event = {
+        kind: classification.kind, chain: 'robinhood', wallet, signature: hash,
+        timestamp: Number(block.timestamp), blockNumber: Number(receipt.blockNumber), tokenMint: classification.token,
         tokenAmount: normalizedAmount(classification.amountRaw, metadata?.decimals ?? null),
-        tokenAmountRaw: classification.amountRaw?.toString() ?? null,
-        tokenDecimals: metadata?.decimals ?? null,
-        tokenSymbol: metadata?.symbol ?? null,
-        tokenName: metadata?.name ?? null,
-        nativeAmount: nativeAmount ?? quoteAmount,
-        quoteSymbol: nativeAmount != null ? 'ETH' : quoteTransfer ? 'WETH' : null,
-        counterparty: assetTransfer
-          ? (sameAddress(assetTransfer.to, wallet) ? assetTransfer.from : assetTransfer.to)
-          : null,
+        tokenAmountRaw: classification.amountRaw?.toString() ?? null, tokenDecimals: metadata?.decimals ?? null,
+        tokenSymbol: metadata?.symbol ?? null, tokenName: metadata?.name ?? null,
+        nativeAmount: nativeAmount ?? quoteAmount, quoteSymbol: nativeAmount != null ? 'ETH' : quoteTransfer ? 'WETH' : null,
+        counterparty: assetTransfer ? (sameAddress(assetTransfer.to, wallet) ? assetTransfer.from : assetTransfer.to) : null,
         type: classification.evidence,
         ...(classification.kind === 'buy' || classification.kind === 'sell' ? { amountSol: null } : {}),
-      } as WalletWatchEvent);
+      } as WalletWatchEvent;
+      await persistRobinhoodWalletIntelligence(event).catch(error => console.warn('[RobinhoodWalletIntel] persistence failed', {
+        wallet: event.wallet, token: event.tokenMint, kind: event.kind,
+        reason: error instanceof Error ? error.message : String(error),
+      }));
+      events.push(event);
     }
   }
   return events;
@@ -249,10 +261,7 @@ export async function scanRobinhoodWalletActivity(args: {
 type StoredWalletCursor = { block: bigint; updatedAt: Date };
 
 async function initializeMissingCursors(wallets: Address[], latest: bigint): Promise<Map<string, StoredWalletCursor>> {
-  const { data, error } = await supabase
-    .from('wallet_monitor_cursors')
-    .select('wallet_address,last_processed_block,updated_at')
-    .eq('chain', 'robinhood');
+  const { data, error } = await supabase.from('wallet_monitor_cursors').select('wallet_address,last_processed_block,updated_at').eq('chain', 'robinhood');
   if (error) throw error;
   const cursors = new Map((data ?? []).map(row => [String(row.wallet_address).toLowerCase(), {
     block: BigInt(row.last_processed_block), updatedAt: new Date(String(row.updated_at)),
@@ -279,9 +288,7 @@ export function walletCursorRecoveryDecision(args: {
   if (args.unresolvedDeliveries > 0) return { health: 'BLOCKED' as const, rebase: false, lag };
   const ageMs = args.cursorUpdatedAt == null ? 0 : (args.now ?? new Date()).getTime() - args.cursorUpdatedAt.getTime();
   const abandoned = lag >= ABANDONED_CURSOR_MIN_LAG && ageMs >= ABANDONED_CURSOR_MIN_AGE_MS;
-  return abandoned
-    ? { health: 'STALE' as const, rebase: true, lag }
-    : { health: 'CATCHING_UP' as const, rebase: false, lag };
+  return abandoned ? { health: 'STALE' as const, rebase: true, lag } : { health: 'CATCHING_UP' as const, rebase: false, lag };
 }
 
 async function unresolvedWalletDeliveries(wallets: Address[]): Promise<Map<string, number>> {
@@ -293,23 +300,16 @@ async function unresolvedWalletDeliveries(wallets: Address[]): Promise<Map<strin
   for (const row of data ?? []) {
     const key = String(row.wallet_address).toLowerCase();
     const state = (row.metadata as Record<string, unknown> | null)?.state;
-    // A delivered row is resolved even if stale metadata still says RESERVED.
     if (row.delivered_at != null) continue;
-    if (monitored.has(key) && (state === 'RESERVED' || state === 'SENT_UNCONFIRMED')) {
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
+    if (monitored.has(key) && (state === 'RESERVED' || state === 'SENT_UNCONFIRMED')) counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   return counts;
 }
 
-export type RobinhoodWalletChunkProcessor = (
-  events: WalletWatchEvent[],
-) => Promise<{ failedWallets: Set<string> }>;
+export type RobinhoodWalletChunkProcessor = (events: WalletWatchEvent[]) => Promise<{ failedWallets: Set<string> }>;
 
 export async function pollRobinhoodTrackedWallets(processChunk: RobinhoodWalletChunkProcessor): Promise<{
-  events: WalletWatchEvent[];
-  checkpointBlocks: Map<string, bigint>;
-  wallets: Address[];
+  events: WalletWatchEvent[]; checkpointBlocks: Map<string, bigint>; wallets: Address[];
 }> {
   const allWallets = [...new Map((await getTrackedWalletAddressesForChain('robinhood'))
     .map(value => getAddress(value)).map(wallet => [wallet.toLowerCase(), wallet])).values()];
@@ -332,7 +332,6 @@ export async function pollRobinhoodTrackedWallets(processChunk: RobinhoodWalletC
   let totalChunks = 0;
   let pending = [...existingWallets];
 
-  // Round-robin one chunk per wallet so a deeply lagged wallet cannot monopolize a poll.
   while (pending.length && totalChunks < MAX_CATCH_UP_CHUNKS_PER_POLL) {
     const nextRound: Address[] = [];
     for (const wallet of pending) {
@@ -340,10 +339,7 @@ export async function pollRobinhoodTrackedWallets(processChunk: RobinhoodWalletC
       const key = wallet.toLowerCase();
       const stored = cursors.get(key)!;
       const cursor = workingCursors.get(key)!;
-      const recovery = walletCursorRecoveryDecision({
-        cursor, chainHead: latest, unresolvedDeliveries: unresolved.get(key) ?? 0,
-        cursorUpdatedAt: stored.updatedAt,
-      });
+      const recovery = walletCursorRecoveryDecision({ cursor, chainHead: latest, unresolvedDeliveries: unresolved.get(key) ?? 0, cursorUpdatedAt: stored.updatedAt });
       if (recovery.rebase) {
         await commitRobinhoodWalletCheckpoints([wallet], latest);
         console.warn('[RobinhoodWalletWatcher] Rebased abandoned cursor without historical replay', {
@@ -352,22 +348,16 @@ export async function pollRobinhoodTrackedWallets(processChunk: RobinhoodWalletC
         continue;
       }
       if (cursor >= latest || recovery.health === 'BLOCKED') continue;
-
       const fromBlock = cursor + 1n;
-      const toBlock = fromBlock + MAX_BLOCKS_PER_CYCLE - 1n < latest
-        ? fromBlock + MAX_BLOCKS_PER_CYCLE - 1n
-        : latest;
+      const toBlock = fromBlock + MAX_BLOCKS_PER_CYCLE - 1n < latest ? fromBlock + MAX_BLOCKS_PER_CYCLE - 1n : latest;
       const walletEvents = (await scanRobinhoodWalletActivity({ wallets: [wallet], fromBlock, toBlock }))
         .filter(event => eventIsAfterWalletCursor(event, workingCursors));
       events.push(...walletEvents);
       totalChunks += 1;
       const count = (chunksScanned.get(key) ?? 0) + 1;
       chunksScanned.set(key, count);
-
       const delivery = await processChunk(walletEvents);
       if (delivery.failedWallets.has(key)) continue;
-
-      // This is the safety boundary: no range is checkpointed until every event in it is resolved.
       await commitRobinhoodWalletCheckpoints([wallet], toBlock);
       workingCursors.set(key, toBlock);
       checkpointBlocks.set(key, toBlock);
@@ -376,10 +366,7 @@ export async function pollRobinhoodTrackedWallets(processChunk: RobinhoodWalletC
     }
     pending = nextRound;
   }
-  return {
-    events, checkpointBlocks,
-    wallets: [...new Map(scannedWallets.map(wallet => [wallet.toLowerCase(), wallet])).values()],
-  };
+  return { events, checkpointBlocks, wallets: [...new Map(scannedWallets.map(wallet => [wallet.toLowerCase(), wallet])).values()] };
 }
 
 export function eventIsAfterWalletCursor(event: WalletWatchEvent, cursors: Map<string, bigint>): boolean {
@@ -387,9 +374,7 @@ export function eventIsAfterWalletCursor(event: WalletWatchEvent, cursors: Map<s
   return cursor != null && BigInt(event.blockNumber ?? 0) > cursor;
 }
 
-export function walletsEligibleForCheckpoint(
-  wallets: Address[], cursors: Map<string, bigint>, block: bigint,
-): Address[] {
+export function walletsEligibleForCheckpoint(wallets: Address[], cursors: Map<string, bigint>, block: bigint): Address[] {
   return wallets.filter(wallet => (cursors.get(wallet.toLowerCase()) ?? block) < block);
 }
 
