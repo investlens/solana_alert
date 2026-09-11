@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx src/main.ts",
-    "start": "tsx src/main.ts",
+    "dev": "tsx src/bootstrap.ts",
+    "start": "tsx src/bootstrap.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/**/*.test.ts",
     "release:check": "tsx scripts/releaseSafetyCheck.ts",
