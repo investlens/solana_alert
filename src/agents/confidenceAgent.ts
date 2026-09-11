@@ -32,6 +32,34 @@ function sellBuyRatio(input: ConfidenceInput) {
 }
 
 export function calculateConfidence(input: ConfidenceInput): ConfidenceResult {
+  // Hard safety invariants for actionable DEX-paid candidates. These conditions
+  // must not be recoverable through momentum/social/creator points. BONKAT
+  // demonstrated that a high-scoring market snapshot can still be structurally
+  // unsafe and that a non-enforced qualification boolean is not enough.
+  if (input.holderRiskScore >= 70) {
+    return {
+      confidence: 0,
+      riskLevel: 'HIGH',
+      reasons: ['Hard block: holder distribution is unsafe or unavailable'],
+    };
+  }
+
+  if (input.bundleRiskScore >= 70) {
+    return {
+      confidence: 0,
+      riskLevel: 'HIGH',
+      reasons: ['Hard block: coordinated wallet / bundle risk is high'],
+    };
+  }
+
+  if (input.marketCap == null || input.marketCap <= 0 || input.marketCap >= 120_000) {
+    return {
+      confidence: 0,
+      riskLevel: 'HIGH',
+      reasons: ['Hard block: DEX-paid candidate is outside the early market-cap window'],
+    };
+  }
+
   let confidence = 0;
   const reasons: string[] = [];
 
@@ -94,7 +122,7 @@ export function calculateConfidence(input: ConfidenceInput): ConfidenceResult {
     reasons.push('Basic socials present');
   }
 
-  if (input.marketCap && input.marketCap <= 120_000) {
+  if (input.marketCap <= 120_000) {
     confidence += 6;
     reasons.push('Still early market cap');
   }
@@ -107,9 +135,7 @@ export function calculateConfidence(input: ConfidenceInput): ConfidenceResult {
     reasons.push('Older pair');
   }
 
-  const riskPenalty =
-    Math.max(0, input.holderRiskScore) +
-    Math.max(0, input.bundleRiskScore);
+  const riskPenalty = Math.max(0, input.holderRiskScore) + Math.max(0, input.bundleRiskScore);
 
   if (riskPenalty >= 100) {
     confidence -= 30;
@@ -120,7 +146,6 @@ export function calculateConfidence(input: ConfidenceInput): ConfidenceResult {
   }
 
   confidence = clamp(confidence);
-
   const riskLevel =
     riskPenalty >= 80 || sellBuyRatio(input) > 0.75
       ? 'HIGH'
@@ -128,9 +153,5 @@ export function calculateConfidence(input: ConfidenceInput): ConfidenceResult {
         ? 'MEDIUM'
         : 'LOW';
 
-  return {
-    confidence: Math.round(confidence),
-    riskLevel,
-    reasons: reasons.slice(0, 6),
-  };
+  return { confidence: Math.round(confidence), riskLevel, reasons: reasons.slice(0, 6) };
 }
