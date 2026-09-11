@@ -1,27 +1,31 @@
 import { supabase } from './supabase.js';
 
-const COMPONENTS = [
-  'ai_decision_engine',
-  'creator_intel',
+const SERVICES = [
+  'telegram_bot',
   'dexscreener',
+  'wallet_watcher',
+  'creator_intel',
+  'ai_decision_engine',
   'premium_alerts',
 ] as const;
 
 async function heartbeat(): Promise<void> {
   const now = new Date().toISOString();
 
-  for (const component of COMPONENTS) {
+  for (const service of SERVICES) {
     const { error } = await supabase
       .from('system_health')
       .update({
         status: 'healthy',
-        last_heartbeat_at: now,
+        message: 'Runtime heartbeat active',
+        last_seen_at: now,
+        updated_at: now,
       })
-      .eq('component', component);
+      .eq('service', service);
 
     if (error) {
       console.warn('[SystemHealth] heartbeat failed', {
-        component,
+        service,
         reason: error.message,
       });
     }
