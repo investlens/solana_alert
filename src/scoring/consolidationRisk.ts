@@ -1,4 +1,5 @@
 import { fetchEnhancedTransactionsForAddress } from '../core/helius.js';
+import { getBundleIntelligenceV2 } from './bundleIntelligenceV2.js';
 
 export type ConsolidationRisk = {
   score: number;
@@ -11,7 +12,7 @@ function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
-export async function getConsolidationRisk(
+async function getLegacyConsolidationRisk(
   mintAddress: string,
   buyers: string[]
 ): Promise<ConsolidationRisk> {
@@ -19,15 +20,12 @@ export async function getConsolidationRisk(
     return {
       score: 0,
       level: 'LOW',
-      reasons: ['No early buyers detected'],
+      reasons: ['No watched-wallet consolidation evidence'],
       destinationWallets: [],
     };
   }
 
   const destinationCounts = new Map<string, number>();
-
-  // Only inspect the first three early buyers.
-  // This protects the Helius allowance while still providing a useful signal.
   const walletsToInspect = buyers.slice(0, 3);
 
   for (let index = 0; index < walletsToInspect.length; index += 1) {
@@ -42,12 +40,9 @@ export async function getConsolidationRisk(
           if (!transfer.fromUserAccount || !transfer.toUserAccount) continue;
           if (transfer.fromUserAccount === transfer.toUserAccount) continue;
 
-          const current =
-            destinationCounts.get(transfer.toUserAccount) ?? 0;
-
           destinationCounts.set(
             transfer.toUserAccount,
-            current + 1
+            (destinationCounts.get(transfer.toUserAccount) ?? 0) + 1
           );
         }
       }
@@ -55,17 +50,11 @@ export async function getConsolidationRisk(
       console.log('consolidation wallet scan failed:', {
         mintAddress,
         wallet,
-        error:
-          error instanceof Error
-            ? error.message
-            : String(error),
+        error: error instanceof Error ? error.message : String(error),
       });
     }
 
-    // Avoid sending all Helius requests in one burst.
-    if (index < walletsToInspect.length - 1) {
-      await sleep(800);
-    }
+    if (index < walletsToInspect.length - 1) await sleep(800);
   }
 
   const suspiciousDestinations = [...destinationCounts.entries()]
@@ -77,7 +66,7 @@ export async function getConsolidationRisk(
       score: 80,
       level: 'HIGH',
       reasons: [
-        'Multiple early buyers transferred tokens to the same wallet',
+        'Multiple watched buyers transferred tokens to the same wallet',
         'Possible bundled consolidation before dump',
       ],
       destinationWallets: suspiciousDestinations,
@@ -87,7 +76,52 @@ export async function getConsolidationRisk(
   return {
     score: 0,
     level: 'LOW',
-    reasons: ['No consolidation detected'],
+    reasons: ['No watched-wallet consolidation detected'],
     destinationWallets: [],
+  };
+}
+
+export async function getConsolidationRisk(
+  mintAddress: string,
+  buyers: string[]
+): Promise<ConsolidationRisk> {
+  // Bundle V2 inspects actual large holder owners and shared funding / fresh
+  // wallet clusters. The legacy check remains as a second independent signal.
+  // Either one may block an alert; neither changes production scoring/trading.
+  const [bundleV2, legacy] = await Promise.all([
+    getBundleIntelligenceV2(mintAddress),
+    getLegacyConsolidationRisk(mintAddress, buyers),
+  ]);
+
+  const score = Math.max(bundleV2.score, legacy.score);
+  const level = score >= 75 ? 'HIGH' : score >= 40 ? 'MEDIUM' : 'LOW';
+  const reasons = [
+    ...bundleV2.reasons.map((reason) => `Bundle V2: ${reason}`),
+    ...legacy.reasons.map((reason) => `Legacy: ${reason}`),
+  ];
+  const destinationWallets = [
+    ...new Set([
+      ...bundleV2.connectedWallets,
+      ...legacy.destinationWallets,
+    ]),
+  ];
+
+  console.log('[BundleRisk] combined result', {
+    mintAddress,
+    score,
+    level,
+    bundleV2Score: bundleV2.score,
+    bundleV2EvidenceAvailable: bundleV2.evidenceAvailable,
+    bundleV2Metrics: bundleV2.metrics,
+    legacyScore: legacy.score,
+    reasons,
+    connectedWallets: destinationWallets.length,
+  });
+
+  return {
+    score,
+    level,
+    reasons,
+    destinationWallets,
   };
 }
