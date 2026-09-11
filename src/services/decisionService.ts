@@ -59,10 +59,6 @@ export async function recordDecision(
   const chain = input.chain?.trim() || 'solana';
   const source = input.source?.trim() || 'MAIN_SCANNER';
 
-  /*
-   * A score or action change creates a new meaningful decision.
-   * An identical repeated scan is treated as a duplicate.
-   */
   const deduplicationKey = [
     'decision',
     Math.round(input.baseScore),
@@ -86,11 +82,6 @@ export async function recordDecision(
           : 'INFO',
 
       deduplicationKey,
-
-      /*
-       * Stops the same decision being inserted repeatedly during
-       * scanner loops or application restarts.
-       */
       deduplicationWindowSeconds: 24 * 60 * 60,
 
       payload: {
@@ -140,6 +131,20 @@ export async function recordDecision(
         `adjusted=${input.adjustedScore} ` +
         `bucket=${input.actionBucket}`,
       );
+
+      // Shadow learning is deliberately fire-and-forget. It receives the same
+      // decision inputs after the production decision has already been made,
+      // and therefore cannot alter scanner, alert or trading behaviour.
+      void import('../intelligence/shadowLearnedDecision.js')
+        .then(({ recordShadowLearnedDecision }) =>
+          recordShadowLearnedDecision(input),
+        )
+        .catch((error) => {
+          console.warn(
+            '[DecisionService] shadow intelligence failed but production continues:',
+            error instanceof Error ? error.message : String(error),
+          );
+        });
     } else if (result.error) {
       console.warn(
         `[DecisionService] Decision persistence failed but scanner continues: ${result.error.message}`,
