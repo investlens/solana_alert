@@ -23,6 +23,7 @@ const route = createPonsLiveLaunchRouter({ config,
     : {}),
 });
 
+// Keep Pons outcome learning alive inside the dedicated Pons service.
 let ponsOutcomeCollectionRunning = false;
 
 async function runPonsOutcomeCollection(): Promise<void> {
