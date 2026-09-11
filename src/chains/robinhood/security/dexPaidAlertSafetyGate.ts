@@ -8,6 +8,7 @@ import { scanPonsSellability } from './sellabilityScanner.js';
 import { scanRobinhoodHolderRisk } from './holderRiskScanner.js';
 import { scanRobinhoodDevHolding } from './devHoldingScanner.js';
 import { scanRobinhoodDevMovement } from './devMovementScanner.js';
+import { scanRobinhoodBundleIntelligence } from './bundleIntelligence.js';
 
 const MAX_MARKET_CAP_USD = Number(process.env.DEX_PAID_MAX_MARKET_CAP_USD ?? 15_000);
 const MIN_LIQUIDITY_USD = Number(process.env.DEX_PAID_MIN_LIQUIDITY_USD ?? 2_500);
@@ -80,17 +81,32 @@ export async function evaluateDexPaidAlertSafety(tokenAddress: string): Promise<
     } else push(checks, reasons, 'SELLABILITY', false, 'sell route cannot be verified as PONS');
 
     const holder = await scanRobinhoodHolderRisk(tokenAddress, { poolAddress: market?.pairAddress ?? null, timeoutMs: 2_750 });
-    const holderPass = holder.concentrationRisk !== 'HIGH' && (holder.top1Pct == null || holder.top1Pct <= MAX_TOP1_PERCENT);
+    const holderPass = holder.concentrationRisk !== 'HIGH' && holder.concentrationRisk !== 'UNKNOWN' && holder.top1Pct != null && holder.top1Pct <= MAX_TOP1_PERCENT;
     push(checks, reasons, 'HOLDER_CONCENTRATION', holderPass,
       `risk=${holder.concentrationRisk}, top1=${holder.top1Pct == null ? 'unknown' : `${holder.top1Pct.toFixed(1)}%`}`);
+
     if (isVerifiedPonsLaunch) {
       const [devHolding, devMovement] = await Promise.all([scanRobinhoodDevHolding(tokenAddress), scanRobinhoodDevMovement(tokenAddress)]);
       const holdingPass = devHolding.holdingPercent != null && devHolding.holdingPercent <= MAX_DEV_HOLDING_PERCENT;
       push(checks, reasons, 'DEV_HOLDING', holdingPass,
         devHolding.holdingPercent == null ? 'dev holding unavailable' : `${devHolding.holdingPercent.toFixed(1)}%; max ${MAX_DEV_HOLDING_PERCENT}%`);
+
+      const bundle = await scanRobinhoodBundleIntelligence(tokenAddress, {
+        poolAddress: market?.pairAddress ?? null,
+        devMovement,
+      });
+      const bundlePass = bundle.evidenceAvailable && bundle.level !== 'HIGH' && bundle.level !== 'UNKNOWN';
+      push(checks, reasons, 'ROBINHOOD_BUNDLE', bundlePass,
+        `level=${bundle.level}, score=${bundle.score}, ${bundle.reasons.join('; ')}`);
+
+      // Preserve the existing conservative dev-movement rule. Bundle Intelligence
+      // adds graph-level evidence; it does not weaken the original direct-movement block.
       const movementPass = devMovement.status === 'NO_MOVEMENT' || devMovement.burned === true;
       push(checks, reasons, 'DEV_MOVEMENT', movementPass, `status=${devMovement.status}${devMovement.burned ? ', burn-only' : ''}`);
+    } else {
+      push(checks, reasons, 'ROBINHOOD_BUNDLE', false, 'verified deployer unavailable for bundle analysis');
     }
+
     return { allowed: reasons.length === 0, reasons, checks, marketCapUsd: marketCap, liquidityUsd: liquidity,
       pairAgeMinutes, paymentAgeSeconds, sellImpactPercent: sellImpact, ponsDeployer: launch?.exists ? String(launch.deployer) : null };
   } catch (error) {
