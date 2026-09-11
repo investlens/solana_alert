@@ -17,6 +17,31 @@ function scheduleReconnect() {
   }, RECONNECT_MS);
 }
 
+async function websocketPayloadToText(data: unknown): Promise<string> {
+  if (typeof data === 'string') return data;
+
+  if (data instanceof ArrayBuffer) {
+    return new TextDecoder().decode(new Uint8Array(data));
+  }
+
+  if (ArrayBuffer.isView(data)) {
+    return new TextDecoder().decode(
+      new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
+    );
+  }
+
+  if (
+    data &&
+    typeof data === 'object' &&
+    'text' in data &&
+    typeof (data as { text?: unknown }).text === 'function'
+  ) {
+    return await (data as { text: () => Promise<string> }).text();
+  }
+
+  return String(data ?? '');
+}
+
 export async function startPumpPortalCreatorFeed(): Promise<void> {
   if (started) return;
 
@@ -43,11 +68,7 @@ export async function startPumpPortalCreatorFeed(): Promise<void> {
 
     socket.onmessage = async (event: any) => {
       try {
-        const raw =
-          typeof event?.data === 'string'
-            ? event.data
-            : String(event?.data ?? '');
-
+        const raw = await websocketPayloadToText(event?.data);
         const message = JSON.parse(raw);
 
         if (String(message?.txType ?? '').toLowerCase() !== 'create') {
@@ -98,7 +119,10 @@ export async function startPumpPortalCreatorFeed(): Promise<void> {
         });
       } catch (error) {
         console.log('[PumpPortalCreatorFeed] message error', {
-          error: error instanceof Error ? error.message : String(error),
+          error:
+            error instanceof Error
+              ? error.message
+              : JSON.stringify(error),
         });
       }
     };
