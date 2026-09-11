@@ -1,5 +1,6 @@
 import { supabase } from '../services/supabase.js';
 import type { RecordDecisionInput } from '../services/decisionService.js';
+import { runDecisionEngineV2 } from '../ai/decisionEngineV2.js';
 
 type HistoricalPrior = {
   sampleSize: number;
@@ -26,7 +27,7 @@ function median(values: number[]): number | null {
     : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-function shadowAction(score: number) {
+function legacyShadowAction(score: number) {
   if (score >= 82) return 'SHADOW_HIGH_BUY';
   if (score >= 72) return 'SHADOW_BUY';
   return 'SHADOW_IGNORE';
@@ -108,15 +109,11 @@ async function loadHistoricalPrior(input: RecordDecisionInput): Promise<Historic
   }
 }
 
-export async function recordShadowLearnedDecision(input: RecordDecisionInput) {
-  const tokenAddress = input.tokenAddress.trim();
-  if (!tokenAddress) return;
-
-  const [creator, prior] = await Promise.all([
-    loadCreatorEvidence(input),
-    loadHistoricalPrior(input),
-  ]);
-
+function buildLegacyComparison(
+  input: RecordDecisionInput,
+  creator: any,
+  prior: HistoricalPrior,
+) {
   let adjustment = 0;
   const reasons: string[] = [];
 
@@ -175,27 +172,67 @@ export async function recordShadowLearnedDecision(input: RecordDecisionInput) {
     }
   }
 
-  // Keep shadow learning conservative. It may disagree with production, but it
-  // cannot move the comparison score by more than ten points either way.
   adjustment = clamp(adjustment, -10, 10);
-  const shadowScore = clamp(input.adjustedScore + adjustment, 0, 100);
+  const score = clamp(input.adjustedScore + adjustment, 0, 100);
 
-  const featureCount = [buyRatio, liquidity, creatorTrust, prior.medianRoi15m]
-    .filter((v) => v != null).length;
-  const sampleConfidence = Math.min(40, prior.sampleSize * 2);
-  const featureConfidence = featureCount * 12;
-  const creatorEvidenceConfidence = creatorLaunches >= 2 ? 12 : 0;
-  const confidence = clamp(sampleConfidence + featureConfidence + creatorEvidenceConfidence, 0, 100);
+  return {
+    score,
+    action: legacyShadowAction(score),
+    delta: adjustment,
+    reasons,
+  };
+}
+
+export async function recordShadowLearnedDecision(input: RecordDecisionInput) {
+  const tokenAddress = input.tokenAddress.trim();
+  if (!tokenAddress) return;
+
+  const [creator, prior] = await Promise.all([
+    loadCreatorEvidence(input),
+    loadHistoricalPrior(input),
+  ]);
+
+  const legacy = buildLegacyComparison(input, creator, prior);
+
+  const creatorTrust = finite(creator?.trust_score);
+  const creatorConfidence = finite(creator?.confidence_score);
+  const creatorLaunches = finite(creator?.total_launches) ?? 0;
+
+  const v2 = runDecisionEngineV2(input, {
+    creator: creator
+      ? {
+          trustScore: creatorTrust,
+          confidenceScore: creatorConfidence,
+          totalLaunches: creatorLaunches,
+          successRate: finite(creator.success_rate),
+          rugCount: finite(creator.rug_count),
+          riskScore: finite(creator.risk_score),
+        }
+      : null,
+    historical: prior,
+    wallet: null,
+  });
+
+  const buys = finite(input.buys5m);
+  const sells = finite(input.sells5m);
+  const buyRatio = buys != null && sells != null ? buys / Math.max(1, sells) : null;
+  const liquidity = finite(input.liquidity);
 
   const evidence = {
     mode: 'SHADOW_ONLY',
-    reasons,
+    modelVersion: v2.modelVersion,
+    engineV2: v2,
+    legacyShadow: legacy,
     features: {
       buyRatio,
       liquidity,
+      marketCap: finite(input.marketCap),
       volume5m: finite(input.volume5m),
       buys5m: buys,
       sells5m: sells,
+      marketSafetyScore: finite(input.marketSafetyScore),
+      authoritySafetyScore: finite(input.authoritySafetyScore),
+      paidApproved: input.paidApproved ?? null,
     },
     creator: creator
       ? {
@@ -215,6 +252,7 @@ export async function recordShadowLearnedDecision(input: RecordDecisionInput) {
       affectsProductionDecision: false,
       affectsAlerts: false,
       affectsTrading: false,
+      promotionRequiresEvidence: true,
     },
   };
 
@@ -227,10 +265,10 @@ export async function recordShadowLearnedDecision(input: RecordDecisionInput) {
     current_action: input.actionBucket,
     base_score: input.baseScore,
     current_adjusted_score: input.adjustedScore,
-    shadow_score: shadowScore,
-    shadow_action: shadowAction(shadowScore),
-    confidence,
-    score_delta: adjustment,
+    shadow_score: v2.score,
+    shadow_action: v2.action,
+    confidence: v2.confidence,
+    score_delta: v2.delta,
     evidence,
   });
 
@@ -241,11 +279,19 @@ export async function recordShadowLearnedDecision(input: RecordDecisionInput) {
 
   console.log('[ShadowLearnedDecision] recorded', {
     token: tokenAddress,
+    modelVersion: v2.modelVersion,
     currentAction: input.actionBucket,
-    shadowAction: shadowAction(shadowScore),
+    shadowAction: v2.action,
     currentScore: input.adjustedScore,
-    shadowScore: Number(shadowScore.toFixed(2)),
-    delta: Number(adjustment.toFixed(2)),
-    confidence,
+    shadowScore: Number(v2.score.toFixed(2)),
+    delta: Number(v2.delta.toFixed(2)),
+    confidence: Number(v2.confidence.toFixed(2)),
+    promotionEligible: v2.promotionEligible,
+    factorSummary: v2.factors.map((factor) => ({
+      key: factor.key,
+      score: Number(factor.score.toFixed(2)),
+      confidence: Number(factor.confidence.toFixed(2)),
+      contribution: Number(factor.contribution.toFixed(2)),
+    })),
   });
 }
