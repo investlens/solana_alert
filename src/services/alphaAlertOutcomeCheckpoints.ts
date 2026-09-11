@@ -15,7 +15,7 @@ export const OUTCOME_ELIGIBLE_SEMANTIC_TYPES = [
 export const OUTCOME_ELIGIBLE_ALERT_TYPES: readonly string[] = [];
 
 const OUTCOME_CANDIDATE_LIMIT = 50;
-const OUTCOME_POLL_MS = 120_000;
+const OUTCOME_POLL_MS = 30_000;
 
 type EventRow = { id: number; asset_id: string; chain: string; price: number | string | null; price_provenance?: string | null; market_index_state?: string | null; alerted_at: string; semantic_event_type?: string | null; alert_type?: string | null };
 type PriorRow = { alert_event_id?: number; checkpoint_seconds?: number; current_price: number | string | null; peak_price: number | string | null; peak_roi: number | string | null; time_to_peak_seconds: number | null };
