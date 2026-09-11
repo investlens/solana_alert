@@ -15,7 +15,7 @@ async function heartbeat(): Promise<void> {
       .from('system_health')
       .update({
         status: 'healthy',
-        last_heartbeat: now,
+        last_heartbeat_at: now,
       })
       .eq('component', component);
 
