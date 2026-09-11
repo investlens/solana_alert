@@ -9,24 +9,15 @@ type HistoricalPrior = {
   medianDrawdown: number | null;
 };
 
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function finite(value: unknown): number | null {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
+function clamp(value: number, min: number, max: number) { return Math.max(min, Math.min(max, value)); }
+function finite(value: unknown): number | null { const n = Number(value); return Number.isFinite(n) ? n : null; }
+function positive(value: unknown): number | null { const n = finite(value); return n != null && n > 0 ? n : null; }
 function median(values: number[]): number | null {
   if (!values.length) return null;
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2
-    ? sorted[mid]
-    : (sorted[mid - 1] + sorted[mid]) / 2;
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
-
 function legacyShadowAction(score: number) {
   if (score >= 82) return 'SHADOW_HIGH_BUY';
   if (score >= 72) return 'SHADOW_BUY';
@@ -35,263 +26,87 @@ function legacyShadowAction(score: number) {
 
 async function loadCreatorEvidence(input: RecordDecisionInput) {
   if (!input.creatorWallet) return null;
-
-  const { data, error } = await supabase
-    .from('creator_intelligence')
-    .select(
-      'trust_score,confidence_score,total_launches,successful_launches,failed_launches,rug_count,success_rate,best_market_cap,risk_score,trust_label',
-    )
-    .eq('chain', input.chain?.trim() || 'solana')
-    .eq('creator_wallet', input.creatorWallet)
-    .maybeSingle();
-
-  if (error) {
-    console.warn('[ShadowLearnedDecision] creator lookup failed:', error.message);
-    return null;
-  }
-
+  const { data, error } = await supabase.from('creator_intelligence')
+    .select('trust_score,confidence_score,total_launches,successful_launches,failed_launches,rug_count,success_rate,best_market_cap,risk_score,trust_label')
+    .eq('chain', input.chain?.trim() || 'solana').eq('creator_wallet', input.creatorWallet).maybeSingle();
+  if (error) { console.warn('[ShadowLearnedDecision] creator lookup failed:', error.message); return null; }
   return data ?? null;
 }
 
 async function loadHistoricalPrior(input: RecordDecisionInput): Promise<HistoricalPrior> {
   const liquidity = finite(input.liquidity);
   const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-
   try {
-    let query = supabase
-      .from('alpha_alert_outcomes')
-      .select(
-        'current_roi,max_drawdown,alpha_alert_events!inner(liquidity,chain)',
-      )
-      .eq('status', 'MEASURED')
-      .eq('checkpoint_seconds', 900)
-      .gte('measured_at', since)
-      .limit(500);
-
+    let query = supabase.from('alpha_alert_outcomes')
+      .select('current_roi,max_drawdown,alpha_alert_events!inner(liquidity,chain)')
+      .eq('status', 'MEASURED').eq('checkpoint_seconds', 900).gte('measured_at', since).limit(500);
     const chain = input.chain?.trim();
-    if (chain) {
-      query = query.eq('alpha_alert_events.chain', chain);
-    }
-
+    if (chain) query = query.eq('alpha_alert_events.chain', chain);
     const { data, error } = await query;
-    if (error) {
-      console.warn('[ShadowLearnedDecision] historical prior lookup failed:', error.message);
-      return { sampleSize: 0, medianRoi15m: null, hit20Rate: null, medianDrawdown: null };
-    }
-
+    if (error) { console.warn('[ShadowLearnedDecision] historical prior lookup failed:', error.message); return { sampleSize: 0, medianRoi15m: null, hit20Rate: null, medianDrawdown: null }; }
     const comparable = (data ?? []).filter((row: any) => {
       if (liquidity == null || liquidity <= 0) return true;
       const eventLiquidity = finite(row?.alpha_alert_events?.liquidity);
-      if (eventLiquidity == null || eventLiquidity <= 0) return false;
-      return eventLiquidity >= liquidity * 0.5 && eventLiquidity <= liquidity * 1.5;
+      return eventLiquidity != null && eventLiquidity > 0 && eventLiquidity >= liquidity * 0.5 && eventLiquidity <= liquidity * 1.5;
     });
-
-    const rois = comparable
-      .map((row: any) => finite(row.current_roi))
-      .filter((v: number | null): v is number => v != null && v >= -100 && v <= 500);
-
-    const drawdowns = comparable
-      .map((row: any) => finite(row.max_drawdown))
-      .filter((v: number | null): v is number => v != null && v >= -100 && v <= 0);
-
-    return {
-      sampleSize: rois.length,
-      medianRoi15m: median(rois),
-      hit20Rate: rois.length ? rois.filter((v) => v >= 20).length / rois.length : null,
-      medianDrawdown: median(drawdowns),
-    };
+    const rois = comparable.map((row: any) => finite(row.current_roi)).filter((v: number | null): v is number => v != null && v >= -100 && v <= 500);
+    const drawdowns = comparable.map((row: any) => finite(row.max_drawdown)).filter((v: number | null): v is number => v != null && v >= 0 && v <= 100);
+    return { sampleSize: rois.length, medianRoi15m: median(rois), hit20Rate: rois.length ? rois.filter(v => v >= 20).length / rois.length : null, medianDrawdown: median(drawdowns) };
   } catch (error) {
-    console.warn(
-      '[ShadowLearnedDecision] historical prior exception:',
-      error instanceof Error ? error.message : String(error),
-    );
+    console.warn('[ShadowLearnedDecision] historical prior exception:', error instanceof Error ? error.message : String(error));
     return { sampleSize: 0, medianRoi15m: null, hit20Rate: null, medianDrawdown: null };
   }
 }
 
-function buildLegacyComparison(
-  input: RecordDecisionInput,
-  creator: any,
-  prior: HistoricalPrior,
-) {
-  let adjustment = 0;
-  const reasons: string[] = [];
-
-  const buys = finite(input.buys5m);
-  const sells = finite(input.sells5m);
+function buildLegacyComparison(input: RecordDecisionInput, creator: any, prior: HistoricalPrior) {
+  let adjustment = 0; const reasons: string[] = [];
+  const buys = finite(input.buys5m); const sells = finite(input.sells5m);
   const buyRatio = buys != null && sells != null ? buys / Math.max(1, sells) : null;
-
   if (buyRatio != null) {
-    if (buyRatio >= 2.5) {
-      adjustment += 4;
-      reasons.push('strong_buy_ratio_2_5_plus');
-    } else if (buyRatio >= 1.8) {
-      adjustment += 3;
-      reasons.push('strong_buy_ratio_1_8_plus');
-    } else if (buyRatio >= 1.4) {
-      adjustment += 1;
-      reasons.push('positive_buy_ratio_1_4_plus');
-    } else if (buyRatio < 1) {
-      adjustment -= 4;
-      reasons.push('sell_pressure_ratio_below_1');
-    }
+    if (buyRatio >= 2.5) { adjustment += 4; reasons.push('strong_buy_ratio_2_5_plus'); }
+    else if (buyRatio >= 1.8) { adjustment += 3; reasons.push('strong_buy_ratio_1_8_plus'); }
+    else if (buyRatio >= 1.4) { adjustment += 1; reasons.push('positive_buy_ratio_1_4_plus'); }
+    else if (buyRatio < 1) { adjustment -= 4; reasons.push('sell_pressure_ratio_below_1'); }
   }
-
   const liquidity = finite(input.liquidity);
   if (liquidity != null) {
-    if (liquidity >= 15_000 && liquidity <= 30_000) {
-      adjustment += 2;
-      reasons.push('historical_liquidity_sweet_spot');
-    } else if (liquidity < 6_000) {
-      adjustment -= 3;
-      reasons.push('thin_liquidity');
-    }
+    if (liquidity >= 15_000 && liquidity <= 30_000) { adjustment += 2; reasons.push('historical_liquidity_sweet_spot'); }
+    else if (liquidity < 6_000) { adjustment -= 3; reasons.push('thin_liquidity'); }
   }
-
-  const creatorTrust = finite(creator?.trust_score);
-  const creatorConfidence = finite(creator?.confidence_score);
-  const creatorLaunches = finite(creator?.total_launches) ?? 0;
+  const creatorTrust = finite(creator?.trust_score); const creatorConfidence = finite(creator?.confidence_score); const creatorLaunches = finite(creator?.total_launches) ?? 0;
   if (creatorTrust != null && creatorLaunches >= 2) {
     const evidenceWeight = creatorConfidence == null ? 0.5 : clamp(creatorConfidence / 100, 0.25, 1);
-    if (creatorTrust >= 80) {
-      adjustment += 4 * evidenceWeight;
-      reasons.push('proven_creator_positive');
-    } else if (creatorTrust <= 30) {
-      adjustment -= 5 * evidenceWeight;
-      reasons.push('weak_creator_history');
-    }
+    if (creatorTrust >= 80) { adjustment += 4 * evidenceWeight; reasons.push('proven_creator_positive'); }
+    else if (creatorTrust <= 30) { adjustment -= 5 * evidenceWeight; reasons.push('weak_creator_history'); }
   }
-
   if (prior.sampleSize >= 12 && prior.medianRoi15m != null && prior.hit20Rate != null) {
-    if (prior.medianRoi15m >= 10 && prior.hit20Rate >= 0.35) {
-      adjustment += 3;
-      reasons.push('positive_robust_15m_prior');
-    } else if (prior.medianRoi15m < 0 && prior.hit20Rate < 0.2) {
-      adjustment -= 3;
-      reasons.push('negative_robust_15m_prior');
-    }
+    if (prior.medianRoi15m >= 10 && prior.hit20Rate >= 0.35) { adjustment += 3; reasons.push('positive_robust_15m_prior'); }
+    else if (prior.medianRoi15m < 0 && prior.hit20Rate < 0.2) { adjustment -= 3; reasons.push('negative_robust_15m_prior'); }
   }
-
   adjustment = clamp(adjustment, -10, 10);
   const score = clamp(input.adjustedScore + adjustment, 0, 100);
-
-  return {
-    score,
-    action: legacyShadowAction(score),
-    delta: adjustment,
-    reasons,
-  };
+  return { score, action: legacyShadowAction(score), delta: adjustment, reasons };
 }
 
 export async function recordShadowLearnedDecision(input: RecordDecisionInput) {
-  const tokenAddress = input.tokenAddress.trim();
-  if (!tokenAddress) return;
-
-  const [creator, prior] = await Promise.all([
-    loadCreatorEvidence(input),
-    loadHistoricalPrior(input),
-  ]);
-
+  const tokenAddress = input.tokenAddress.trim(); if (!tokenAddress) return;
+  const [creator, prior] = await Promise.all([loadCreatorEvidence(input), loadHistoricalPrior(input)]);
   const legacy = buildLegacyComparison(input, creator, prior);
-
-  const creatorTrust = finite(creator?.trust_score);
-  const creatorConfidence = finite(creator?.confidence_score);
-  const creatorLaunches = finite(creator?.total_launches) ?? 0;
-
-  const v2 = runDecisionEngineV2(input, {
-    creator: creator
-      ? {
-          trustScore: creatorTrust,
-          confidenceScore: creatorConfidence,
-          totalLaunches: creatorLaunches,
-          successRate: finite(creator.success_rate),
-          rugCount: finite(creator.rug_count),
-          riskScore: finite(creator.risk_score),
-        }
-      : null,
-    historical: prior,
-    wallet: null,
-  });
-
-  const buys = finite(input.buys5m);
-  const sells = finite(input.sells5m);
-  const buyRatio = buys != null && sells != null ? buys / Math.max(1, sells) : null;
-  const liquidity = finite(input.liquidity);
-
+  const creatorTrust = finite(creator?.trust_score); const creatorConfidence = finite(creator?.confidence_score); const creatorLaunches = finite(creator?.total_launches) ?? 0;
+  const v2 = runDecisionEngineV2(input, { creator: creator ? { trustScore: creatorTrust, confidenceScore: creatorConfidence, totalLaunches: creatorLaunches, successRate: finite(creator.success_rate), rugCount: finite(creator.rug_count), riskScore: finite(creator.risk_score) } : null, historical: prior, wallet: null });
+  const buys = finite(input.buys5m); const sells = finite(input.sells5m); const buyRatio = buys != null && sells != null ? buys / Math.max(1, sells) : null; const liquidity = finite(input.liquidity);
   const evidence = {
-    mode: 'SHADOW_ONLY',
-    modelVersion: v2.modelVersion,
-    engineV2: v2,
-    legacyShadow: legacy,
-    features: {
-      buyRatio,
-      liquidity,
-      marketCap: finite(input.marketCap),
-      volume5m: finite(input.volume5m),
-      buys5m: buys,
-      sells5m: sells,
-      marketSafetyScore: finite(input.marketSafetyScore),
-      authoritySafetyScore: finite(input.authoritySafetyScore),
-      paidApproved: input.paidApproved ?? null,
-    },
-    creator: creator
-      ? {
-          trustScore: creatorTrust,
-          confidenceScore: creatorConfidence,
-          totalLaunches: creatorLaunches,
-          successRate: finite(creator.success_rate),
-          rugCount: finite(creator.rug_count),
-          riskScore: finite(creator.risk_score),
-          trustLabel: creator.trust_label ?? null,
-        }
-      : null,
+    mode: 'SHADOW_ONLY', modelVersion: v2.modelVersion, engineV2: v2, legacyShadow: legacy,
+    features: { buyRatio, liquidity, marketCap: finite(input.marketCap), volume5m: finite(input.volume5m), buys5m: buys, sells5m: sells, marketSafetyScore: finite(input.marketSafetyScore), authoritySafetyScore: finite(input.authoritySafetyScore), paidApproved: input.paidApproved ?? null },
+    creator: creator ? { trustScore: creatorTrust, confidenceScore: creatorConfidence, totalLaunches: creatorLaunches, successRate: finite(creator.success_rate), rugCount: finite(creator.rug_count), riskScore: finite(creator.risk_score), trustLabel: creator.trust_label ?? null } : null,
     historicalPrior: prior,
-    guardrails: {
-      maxAdjustment: 10,
-      usesMedianNotMean: true,
-      affectsProductionDecision: false,
-      affectsAlerts: false,
-      affectsTrading: false,
-      promotionRequiresEvidence: true,
-    },
+    guardrails: { maxAdjustment: 10, usesMedianNotMean: true, affectsProductionDecision: false, affectsAlerts: false, affectsTrading: false, promotionRequiresEvidence: true },
   };
-
   const { error } = await supabase.from('shadow_intelligence_decisions').insert({
-    token_address: tokenAddress,
-    chain: input.chain?.trim() || 'solana',
-    source: input.source?.trim() || 'MAIN_SCANNER',
-    symbol: input.symbol ?? null,
-    creator_wallet: input.creatorWallet ?? null,
-    current_action: input.actionBucket,
-    base_score: input.baseScore,
-    current_adjusted_score: input.adjustedScore,
-    shadow_score: v2.score,
-    shadow_action: v2.action,
-    confidence: v2.confidence,
-    score_delta: v2.delta,
-    evidence,
+    token_address: tokenAddress, chain: input.chain?.trim() || 'solana', source: input.source?.trim() || 'MAIN_SCANNER', symbol: input.symbol ?? null, creator_wallet: input.creatorWallet ?? null,
+    current_action: input.actionBucket, base_score: input.baseScore, current_adjusted_score: input.adjustedScore, shadow_score: v2.score, shadow_action: v2.action, confidence: v2.confidence, score_delta: v2.delta,
+    entry_price: positive(input.price), evidence,
   });
-
-  if (error) {
-    console.warn('[ShadowLearnedDecision] persistence failed:', error.message);
-    return;
-  }
-
-  console.log('[ShadowLearnedDecision] recorded', {
-    token: tokenAddress,
-    modelVersion: v2.modelVersion,
-    currentAction: input.actionBucket,
-    shadowAction: v2.action,
-    currentScore: input.adjustedScore,
-    shadowScore: Number(v2.score.toFixed(2)),
-    delta: Number(v2.delta.toFixed(2)),
-    confidence: Number(v2.confidence.toFixed(2)),
-    promotionEligible: v2.promotionEligible,
-    factorSummary: v2.factors.map((factor) => ({
-      key: factor.key,
-      score: Number(factor.score.toFixed(2)),
-      confidence: Number(factor.confidence.toFixed(2)),
-      contribution: Number(factor.contribution.toFixed(2)),
-    })),
-  });
+  if (error) { console.warn('[ShadowLearnedDecision] persistence failed:', error.message); return; }
+  console.log('[ShadowLearnedDecision] recorded', { token: tokenAddress, modelVersion: v2.modelVersion, currentAction: input.actionBucket, shadowAction: v2.action, currentScore: input.adjustedScore, shadowScore: Number(v2.score.toFixed(2)), delta: Number(v2.delta.toFixed(2)), confidence: Number(v2.confidence.toFixed(2)), promotionEligible: v2.promotionEligible, entryPriceCaptured: positive(input.price) != null, factorSummary: v2.factors.map(factor => ({ key: factor.key, score: Number(factor.score.toFixed(2)), confidence: Number(factor.confidence.toFixed(2)), contribution: Number(factor.contribution.toFixed(2)) })) });
 }
