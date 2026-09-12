@@ -10,7 +10,7 @@ type NavigationItem = { label: string; href: string; description: string; icon: 
 const navigationItems: NavigationItem[] = [
   { label: "Home", href: "/", description: "Performance and market pulse", icon: "⌂" },
   { label: "Radar", href: "/opportunities", description: "Live market setups", icon: "⌁" },
-  { label: "Intel", href: "/dashboard", description: "Research and intelligence", icon: "◇" },
+  { label: "Intel", href: "/intelligence", description: "Developers and smart money", icon: "◇" },
   { label: "Game", href: "/game", description: "Reputation and rewards", icon: "◆" },
   { label: "Me", href: "/me", description: "Preferences and membership", icon: "○" },
 ];
