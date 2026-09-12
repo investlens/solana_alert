@@ -1,5 +1,4 @@
 import { createClient } from '@supabase/supabase-js';
-import { config } from '../config.js';
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -16,6 +15,10 @@ type CachedResponse = {
 
 let deliverableUsersCache: CachedResponse | null = null;
 const failOpenReservations = new Set<string>();
+const SUPABASE_REQUEST_TIMEOUT_MS = Math.max(
+  2_000,
+  Number(process.env.SUPABASE_REQUEST_TIMEOUT_MS ?? 5_000),
+);
 
 function requestUrl(input: RequestInfo | URL): string {
   if (typeof input === 'string') return input;
@@ -66,9 +69,13 @@ async function resilientFetch(input: RequestInfo | URL, init?: RequestInit): Pro
   const reservation = isDeliveryReservation(url);
   const body = requestBody(input, init);
   const key = reservation ? reservationKey(body) : null;
+  const boundedInit: RequestInit = {
+    ...init,
+    signal: init?.signal ?? AbortSignal.timeout(SUPABASE_REQUEST_TIMEOUT_MS),
+  };
 
   try {
-    const response = await fetch(input, init);
+    const response = await fetch(input, boundedInit);
 
     if (usersRead && response.ok) {
       const clone = response.clone();
@@ -122,6 +129,10 @@ async function resilientFetch(input: RequestInfo | URL, init?: RequestInit): Pro
       return cachedResponse(deliverableUsersCache);
     }
 
+    console.warn('[SupabaseResilience] Request failed fast.', {
+      url,
+      reason: error instanceof Error ? error.message : String(error),
+    });
     throw error;
   }
 }
