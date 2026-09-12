@@ -8,8 +8,11 @@ const ACTIVE_STATUSES = [
   'APPROVED',
 ];
 
-const SWEEP_INTERVAL_MS =
-  30 * 1000;
+function getSweepIntervalMs(): number {
+  const raw = Number(process.env.OPPORTUNITY_FRESHNESS_SWEEP_MS ?? 5 * 60 * 1000);
+  if (!Number.isFinite(raw)) return 5 * 60 * 1000;
+  return Math.max(60 * 1000, Math.floor(raw));
+}
 
 let started =
   false;
@@ -254,9 +257,11 @@ void {
   started =
     true;
 
+  const sweepIntervalMs = getSweepIntervalMs();
+
   console.log(
     `[OpportunityFreshness] Started. Interval: ${
-      SWEEP_INTERVAL_MS /
+      sweepIntervalMs /
       1000
     } seconds.`,
   );
@@ -292,7 +297,7 @@ void {
             },
           );
       },
-      SWEEP_INTERVAL_MS,
+      sweepIntervalMs,
     );
 }
 
