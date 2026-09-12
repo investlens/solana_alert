@@ -51,8 +51,8 @@ export type OpportunityInput = {
   expectedProfit?: number | null;
   expectedProfitPercent?: number | null;
 
-  riskScore?: number;
-  confidence?: number;
+  riskScore?: number | null;
+  confidence?: number | null;
 
   status?: OpportunityStatus;
 
@@ -249,10 +249,10 @@ export async function recordOpportunity(
               args.expectedProfitPercent ?? null,
 
             risk_score:
-              args.riskScore ?? 50,
+              args.riskScore ?? null,
 
             confidence:
-              args.confidence ?? 50,
+              args.confidence ?? null,
 
             status:
               args.status ??
@@ -319,7 +319,7 @@ export async function recordOpportunity(
             args.recommendedAction ?? null,
 
           confidence:
-            args.confidence ?? 50,
+            args.confidence ?? null,
 
           observationCount:
             nextObservationCount,
@@ -380,10 +380,10 @@ export async function recordOpportunity(
           args.expectedProfitPercent ?? null,
 
         risk_score:
-          args.riskScore ?? 50,
+          args.riskScore ?? null,
 
         confidence:
-          args.confidence ?? 50,
+          args.confidence ?? null,
 
         status:
           args.status ?? 'NEW',
@@ -443,7 +443,7 @@ export async function recordOpportunity(
         args.assetId,
 
       confidence:
-        args.confidence ?? 50,
+        args.confidence ?? null,
 
       observationCount:
         args.observationCount ?? 1,
@@ -534,8 +534,8 @@ export async function transitionActiveStrategyOpportunity(
         strategyKey:
           args.strategyKey,
 
-        error:
-          lookupError.message,
+          error:
+            lookupError.message,
       },
     );
 
