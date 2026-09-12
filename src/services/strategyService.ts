@@ -26,9 +26,13 @@ export type UserStrategyPreference = {
 export const DEX_PAID_STRATEGY_KEY = 'DEX_PAID';
 export const X_REPUTED_MENTION_STRATEGY_KEY = 'X_REPUTED_MENTION';
 
+const strategyStateCache = new Map<string, boolean>();
+const userPreferenceCache = new Map<string, boolean>();
+const preferenceKey = (telegramId: string, strategyKey: string) => `${telegramId}:${strategyKey}`;
+
 export function defaultStrategyEnabledForUser(strategyKey: string): boolean {
-  // DEX_PAID is a core Robinhood discovery alert and should be on unless a user
-  // explicitly disables it. X mentions remain opt-in to avoid notification noise.
+  // DEX_PAID and other core strategies are fail-open for alert continuity.
+  // X mentions remain opt-in to avoid notification noise during a database outage.
   return strategyKey !== X_REPUTED_MENTION_STRATEGY_KEY;
 }
 
@@ -37,7 +41,9 @@ export async function getEnabledStrategies(): Promise<StrategyDefinition[]> {
     .select('strategy_key,name,chain,category,enabled,default_action')
     .eq('enabled', true).order('chain').order('category').order('name');
   if (error) { console.error('[StrategyService] Registry load failed:', error); throw error; }
-  return (data ?? []) as StrategyDefinition[];
+  const rows = (data ?? []) as StrategyDefinition[];
+  for (const row of rows) strategyStateCache.set(row.strategy_key, Boolean(row.enabled));
+  return rows;
 }
 
 export async function getAllStrategies(): Promise<StrategyDefinition[]> {
@@ -45,7 +51,9 @@ export async function getAllStrategies(): Promise<StrategyDefinition[]> {
     .select('strategy_key,name,chain,category,enabled,default_action')
     .order('chain').order('category').order('name');
   if (error) { console.error('[StrategyService] Registry load failed:', error); throw error; }
-  return (data ?? []) as StrategyDefinition[];
+  const rows = (data ?? []) as StrategyDefinition[];
+  for (const row of rows) strategyStateCache.set(row.strategy_key, Boolean(row.enabled));
+  return rows;
 }
 
 export async function getUserStrategyPreferences(telegramId: string): Promise<Map<string, boolean>> {
@@ -53,20 +61,46 @@ export async function getUserStrategyPreferences(telegramId: string): Promise<Ma
     .select('strategy_key,enabled').eq('telegram_id', telegramId);
   if (error) { console.error('[StrategyService] Preference load failed:', { telegramId, error }); throw error; }
   const preferences = new Map<string, boolean>();
-  for (const row of (data ?? []) as UserStrategyPreference[]) preferences.set(row.strategy_key, Boolean(row.enabled));
+  for (const row of (data ?? []) as UserStrategyPreference[]) {
+    const enabled = Boolean(row.enabled);
+    preferences.set(row.strategy_key, enabled);
+    userPreferenceCache.set(preferenceKey(telegramId, row.strategy_key), enabled);
+  }
   return preferences;
 }
 
 export async function isStrategyEnabledForUser(telegramId: string, strategyKey: string): Promise<boolean> {
-  const { data: strategy, error: strategyError } = await supabase.from('strategy_registry')
-    .select('enabled').eq('strategy_key', strategyKey).maybeSingle();
-  if (strategyError) throw strategyError;
-  if (!strategy?.enabled) return false;
-  const { data: preference, error: preferenceError } = await supabase.from('user_strategy_preferences')
-    .select('enabled').eq('telegram_id', telegramId).eq('strategy_key', strategyKey).maybeSingle();
-  if (preferenceError) throw preferenceError;
-  if (!preference) return defaultStrategyEnabledForUser(strategyKey);
-  return Boolean(preference.enabled);
+  try {
+    const { data: strategy, error: strategyError } = await supabase.from('strategy_registry')
+      .select('enabled').eq('strategy_key', strategyKey).maybeSingle();
+    if (strategyError) throw strategyError;
+    const strategyEnabled = Boolean(strategy?.enabled);
+    strategyStateCache.set(strategyKey, strategyEnabled);
+    if (!strategyEnabled) return false;
+
+    const { data: preference, error: preferenceError } = await supabase.from('user_strategy_preferences')
+      .select('enabled').eq('telegram_id', telegramId).eq('strategy_key', strategyKey).maybeSingle();
+    if (preferenceError) throw preferenceError;
+    if (!preference) return defaultStrategyEnabledForUser(strategyKey);
+
+    const enabled = Boolean(preference.enabled);
+    userPreferenceCache.set(preferenceKey(telegramId, strategyKey), enabled);
+    return enabled;
+  } catch (error) {
+    const cachedStrategy = strategyStateCache.get(strategyKey);
+    const cachedPreference = userPreferenceCache.get(preferenceKey(telegramId, strategyKey));
+    const enabled = cachedStrategy === false
+      ? false
+      : cachedPreference ?? defaultStrategyEnabledForUser(strategyKey);
+
+    console.warn('[StrategyService] Database unavailable; using resilient strategy fallback.', {
+      telegramId,
+      strategyKey,
+      enabled,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    return enabled;
+  }
 }
 
 export async function setUserStrategyEnabled(args: { telegramId: string; strategyKey: string; enabled: boolean }): Promise<void> {
@@ -75,6 +109,7 @@ export async function setUserStrategyEnabled(args: { telegramId: string; strateg
     telegram_id: args.telegramId, strategy_key: args.strategyKey, enabled: args.enabled, updated_at: now,
   }, { onConflict: 'telegram_id,strategy_key' });
   if (error) { console.error('[StrategyService] Preference update failed:', { ...args, error }); throw error; }
+  userPreferenceCache.set(preferenceKey(args.telegramId, args.strategyKey), args.enabled);
 }
 
 export async function toggleUserStrategy(args: { telegramId: string; strategyKey: string }): Promise<boolean> {
