@@ -58,11 +58,15 @@ void startTelegramPollingEarly().catch((error) => {
   });
 });
 
-void startPumpPortalCreatorFeed().catch((error) => {
-  console.log('[PumpPortalCreatorFeed] startup error', {
-    error: error instanceof Error ? error.message : String(error),
+if (process.env.PUMPPORTAL_CREATOR_FEED_ENABLED === 'true') {
+  void startPumpPortalCreatorFeed().catch((error) => {
+    console.log('[PumpPortalCreatorFeed] startup error', {
+      error: error instanceof Error ? error.message : String(error),
+    });
   });
-});
+} else {
+  console.log('[PumpPortalCreatorFeed] disabled to protect production database capacity.');
+}
 
 startRuntimeHealthHeartbeat();
 startShadowDecisionOutcomeGrader();
