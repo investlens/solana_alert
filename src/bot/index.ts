@@ -20,6 +20,15 @@ import { registerXIntelligenceAdmin } from './xIntelligenceAdmin.js';
 export function createBot() {
   const bot = new Telegraf(config.botToken);
 
+  // A database-backed command/callback must never terminate Telegram polling.
+  bot.catch((error, ctx) => {
+    console.error('[TelegramPolling] Handler error contained.', {
+      updateType: ctx.updateType,
+      telegramId: String(ctx.from?.id ?? ''),
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  });
+
   // Keep the real AlphaOS home available even when the data layer is degraded.
   // Admin identity comes from Railway config, so this path requires no database read.
   bot.use(async (ctx, next) => {
