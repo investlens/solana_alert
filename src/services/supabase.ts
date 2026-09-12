@@ -14,12 +14,37 @@ type CachedResponse = {
   contentType: string | null;
 };
 
+type Lane = 'critical' | 'background';
+
+type LaneState = {
+  active: number;
+  limit: number;
+  queue: Array<() => void>;
+};
+
 let deliverableUsersCache: CachedResponse | null = null;
 const failOpenReservations = new Set<string>();
+const lastGoodCriticalGets = new Map<string, CachedResponse>();
+
 const SUPABASE_REQUEST_TIMEOUT_MS = Math.max(
   2_000,
   Number(process.env.SUPABASE_REQUEST_TIMEOUT_MS ?? 5_000),
 );
+
+const CRITICAL_CONCURRENCY = Math.max(
+  1,
+  Number(process.env.SUPABASE_CRITICAL_CONCURRENCY ?? 2),
+);
+
+const BACKGROUND_CONCURRENCY = Math.max(
+  1,
+  Number(process.env.SUPABASE_BACKGROUND_CONCURRENCY ?? 2),
+);
+
+const lanes: Record<Lane, LaneState> = {
+  critical: { active: 0, limit: CRITICAL_CONCURRENCY, queue: [] },
+  background: { active: 0, limit: BACKGROUND_CONCURRENCY, queue: [] },
+};
 
 function requestUrl(input: RequestInfo | URL): string {
   if (typeof input === 'string') return input;
@@ -33,6 +58,10 @@ function requestBody(input: RequestInfo | URL, init?: RequestInit): string | nul
   return null;
 }
 
+function requestMethod(init?: RequestInit): string {
+  return String(init?.method ?? 'GET').toUpperCase();
+}
+
 function cachedResponse(cache: CachedResponse): Response {
   return new Response(cache.body, {
     status: cache.status,
@@ -42,12 +71,75 @@ function cachedResponse(cache: CachedResponse): Response {
 }
 
 function isDeliverableUsersRead(url: string, init?: RequestInit): boolean {
-  const method = String(init?.method ?? 'GET').toUpperCase();
+  const method = requestMethod(init);
   return method === 'GET' && url.includes('/rest/v1/users') && url.includes('is_blocked=eq.false');
 }
 
 function isDeliveryReservation(url: string): boolean {
   return url.includes('/rest/v1/rpc/reserve_opportunity_delivery');
+}
+
+function isCriticalRequest(url: string, init?: RequestInit): boolean {
+  const method = requestMethod(init);
+
+  if (isDeliverableUsersRead(url, init) || isDeliveryReservation(url)) return true;
+
+  if (
+    url.includes('/rest/v1/user_tracked_wallets') ||
+    url.includes('/rest/v1/wallet_activity_deliveries') ||
+    url.includes('/rest/v1/wallet_monitor_cursors') ||
+    url.includes('/rest/v1/strategy_settings') ||
+    url.includes('/rest/v1/alerts') ||
+    url.includes('/rest/v1/alert_deliveries') ||
+    url.includes('/rest/v1/users')
+  ) {
+    return true;
+  }
+
+  // Writes that are part of a user action or alert delivery should not sit
+  // behind long-running analytics reads.
+  if (method !== 'GET' && (
+    url.includes('/rest/v1/user_') ||
+    url.includes('/rest/v1/wallet_') ||
+    url.includes('/rest/v1/alerts') ||
+    url.includes('/rest/v1/alert_deliveries')
+  )) {
+    return true;
+  }
+
+  return false;
+}
+
+function cacheableCriticalGet(url: string, init?: RequestInit): boolean {
+  if (requestMethod(init) !== 'GET') return false;
+  return (
+    url.includes('/rest/v1/user_tracked_wallets') ||
+    url.includes('/rest/v1/wallet_activity_deliveries') ||
+    url.includes('/rest/v1/strategy_settings') ||
+    isDeliverableUsersRead(url, init)
+  );
+}
+
+async function acquireLane(lane: Lane): Promise<void> {
+  const state = lanes[lane];
+  if (state.active < state.limit) {
+    state.active += 1;
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    state.queue.push(() => {
+      state.active += 1;
+      resolve();
+    });
+  });
+}
+
+function releaseLane(lane: Lane): void {
+  const state = lanes[lane];
+  state.active = Math.max(0, state.active - 1);
+  const next = state.queue.shift();
+  if (next) next();
 }
 
 function reservationKey(body: string | null): string | null {
@@ -121,12 +213,41 @@ function runtimeUsersResponse(reason: string): Response {
   });
 }
 
+async function rememberCriticalGet(url: string, response: Response): Promise<Response> {
+  if (!response.ok) return response;
+  const clone = response.clone();
+  const rawBody = await clone.text();
+  const cache: CachedResponse = {
+    body: rawBody,
+    status: clone.status,
+    statusText: clone.statusText,
+    contentType: clone.headers.get('content-type'),
+  };
+  lastGoodCriticalGets.set(url, cache);
+
+  // Keep the cache bounded. Critical URLs are mostly a small set of stable
+  // query shapes, but this prevents unbounded growth from per-user queries.
+  if (lastGoodCriticalGets.size > 200) {
+    const oldest = lastGoodCriticalGets.keys().next().value;
+    if (oldest) lastGoodCriticalGets.delete(oldest);
+  }
+
+  return response;
+}
+
 async function resilientFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const url = requestUrl(input);
   const usersRead = isDeliverableUsersRead(url, init);
   const reservation = isDeliveryReservation(url);
   const body = requestBody(input, init);
   const key = reservation ? reservationKey(body) : null;
+  const critical = isCriticalRequest(url, init);
+  const lane: Lane = critical ? 'critical' : 'background';
+
+  await acquireLane(lane);
+
+  // The timeout starts only after the request has obtained its lane. Queue
+  // time must never consume the network timeout budget.
   const boundedInit: RequestInit = {
     ...init,
     signal: init?.signal ?? AbortSignal.timeout(SUPABASE_REQUEST_TIMEOUT_MS),
@@ -153,7 +274,10 @@ async function resilientFetch(input: RequestInfo | URL, init?: RequestInit): Pro
         contentType: clone.headers.get('content-type'),
       };
 
+      lastGoodCriticalGets.set(url, deliverableUsersCache);
       if (testingRealtimeEnabled()) return cachedResponse(deliverableUsersCache);
+    } else if (critical && cacheableCriticalGet(url, init) && response.ok) {
+      await rememberCriticalGet(url, response);
     }
 
     if (reservation && !response.ok && response.status >= 500) {
@@ -171,6 +295,17 @@ async function resilientFetch(input: RequestInfo | URL, init?: RequestInit): Pro
 
     if (usersRead && !response.ok && response.status >= 500) {
       return runtimeUsersResponse(`HTTP ${response.status}`);
+    }
+
+    if (critical && cacheableCriticalGet(url, init) && !response.ok && response.status >= 500) {
+      const cached = lastGoodCriticalGets.get(url);
+      if (cached) {
+        console.warn('[SupabaseResilience] Critical read degraded; serving last-good response.', {
+          url,
+          status: response.status,
+        });
+        return cachedResponse(cached);
+      }
     }
 
     return response;
@@ -192,11 +327,25 @@ async function resilientFetch(input: RequestInfo | URL, init?: RequestInit): Pro
       return runtimeUsersResponse(error instanceof Error ? error.message : String(error));
     }
 
+    if (critical && cacheableCriticalGet(url, init)) {
+      const cached = lastGoodCriticalGets.get(url);
+      if (cached) {
+        console.warn('[SupabaseResilience] Critical request failed; serving last-good response.', {
+          url,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+        return cachedResponse(cached);
+      }
+    }
+
     console.warn('[SupabaseResilience] Request failed fast.', {
       url,
+      lane,
       reason: error instanceof Error ? error.message : String(error),
     });
     throw error;
+  } finally {
+    releaseLane(lane);
   }
 }
 
