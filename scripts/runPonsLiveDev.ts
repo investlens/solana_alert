@@ -23,6 +23,10 @@ const route = createPonsLiveLaunchRouter({ config,
     : {}),
 });
 
+// Live discovery should recover on the next poll rather than spending minutes retrying
+// one transient persistence request. We never skip the checkpoint or advance to head.
+const liveRetry = { attempts: 2, baseDelayMs: 1_000, maxDelayMs: 2_000, jitterMs: 250 };
+
 // Keep Pons outcome learning alive inside the dedicated Pons service.
 let ponsOutcomeCollectionRunning = false;
 
@@ -85,13 +89,13 @@ const dryStorage = {
 };
 if (mode.kind === 'ONCE') {
   console.log('[PonsLive] mode=SHADOW dryRun=true liveStateWrites=0 realTrades=0');
-  const result = await pollPonsLiveLaunchesOnce(robinhoodPublicClient as never, dryStorage, route);
+  const result = await pollPonsLiveLaunchesOnce(robinhoodPublicClient as never, dryStorage, route, { retry: liveRetry });
   console.log(`[PonsLive] complete detected=${result.detected} handled=${result.handled} duplicates=${result.duplicates} liveStateWrites=0 realTrades=0`);
 } else {
   console.log('[PonsLive] mode=SHADOW dryRun=true realTrades=0 liveStateWrites=enabled');
   startPonsOutcomeCollectionLoop();
   await runPonsLivePollingLoop({
     pollIntervalMs: ponsLivePollInterval(),
-    poll: () => pollPonsLiveLaunchesOnce(robinhoodPublicClient as never, supabasePonsLiveDetectorStorage, route),
+    poll: () => pollPonsLiveLaunchesOnce(robinhoodPublicClient as never, supabasePonsLiveDetectorStorage, route, { retry: liveRetry }),
   });
 }
