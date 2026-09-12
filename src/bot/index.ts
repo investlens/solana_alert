@@ -61,7 +61,8 @@ export function createBot() {
   });
 
   // Critical navigation must never wait on Supabase. These handlers intentionally
-  // run before the legacy DB-backed screens registered below.
+  // run before the legacy DB-backed screens registered below. WALLET_TRACKING is
+  // deliberately NOT intercepted here so the full saved-wallet experience remains intact.
   bot.use(async (ctx, next) => {
     const data = String((ctx.callbackQuery as any)?.data ?? '');
     if (!data) return next();
@@ -118,25 +119,6 @@ export function createBot() {
           'Choose an intelligence workspace below.',
         ].join('\n'),
         intelligenceMenu(access).reply_markup,
-      );
-      return;
-    }
-
-    if (data === 'WALLET_TRACKING') {
-      await renderFast(
-        ctx,
-        [
-          '🐋 <b>WALLETS</b>',
-          '',
-          'Track developer, whale and smart-money activity.',
-          '',
-          '<i>Wallet history may be delayed while the database is recovering, but navigation remains available.</i>',
-        ].join('\n'),
-        Markup.inlineKeyboard([
-          [Markup.button.callback('🧠 Developers', 'INTEL_CREATORS')],
-          [Markup.button.callback('🐋 Smart Money', 'INTEL_SMART_MONEY')],
-          [Markup.button.callback('⌂ Home', 'MAIN_MENU')],
-        ]).reply_markup,
       );
       return;
     }
