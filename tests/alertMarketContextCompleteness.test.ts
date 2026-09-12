@@ -29,6 +29,49 @@ test('shared market normalization preserves strongest reliable producer context'
   assert.deepEqual(marketContextMetrics(context).map(metric => metric.label), ['Market cap', 'Liquidity', '5m volume']);
 });
 
+test('thin DEX pool does not advertise a misleading cheap market cap', () => {
+  const context = normalizeNotificationMarketContext({
+    token_address: address, symbol: 'ZFORGE', marketCap: 3_398, fdv: 3_398, liquidity: 3.47,
+  });
+  assert.equal(context.valuationState, 'VERIFYING');
+  assert.equal(context.marketCap, null);
+  assert.equal(context.fdv, null);
+  assert.equal(context.liquidity, 3.47);
+  assert.deepEqual(marketContextMetrics(context).map(metric => metric.label), ['Valuation', 'Liquidity']);
+});
+
+test('verified fresh PONS curve valuation remains visible even when DEX pool is thin', () => {
+  const observedAt = new Date().toISOString();
+  const context = normalizeNotificationMarketContext({
+    token_address: address, marketCap: 3_398, liquidity: 3.47,
+    preIndexValuation: {
+      tokenAddress: address, valueUsd: 7_250, valuationType: 'MARKET_CAP',
+      source: 'PONS_V2_CURVE_RESERVE_SPOT', tokenPriceSource: 'PONS_V2_CURVE_RESERVE_RATIO',
+      quoteAsset: '0x0000000000000000000000000000000000000001', quoteUsdSource: 'DEXSCREENER_QUOTE',
+      observedAt, indexed: false,
+    },
+  });
+  assert.equal(context.valuationState, 'VERIFIED_PONS_CURVE');
+  assert.equal(context.marketCap, 7_250);
+  assert.equal(context.valuationSource, 'PONS_V2_CURVE_RESERVE_SPOT');
+});
+
+test('credible DEX and PONS valuations that materially disagree are marked disputed', () => {
+  const observedAt = new Date().toISOString();
+  const context = normalizeNotificationMarketContext({
+    token_address: address, marketCap: 19_000, liquidity: 8_000,
+    preIndexValuation: {
+      tokenAddress: address, valueUsd: 7_000, valuationType: 'MARKET_CAP',
+      source: 'PONS_V2_CURVE_RESERVE_SPOT', tokenPriceSource: 'PONS_V2_CURVE_RESERVE_RATIO',
+      quoteAsset: '0x0000000000000000000000000000000000000001', quoteUsdSource: 'DEXSCREENER_QUOTE',
+      observedAt, indexed: false,
+    },
+  });
+  assert.equal(context.valuationState, 'DISPUTED');
+  assert.equal(context.marketCap, null);
+  assert.equal(marketContextMetrics(context)[0]?.value, 'DISPUTED');
+});
+
 test('PONS Entry Ready, Watching and Risk preserve symbol and market context', async () => {
   for (const action of ['BUY', 'WATCH', 'EXIT']) {
     const message = await opportunityMessage(action, {
