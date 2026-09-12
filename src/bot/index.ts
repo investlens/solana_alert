@@ -1,8 +1,8 @@
-import { Telegraf } from 'telegraf';
+import { Markup, Telegraf } from 'telegraf';
 import { config } from '../config.js';
 import { accessProfileForTier } from '../product/capabilities.js';
 import { rememberRuntimeSubscriber } from '../services/runtimeSubscriberRegistry.js';
-import { mainAlphaMenu } from './menus.js';
+import { intelligenceMenu, mainAlphaMenu, tradingMenu } from './menus.js';
 import { registerBotCommands } from './commands.js';
 import { registerStrategyControls } from './strategyControls.js';
 import { registerOpportunityCenter } from './opportunityCenter.js';
@@ -18,10 +18,27 @@ import { registerIntelligenceCenter } from './intelligenceCenter.js';
 import { registerTokenIntelligenceActions } from './tokenIntelligenceActions.js';
 import { registerXIntelligenceAdmin } from './xIntelligenceAdmin.js';
 
+function accessForContext(ctx: any) {
+  const telegramId = String(ctx.from?.id ?? '');
+  return accessProfileForTier(
+    telegramId === String(config.adminTelegramId) ? 'admin' : 'free',
+  );
+}
+
+async function renderFast(ctx: any, text: string, replyMarkup: any) {
+  await ctx.answerCbQuery?.().catch(() => {});
+  const options = { parse_mode: 'HTML' as const, reply_markup: replyMarkup };
+  try {
+    await ctx.editMessageText(text, options);
+  } catch (error) {
+    if (String(error).toLowerCase().includes('message is not modified')) return;
+    await ctx.reply(text, options);
+  }
+}
+
 export function createBot() {
   const bot = new Telegraf(config.botToken);
 
-  // A database-backed command/callback must never terminate Telegram polling.
   bot.catch((error, ctx) => {
     console.error('[TelegramPolling] Handler error contained.', {
       updateType: ctx.updateType,
@@ -30,8 +47,6 @@ export function createBot() {
     });
   });
 
-  // Any tester who talks to AlphaOS becomes a process-local delivery fallback.
-  // This keeps known active recipients available if Supabase is temporarily unreachable.
   bot.use(async (ctx, next) => {
     const telegramId = String(ctx.from?.id ?? '');
     if (telegramId) {
@@ -45,16 +60,148 @@ export function createBot() {
     return next();
   });
 
-  // Keep the real AlphaOS home available even when the data layer is degraded.
-  // Admin identity comes from Railway config, so this path requires no database read.
+  // Critical navigation must never wait on Supabase. These handlers intentionally
+  // run before the legacy DB-backed screens registered below.
+  bot.use(async (ctx, next) => {
+    const data = String((ctx.callbackQuery as any)?.data ?? '');
+    if (!data) return next();
+
+    const access = accessForContext(ctx);
+
+    if (data === 'MAIN_MENU') {
+      await renderFast(
+        ctx,
+        [
+          '🧠 <b>ALPHAOS AI</b>',
+          '<i>Crypto Intelligence Terminal</i>',
+          '',
+          '⚡ Live opportunities',
+          '🧠 Developer & smart-money intelligence',
+          '🐋 Wallet tracking',
+          '📈 Trading workspace',
+          '',
+          '<i>Navigation remains available even while market data is recovering.</i>',
+        ].join('\n'),
+        mainAlphaMenu(access).reply_markup,
+      );
+      return;
+    }
+
+    if (data === 'OPPORTUNITY_CENTER') {
+      await renderFast(
+        ctx,
+        [
+          '⚡ <b>RADAR</b>',
+          '',
+          'AlphaOS scanners are running.',
+          'Live opportunity data is loaded separately so a database slowdown cannot freeze this screen.',
+          '',
+          '<i>If the live list is temporarily unavailable, alerts continue to be evaluated by the scanner.</i>',
+        ].join('\n'),
+        Markup.inlineKeyboard([
+          [Markup.button.callback('🔄 Refresh Radar', 'OPPORTUNITY_CENTER')],
+          [Markup.button.callback('🧠 Intelligence', 'INTELLIGENCE_CENTER')],
+          [Markup.button.callback('⌂ Home', 'MAIN_MENU')],
+        ]).reply_markup,
+      );
+      return;
+    }
+
+    if (data === 'INTELLIGENCE_CENTER') {
+      await renderFast(
+        ctx,
+        [
+          '🧠 <b>INTELLIGENCE</b>',
+          '',
+          'Developer wallets · Smart money · Research · Track record',
+          '',
+          'Choose an intelligence workspace below.',
+        ].join('\n'),
+        intelligenceMenu(access).reply_markup,
+      );
+      return;
+    }
+
+    if (data === 'WALLET_TRACKING') {
+      await renderFast(
+        ctx,
+        [
+          '🐋 <b>WALLETS</b>',
+          '',
+          'Track developer, whale and smart-money activity.',
+          '',
+          '<i>Wallet history may be delayed while the database is recovering, but navigation remains available.</i>',
+        ].join('\n'),
+        Markup.inlineKeyboard([
+          [Markup.button.callback('🧠 Developers', 'INTEL_CREATORS')],
+          [Markup.button.callback('🐋 Smart Money', 'INTEL_SMART_MONEY')],
+          [Markup.button.callback('⌂ Home', 'MAIN_MENU')],
+        ]).reply_markup,
+      );
+      return;
+    }
+
+    if (data === 'TRADE_MENU') {
+      await renderFast(
+        ctx,
+        [
+          '📈 <b>TRADING</b>',
+          '',
+          'Review opportunities and execution controls.',
+          '',
+          '<i>Automatic trading remains disabled unless explicitly enabled.</i>',
+        ].join('\n'),
+        tradingMenu(access).reply_markup,
+      );
+      return;
+    }
+
+    if (data === 'SETTINGS') {
+      await renderFast(
+        ctx,
+        [
+          '⚙ <b>CONTROLS</b>',
+          '',
+          'Alert strategies and preferences.',
+          '',
+          'Database-backed preference editing is temporarily protected while Supabase recovers.',
+        ].join('\n'),
+        Markup.inlineKeyboard([
+          [Markup.button.callback('🎯 Strategies', 'STRATEGY_SETTINGS')],
+          [Markup.button.callback('⌂ Home', 'MAIN_MENU')],
+        ]).reply_markup,
+      );
+      return;
+    }
+
+    if (data === 'MEMBERSHIP_HOME') {
+      await renderFast(
+        ctx,
+        [
+          '✦ <b>ALPHAOS ACCESS</b>',
+          '',
+          'Realtime testing access is currently enabled for active users.',
+          'Premium packaging will be re-enabled after the production reliability pass.',
+        ].join('\n'),
+        Markup.inlineKeyboard([
+          [Markup.button.callback('⌂ Home', 'MAIN_MENU')],
+        ]).reply_markup,
+      );
+      return;
+    }
+
+    return next();
+  });
+
+  // /start also stays independent of Supabase.
   bot.use(async (ctx, next) => {
     const text = String((ctx.message as any)?.text ?? '').trim();
     const isStart = text === '/start' || text.startsWith('/start@');
     if (!isStart) return next();
 
+    const access = accessForContext(ctx);
     const telegramId = String(ctx.from?.id ?? '');
     const isAdmin = telegramId === String(config.adminTelegramId);
-    const access = accessProfileForTier(isAdmin ? 'admin' : 'free');
 
     console.log('[TelegramCommand] /start received', { telegramId, isAdmin });
 
