@@ -12,6 +12,11 @@ export type PonsLiveDetectorOptions = {
   factories?: PonsFactoryDeployment[]; log?: (line: string) => void;
 };
 
+// Process-local safety net. Once a checkpoint has been successfully read or a
+// block range has been handled, a temporary Supabase outage must not stop live
+// chain scanning. Persistence can catch up later; alert discovery stays live.
+const liveCheckpointCache = new Map<string, bigint>();
+
 export async function pollPonsLiveLaunchesOnce(
   rpc: PonsScannerRpc,
   storage: PonsLiveDetectorStorage,
@@ -26,9 +31,25 @@ export async function pollPonsLiveLaunchesOnce(
   let detected = 0; let handled = 0; let duplicates = 0;
 
   for (const factory of factories) {
-    const checkpoint = options.fromBlock == null
-      ? await retryPonsOperation('liveCheckpointRead', () => storage.getLiveCheckpoint(factory.id), retry)
-      : null;
+    let checkpoint: bigint | null = null;
+    if (options.fromBlock == null) {
+      try {
+        checkpoint = await retryPonsOperation('liveCheckpointRead', () => storage.getLiveCheckpoint(factory.id), retry);
+        if (checkpoint != null) liveCheckpointCache.set(factory.id, checkpoint);
+      } catch (error) {
+        const cached = liveCheckpointCache.get(factory.id);
+        if (cached == null) {
+          // On a cold start we deliberately scan a conservative recent window
+          // rather than jumping to head and silently missing launches.
+          checkpoint = head > 300n ? head - 300n : 0n;
+          log(`[PonsLive] checkpoint database unavailable factory=${factory.id}; cold-start recovery from block=${checkpoint + 1n}`);
+        } else {
+          checkpoint = cached;
+          log(`[PonsLive] checkpoint database unavailable factory=${factory.id}; using memory checkpoint=${cached}`);
+        }
+      }
+    }
+
     const requestedFrom = options.fromBlock ?? (checkpoint == null ? head : checkpoint + 1n);
     const maximum = options.maxBlocksPerPoll ?? 2_500n;
     const from = requestedFrom;
@@ -53,9 +74,26 @@ export async function pollPonsLiveLaunchesOnce(
       if (seen.has(identity)) { duplicates += 1; continue; }
       seen.add(identity); launches.push(launch);
     }
-    if (launches.length) await retryPonsOperation('liveLaunchUpsert', () => storage.persistLaunches(launches), retry);
+
+    if (launches.length) {
+      try {
+        await retryPonsOperation('liveLaunchUpsert', () => storage.persistLaunches(launches), retry);
+      } catch (error) {
+        log(`[PonsLive] launch persistence unavailable factory=${factory.id}; routing ${launches.length} launch(es) without blocking alerts`);
+      }
+    }
+
     for (const launch of launches) { await handleLaunch(launch); handled += 1; }
-    await retryPonsOperation('liveCheckpointUpsert', () => storage.setLiveCheckpoint(factory, to), retry);
+
+    // Advance process-local progress only after every launch in the range has
+    // reached the router. This prevents a persistence outage from halting the
+    // scanner while preserving at-least-once alert handling semantics.
+    liveCheckpointCache.set(factory.id, to);
+    try {
+      await retryPonsOperation('liveCheckpointUpsert', () => storage.setLiveCheckpoint(factory, to), retry);
+    } catch (error) {
+      log(`[PonsLive] checkpoint persistence unavailable factory=${factory.id}; memory checkpoint=${to}`);
+    }
     log(`[PonsLive] factory=${factory.id} blocks=${from}-${to} detected=${launches.length}`);
   }
   return { detected, handled, duplicates };
