@@ -235,6 +235,21 @@ export async function getRobinhoodMarketSnapshot(
       pair.txns?.m5?.sells,
     );
 
+  // BOOST is a presentation signal, not a scanner threshold. Refresh the canonical
+  // PONS delivery evidence before the observer loads its opportunity context so a
+  // fresh curve valuation can replace a thin/dust-pool DEX valuation in the alert.
+  if (options.caller === 'robinhood_boost_observer') {
+    try {
+      const { refreshPonsMarketTruthForAlert } = await import('./ponsMarketTruthRefresh.js');
+      await refreshPonsMarketTruthForAlert(tokenAddress);
+    } catch (error) {
+      console.warn('[RobinhoodMarket] Optional PONS market-truth refresh unavailable:', {
+        token: tokenAddress,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   return {
     chain: 'robinhood',
 
