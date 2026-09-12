@@ -8,6 +8,8 @@ import { createBot } from './bot/index.js';
 import { claimTelegramPollingOwner } from './services/telegramPollingOwner.js';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const enabled = (name: string, fallback = false) =>
+  String(process.env[name] ?? (fallback ? 'true' : 'false')).toLowerCase() === 'true';
 
 async function startTelegramPollingEarly() {
   if (process.env.RUN_TELEGRAM_BOT !== 'true') return;
@@ -19,9 +21,6 @@ async function startTelegramPollingEarly() {
 
   console.log('[TelegramPolling] Starting before database restore...');
 
-  // Polling is a critical user-facing service. If Telegraf exits because of a
-  // transient Telegram/network/handler failure, recreate it and resume instead
-  // of leaving the rest of AlphaOS alive with a dead command surface.
   for (;;) {
     const bot = createBot();
 
@@ -68,10 +67,31 @@ if (process.env.PUMPPORTAL_CREATOR_FEED_ENABLED === 'true') {
   console.log('[PumpPortalCreatorFeed] disabled to protect production database capacity.');
 }
 
-startRuntimeHealthHeartbeat();
-startShadowDecisionOutcomeGrader();
-startOutcomePatternLearner();
-startSystemWatchdog();
+if (enabled('RUNTIME_HEALTH_HEARTBEAT_ENABLED', true)) {
+  startRuntimeHealthHeartbeat();
+} else {
+  console.log('[RuntimeHealth] disabled during database recovery.');
+}
+
+if (enabled('SHADOW_OUTCOME_GRADER_ENABLED', false)) {
+  startShadowDecisionOutcomeGrader();
+} else {
+  console.log('[ShadowOutcomeGrader] disabled during database recovery.');
+}
+
+if (enabled('OUTCOME_PATTERN_LEARNER_ENABLED', false)) {
+  startOutcomePatternLearner();
+} else {
+  console.log('[OutcomePatternLearner] disabled during database recovery.');
+}
+
+if (enabled('SYSTEM_WATCHDOG_DB_ENABLED', false)) {
+  startSystemWatchdog();
+} else {
+  console.log('[SystemWatchdog] DB-backed watchdog disabled during database recovery.');
+}
+
+// Keep this critical Robinhood/PONS discovery fast lane alive.
 startDexPaidFastLane();
 
 await import('./main.js');
