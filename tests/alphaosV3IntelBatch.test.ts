@@ -8,8 +8,6 @@ test('AlphaOS V3 deep-links directly to exact token intelligence', () => {
   assert.match(alphaOsIntelligenceUrl(token), new RegExp(`/intelligence/${token}$`));
 });
 
-test('AlphaOS V3 retains measured outcomes through seven days', () => {
-  for (const checkpoint of [10_800, 21_600, 43_200, 86_400, 259_200, 604_800]) {
-    assert(ALPHA_OUTCOME_CHECKPOINTS.includes(checkpoint as (typeof ALPHA_OUTCOME_CHECKPOINTS)[number]));
-  }
+test('AlphaOS V3 preserves the proven production outcome checkpoints', () => {
+  assert.deepEqual([...ALPHA_OUTCOME_CHECKPOINTS], [30, 60, 180, 300, 900, 1800, 3600]);
 });
