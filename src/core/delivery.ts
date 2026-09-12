@@ -1,6 +1,7 @@
 import { supabase } from '../services/supabase.js';
-import { eventEngine } from '../services/eventEngine.js';
-import { runtimeDeliverableUsers } from '../services/runtimeSubscriberRegistry.js';
+import {
+  eventEngine,
+} from '../services/eventEngine.js';
 
 export type DeliverableUser = {
   telegram_id: string;
@@ -14,47 +15,39 @@ export type DeliverableUser = {
   is_blocked: boolean;
 };
 
-let lastGoodDeliverableUsers: DeliverableUser[] = [];
-
 export async function expireDueSubscriptions() {
   const { error } = await supabase.rpc('expire_due_subscriptions');
   if (error) throw error;
 }
 
 export async function getDeliverableUsers(): Promise<DeliverableUser[]> {
-  const testingRealtime = process.env.TESTING_REALTIME_ALERTS === 'true';
+  const { data, error } = await supabase
+    .from('users')
+    .select(
+      'telegram_id, username, first_name, tier, subscription_status, free_trial_used, free_trial_limit, paid_active_until, is_blocked'
+    )
+    .eq('is_blocked', false);
 
-  try {
-    const { data, error } = await supabase
-      .from('users')
-      .select(
-        'telegram_id, username, first_name, tier, subscription_status, free_trial_used, free_trial_limit, paid_active_until, is_blocked'
-      )
-      .eq('is_blocked', false);
-
-    if (error) throw error;
-
-    const users = (data ?? []) as DeliverableUser[];
-    lastGoodDeliverableUsers = users;
-
-    console.log('deliverable users loaded:', { count: users.length });
-    return users;
-  } catch (error) {
-    const runtime = runtimeDeliverableUsers({ allRealtime: testingRealtime }) as DeliverableUser[];
-    const merged = new Map<string, DeliverableUser>();
-
-    for (const user of lastGoodDeliverableUsers) merged.set(String(user.telegram_id), user);
-    for (const user of runtime) merged.set(String(user.telegram_id), user);
-
-    const fallback = [...merged.values()];
-    console.warn('[Delivery] Subscriber DB read failed; using resilient recipient cache.', {
-      cached: lastGoodDeliverableUsers.length,
-      runtime: runtime.length,
-      total: fallback.length,
-      reason: error instanceof Error ? error.message : String(error),
-    });
-    return fallback;
+  if (error) {
+    console.error('getDeliverableUsers failed:', error);
+    throw error;
   }
+
+  const users = (data ?? []) as DeliverableUser[];
+
+  console.log('deliverable users loaded:', {
+    count: users.length,
+    users: users.map((user) => ({
+      telegramId: user.telegram_id,
+      username: user.username,
+      firstName: user.first_name,
+      tier: user.tier,
+      subscriptionStatus: user.subscription_status,
+      isBlocked: user.is_blocked,
+    })),
+  });
+
+  return users;
 }
 
 export async function incrementFreeTrialUsed(telegramId: string) {
@@ -91,6 +84,7 @@ async function createAlertOutcome(args: {
   actionAtAlert: string;
 }) {
   const now = new Date().toISOString();
+  console.log('[createAlertOutcome] Creating outcome for', args.symbol, args.alertId);
   const { error } = await supabase.from('alert_outcomes').insert({
     alert_id: args.alertId,
     chain: args.chain,
@@ -115,40 +109,82 @@ async function createAlertOutcome(args: {
     updated_at: now,
     last_checked_at: now,
   });
-  if (error) throw error;
+  if (error) console.error('[createAlertOutcome] insert failed', error);
 }
 
-export async function createAlertRecord(args: any) {
-  const { data, error } = await supabase.from('alerts').insert(args).select('id').single();
+export async function createAlertRecord(args: {
+  chain: string; tokenAddress: string; pairAddress?: string | null; symbol?: string | null; name?: string | null;
+  scoreAtAlert: number; riskAtAlert: string; actionAtAlert: string; alertPrice?: number | null;
+  liquidityAtAlert?: number | null; buys5mAtAlert?: number | null; sells5mAtAlert?: number | null; volume5mAtAlert?: number | null;
+}) {
+  const { data, error } = await supabase.from('alerts').insert({
+    chain: args.chain, token_address: args.tokenAddress, pair_address: args.pairAddress ?? null,
+    symbol: args.symbol ?? null, name: args.name ?? null, score_at_alert: args.scoreAtAlert,
+    risk_at_alert: args.riskAtAlert, action_at_alert: args.actionAtAlert, alert_price: args.alertPrice ?? null,
+    liquidity_at_alert: args.liquidityAtAlert ?? null, buys5m_at_alert: args.buys5mAtAlert ?? null,
+    sells5m_at_alert: args.sells5mAtAlert ?? null, volume5m_at_alert: args.volume5mAtAlert ?? null,
+  }).select('id').single();
   if (error) throw error;
-  return data?.id as string;
+  await createAlertOutcome({ alertId: data.id, chain: args.chain, tokenAddress: args.tokenAddress, pairAddress: args.pairAddress,
+    symbol: args.symbol, name: args.name, entryPrice: args.alertPrice, scoreAtAlert: args.scoreAtAlert,
+    riskAtAlert: args.riskAtAlert, actionAtAlert: args.actionAtAlert });
+  try {
+    await eventEngine.emit({ eventType: 'ALERT_GENERATED', token: { chain: args.chain, tokenAddress: args.tokenAddress },
+      source: 'ALERT_PIPELINE', severity: args.actionAtAlert.toUpperCase() === 'BUY' ? 'NOTICE' : 'INFO',
+      deduplicationKey: ['alert', data.id, args.actionAtAlert.toUpperCase()].join(':'), deduplicationWindowSeconds: 86400,
+      payload: { alertId: data.id, pairAddress: args.pairAddress ?? null, symbol: args.symbol ?? null, name: args.name ?? null,
+        score: args.scoreAtAlert, risk: args.riskAtAlert, action: args.actionAtAlert, alertPrice: args.alertPrice ?? null,
+        liquidity: args.liquidityAtAlert ?? null, buys5m: args.buys5mAtAlert ?? null, sells5m: args.sells5mAtAlert ?? null,
+        volume5m: args.volume5mAtAlert ?? null } });
+  } catch (error) { console.warn('[Delivery] ALERT_GENERATED event failed:', error); }
+  return data;
 }
 
-export async function createAlertDelivery(args: any) {
-  const payload = {
-    alert_id: args.alertId,
-    chain: args.chain,
-    token_address: args.tokenAddress,
-    telegram_id: args.telegramId,
-    tier_at_delivery: args.tierAtDelivery,
-    delivery_type: args.deliveryType,
-    delay_seconds: args.delaySeconds,
-    delivered_at: new Date().toISOString(),
-  };
-  const { error } = await supabase.from('alert_deliveries').insert(payload);
+export async function createAlertDelivery(args: {
+  alertId: string; chain: string; tokenAddress: string; telegramId: string; tierAtDelivery: 'admin' | 'paid' | 'free';
+  deliveryType: 'instant' | 'paid_delay' | 'free_trial_fast' | 'free_delayed'; delaySeconds: number;
+}) {
+  const { error } = await supabase.from('alert_deliveries').insert({ alert_id: args.alertId, telegram_id: args.telegramId,
+    tier_at_delivery: args.tierAtDelivery, delivery_type: args.deliveryType, delay_seconds: args.delaySeconds });
   if (error) throw error;
-  eventEngine.emit('alert_delivery_created', payload);
+  try {
+    await eventEngine.emit({ eventType: 'ALERT_SENT', token: { chain: args.chain, tokenAddress: args.tokenAddress }, source: 'TELEGRAM',
+      severity: 'INFO', deduplicationKey: ['delivery', args.alertId, args.telegramId, args.deliveryType].join(':'),
+      deduplicationWindowSeconds: 86400, payload: { alertId: args.alertId, telegramId: args.telegramId, tier: args.tierAtDelivery,
+        deliveryType: args.deliveryType, delaySeconds: args.delaySeconds } });
+  } catch (error) { console.warn('[Delivery] ALERT_SENT event failed:', error); }
 }
 
 export async function hasAlertDelivery(args: { alertId: string; telegramId: string }) {
-  const { data, error } = await supabase.from('alert_deliveries').select('id').eq('alert_id', args.alertId).eq('telegram_id', args.telegramId).limit(1);
+  const { data, error } = await supabase.from('alert_deliveries').select('id').eq('alert_id', args.alertId)
+    .eq('telegram_id', args.telegramId).maybeSingle();
   if (error) throw error;
-  return Boolean(data?.length);
+  return !!data;
 }
 
-export async function updateAlertPerformance(args: { alertId: string; currentPrice: number }) {
-  const { error } = await supabase.from('alerts').update({ current_price: args.currentPrice, updated_at: new Date().toISOString() }).eq('id', args.alertId);
-  if (error) throw error;
+export async function getAlertDeliveries(alertId: string): Promise<Array<{ telegram_id: string; tier_at_delivery: 'admin' | 'paid' | 'free' }>> {
+  const { data, error } = await supabase.from('alert_deliveries').select('telegram_id, tier_at_delivery').eq('alert_id', alertId);
+  if (error) { console.error('getAlertDeliveries failed:', { alertId, error }); throw error; }
+  return (data ?? []) as Array<{ telegram_id: string; tier_at_delivery: 'admin' | 'paid' | 'free' }>;
 }
 
-export { createAlertOutcome };
+export async function markTelegramUserBlocked(telegramId: string): Promise<void> {
+  const { error } = await supabase.from('users').update({ is_blocked: true, updated_at: new Date().toISOString() }).eq('telegram_id', telegramId);
+  if (error) console.error('markTelegramUserBlocked failed:', { telegramId, error });
+}
+
+export async function updateAlertPerformance(args: { alertId: string; currentPrice?: number | null }) {
+  const { alertId, currentPrice } = args;
+  if (currentPrice == null || !Number.isFinite(currentPrice)) return;
+  const { data: alert, error: fetchError } = await supabase.from('alerts').select('alert_price, high_price_after_alert').eq('id', alertId).maybeSingle();
+  if (fetchError) throw fetchError;
+  if (!alert?.alert_price) return;
+  const alertPrice = Number(alert.alert_price);
+  const existingHigh = alert.high_price_after_alert != null ? Number(alert.high_price_after_alert) : null;
+  const newHigh = existingHigh == null ? currentPrice : Math.max(existingHigh, currentPrice);
+  const roiNow = ((currentPrice - alertPrice) / alertPrice) * 100;
+  const roiHigh = ((newHigh - alertPrice) / alertPrice) * 100;
+  const { error: updateError } = await supabase.from('alerts').update({ current_price: currentPrice, high_price_after_alert: newHigh,
+    roi_now: roiNow, roi_high: roiHigh, updated_at: new Date().toISOString() }).eq('id', alertId);
+  if (updateError) throw updateError;
+}
