@@ -4,6 +4,11 @@ import { finiteNumber, normalizeChain, type LifecycleEvent, type LiveIntelligenc
 
 export const dynamic = "force-dynamic";
 
+function assetKey(row: Record<string, any>){return `${String(row.chain??"unknown").toLowerCase()}:${String(row.asset_id??"").toLowerCase()}`}
+function isRiskBlocked(row:Record<string,any>){const state=String(row.lifecycle_state??row.intelligence_state??"").toUpperCase(),risk=String(row.risk_label??"").toUpperCase();return["DANGER","WEAKENING","COOLING","AVOID","BLOCKED"].includes(state)||["HIGH","CRITICAL"].includes(risk)}
+function isWatching(row:Record<string,any>){const state=String(row.lifecycle_state??row.intelligence_state??"").toUpperCase();return["FORMING","WATCHING","BUILDING","EVENT","DEX_PAID","RUNNER"].includes(state)}
+function hasMarketEvidence(row:Record<string,any>){return finiteNumber(row.market_cap)!=null||finiteNumber(row.liquidity)!=null||finiteNumber(row.price)!=null}
+
 export async function GET(){try{
  const since=new Date(Date.now()-24*60*60*1000).toISOString();
  const[events,health,shadow,outcomes]=await Promise.all([
@@ -14,22 +19,27 @@ export async function GET(){try{
  ]);
  for(const result of[events,health,shadow,outcomes])if(result.error)throw result.error;
  const rows=events.data??[];
- const marketEvidenceRows=rows.filter(row=>row.market_cap!=null||row.liquidity!=null||row.price!=null);
- const highConviction=rows.filter(row=>{const confidence=finiteNumber(row.confidence),risk=String(row.risk_label??"").toUpperCase();return confidence!=null&&confidence>=85&&!["HIGH","CRITICAL"].includes(risk)}).length;
- const watching=rows.filter(row=>["FORMING","WATCHING","BUILDING","EVENT"].includes(String(row.lifecycle_state??"").toUpperCase())).length;
- const riskBlocked=rows.filter(row=>{const state=String(row.lifecycle_state??"").toUpperCase(),risk=String(row.risk_label??"").toUpperCase();return["DANGER","WEAKENING","COOLING"].includes(state)||["HIGH","CRITICAL"].includes(risk)}).length;
- const ranked=[...marketEvidenceRows].sort((a,b)=>(finiteNumber(b.confidence)??-1)-(finiteNumber(a.confidence)??-1)||new Date(b.created_at).getTime()-new Date(a.created_at).getTime());
+ // Status cards represent unique assets using their latest recorded state, not raw event volume.
+ const latestByAsset=new Map<string,Record<string,any>>();
+ for(const row of rows){if(!row.asset_id)continue;const key=assetKey(row);if(!latestByAsset.has(key))latestByAsset.set(key,row)}
+ const latestAssets=[...latestByAsset.values()];
+ const marketEvidenceRows=latestAssets.filter(hasMarketEvidence);
+ const highConviction=latestAssets.filter(row=>{const confidence=finiteNumber(row.confidence);return confidence!=null&&confidence>=85&&!isRiskBlocked(row)}).length;
+ const watching=latestAssets.filter(row=>isWatching(row)&&!isRiskBlocked(row)).length;
+ const riskBlocked=latestAssets.filter(isRiskBlocked).length;
+ // Top Opportunity must be current, unique, market-evidenced and not presently risk-blocked.
+ const ranked=marketEvidenceRows.filter(row=>!isRiskBlocked(row)).sort((a,b)=>(finiteNumber(b.confidence)??-1)-(finiteNumber(a.confidence)??-1)||new Date(b.created_at).getTime()-new Date(a.created_at).getTime());
  const top=ranked[0]??null;
- const topOpportunity:TopOpportunity|null=top?{id:top.id,token:top.asset_id,chain:normalizeChain(top.chain),symbol:top.symbol??null,state:top.lifecycle_state??null,type:top.semantic_event_type??top.alert_type??null,confidence:finiteNumber(top.confidence),risk:top.risk_label??null,reason:top.reason??null,price:finiteNumber(top.price),marketCap:finiteNumber(top.market_cap),liquidity:finiteNumber(top.liquidity),volume5m:finiteNumber(top.volume_5m),devHolding:finiteNumber(top.dev_holding_percent),devHoldingEvidence:top.dev_holding_evidence??null,priceProvenance:top.price_provenance??null,valuationProvenance:top.valuation_provenance??null,createdAt:top.created_at??null}:null;
+ const topOpportunity:TopOpportunity|null=top?{id:top.id,token:top.asset_id,chain:normalizeChain(top.chain),symbol:top.symbol??null,state:top.lifecycle_state??top.intelligence_state??null,type:top.semantic_event_type??top.alert_type??null,confidence:finiteNumber(top.confidence),risk:top.risk_label??null,reason:top.reason??null,price:finiteNumber(top.price),marketCap:finiteNumber(top.market_cap),liquidity:finiteNumber(top.liquidity),volume5m:finiteNumber(top.volume_5m),devHolding:finiteNumber(top.dev_holding_percent),devHoldingEvidence:top.dev_holding_evidence??null,priceProvenance:top.price_provenance??null,valuationProvenance:top.valuation_provenance??null,createdAt:top.created_at??null}:null;
 
  const lifecycleMap=new Map<string,TokenLifecycle>();
  for(const row of [...rows].reverse()){
   if(!row.asset_id)continue;
-  const key=`${String(row.chain??"unknown").toLowerCase()}:${row.asset_id}`;
-  const event:LifecycleEvent={id:row.id,token:row.asset_id,chain:normalizeChain(row.chain),symbol:row.symbol??null,state:row.lifecycle_state??null,type:row.semantic_event_type??row.alert_type??null,confidence:finiteNumber(row.confidence),risk:row.risk_label??null,reason:row.reason??null,currentRoi:finiteNumber(row.current_roi),marketCap:finiteNumber(row.market_cap),liquidity:finiteNumber(row.liquidity),observedAt:row.created_at??null};
+  const key=assetKey(row);
+  const event:LifecycleEvent={id:row.id,token:row.asset_id,chain:normalizeChain(row.chain),symbol:row.symbol??null,state:row.lifecycle_state??row.intelligence_state??null,type:row.semantic_event_type??row.alert_type??null,confidence:finiteNumber(row.confidence),risk:row.risk_label??null,reason:row.reason??null,currentRoi:finiteNumber(row.current_roi),marketCap:finiteNumber(row.market_cap),liquidity:finiteNumber(row.liquidity),observedAt:row.created_at??null};
   const existing=lifecycleMap.get(key);
-  if(!existing){lifecycleMap.set(key,{token:row.asset_id,chain:normalizeChain(row.chain),symbol:row.symbol??null,currentState:row.lifecycle_state??null,currentRisk:row.risk_label??null,latestObservedAt:row.created_at??null,events:[event]})}
-  else{existing.events.push(event);existing.currentState=row.lifecycle_state??existing.currentState;existing.currentRisk=row.risk_label??existing.currentRisk;existing.latestObservedAt=row.created_at??existing.latestObservedAt;existing.symbol=row.symbol??existing.symbol}
+  if(!existing){lifecycleMap.set(key,{token:row.asset_id,chain:normalizeChain(row.chain),symbol:row.symbol??null,currentState:event.state,currentRisk:row.risk_label??null,latestObservedAt:row.created_at??null,events:[event]})}
+  else{existing.events.push(event);existing.currentState=event.state??existing.currentState;existing.currentRisk=row.risk_label??existing.currentRisk;existing.latestObservedAt=row.created_at??existing.latestObservedAt;existing.symbol=row.symbol??existing.symbol}
  }
  const lifecycles=[...lifecycleMap.values()].filter(item=>item.events.length>=2).sort((a,b)=>new Date(b.latestObservedAt??0).getTime()-new Date(a.latestObservedAt??0).getTime()).slice(0,8);
 
