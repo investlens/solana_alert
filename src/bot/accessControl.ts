@@ -1,17 +1,24 @@
 import { Markup } from 'telegraf';
-import { getUserByTelegramId } from '../core/subscriptions.js';
+import { config } from '../config.js';
 import {
-  accessProfileForUser,
+  accessProfileForTier,
   CAPABILITY_BENEFITS,
   hasCapability,
   type AccessProfile,
   type Capability,
 } from '../product/capabilities.js';
 
+/**
+ * Telegram navigation must remain usable during database degradation.
+ * In the current tester model FREE and PRO intentionally expose the same
+ * product capabilities; only the configured admin identity needs a special
+ * profile. Subscription/database reads belong inside the data action itself,
+ * not on every button press.
+ */
 export async function getContextAccess(ctx: any): Promise<AccessProfile> {
   const telegramId = String(ctx.from?.id ?? '');
-  const user = telegramId ? await getUserByTelegramId(telegramId) : null;
-  return accessProfileForUser(user);
+  const isAdmin = telegramId !== '' && telegramId === String(config.adminTelegramId);
+  return accessProfileForTier(isAdmin ? 'admin' : 'free');
 }
 
 export async function requireCapability(
