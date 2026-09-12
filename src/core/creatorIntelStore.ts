@@ -1,5 +1,5 @@
 import { supabase } from '../services/supabase.js';
-
+import { runDatabaseWork } from '../services/databaseLoadGovernor.js';
 
 async function recordCreatorEvent(args: {
   creatorWallet: string;
@@ -9,23 +9,27 @@ async function recordCreatorEvent(args: {
   marketCap?: number;
   source?: string;
 }) {
-  const { error } = await supabase
-    .from('creator_wallet_events')
-    .insert({
-      creator_wallet: args.creatorWallet,
-      event_type: args.eventType,
-      token: args.token ?? null,
-      symbol: args.symbol ?? null,
-      market_cap: args.marketCap ?? null,
-      source: args.source ?? 'CreatorMarketTracker',
-      raw_data: {},
-    });
+  const result = await runDatabaseWork('BACKGROUND', async () => {
+    const { error } = await supabase
+      .from('creator_wallet_events')
+      .insert({
+        creator_wallet: args.creatorWallet,
+        event_type: args.eventType,
+        token: args.token ?? null,
+        symbol: args.symbol ?? null,
+        market_cap: args.marketCap ?? null,
+        source: args.source ?? 'CreatorMarketTracker',
+        raw_data: {},
+      });
 
-  if (error) {
-    console.log('creator wallet event error:', {
+    if (error) throw error;
+    return true;
+  });
+
+  if (result === null) {
+    console.log('creator wallet event deferred by database governor:', {
       creatorWallet: args.creatorWallet,
       eventType: args.eventType,
-      error: error.message,
     });
   }
 }
@@ -40,30 +44,31 @@ export async function saveCreatorLaunch(args: {
   if (!args.token) return;
 
   const now = new Date().toISOString();
+  const result = await runDatabaseWork('BACKGROUND', async () => {
+    const { error } = await supabase.from('creator_launches').upsert(
+      {
+        creator_wallet: args.creatorWallet ?? null,
+        token: args.token,
+        symbol: args.symbol ?? null,
+        name: args.name ?? null,
+        initial_market_cap: args.initialMarketCap ?? null,
+        current_market_cap: args.initialMarketCap ?? null,
+        launched_at: now,
+        last_checked_at: now,
+      },
+      {
+        onConflict: 'token',
+      }
+    );
 
-  const { error } = await supabase.from('creator_launches').upsert(
-    {
-      creator_wallet: args.creatorWallet ?? null,
-      token: args.token,
-      symbol: args.symbol ?? null,
-      name: args.name ?? null,
-      initial_market_cap: args.initialMarketCap ?? null,
-      current_market_cap: args.initialMarketCap ?? null,
-      launched_at: now,
-      last_checked_at: now,
-    },
-    {
-      onConflict: 'token',
-    }
-  );
+    if (error) throw error;
+    return true;
+  });
 
-  if (error) {
-    console.log('creator launch save error:', {
+  if (result === null) {
+    console.log('creator launch deferred by database governor:', {
       token: args.token,
-      error: error.message,
     });
-
-    throw error;
   }
 }
 
@@ -203,13 +208,13 @@ export async function markProvenCreator(args: {
   });
 
   await recordCreatorEvent({
-  creatorWallet: args.creatorWallet,
-  eventType:
-    incomingMarketCap >= 1_000_000
-      ? 'ELITE'
-      : 'PROMOTED',
-  token: args.bestToken,
-  symbol: args.bestSymbol,
-  marketCap: incomingMarketCap,
-});
+    creatorWallet: args.creatorWallet,
+    eventType:
+      incomingMarketCap >= 1_000_000
+        ? 'ELITE'
+        : 'PROMOTED',
+    token: args.bestToken,
+    symbol: args.bestSymbol,
+    marketCap: incomingMarketCap,
+  });
 }
