@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { runtimeDeliverableUsers } from './runtimeSubscriberRegistry.js';
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -63,6 +64,63 @@ function reservationKey(body: string | null): string | null {
   }
 }
 
+function testingRealtimeEnabled(): boolean {
+  return process.env.TESTING_REALTIME_ALERTS === 'true';
+}
+
+function normalizeTestingRecipients(rows: any[]): any[] {
+  if (!testingRealtimeEnabled()) return rows;
+  const adminId = String(process.env.ADMIN_TELEGRAM_ID ?? process.env.OWNER_CHAT_ID ?? '');
+  return rows.map((row) => {
+    const telegramId = String(row?.telegram_id ?? '');
+    if (!telegramId || telegramId === adminId) return row;
+    return {
+      ...row,
+      tier: 'paid',
+      subscription_status: 'active',
+      free_trial_used: 0,
+    };
+  });
+}
+
+function resilientUsersBody(cachedBody?: string | null): string {
+  const merged = new Map<string, any>();
+
+  if (cachedBody) {
+    try {
+      const cached = JSON.parse(cachedBody);
+      if (Array.isArray(cached)) {
+        for (const row of cached) {
+          const id = String(row?.telegram_id ?? '');
+          if (id) merged.set(id, row);
+        }
+      }
+    } catch {
+      // Ignore malformed cache and continue with runtime recipients.
+    }
+  }
+
+  for (const row of runtimeDeliverableUsers({ allRealtime: testingRealtimeEnabled() })) {
+    const id = String(row?.telegram_id ?? '');
+    if (id) merged.set(id, row);
+  }
+
+  return JSON.stringify(normalizeTestingRecipients([...merged.values()]));
+}
+
+function runtimeUsersResponse(reason: string): Response {
+  const body = resilientUsersBody(deliverableUsersCache?.body ?? null);
+  console.warn('[SupabaseResilience] Subscriber database unavailable; using resilient recipient set.', {
+    reason,
+    runtimeRecipients: runtimeDeliverableUsers({ allRealtime: testingRealtimeEnabled() }).length,
+    hasLastGoodCache: Boolean(deliverableUsersCache),
+  });
+  return new Response(body, {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
 async function resilientFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const url = requestUrl(input);
   const usersRead = isDeliverableUsersRead(url, init);
@@ -79,12 +137,23 @@ async function resilientFetch(input: RequestInfo | URL, init?: RequestInit): Pro
 
     if (usersRead && response.ok) {
       const clone = response.clone();
+      const rawBody = await clone.text();
+      let normalizedBody = rawBody;
+      try {
+        const rows = JSON.parse(rawBody);
+        if (Array.isArray(rows)) normalizedBody = JSON.stringify(normalizeTestingRecipients(rows));
+      } catch {
+        // Preserve original body if parsing fails.
+      }
+
       deliverableUsersCache = {
-        body: await clone.text(),
+        body: normalizedBody,
         status: clone.status,
         statusText: clone.statusText,
         contentType: clone.headers.get('content-type'),
       };
+
+      if (testingRealtimeEnabled()) return cachedResponse(deliverableUsersCache);
     }
 
     if (reservation && !response.ok && response.status >= 500) {
@@ -100,11 +169,8 @@ async function resilientFetch(input: RequestInfo | URL, init?: RequestInit): Pro
       return new Response('true', { status: 200, headers: { 'content-type': 'application/json' } });
     }
 
-    if (usersRead && !response.ok && response.status >= 500 && deliverableUsersCache) {
-      console.warn('[SupabaseResilience] Users database read unavailable; using last-known-good subscriber list.', {
-        status: response.status,
-      });
-      return cachedResponse(deliverableUsersCache);
+    if (usersRead && !response.ok && response.status >= 500) {
+      return runtimeUsersResponse(`HTTP ${response.status}`);
     }
 
     return response;
@@ -122,11 +188,8 @@ async function resilientFetch(input: RequestInfo | URL, init?: RequestInit): Pro
       return new Response('true', { status: 200, headers: { 'content-type': 'application/json' } });
     }
 
-    if (usersRead && deliverableUsersCache) {
-      console.warn('[SupabaseResilience] Users request failed; using last-known-good subscriber list.', {
-        reason: error instanceof Error ? error.message : String(error),
-      });
-      return cachedResponse(deliverableUsersCache);
+    if (usersRead) {
+      return runtimeUsersResponse(error instanceof Error ? error.message : String(error));
     }
 
     console.warn('[SupabaseResilience] Request failed fast.', {
