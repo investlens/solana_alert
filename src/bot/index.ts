@@ -1,6 +1,7 @@
 import { Telegraf } from 'telegraf';
 import { config } from '../config.js';
 import { accessProfileForTier } from '../product/capabilities.js';
+import { rememberRuntimeSubscriber } from '../services/runtimeSubscriberRegistry.js';
 import { mainAlphaMenu } from './menus.js';
 import { registerBotCommands } from './commands.js';
 import { registerStrategyControls } from './strategyControls.js';
@@ -27,6 +28,21 @@ export function createBot() {
       telegramId: String(ctx.from?.id ?? ''),
       reason: error instanceof Error ? error.message : String(error),
     });
+  });
+
+  // Any tester who talks to AlphaOS becomes a process-local delivery fallback.
+  // This keeps known active recipients available if Supabase is temporarily unreachable.
+  bot.use(async (ctx, next) => {
+    const telegramId = String(ctx.from?.id ?? '');
+    if (telegramId) {
+      rememberRuntimeSubscriber({
+        telegramId,
+        username: ctx.from?.username ?? null,
+        firstName: ctx.from?.first_name ?? null,
+        isAdmin: telegramId === String(config.adminTelegramId),
+      });
+    }
+    return next();
   });
 
   // Keep the real AlphaOS home available even when the data layer is degraded.
