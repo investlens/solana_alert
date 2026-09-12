@@ -37,31 +37,21 @@ export function extractAutomaticSocials(raw: Record<string, unknown> | null | un
   return { xUrl, telegramUrl };
 }
 
+// Keep normal opportunity alerts deliberately small. Deep links, socials, CA copy and
+// mute controls belong inside Full Intel rather than competing with the decision.
 export function buildAlphaMarketActions(input: AlphaMarketActionInput): AlphaNotificationAction[][] {
   const rows: AlphaNotificationAction[][] = [];
   const primary: AlphaNotificationAction[] = [];
   if (input.fullIntelCallback) primary.push({ text: '🔬 Full Intel', callback_data: input.fullIntelCallback });
-  if (input.chartUrl && input.chartUrl !== input.tokenUrl) {
-    primary.push({ text: '📊 Chart', url: input.chartUrl });
-  }
-  if (primary.length) rows.push(primary);
+  if (input.chartUrl && input.chartUrl !== input.tokenUrl) primary.push({ text: '📊 Chart', url: input.chartUrl });
+  if (!primary.length) primary.push({ text: '🔎 Token', url: input.tokenUrl });
+  rows.push(primary.slice(0, 2));
 
-  const socials: AlphaNotificationAction[] = [];
-  const xUrl = safeSocialUrl(input.xUrl, 'x');
-  const telegramUrl = safeSocialUrl(input.telegramUrl, 'telegram');
-  if (xUrl) socials.push({ text: '𝕏 X', url: xUrl });
-  if (telegramUrl) socials.push({ text: '✈️ Telegram', url: telegramUrl });
-  if (socials.length) rows.push(socials);
+  const decision: AlphaNotificationAction[] = [];
+  if (input.trackCallback) decision.push({ text: '⭐ Track', callback_data: input.trackCallback });
+  if (input.tradeUrl) decision.push({ text: '⚡ Trade', url: input.tradeUrl });
+  if (input.walletActivityCallback && !input.trackCallback) decision.push({ text: '🐋 Wallet Activity', callback_data: input.walletActivityCallback });
+  if (decision.length) rows.push(decision.slice(0, 2));
 
-  const preferences: AlphaNotificationAction[] = [];
-  if (input.trackCallback) preferences.push({ text: '⭐ Track', callback_data: input.trackCallback });
-  if (input.copyContractCallback) preferences.push({ text: '📋 Copy CA', callback_data: input.copyContractCallback });
-  if (preferences.length) rows.push(preferences);
-  if (input.muteCallback) rows.push([{ text: '🔕 Mute', callback_data: input.muteCallback }]);
-  if (!input.fullIntelCallback) rows.push([{ text: '🔎 Token', url: input.tokenUrl }]);
-  if (input.tradeUrl) rows.push([{ text: '⚡ Trade', url: input.tradeUrl }]);
-  if (input.walletActivityCallback) {
-    rows.push([{ text: '🐋 Wallet Activity', callback_data: input.walletActivityCallback }]);
-  }
   return assertAlphaActions(rows);
 }
