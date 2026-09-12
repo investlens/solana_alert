@@ -30,6 +30,32 @@ export type TopOpportunity = {
   createdAt: string | null;
 };
 
+export type LifecycleEvent = {
+  id: number | string;
+  token: string;
+  chain: IntelligenceChain;
+  symbol: string | null;
+  state: string | null;
+  type: string | null;
+  confidence: number | null;
+  risk: string | null;
+  reason: string | null;
+  currentRoi: number | null;
+  marketCap: number | null;
+  liquidity: number | null;
+  observedAt: string | null;
+};
+
+export type TokenLifecycle = {
+  token: string;
+  chain: IntelligenceChain;
+  symbol: string | null;
+  currentState: string | null;
+  currentRisk: string | null;
+  latestObservedAt: string | null;
+  events: LifecycleEvent[];
+};
+
 export type ShadowOutcome = {
   shadow_decision_id: number;
   checkpoint_seconds: number;
@@ -61,6 +87,7 @@ export type LiveIntelligenceProof = {
   generatedAt: string;
   status: LiveIntelligenceStatus;
   topOpportunity: TopOpportunity | null;
+  lifecycles: TokenLifecycle[];
   health: Array<Record<string, unknown>>;
   decisions: ShadowDecision[];
 };
