@@ -33,6 +33,20 @@ export async function getCreatorLeaders(limit = 8) {
   return data ?? [];
 }
 
+export async function getPonsDeveloperLeaders(limit = 8) {
+  const { data, error } = await supabase
+    .from('pons_developer_registry')
+    .select('deployer_address,total_launches,winners_100k,winners_500k,winners_1m,best_verified_peak_market_cap,confidence,tier,risk_tier,latest_launch_at')
+    .gt('winners_100k', 0)
+    .order('winners_1m', { ascending: false })
+    .order('winners_500k', { ascending: false })
+    .order('winners_100k', { ascending: false })
+    .order('best_verified_peak_market_cap', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data ?? [];
+}
+
 export async function getPerformanceLeaders(limit = 8) {
   const [verifiedResult, legacyResult] = await Promise.all([
     supabase
