@@ -7,172 +7,19 @@ import { processRunnerMilestones } from './runnerMilestoneService.js';
 import { describeBackgroundError } from './backgroundPromiseSafety.js';
 import { runDatabaseWork } from './databaseLoadGovernor.js';
 
-export const ALPHA_OUTCOME_CHECKPOINTS = [30, 60, 180, 300, 900, 1800, 3600] as const;
-export const OUTCOME_ELIGIBLE_SEMANTIC_TYPES = [
-  'DEX_PAID', 'BOOST', 'REIGNITION', 'TREND_REVERSAL', 'PONS_PROVEN_DEV_LAUNCH', 'PROVEN_DEV_LAUNCH',
-  'VOLUME_SURGE', 'DEV_BURN', 'DEV_SELL', 'LIQUIDITY_RISK',
-] as const;
+export const ALPHA_OUTCOME_CHECKPOINTS = [30,60,180,300,900,1800,3600,10800,21600,43200,86400,259200,604800] as const;
+export const OUTCOME_ELIGIBLE_SEMANTIC_TYPES = ['DEX_PAID','BOOST','REIGNITION','TREND_REVERSAL','PONS_PROVEN_DEV_LAUNCH','PROVEN_DEV_LAUNCH','VOLUME_SURGE','DEV_BURN','DEV_SELL','LIQUIDITY_RISK'] as const;
 export const OUTCOME_ELIGIBLE_ALERT_TYPES: readonly string[] = [];
-
-const OUTCOME_CANDIDATE_LIMIT = 50;
-const OUTCOME_POLL_MS = 30_000;
-
-type EventRow = { id: number; asset_id: string; chain: string; price: number | string | null; price_provenance?: string | null; market_index_state?: string | null; alerted_at: string; semantic_event_type?: string | null; alert_type?: string | null };
-type PriorRow = { alert_event_id?: number; checkpoint_seconds?: number; current_price: number | string | null; peak_price: number | string | null; peak_roi: number | string | null; time_to_peak_seconds: number | null };
-const positive = (value: unknown): number | null => { const number = Number(value); return Number.isFinite(number) && number > 0 ? number : null; };
-
-export function buildAlphaOutcomeCheckpoint(args: {
-  event: EventRow; checkpointSeconds: number; currentPrice: number | null;
-  source: string | null; provenance: string | null; prior: PriorRow[]; measuredAt?: string;
-  unavailableReason?: string | null;
-}) {
-  const measuredAt = args.measuredAt ?? new Date().toISOString();
-  const entry = positive(args.event.price); const current = positive(args.currentPrice);
-  const priceComparison = compareVerifiedPrices(
-    { chain: args.event.chain, token: args.event.asset_id, price: entry, provenance: args.event.price_provenance,
-      marketIndexState: args.event.market_index_state },
-    { chain: args.event.chain, token: args.event.asset_id, price: current, provenance: args.provenance,
-      marketIndexState: args.provenance === 'DEXSCREENER_VERIFIED_BASE_PAIR' ? 'VERIFIED' : args.event.market_index_state },
-  );
-  const priceUnavailableReason = 'reason' in priceComparison ? priceComparison.reason : null;
-  const previousPrices = args.prior.flatMap(row => [positive(row.current_price), positive(row.peak_price)]).filter((v): v is number => v != null);
-  if (entry == null || current == null || !priceComparison.comparable) return {
-    alert_event_id: args.event.id, checkpoint_seconds: args.checkpointSeconds,
-    current_roi: null, peak_roi: null, time_to_peak_seconds: null, max_drawdown: null,
-    current_price: current, peak_price: previousPrices.length ? Math.max(...previousPrices) : null,
-    measurement_source: args.source, price_provenance: args.provenance, measured_at: measuredAt,
-    status: 'UNAVAILABLE', completeness: { entryPrice: entry != null, currentPrice: current != null,
-      reason: entry == null ? 'MISSING_ENTRY_PRICE' : current == null ? (args.unavailableReason ?? 'MISSING_CURRENT_PRICE') : priceUnavailableReason },
-  };
-  const peak = Math.max(entry, current, ...previousPrices);
-  const currentRoi = ((current - entry) / entry) * 100; const peakRoi = ((peak - entry) / entry) * 100;
-  const priorPeak = args.prior.find(row => positive(row.peak_price) === peak);
-  return {
-    alert_event_id: args.event.id, checkpoint_seconds: args.checkpointSeconds,
-    current_roi: currentRoi, peak_roi: peakRoi,
-    time_to_peak_seconds: current === peak ? args.checkpointSeconds : priorPeak?.time_to_peak_seconds ?? null,
-    max_drawdown: ((peak - current) / peak) * 100, current_price: current, peak_price: peak,
-    measurement_source: args.source, price_provenance: args.provenance, measured_at: measuredAt,
-    status: 'MEASURED', completeness: { entryPrice: true, currentPrice: true, peakPrice: true },
-  };
-}
-
-async function currentPrice(event: EventRow): Promise<{ price: number | null; source: string | null; provenance: string | null; reason: string | null }> {
-  if (['robinhood', 'pons'].includes(event.chain.toLowerCase())) {
-    const market = await getRobinhoodMarketSnapshot(event.asset_id, { priority: 'HIGH', caller: 'alpha_outcome_checkpoint' });
-    return { price: market?.priceUsd ?? null, source: market ? 'ROBINHOOD_MARKET_SNAPSHOT' : null, provenance: market ? 'DEXSCREENER_VERIFIED_BASE_PAIR' : null, reason: market ? null : 'ROBINHOOD_MARKET_UNAVAILABLE' };
-  }
-  if (event.chain.toLowerCase() === 'solana') {
-    const result = await enrichTokenByMintAddress(event.asset_id);
-    const pair = result?.pair as { priceUsd?: string | null } | undefined;
-    return { price: positive(pair?.priceUsd), source: pair ? 'DEXSCREENER_TOKEN_PAIR' : null, provenance: pair ? 'DEX_BASE_V1' : null, reason: pair ? null : 'SOLANA_MARKET_UNAVAILABLE' };
-  }
-  return { price: null, source: null, provenance: null, reason: 'UNSUPPORTED_CHAIN' };
-}
-
-export function premiumEventNeedsOutcome(event: Pick<EventRow, 'semantic_event_type' | 'alert_type'>): boolean {
-  const semantic = String(event.semantic_event_type ?? '').toUpperCase();
-  return (OUTCOME_ELIGIBLE_SEMANTIC_TYPES as readonly string[]).includes(semantic);
-}
-
-export function selectOutcomeEligibleCandidates(events: EventRow[], limit = OUTCOME_CANDIDATE_LIMIT): EventRow[] {
-  return events.filter(premiumEventNeedsOutcome).slice(0, limit);
-}
-
-export function checkpointCanUseCurrentPrice(ageSeconds: number, checkpointSeconds: number, maximumLatenessSeconds = 60): boolean {
-  return ageSeconds >= checkpointSeconds && ageSeconds - checkpointSeconds <= maximumLatenessSeconds;
-}
-
-function groupPrior(rows: PriorRow[]): Map<number, PriorRow[]> {
-  const grouped = new Map<number, PriorRow[]>();
-  for (const row of rows) {
-    const id = Number(row.alert_event_id);
-    if (!Number.isFinite(id)) continue;
-    const existing = grouped.get(id) ?? [];
-    existing.push(row);
-    grouped.set(id, existing);
-  }
-  return grouped;
-}
-
-async function runAlphaOutcomeCheckpointDatabaseWork(now: Date): Promise<number> {
-  const started = Date.now();
-  const oldest = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
-  const latest = new Date(now.getTime() - 30_000).toISOString();
-  const { data, error } = await supabase.rpc('select_alpha_outcome_candidates', {
-    p_oldest: oldest, p_latest: latest, p_now: now.toISOString(), p_limit: OUTCOME_CANDIDATE_LIMIT,
-  });
-  if (error) throw error;
-
-  const selected = selectOutcomeEligibleCandidates((data ?? []) as EventRow[], OUTCOME_CANDIDATE_LIMIT);
-  const selectedIds = [...new Set(selected.map(event => Number(event.id)).filter(Number.isFinite))];
-  if (!selectedIds.length) return 0;
-
-  const [{ data: fullEvents, error: fullEventsError }, { data: priorRows, error: priorError }] = await Promise.all([
-    supabase.from('alpha_alert_events').select('id,asset_id,chain,price,price_provenance,market_index_state,alerted_at,semantic_event_type,alert_type').in('id', selectedIds),
-    supabase.from('alpha_alert_outcomes').select('alert_event_id,checkpoint_seconds,current_price,peak_price,peak_roi,time_to_peak_seconds').in('alert_event_id', selectedIds),
-  ]);
-  if (fullEventsError) throw fullEventsError;
-  if (priorError) throw priorError;
-
-  const fullById = new Map<number, EventRow>((fullEvents ?? []).map(event => [Number(event.id), event as EventRow] as const));
-  const priorByEvent = groupPrior((priorRows ?? []) as PriorRow[]);
-  const pendingRows: ReturnType<typeof buildAlphaOutcomeCheckpoint>[] = [];
-  const measuredRows: ReturnType<typeof buildAlphaOutcomeCheckpoint>[] = [];
-  let attempted = 0;
-
-  for (const id of selectedIds) {
-    const event = fullById.get(id);
-    if (!event || !premiumEventNeedsOutcome(event)) continue;
-    const prior = priorByEvent.get(id) ?? [];
-    const ageSeconds = Math.floor((now.getTime() - new Date(event.alerted_at).getTime()) / 1000);
-    const done = new Set(prior.map(row => Number(row.checkpoint_seconds)));
-    const due = ALPHA_OUTCOME_CHECKPOINTS.find(seconds => ageSeconds >= seconds && !done.has(seconds));
-    if (!due) continue;
-
-    attempted += 1;
-    let measurement = { price: null as number | null, source: null as string | null, provenance: null as string | null, reason: 'HISTORICAL_CHECKPOINT_PRICE_UNAVAILABLE' as string | null };
-    if (checkpointCanUseCurrentPrice(ageSeconds, due)) {
-      measurement.reason = 'PRICE_ACQUISITION_FAILED';
-      try { measurement = await currentPrice(event); }
-      catch (error) { if (isDexScreenerProviderBackoffError(error)) measurement.reason = 'DEXSCREENER_BACKOFF'; }
-    }
-
-    const row = buildAlphaOutcomeCheckpoint({ event, checkpointSeconds: due, currentPrice: measurement.price,
-      source: measurement.source, provenance: measurement.provenance, prior, measuredAt: now.toISOString(), unavailableReason: measurement.reason });
-    pendingRows.push(row);
-    if (row.status === 'MEASURED') measuredRows.push(row);
-  }
-
-  if (!pendingRows.length) return 0;
-  const { error: insertError } = await supabase.from('alpha_alert_outcomes').upsert(pendingRows, { onConflict: 'alert_event_id,checkpoint_seconds', ignoreDuplicates: true });
-  if (insertError) throw insertError;
-
-  for (const row of measuredRows) {
-    await processRunnerMilestones({ alertEventId: row.alert_event_id, currentPrice: row.current_price,
-      priceProvenance: row.price_provenance, measuredAt: row.measured_at, measurementSource: row.measurement_source })
-      .catch(error => console.warn('[RunnerMilestones] Evaluation failed', {
-        alertEventId: row.alert_event_id, checkpointSeconds: row.checkpoint_seconds,
-        reason: error instanceof Error ? error.message : String(error),
-      }));
-  }
-
-  console.log('alpha_outcome_checkpoint_cycle', {
-    eligible_candidates: selected.length, checkpoints_attempted: attempted, persisted: pendingRows.length,
-    measured: measuredRows.length, unavailable: pendingRows.length - measuredRows.length, duration_ms: Date.now() - started,
-  });
-  return pendingRows.length;
-}
-
-export async function runAlphaOutcomeCheckpointCycle(now = new Date()): Promise<number> {
-  return (await runDatabaseWork('BACKGROUND', () => runAlphaOutcomeCheckpointDatabaseWork(now))) ?? 0;
-}
-
-let started = false;
-export function startAlphaOutcomeCheckpointService(): void {
-  if (started) return;
-  started = true;
-  const run = () => void runAlphaOutcomeCheckpointCycle().catch(error => console.warn(`[AlphaOutcomeCheckpoints] Cycle failed: ${describeBackgroundError(error)}`));
-  run();
-  setInterval(run, Number(process.env.ALPHA_OUTCOME_CHECKPOINT_POLL_MS ?? OUTCOME_POLL_MS));
-}
+const OUTCOME_CANDIDATE_LIMIT=80, OUTCOME_POLL_MS=30_000, MAX_HORIZON_SECONDS=604800;
+type EventRow={id:number;asset_id:string;chain:string;price:number|string|null;price_provenance?:string|null;market_index_state?:string|null;alerted_at:string;semantic_event_type?:string|null;alert_type?:string|null};
+type PriorRow={alert_event_id?:number;checkpoint_seconds?:number;current_price:number|string|null;peak_price:number|string|null;peak_roi:number|string|null;time_to_peak_seconds:number|null};
+const positive=(v:unknown):number|null=>{const n=Number(v);return Number.isFinite(n)&&n>0?n:null};
+export function buildAlphaOutcomeCheckpoint(args:{event:EventRow;checkpointSeconds:number;currentPrice:number|null;source:string|null;provenance:string|null;prior:PriorRow[];measuredAt?:string;unavailableReason?:string|null}){const measuredAt=args.measuredAt??new Date().toISOString(),entry=positive(args.event.price),current=positive(args.currentPrice);const cmp=compareVerifiedPrices({chain:args.event.chain,token:args.event.asset_id,price:entry,provenance:args.event.price_provenance,marketIndexState:args.event.market_index_state},{chain:args.event.chain,token:args.event.asset_id,price:current,provenance:args.provenance,marketIndexState:args.provenance==='DEXSCREENER_VERIFIED_BASE_PAIR'?'VERIFIED':args.event.market_index_state});const reason='reason'in cmp?cmp.reason:null;const prev=args.prior.flatMap(r=>[positive(r.current_price),positive(r.peak_price)]).filter((v):v is number=>v!=null);if(entry==null||current==null||!cmp.comparable)return{alert_event_id:args.event.id,checkpoint_seconds:args.checkpointSeconds,current_roi:null,peak_roi:null,time_to_peak_seconds:null,max_drawdown:null,current_price:current,peak_price:prev.length?Math.max(...prev):null,measurement_source:args.source,price_provenance:args.provenance,measured_at:measuredAt,status:'UNAVAILABLE',completeness:{entryPrice:entry!=null,currentPrice:current!=null,reason:entry==null?'MISSING_ENTRY_PRICE':current==null?(args.unavailableReason??'MISSING_CURRENT_PRICE'):reason}};const peak=Math.max(entry,current,...prev),currentRoi=(current-entry)/entry*100,peakRoi=(peak-entry)/entry*100,priorPeak=args.prior.find(r=>positive(r.peak_price)===peak);return{alert_event_id:args.event.id,checkpoint_seconds:args.checkpointSeconds,current_roi:currentRoi,peak_roi:peakRoi,time_to_peak_seconds:current===peak?args.checkpointSeconds:priorPeak?.time_to_peak_seconds??null,max_drawdown:(peak-current)/peak*100,current_price:current,peak_price:peak,measurement_source:args.source,price_provenance:args.provenance,measured_at:measuredAt,status:'MEASURED',completeness:{entryPrice:true,currentPrice:true,peakPrice:true}}}
+async function currentPrice(event:EventRow){if(['robinhood','pons'].includes(event.chain.toLowerCase())){const m=await getRobinhoodMarketSnapshot(event.asset_id,{priority:'HIGH',caller:'alpha_outcome_checkpoint'});return{price:m?.priceUsd??null,source:m?'ROBINHOOD_MARKET_SNAPSHOT':null,provenance:m?'DEXSCREENER_VERIFIED_BASE_PAIR':null,reason:m?null:'ROBINHOOD_MARKET_UNAVAILABLE'}}if(event.chain.toLowerCase()==='solana'){const r=await enrichTokenByMintAddress(event.asset_id),pair=r?.pair as {priceUsd?:string|null}|undefined;return{price:positive(pair?.priceUsd),source:pair?'DEXSCREENER_TOKEN_PAIR':null,provenance:pair?'DEX_BASE_V1':null,reason:pair?null:'SOLANA_MARKET_UNAVAILABLE'}}return{price:null,source:null,provenance:null,reason:'UNSUPPORTED_CHAIN'}}
+export function premiumEventNeedsOutcome(event:Pick<EventRow,'semantic_event_type'|'alert_type'>){return(OUTCOME_ELIGIBLE_SEMANTIC_TYPES as readonly string[]).includes(String(event.semantic_event_type??'').toUpperCase())}
+export function selectOutcomeEligibleCandidates(events:EventRow[],limit=OUTCOME_CANDIDATE_LIMIT){return events.filter(premiumEventNeedsOutcome).slice(0,limit)}
+export function checkpointCanUseCurrentPrice(age:number,checkpoint:number,maximumLatenessSeconds=90){return age>=checkpoint&&age-checkpoint<=maximumLatenessSeconds}
+function groupPrior(rows:PriorRow[]){const m=new Map<number,PriorRow[]>();for(const r of rows){const id=Number(r.alert_event_id);if(!Number.isFinite(id))continue;const a=m.get(id)??[];a.push(r);m.set(id,a)}return m}
+async function runAlphaOutcomeCheckpointDatabaseWork(now:Date){const started=Date.now(),oldest=new Date(now.getTime()-MAX_HORIZON_SECONDS*1000-120000).toISOString(),latest=new Date(now.getTime()-30000).toISOString();const{data,error}=await supabase.rpc('select_alpha_outcome_candidates',{p_oldest:oldest,p_latest:latest,p_now:now.toISOString(),p_limit:OUTCOME_CANDIDATE_LIMIT});if(error)throw error;const selected=selectOutcomeEligibleCandidates((data??[])as EventRow[]),ids=[...new Set(selected.map(e=>Number(e.id)).filter(Number.isFinite))];if(!ids.length)return 0;const[{data:events,error:ee},{data:priorRows,error:pe}]=await Promise.all([supabase.from('alpha_alert_events').select('id,asset_id,chain,price,price_provenance,market_index_state,alerted_at,semantic_event_type,alert_type').in('id',ids),supabase.from('alpha_alert_outcomes').select('alert_event_id,checkpoint_seconds,current_price,peak_price,peak_roi,time_to_peak_seconds').in('alert_event_id',ids)]);if(ee)throw ee;if(pe)throw pe;const byId=new Map<number,EventRow>((events??[]).map(e=>[Number(e.id),e as EventRow])),priorBy=groupPrior((priorRows??[])as PriorRow[]),pending:any[]=[],measured:any[]=[];let attempted=0;for(const id of ids){const event=byId.get(id);if(!event||!premiumEventNeedsOutcome(event))continue;const prior=priorBy.get(id)??[],age=Math.floor((now.getTime()-new Date(event.alerted_at).getTime())/1000),done=new Set(prior.map(r=>Number(r.checkpoint_seconds))),due=ALPHA_OUTCOME_CHECKPOINTS.find(s=>age>=s&&!done.has(s));if(!due)continue;attempted++;let measurement:{price:number|null;source:string|null;provenance:string|null;reason:string|null}={price:null,source:null,provenance:null,reason:'HISTORICAL_CHECKPOINT_PRICE_UNAVAILABLE'};if(checkpointCanUseCurrentPrice(age,due)){measurement.reason='PRICE_ACQUISITION_FAILED';try{measurement=await currentPrice(event)}catch(error){if(isDexScreenerProviderBackoffError(error))measurement.reason='DEXSCREENER_BACKOFF'}}const row=buildAlphaOutcomeCheckpoint({event,checkpointSeconds:due,currentPrice:measurement.price,source:measurement.source,provenance:measurement.provenance,prior,measuredAt:now.toISOString(),unavailableReason:measurement.reason});pending.push(row);if(row.status==='MEASURED')measured.push(row)}if(!pending.length)return 0;const{error:ie}=await supabase.from('alpha_alert_outcomes').upsert(pending,{onConflict:'alert_event_id,checkpoint_seconds',ignoreDuplicates:true});if(ie)throw ie;for(const row of measured)await processRunnerMilestones({alertEventId:row.alert_event_id,currentPrice:row.current_price,priceProvenance:row.price_provenance,measuredAt:row.measured_at,measurementSource:row.measurement_source}).catch(()=>{});console.log('alpha_outcome_checkpoint_cycle',{eligible_candidates:selected.length,checkpoints_attempted:attempted,persisted:pending.length,measured:measured.length,horizon_days:7,duration_ms:Date.now()-started});return pending.length}
+export async function runAlphaOutcomeCheckpointCycle(now=new Date()){return(await runDatabaseWork('BACKGROUND',()=>runAlphaOutcomeCheckpointDatabaseWork(now)))??0}
+let started=false;export function startAlphaOutcomeCheckpointService(){if(started)return;started=true;const run=()=>void runAlphaOutcomeCheckpointCycle().catch(e=>console.warn(`[AlphaOutcomeCheckpoints] Cycle failed: ${describeBackgroundError(e)}`));run();setInterval(run,Number(process.env.ALPHA_OUTCOME_CHECKPOINT_POLL_MS??OUTCOME_POLL_MS))}
