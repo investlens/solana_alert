@@ -1,4 +1,4 @@
-import { normalizeCoreDecisionMetrics, normalizeNotificationMarketContext, verifiedPonsPreIndexValuation } from '../ui/notificationMarketContext.js';
+import { normalizeCoreDecisionMetrics, normalizeNotificationMarketContext } from '../ui/notificationMarketContext.js';
 import { opportunityDeliveryIdentity } from './opportunityDeliveryIdentity.js';
 import { supabase } from './supabase.js';
 import { resolveVerifiedSemanticEntryPrice } from './alphaSemanticEventService.js';
@@ -26,8 +26,6 @@ export function buildAlphaAlertEvent(opportunity: AlphaLedgerOpportunity, alerte
   const raw = structuredClone(opportunity.raw_data ?? {});
   const market = normalizeNotificationMarketContext(raw, { address: opportunity.asset_id });
   const core = normalizeCoreDecisionMetrics(raw);
-  const preIndex = verifiedPonsPreIndexValuation(raw, opportunity.asset_id);
-  const indexed = String(raw.marketIndexState ?? '') === 'VERIFIED';
   const action = String(opportunity.recommended_action ?? '').toUpperCase();
   const entryPrice = resolveVerifiedSemanticEntryPrice(raw, opportunity.asset_id);
   const valuationType = market.marketCap != null ? 'MARKET_CAP' : market.fdv != null ? 'FDV' : null;
@@ -46,7 +44,7 @@ export function buildAlphaAlertEvent(opportunity: AlphaLedgerOpportunity, alerte
     current_roi: finite(raw.currentRoi ?? raw.roi), roi_change: finite(raw.roiChange ?? raw.momentum),
     price: entryPrice.price, price_provenance: entryPrice.provenance,
     market_cap: market.marketCap, fdv: market.fdv, valuation_type: valuationType,
-    valuation_provenance: indexed ? text((raw.verifiedMarketContext as Record<string, unknown> | undefined)?.source) ?? 'VERIFIED_MARKET_INDEX' : preIndex ? 'PONS_V2_CURVE_RESERVE_SPOT' : null,
+    valuation_provenance: market.valuationSource ?? null,
     liquidity: market.liquidity, volume_5m: market.volume5m,
     market_index_state: text(raw.marketIndexState), chart_available: Boolean(market.chartUrl), elapsed_seconds: elapsed,
     dev_holding_percent: core.devHoldingPercent, dev_holding_evidence: core.devHoldingEvidence,

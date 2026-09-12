@@ -1,118 +1,26 @@
 import type { TokenIntel } from '../services/tokenIntelligenceService.js';
+import type { TokenBundleEvidence } from '../services/tokenBundleEvidenceService.js';
+import { alphaOsIntelligenceUrl } from './alphaOsWebLink.js';
 
-const esc = (value: unknown) => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
-  .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const money = (value: number | null) => value == null ? 'UNKNOWN' : value === 0 ? '$0' : value >= 1_000_000
-  ? `$${(value / 1_000_000).toFixed(2)}M` : value >= 1_000 ? `$${(value / 1_000).toFixed(1)}K` : `$${value.toPrecision(4)}`;
-const pct = (value: number | null) => value == null ? 'UNKNOWN' : `${value.toFixed(1)}%`;
-const short = (value: string | null) => value ? `${value.slice(0, 6)}…${value.slice(-4)}` : 'UNKNOWN';
-export function formatIntelTime(value: string | null, now = Date.now()): string {
-  if (!value) return 'time unavailable';
-  const timestamp = Date.parse(value); if (!Number.isFinite(timestamp)) return 'time unavailable';
-  const seconds = Math.max(0, Math.floor((now - timestamp) / 1000));
-  if (seconds < 45) return 'just now'; if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  return `${new Date(timestamp).toISOString().slice(11, 16)} UTC`;
-}
-const sourceName = (value: string | null) => !value ? null : /DEXSCREENER/i.test(value) ? 'DexScreener' : 'AlphaOS verified history';
-const alphaView = (state: string | null) => ({ FORMING: 'Early activity forming.', BUILDING: 'Momentum is building.',
-  CONFIRMED: 'Opportunity structure confirmed.', RUNNER: 'Momentum remains strong.', COOLING: 'Momentum is cooling.' }[String(state ?? '').toUpperCase()] ?? null);
+const esc = (value: unknown) => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const money = (value: number | null) => value == null ? 'VERIFYING' : value === 0 ? '$0' : value >= 1_000_000 ? `$${(value / 1_000_000).toFixed(2)}M` : value >= 1_000 ? `$${(value / 1_000).toFixed(1)}K` : value >= 1 ? `$${value.toFixed(4)}` : `$${value.toPrecision(4)}`;
+const pct = (value: number | null) => value == null ? 'VERIFYING' : `${value.toFixed(1)}%`;
+const short = (value: string | null) => value ? `${value.slice(0, 6)}…${value.slice(-4)}` : 'VERIFYING';
+export function formatIntelTime(value: string | null, now = Date.now()): string { if (!value) return 'unavailable'; const t = Date.parse(value); if (!Number.isFinite(t)) return 'unavailable'; const s = Math.max(0, Math.floor((now - t) / 1000)); if (s < 45) return 'just now'; if (s < 3600) return `${Math.floor(s / 60)}m ago`; if (s < 86400) return `${Math.floor(s / 3600)}h ago`; return `${Math.floor(s / 86400)}d ago`; }
 const technicalDiagnostic = (value: string) => /\bHTTP\s*\d{3}\b|provider unavailable|lookup unavailable|analysis deadline|request failed/i.test(value);
+export function normalizedTokenSupply(raw: string | null, decimals: number | null): string | null { if (!raw || decimals == null || !Number.isInteger(decimals) || decimals < 0 || !/^\d+$/.test(raw)) return null; const padded = raw.padStart(decimals + 1, '0'); const whole = decimals ? padded.slice(0, -decimals) : padded; const fraction = decimals ? padded.slice(-decimals).replace(/0+$/, '').slice(0, 6) : ''; const grouped = BigInt(whole || '0').toLocaleString('en-US'); return fraction ? `${grouped}.${fraction}` : grouped; }
 
-export function normalizedTokenSupply(raw: string | null, decimals: number | null): string | null {
-  if (!raw || decimals == null || !Number.isInteger(decimals) || decimals < 0 || !/^\d+$/.test(raw)) return null;
-  const padded = raw.padStart(decimals + 1, '0');
-  const whole = decimals ? padded.slice(0, -decimals) : padded;
-  const fraction = decimals ? padded.slice(-decimals).replace(/0+$/, '').slice(0, 6) : '';
-  const grouped = BigInt(whole || '0').toLocaleString('en-US');
-  return fraction ? `${grouped}.${fraction}` : grouped;
+function bundleLine(bundle?: TokenBundleEvidence): string {
+  if (!bundle || bundle.status !== 'VERIFIED' || !bundle.level) return 'Bundle    <b>VERIFYING</b>';
+  const details = [bundle.score != null ? `score ${bundle.score.toFixed(0)}` : null,
+    bundle.connectedWalletCount != null ? `${bundle.connectedWalletCount.toFixed(0)} linked wallets` : null,
+    bundle.connectedSupplyPct != null ? `${bundle.connectedSupplyPct.toFixed(1)}% supply` : null].filter(Boolean).join(' · ');
+  return `Bundle    <b>${esc(bundle.level)}</b>${details ? ` · ${esc(details)}` : ''}`;
 }
 
-export function renderTokenIntelligence(intel: TokenIntel): string {
-  const athDistance = intel.ath.distanceFromMarketCapPct == null ? 'UNKNOWN'
-    : intel.ath.distanceFromMarketCapPct <= 0 ? `${Math.abs(intel.ath.distanceFromMarketCapPct).toFixed(1)}% below ATH`
-      : `${intel.ath.distanceFromMarketCapPct.toFixed(1)}% above prior observed ATH`;
-  const currentMarketAvailable = intel.price != null || intel.marketCap != null || intel.liquidity != null || intel.volume5m != null;
-  const holdersAvailable = intel.holders.count != null || intel.holders.top10Pct != null || intel.holders.largestPct != null;
-  const freshAvailable = intel.freshWallets.evidence === 'VERIFIED';
-  const supply = normalizedTokenSupply(intel.supply, intel.decimals);
-  const developerAvailable = intel.developer.wallet != null || intel.developer.holdingPct != null || intel.developer.sold != null || intel.developer.transferredPct != null || intel.developer.burnedPct != null;
-  const securityAvailable = intel.security.tokenBurnedPct != null || intel.security.lpStatus !== 'UNKNOWN' || intel.security.dexPaid != null || intel.security.boostTotal != null;
-  const historyAvailable = intel.devHistory.launches > 0;
-  const view = alphaView(intel.alpha.state);
-  const watch = intel.alpha.watch.filter(item => !technicalDiagnostic(item)).slice(0, 4);
-  const lines = [
-    '🔬 <b>FULL INTEL</b>', '',
-    `<b>${esc(intel.name ?? 'Unknown Token')} (${esc(intel.symbol ? `$${intel.symbol}` : 'UNKNOWN')})</b>`,
-    `<code>${esc(short(intel.tokenAddress))}</code>`, '',
-    '📊 <b>MARKET</b>', ...(currentMarketAvailable ? [
-      `Price             <b>${money(intel.price)}</b>`,
-      `Market Cap        <b>${money(intel.marketCap)}</b>`, `Liquidity         <b>${money(intel.liquidity)}</b>`,
-      `Volume (5m)       <b>${money(intel.volume5m)}</b>`,
-      ...(intel.ageObservedAt ? [`Pair observed     <b>${formatIntelTime(intel.ageObservedAt)}</b>`] : []),
-      `Observed          <b>${formatIntelTime(intel.marketObservedAt ?? intel.analyzedAt)}</b>`,
-    ] : [
-      'Current market data <b>unavailable</b>',
-      ...(intel.lastVerifiedMarket?.price != null ? [`Last verified price <b>${money(intel.lastVerifiedMarket.price)}</b>`] : []),
-      ...(intel.lastVerifiedMarket?.marketCap != null ? [`Last verified MC    <b>${money(intel.lastVerifiedMarket.marketCap)}</b>`] : []),
-      ...(intel.lastVerifiedMarket?.liquidity != null ? [`Last verified liq   <b>${money(intel.lastVerifiedMarket.liquidity)}</b>`] : []),
-      ...(intel.lastVerifiedMarket?.volume5m != null ? [`Last verified vol 5m <b>${money(intel.lastVerifiedMarket.volume5m)}</b>`] : []),
-      ...(intel.lastVerifiedMarket?.observedAt ? [`Last observed       <b>${formatIntelTime(intel.lastVerifiedMarket.observedAt)}</b>`] : []),
-    ]),
-    `From ATH          <b>${esc(athDistance)}</b>`,
-    ...(intel.ath.priceUsd != null ? [`ATH Price         <b>${money(intel.ath.priceUsd)}</b>`] : []),
-    ...(intel.ath.marketCapUsd != null ? [`ATH Market Cap    <b>${money(intel.ath.marketCapUsd)}</b>`] : []),
-    ...(sourceName(intel.ath.priceSource ?? intel.ath.marketCapSource) ? [`ATH source        <b>${sourceName(intel.ath.priceSource ?? intel.ath.marketCapSource)}</b>`] : []),
-    ...(intel.ath.priceObservedAt || intel.ath.marketCapObservedAt ? [`ATH observed      <b>${formatIntelTime(intel.ath.priceObservedAt ?? intel.ath.marketCapObservedAt)}</b>`] : []),
-    `Supply            <b>${esc(supply ?? 'UNKNOWN')}</b>`, '',
-    ...(!holdersAvailable && !freshAvailable ? ['👥 <b>HOLDERS &amp; FRESH WALLETS</b>', 'Analysis currently unavailable.',
-      'Not used for opportunity filtering.'] : []),
-    ...(holdersAvailable ? ['👥 <b>HOLDERS</b>',
-      ...(intel.holders.count != null ? [`Observed holders  <b>${intel.holders.count}</b>`] : []),
-      ...(intel.holders.top10Pct != null ? [`Top 10            <b>${pct(intel.holders.top10Pct)}</b>`] : []),
-      ...(intel.holders.largestPct != null ? [`Largest holder    <b>${pct(intel.holders.largestPct)}</b>`] : []),
-      ...(intel.holders.risk !== 'UNKNOWN' ? [`Concentration     <b>${esc(intel.holders.risk)}</b>`] : [])] : []),
-    ...(freshAvailable ? ['🆕 <b>FRESH WALLETS</b>',
-      `1D verified fresh <b>${pct(intel.freshWallets.oneDayPct)}</b>`,
-      `Coverage          <b>${intel.freshWallets.classified} / ${intel.freshWallets.sampleSize}</b> (${pct(intel.freshWallets.coveragePct)})`,
-    ] : holdersAvailable ? ['🆕 <b>FRESH WALLETS</b>', 'Analysis currently unavailable.', 'Not used for opportunity filtering.'] : []),
-    ...(freshAvailable && intel.freshWallets.oneDayPct != null && intel.freshWallets.oneDayPct > 50
-      ? ['⚠️ <b>High fresh-wallet concentration</b>',
-        `${intel.freshWallets.oneDayPct.toFixed(1)}% of verified classified wallets are ≤1 day old`] : []),
-    '', ...(!developerAvailable && !historyAvailable ? ['👨‍💻 <b>DEVELOPER</b>', 'No verified developer history available.'] : []),
-    ...(developerAvailable ? ['👨‍💻 <b>DEVELOPER</b>',
-      ...(intel.developer.wallet ? [`Wallet             <code>${esc(short(intel.developer.wallet))}</code>`] : []),
-      ...(intel.developer.holdingPct != null ? [`Holding            <b>${pct(intel.developer.holdingPct)}</b>`] : []),
-      ...(intel.developer.sold != null ? [`Sold               <b>${intel.developer.sold ? 'Verified sell' : 'No verified sell'}</b>`] : []),
-      ...(intel.developer.transferredPct != null ? [`Transferred        <b>${pct(intel.developer.transferredPct)}</b>`] : []),
-      ...(intel.developer.burnedPct != null ? [`Burned             <b>${pct(intel.developer.burnedPct)}</b>`] : []),
-    ] : []),
-    ...(historyAvailable ? ['📜 <b>DEV HISTORY</b>',
-      `Observed launches  <b>${intel.devHistory.launches}</b>`, `Measured success  <b>${intel.devHistory.measuredSuccessful}</b>`,
-      `Weak/failed        <b>${intel.devHistory.weakOrFailed}</b>`, `Verdict            <b>${esc(intel.devHistory.verdict)}</b>`,
-    ] : []), '',
-    '🔥 <b>TOKEN / SECURITY</b>', ...(securityAvailable ? [
-      ...(intel.security.tokenBurnedPct != null ? [`Token burned      <b>${pct(intel.security.tokenBurnedPct)}</b>`] : []),
-      ...(intel.security.lpStatus !== 'UNKNOWN' ? [`LP status         <b>${intel.security.lpStatus}</b>`] : []),
-      ...(intel.security.dexPaid != null ? [`DEX Paid          <b>${intel.security.dexPaid ? 'YES' : 'NO'}</b>`] : []),
-      ...(intel.security.boostTotal != null ? [`Boost total       <b>${intel.security.boostTotal}</b>`] : []),
-    ] : ['No verified token-security data available.']), '',
-    '🧠 <b>ALPHAOS</b>', `State              <b>${esc(intel.alpha.state ?? 'UNKNOWN')}</b>`,
-    `Risk               ${esc(intel.alpha.risk === 'MEASURED' ? 'UNKNOWN' : intel.alpha.risk ?? 'UNKNOWN')}`,
-    ...intel.alpha.positive.slice(0, 3).map(x => `✅ ${esc(x)}`), ...watch.map(x => `⚠️ ${esc(x)}`),
-    ...(view ? [`View               ${esc(view)}`] : []), '',
-    `<i>Observed ${formatIntelTime(intel.analyzedAt)}</i>`,
-  ];
-  const rendered = lines.join('\n');
-  if (rendered.length > 3000) throw new Error('Full Intel exceeds compact Telegram budget');
-  return rendered;
+export function renderTokenIntelligence(intel: TokenIntel, bundle?: TokenBundleEvidence): string {
+  const supply=normalizedTokenSupply(intel.supply,intel.decimals),athDistance=intel.ath.distanceFromMarketCapPct==null?'VERIFYING':intel.ath.distanceFromMarketCapPct<=0?`-${Math.abs(intel.ath.distanceFromMarketCapPct).toFixed(1)}%`:`+${intel.ath.distanceFromMarketCapPct.toFixed(1)}%`,fresh=intel.freshWallets.evidence==='VERIFIED',watch=intel.alpha.watch.filter(x=>!technicalDiagnostic(x)).slice(0,3),socialLabels=intel.socials.map(s=>s.label).join(' · '),security=[intel.security.dexPaid===true?'DEX PAID':null,intel.security.lpStatus!=='UNKNOWN'?`LP ${intel.security.lpStatus}`:null,intel.security.tokenBurnedPct!=null?`BURN ${intel.security.tokenBurnedPct.toFixed(1)}%`:null,intel.security.boostTotal!=null?`BOOST ${intel.security.boostTotal}`:null].filter(Boolean).join(' · ');
+  const lines=['🔬 <b>ALPHAOS FULL INTEL</b>',`<b>${esc(intel.name??'Unknown Token')}</b> ${intel.symbol?`($${esc(intel.symbol)})`:''}`,'ROBINHOOD · PONS',`<code>${esc(intel.tokenAddress)}</code>`,'','📊 <b>STATS</b>',`USD       <b>${money(intel.price)}</b>`,`MC        <b>${money(intel.marketCap)}</b>`,`Vol 5m    <b>${money(intel.volume5m)}</b>`,`LP        <b>${money(intel.liquidity)}</b>`,`Supply    <b>${esc(supply??'VERIFYING')}</b>`,`ATH MC    <b>${money(intel.ath.marketCapUsd)}</b> (${athDistance})`,...(intel.ath.priceUsd!=null?[`ATH Price <b>${money(intel.ath.priceUsd)}</b>`]:[]),`Age       <b>${formatIntelTime(intel.ageObservedAt)}</b>`,'','🔗 <b>SOCIALS</b>',socialLabels?esc(socialLabels):'No verified project socials found.','','🛡 <b>SECURITY</b>',`Fresh 1D  <b>${fresh?pct(intel.freshWallets.oneDayPct):'VERIFYING'}</b>`,`Top 10    <b>${pct(intel.holders.top10Pct)}</b>${intel.holders.count!=null?` | ${intel.holders.count} holders`:''}`,`Top 1     <b>${pct(intel.holders.largestPct)}</b>`,`Holder    <b>${esc(intel.holders.risk==='UNKNOWN'?'VERIFYING':intel.holders.risk)}</b>`,bundleLine(bundle),`DEX Paid  <b>${intel.security.dexPaid==null?'VERIFYING':intel.security.dexPaid?'YES':'NO'}</b>`,...(security?[`Structure <b>${esc(security)}</b>`]:[]),'','👨‍💻 <b>DEVELOPER</b>',`Wallet    <code>${esc(short(intel.developer.wallet))}</code>`,`Holding   <b>${pct(intel.developer.holdingPct)}</b>`,`Sold      <b>${intel.developer.sold==null?'VERIFYING':intel.developer.sold?'YES ⚠️':'NO'}</b>`,`Moved     <b>${pct(intel.developer.transferredPct)}</b>`,`Burned    <b>${pct(intel.developer.burnedPct)}</b>`,`Launches  <b>${intel.devHistory.launches||'VERIFYING'}</b>`,...(intel.devHistory.launches?[`History   <b>${intel.devHistory.measuredSuccessful} measured wins · ${intel.devHistory.weakOrFailed} weak/failed</b>`,`Verdict   <b>${esc(intel.devHistory.verdict)}</b>`]:[]),'','🧠 <b>ALPHAOS</b>',`State     <b>${esc(intel.alpha.state??'VERIFYING')}</b>`,`Risk      <b>${esc(intel.alpha.risk==='MEASURED'?'VERIFYING':intel.alpha.risk??'VERIFYING')}</b>`,...intel.alpha.positive.slice(0,3).map(x=>`✅ ${esc(x)}`),...watch.map(x=>`⚠️ ${esc(x)}`),'',`<i>Intelligence refreshed ${formatIntelTime(intel.analyzedAt)}</i>`];
+  const rendered=lines.join('\n');if(rendered.length>3200)throw new Error('Full Intel exceeds compact Telegram budget');return rendered;
 }
-
-export function tokenIntelligenceButtons(intel: TokenIntel) {
-  const rows: Array<Array<{ text: string; url: string } | { text: string; callback_data: string }>> = [];
-  const market = [] as Array<{ text: string; url: string }>;
-  if (intel.chartUrl) market.push({ text: '📊 Chart', url: intel.chartUrl });
-  market.push({ text: '🔎 Explorer', url: `https://robinhoodchain.blockscout.com/token/${intel.tokenAddress}` });
-  rows.push(market);
-  if (/^0x[a-fA-F0-9]{40}$/.test(intel.tokenAddress)) rows.push([{ text: '📋 Copy CA', callback_data: `COPY_CA_${intel.tokenAddress}` }]);
-  return rows;
-}
+export function tokenIntelligenceButtons(intel:TokenIntel){const rows:Array<Array<{text:string;url:string}|{text:string;callback_data:string}>>=[];rows.push([{text:'🧠 Open AlphaOS',url:alphaOsIntelligenceUrl(intel.tokenAddress)}]);const market:Array<{text:string;url:string}>=[];if(intel.chartUrl)market.push({text:'📊 Chart',url:intel.chartUrl});market.push({text:'🔎 Explorer',url:`https://robinhoodchain.blockscout.com/token/${intel.tokenAddress}`});rows.push(market);const socials=intel.socials.map(s=>({text:s.label==='X'?'𝕏 X':s.label==='Telegram'?'✈️ TG':'🌐 Web',url:s.url}));if(socials.length)rows.push(socials.slice(0,3));if(/^0x[a-fA-F0-9]{40}$/.test(intel.tokenAddress))rows.push([{text:'📋 Copy CA',callback_data:`COPY_CA_${intel.tokenAddress}`}]);return rows;}
