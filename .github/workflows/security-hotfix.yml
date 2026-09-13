@@ -1,0 +1,17 @@
+name: Security Hotfix Validation
+on:
+  push:
+    branches:
+      - hotfix/fail-closed-liquidity-20260913
+jobs:
+  security-hotfix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Positive alert security policy tests
+        run: npx tsx --test tests/positiveAlertSecurity.test.ts tests/alphaSemanticDelivery.test.ts
