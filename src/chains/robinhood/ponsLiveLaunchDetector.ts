@@ -10,6 +10,7 @@ export type PonsLiveDetectorStorage = {
 export type PonsLiveDetectorOptions = {
   fromBlock?: bigint; maxBlocksPerPoll?: bigint; retry?: PonsRetryOptions;
   factories?: PonsFactoryDeployment[]; log?: (line: string) => void;
+  maxLiveLagBlocks?: bigint; liveRecoveryBlocks?: bigint;
 };
 
 // Process-local safety net. Once a checkpoint has been successfully read or a
@@ -47,6 +48,23 @@ export async function pollPonsLiveLaunchesOnce(
           checkpoint = cached;
           log(`[PonsLive] checkpoint database unavailable factory=${factory.id}; using memory checkpoint=${cached}`);
         }
+      }
+    }
+
+    // This service is the real-time lane, not the historical backfill worker.
+    // If its dedicated live checkpoint is stale, staying on that checkpoint can
+    // make the scanner permanently lose ground on a busy factory. Recover to a
+    // recent head window instead. Historical checkpoints/tables are untouched,
+    // so the normal backfill path can still fill the skipped history safely.
+    if (options.fromBlock == null && checkpoint != null) {
+      const maxLag = options.maxLiveLagBlocks ?? 10_000n;
+      const recoveryBlocks = options.liveRecoveryBlocks ?? 1_000n;
+      const lag = head > checkpoint ? head - checkpoint : 0n;
+      if (lag > maxLag) {
+        const recoveredCheckpoint = head > recoveryBlocks ? head - recoveryBlocks : 0n;
+        log(`[PonsLive] stale live checkpoint factory=${factory.id} lagBlocks=${lag}; recovering near head from block=${recoveredCheckpoint + 1n}`);
+        checkpoint = recoveredCheckpoint;
+        liveCheckpointCache.set(factory.id, checkpoint);
       }
     }
 
