@@ -10,7 +10,8 @@ async function latestTimestamp(table: string, column: string, filters: Array<[st
   for (const [key, value] of filters) query = query.eq(key, value);
   const { data, error } = await query;
   if (error) throw error;
-  return (data?.[0] as Record<string, string> | undefined)?.[column] ?? null;
+  const row = data?.[0] as unknown as Record<string, unknown> | undefined;
+  return typeof row?.[column] === 'string' ? row[column] as string : null;
 }
 
 function ageMinutes(value: string | null): number | null {

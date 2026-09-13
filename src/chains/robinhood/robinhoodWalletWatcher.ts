@@ -36,6 +36,8 @@ export const ABANDONED_CURSOR_MIN_AGE_MS = 24 * 60 * 60 * 1_000;
 const ADDRESS_BATCH_SIZE = 50;
 const metadataCache = new Map<string, Awaited<ReturnType<typeof getRobinhoodTokenMetadata>>>();
 
+type RobinhoodBuyEvent = Extract<WalletWatchEvent, { kind: 'buy' }>;
+
 export type RobinhoodTransferEvidence = {
   token: Address;
   from: Address;
@@ -131,9 +133,12 @@ function transferEvidenceFromReceipt(receipt: Awaited<ReturnType<typeof robinhoo
   const transfers: RobinhoodTransferEvidence[] = [];
   for (const log of receipt.logs) {
     try {
-      const decoded = decodeEventLog({ abi: [transferEvent], data: log.data, topics: log.topics, strict: true });
+      const decoded = decodeEventLog({ abi: [transferEvent], data: log.data, topics: (log as typeof log & { topics: readonly Hex[] }).topics, strict: true }) as {
+        eventName: string;
+        args: { from: Address; to: Address; value: bigint };
+      };
       if (decoded.eventName !== 'Transfer') continue;
-      const args = decoded.args as { from: Address; to: Address; value: bigint };
+      const args = decoded.args;
       transfers.push({ token: getAddress(log.address), from: getAddress(args.from), to: getAddress(args.to), value: args.value });
     } catch {}
   }
@@ -148,36 +153,38 @@ async function persistRobinhoodWalletIntelligence(event: WalletWatchEvent): Prom
     await recordWalletTrade({ wallet: event.wallet, token: event.tokenMint, action: 'SELL' });
     return;
   }
+  if (event.kind !== 'buy') return;
+  const buyEvent: RobinhoodBuyEvent = event;
 
   let marketCapAtAction: number | null = null;
   let entryPrice: number | null = null;
   let entryLiquidity: number | null = null;
 
   try {
-    const market = await getRobinhoodMarketSnapshot(event.tokenMint, {
+    const market = await getRobinhoodMarketSnapshot(buyEvent.tokenMint!, {
       priority: 'HIGH',
       caller: 'robinhood_wallet_intelligence',
     });
     marketCapAtAction = market?.marketCapUsd ?? null;
     entryPrice = market?.priceUsd ?? null;
     entryLiquidity = market?.liquidityUsd ?? null;
-    event.marketCap = marketCapAtAction;
-    event.liquidity = entryLiquidity;
-    event.volume5m = market?.volume5mUsd ?? null;
-    event.tokenSymbol = market?.symbol ?? event.tokenSymbol;
-    event.tokenName = market?.name ?? event.tokenName;
+    buyEvent.marketCap = marketCapAtAction;
+    buyEvent.liquidity = entryLiquidity;
+    buyEvent.volume5m = market?.volume5mUsd ?? null;
+    buyEvent.tokenSymbol = market?.symbol ?? buyEvent.tokenSymbol;
+    buyEvent.tokenName = market?.name ?? buyEvent.tokenName;
   } catch (error) {
     console.warn('[RobinhoodWalletIntel] market enrichment unavailable', {
-      wallet: event.wallet,
-      token: event.tokenMint,
+      wallet: buyEvent.wallet,
+      token: buyEvent.tokenMint,
       reason: error instanceof Error ? error.message : String(error),
     });
   }
 
-  await recordWalletBuy({ wallet: event.wallet, token: event.tokenMint, amountSol: null });
+  await recordWalletBuy({ wallet: buyEvent.wallet, token: buyEvent.tokenMint!, amountSol: null });
   await recordWalletTrade({
-    wallet: event.wallet,
-    token: event.tokenMint,
+    wallet: buyEvent.wallet,
+    token: buyEvent.tokenMint!,
     action: 'BUY',
     amountSol: null,
     marketCapAtAction,

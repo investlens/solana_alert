@@ -1,6 +1,7 @@
 import type { Telegraf } from 'telegraf';
 import { requireCapability } from './accessControl.js';
 import { getRobinhoodTokenIntelligence } from '../services/tokenIntelligenceService.js';
+import { getLatestRobinhoodBundleEvidence } from '../services/tokenBundleEvidenceService.js';
 import { renderTokenIntelligence, tokenIntelligenceButtons } from '../ui/tokenIntelligenceView.js';
 
 const activeReplies = new Set<string>();
@@ -13,8 +14,11 @@ export function registerTokenIntelligenceActions(bot: Telegraf<any>) {
     if (activeReplies.has(replyKey)) return;
     activeReplies.add(replyKey);
     try {
-      const intel = await getRobinhoodTokenIntelligence(ctx.match[1]);
-      await ctx.reply(renderTokenIntelligence(intel), { parse_mode: 'HTML',
+      const [intel, bundle] = await Promise.all([
+        getRobinhoodTokenIntelligence(ctx.match[1]),
+        getLatestRobinhoodBundleEvidence(ctx.match[1]),
+      ]);
+      await ctx.reply(renderTokenIntelligence(intel, bundle), { parse_mode: 'HTML',
         link_preview_options: { is_disabled: true }, reply_markup: { inline_keyboard: tokenIntelligenceButtons(intel) } });
     } catch (error) {
       console.error('[TokenIntel]', { event: 'ANALYSIS_FAILED', token: ctx.match[1],

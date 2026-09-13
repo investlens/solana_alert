@@ -34,7 +34,7 @@ function verdict(alert:AlphaNotification):string {
   if(alert.state==='DEX_PAID')return 'EARLY WATCH'; if(['BOOST','MAJOR_BOOST','VOLUME_IGNITION','BUILDING','RUNNER'].includes(alert.state))return 'MOMENTUM WATCH';
   if(alert.category==='wallet'||alert.category==='smart-money')return 'SMART MONEY WATCH'; if(alert.category==='creator')return 'CREATOR WATCH'; return 'WATCH';
 }
-function observedLabel(value:string|number|Date|null|undefined):string { if(value==null)return 'Observed just now'; const t=value instanceof Date?value.getTime():typeof value==='number'?value:Date.parse(value); if(!Number.isFinite(t))return 'Observed just now'; const sec=Math.max(0,Math.floor((Date.now()-t)/1000)); return sec<10?'Observed just now':sec<60?`Observed ${sec}s ago`:`Observed ${Math.floor(sec/60)}m ago`; }
+function observedLabel(value:string|number|Date|null|undefined):string|null { if(value==null)return null; const t=value instanceof Date?value.getTime():typeof value==='number'?value:Date.parse(value); if(!Number.isFinite(t))return null; const sec=Math.max(0,Math.floor((Date.now()-t)/1000)); return sec<10?'Observed just now':sec<60?`Observed ${sec}s ago`:`Observed ${Math.floor(sec/60)}m ago`; }
 
 export function renderAlphaNotification(alert:AlphaNotification):string {
   const compactAddress=compactAlphaAddress(alert.address), symbol=normalizeAlphaSymbol(alert.symbol), name=boundedAlphaText(alert.subtitle||alert.token||alert.title,80);
@@ -54,7 +54,7 @@ export function renderAlphaNotification(alert:AlphaNotification):string {
   const risk=String(alert.risk??'UNKNOWN').toUpperCase(), riskIcon=risk==='LOW'?'✅':risk==='MEDIUM'||risk==='REVIEW'?'⚠️':risk==='HIGH'?'🚨':'⚪'; const confidence=validConfidence(alert.confidence);
   lines.push('',`🧠 <b>ALPHAOS VERDICT: ${escapeAlphaHtml(verdict(alert))}${confidence==null?'':` — ${confidence.toFixed(0)}/100`}</b>`,`${riskIcon} <b>Risk:</b> ${escapeAlphaHtml(risk==='MEASURED'?'UNKNOWN':risk)}`);
   if(confidence!=null)lines.push(`<b>Confidence:</b> ${confidence>=85?'HIGH':confidence>=70?'MEDIUM':'LOW'} (${confidence.toFixed(0)}/100)`);
-  lines.push(`<i>${escapeAlphaHtml(observedLabel(alert.observedAt))}</i>`);
+  const observed=observedLabel(alert.observedAt); if(observed)lines.push(`<i>${escapeAlphaHtml(observed)}</i>`);
   if(alert.displayIntent==='WATCH')lines.push('<i>AlphaOS is monitoring for entry confirmation.</i>');
   if(alert.access==='FREE')lines.push('','<i>Free intelligence may be delayed.</i>');
   const rendered=lines.join('\n'); if(rendered.length>TELEGRAM_MESSAGE_LIMIT)throw new Error('Alpha notification exceeds Telegram message limit after bounded rendering'); return rendered;
