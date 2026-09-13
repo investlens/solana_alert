@@ -127,7 +127,7 @@ function chunks<T>(values: T[], size: number): T[][] {
   return result;
 }
 
-function transferEvidenceFromReceipt(receipt: Awaited<ReturnType<typeof robinhoodPublicClient.getTransactionReceipt>>): RobinhoodTransferEvidence[] {
+function transferEvidenceFromReceipt(receipt: any): RobinhoodTransferEvidence[] {
   const transfers: RobinhoodTransferEvidence[] = [];
   for (const log of receipt.logs) {
     try {
@@ -141,7 +141,7 @@ function transferEvidenceFromReceipt(receipt: Awaited<ReturnType<typeof robinhoo
 }
 
 async function persistRobinhoodWalletIntelligence(event: WalletWatchEvent): Promise<void> {
-  if (!event.tokenMint || !['buy', 'sell'].includes(event.kind)) return;
+  if (!event.tokenMint || (event.kind !== 'buy' && event.kind !== 'sell')) return;
 
   if (event.kind === 'sell') {
     await recordWalletSell({ wallet: event.wallet, token: event.tokenMint });
