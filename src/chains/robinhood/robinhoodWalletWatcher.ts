@@ -131,7 +131,13 @@ function transferEvidenceFromReceipt(receipt: Awaited<ReturnType<typeof robinhoo
   const transfers: RobinhoodTransferEvidence[] = [];
   for (const log of receipt.logs) {
     try {
-      const decoded = decodeEventLog({ abi: [transferEvent], data: log.data, topics: log.topics, strict: true });
+      const rawLog = log as typeof log & { topics: readonly Hex[] };
+      const decoded = decodeEventLog({
+        abi: [transferEvent],
+        data: rawLog.data,
+        topics: rawLog.topics as any,
+        strict: true,
+      }) as { eventName?: string; args?: unknown };
       if (decoded.eventName !== 'Transfer') continue;
       const args = decoded.args as { from: Address; to: Address; value: bigint };
       transfers.push({ token: getAddress(log.address), from: getAddress(args.from), to: getAddress(args.to), value: args.value });
@@ -141,13 +147,14 @@ function transferEvidenceFromReceipt(receipt: Awaited<ReturnType<typeof robinhoo
 }
 
 async function persistRobinhoodWalletIntelligence(event: WalletWatchEvent): Promise<void> {
-  if (!event.tokenMint || !['buy', 'sell'].includes(event.kind)) return;
+  if (!event.tokenMint) return;
 
   if (event.kind === 'sell') {
     await recordWalletSell({ wallet: event.wallet, token: event.tokenMint });
     await recordWalletTrade({ wallet: event.wallet, token: event.tokenMint, action: 'SELL' });
     return;
   }
+  if (event.kind !== 'buy') return;
 
   let marketCapAtAction: number | null = null;
   let entryPrice: number | null = null;

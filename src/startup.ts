@@ -3,6 +3,7 @@ import { startRuntimeHealthHeartbeat } from './services/runtimeHealthHeartbeat.j
 import { startShadowDecisionOutcomeGrader } from './intelligence/shadowDecisionOutcomeGrader.js';
 import { startOutcomePatternLearner } from './intelligence/outcomePatternLearner.js';
 import { startSystemWatchdog } from './services/systemWatchdog.js';
+import { startPostAlertLifecycleService } from './services/postAlertLifecycleService.js';
 import { startDexPaidFastLane } from './chains/robinhood/dexPaidFastLane.js';
 import { createBot } from './bot/index.js';
 import { claimTelegramPollingOwner } from './services/telegramPollingOwner.js';
@@ -89,6 +90,12 @@ if (enabled('SYSTEM_WATCHDOG_DB_ENABLED', false)) {
   startSystemWatchdog();
 } else {
   console.log('[SystemWatchdog] DB-backed watchdog disabled during database recovery.');
+}
+
+if (enabled('POST_ALERT_LIFECYCLE_ENABLED', false)) {
+  startPostAlertLifecycleService();
+} else {
+  console.log('[PostAlertLifecycle] disabled.');
 }
 
 // Keep this critical Robinhood/PONS discovery fast lane alive.
