@@ -1,6 +1,8 @@
 import { getDeliverableUsers, markTelegramUserBlocked, type DeliverableUser } from '../core/delivery.js';
 import { accessProfileForUser, hasCapability } from '../product/capabilities.js';
 import { evaluateDexPaidAlertSafety } from '../chains/robinhood/security/dexPaidAlertSafetyGate.js';
+import { evaluateRobinhoodPositiveAlertSecurity } from '../chains/robinhood/launchSecurity.js';
+import { evaluatePositiveAlertSecurity, isPositiveSemanticEvent, labelLaunchType, type LaunchClassification } from '../security/positiveAlertSecurity.js';
 import { createLeaseToken, DELIVERY_LEASE_SECONDS } from './reservationLease.js';
 import { DEX_PAID_STRATEGY_KEY, isStrategyEnabledForUser, X_REPUTED_MENTION_STRATEGY_KEY } from './strategyService.js';
 import { supabase } from './supabase.js';
@@ -67,6 +69,12 @@ const productionDependencies: SemanticDeliveryDependencies = {
   blocked: markTelegramUserBlocked,
 };
 
+async function loadSemanticRawSnapshot(eventId: number): Promise<Record<string, unknown> | null> {
+  const { data, error } = await supabase.from('alpha_alert_events').select('raw_snapshot').eq('id', eventId).maybeSingle();
+  if (error) throw error;
+  return (data?.raw_snapshot as Record<string, unknown> | null) ?? null;
+}
+
 export async function deliverAlphaSemanticEvent(args: {
   event: UserFacingSemanticEvent; message: string; buttons?: InlineButton[][]; preserveMessage?: boolean;
   onFailure?: (error: unknown) => void;
@@ -74,6 +82,33 @@ export async function deliverAlphaSemanticEvent(args: {
   onRecipientFailure?: (user: DeliverableUser, error: unknown,
     stage: 'recipient_setup' | 'telegram_send' | 'delivery_completion') => void;
 }, dependencies: SemanticDeliveryDependencies = productionDependencies): Promise<{ delivered: number; failed: number }> {
+  let launchType: LaunchClassification | null = null;
+  if (dependencies === productionDependencies && isPositiveSemanticEvent(args.event.type) &&
+      ['robinhood', 'solana'].includes(args.event.chain.toLowerCase())) {
+    let raw: Record<string, unknown> | null = null;
+    try {
+      raw = await loadSemanticRawSnapshot(args.event.id);
+    } catch (error) {
+      console.warn('[AlphaSemanticDelivery] Security evidence unavailable; positive alert suppressed fail-closed.', {
+        alertEventId: args.event.id, token: args.event.assetId,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      return { delivered: 0, failed: 0 };
+    }
+    const security = args.event.chain.toLowerCase() === 'robinhood'
+      ? await evaluateRobinhoodPositiveAlertSecurity({ tokenAddress: args.event.assetId, raw })
+      : evaluatePositiveAlertSecurity({ launchType: 'CUSTOM', raw });
+    launchType = security.launchType;
+    if (!security.allowed) {
+      console.warn('[AlphaSemanticDelivery] Positive alert suppressed by fail-closed liquidity security.', {
+        alertEventId: args.event.id, semanticEventType: args.event.type, token: args.event.assetId,
+        launchType: security.launchType, liquidityState: security.liquidityState,
+        liquidityVerified: security.liquidityVerified, reason: security.reason,
+      });
+      return { delivered: 0, failed: 0 };
+    }
+  }
+
   if (dependencies === productionDependencies && args.event.type === 'DEX_PAID' && args.event.chain === 'robinhood') {
     const safety = await evaluateDexPaidAlertSafety(args.event.assetId);
     if (!safety.allowed) {
@@ -107,6 +142,8 @@ export async function deliverAlphaSemanticEvent(args: {
         reason: error instanceof Error ? error.message : String(error) });
     }
   }
+  if (launchType) deliveryMessage = labelLaunchType(deliveryMessage, launchType);
+
   const users = (await dependencies.getUsers()).sort((a, b) => {
     const rank = (tier: DeliverableUser['tier']) => tier === 'admin' ? 0 : tier === 'paid' ? 1 : 2;
     return rank(a.tier) - rank(b.tier);
