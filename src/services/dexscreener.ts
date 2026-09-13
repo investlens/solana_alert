@@ -8,7 +8,11 @@ import type {
   TakeoverToken,
 } from '../types.js';
 import { scoreToken } from '../core/scoring.js';
-import { governedDexScreenerJson } from './dexscreenerRequestGovernor.js';
+import {
+  DexScreenerProviderBackoffError,
+  DexScreenerQueueCapacityError,
+  governedDexScreenerJson,
+} from './dexscreenerRequestGovernor.js';
 
 const jsonCache = new Map<string, { expiresAt: number; data: unknown }>();
 
@@ -21,6 +25,15 @@ function cacheMsForUrl(url: string) {
   return 60_000;
 }
 
+function staleFallbackMsForUrl(url: string) {
+  if (url.includes('/token-profiles/latest')) return 5 * 60_000;
+  if (url.includes('/token-boosts/latest')) return 5 * 60_000;
+  if (url.includes('/community-takeovers/latest')) return 5 * 60_000;
+  if (url.includes('/token-pairs/')) return 30_000;
+  if (url.includes('/orders/')) return 60_000;
+  return 60_000;
+}
+
 async function getJson<T>(url: string): Promise<T> {
   const now = Date.now();
 
@@ -29,16 +42,34 @@ async function getJson<T>(url: string): Promise<T> {
     return cached.data as T;
   }
 
-  const data = (await governedDexScreenerJson<T>({ url, caller: 'dexscreener_service',
-    endpoint: url.includes('/orders/') ? 'ORDERS' : url.includes('/token-pairs/') ? 'TOKEN_PAIRS'
-      : url.includes('/token-boosts/') ? 'BOOSTS' : url.includes('/token-profiles/') ? 'PROFILES' : 'TAKEOVERS' })).value;
+  try {
+    const data = (await governedDexScreenerJson<T>({ url, caller: 'dexscreener_service',
+      endpoint: url.includes('/orders/') ? 'ORDERS' : url.includes('/token-pairs/') ? 'TOKEN_PAIRS'
+        : url.includes('/token-boosts/') ? 'BOOSTS' : url.includes('/token-profiles/') ? 'PROFILES' : 'TAKEOVERS' })).value;
 
-  jsonCache.set(url, {
-    expiresAt: now + cacheMsForUrl(url),
-    data,
-  });
+    jsonCache.set(url, {
+      expiresAt: now + cacheMsForUrl(url),
+      data,
+    });
 
-  return data;
+    return data;
+  } catch (error) {
+    const staleAgeMs = cached ? Math.max(0, now - cached.expiresAt) : Number.POSITIVE_INFINITY;
+    const staleAllowed = staleAgeMs <= staleFallbackMsForUrl(url);
+    const transientCapacityIssue = error instanceof DexScreenerProviderBackoffError
+      || error instanceof DexScreenerQueueCapacityError;
+
+    if (cached && staleAllowed && transientCapacityIssue) {
+      console.warn('DexScreener transient backoff; serving bounded stale cache', {
+        url,
+        staleAgeMs,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return cached.data as T;
+    }
+
+    throw error;
+  }
 }
 
 export async function fetchLatestProfiles(): Promise<DexProfile[]> {
