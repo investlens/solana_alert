@@ -4,6 +4,7 @@ import { startShadowDecisionOutcomeGrader } from './intelligence/shadowDecisionO
 import { startOutcomePatternLearner } from './intelligence/outcomePatternLearner.js';
 import { startSystemWatchdog } from './services/systemWatchdog.js';
 import { startDexPaidFastLane } from './chains/robinhood/dexPaidFastLane.js';
+import { startUndeliveredPonsBoostRecovery } from './chains/robinhood/recoverUndeliveredPonsBoosts.js';
 import { createBot } from './bot/index.js';
 import { claimTelegramPollingOwner } from './services/telegramPollingOwner.js';
 
@@ -93,5 +94,9 @@ if (enabled('SYSTEM_WATCHDOG_DB_ENABLED', false)) {
 
 // Keep this critical Robinhood/PONS discovery fast lane alive.
 startDexPaidFastLane();
+
+// Recover verified PONS BOOST events that were persisted during a Railway restart
+// but never reached Telegram. Delivery records remain the dedupe authority.
+startUndeliveredPonsBoostRecovery();
 
 await import('./main.js');
