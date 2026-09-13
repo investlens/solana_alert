@@ -9,6 +9,8 @@ jobs:
     env:
       SUPABASE_URL: https://example.supabase.co
       SUPABASE_SERVICE_ROLE_KEY: test-only-placeholder
+      TELEGRAM_BOT_TOKEN: test-only-placeholder
+      OWNER_CHAT_ID: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
