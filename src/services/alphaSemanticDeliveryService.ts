@@ -69,6 +69,7 @@ const productionDependencies: SemanticDeliveryDependencies = {
 
 export async function deliverAlphaSemanticEvent(args: {
   event: UserFacingSemanticEvent; message: string; buttons?: InlineButton[][]; preserveMessage?: boolean;
+  recipientTelegramIds?: readonly string[];
   onFailure?: (error: unknown) => void;
   onTelegramAccepted?: (user: DeliverableUser) => void;
   onRecipientFailure?: (user: DeliverableUser, error: unknown,
@@ -107,10 +108,13 @@ export async function deliverAlphaSemanticEvent(args: {
         reason: error instanceof Error ? error.message : String(error) });
     }
   }
-  const users = (await dependencies.getUsers()).sort((a, b) => {
-    const rank = (tier: DeliverableUser['tier']) => tier === 'admin' ? 0 : tier === 'paid' ? 1 : 2;
-    return rank(a.tier) - rank(b.tier);
-  });
+  const recipientFilter = args.recipientTelegramIds ? new Set(args.recipientTelegramIds.map(String)) : null;
+  const users = (await dependencies.getUsers())
+    .filter(user => !recipientFilter || recipientFilter.has(String(user.telegram_id)))
+    .sort((a, b) => {
+      const rank = (tier: DeliverableUser['tier']) => tier === 'admin' ? 0 : tier === 'paid' ? 1 : 2;
+      return rank(a.tier) - rank(b.tier);
+    });
   const renderedCharacters = deliveryMessage.length;
   const renderedBytes = Buffer.byteLength(deliveryMessage, 'utf8');
   let delivered = 0; let failed = 0;
