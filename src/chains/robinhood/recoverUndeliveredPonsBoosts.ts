@@ -11,6 +11,10 @@ let recoveryStarted = false;
 let recoveryRunning = false;
 let recoveryTimer: ReturnType<typeof setInterval> | null = null;
 
+function recoveryEnabled(): boolean {
+  return String(process.env.PONS_BOOST_RECOVERY_ENABLED ?? 'true').toLowerCase() === 'true';
+}
+
 function asNumber(value: unknown): number | null {
   if (value == null || value === '') return null;
   const parsed = Number(value);
@@ -24,6 +28,7 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 export async function recoverUndeliveredPonsBoosts(): Promise<number> {
+  if (!recoveryEnabled()) return 0;
   if (recoveryRunning) return 0;
   recoveryRunning = true;
 
@@ -134,6 +139,11 @@ export async function recoverUndeliveredPonsBoosts(): Promise<number> {
 }
 
 export function startUndeliveredPonsBoostRecovery(): ReturnType<typeof setInterval> | null {
+  if (!recoveryEnabled()) {
+    console.log('[PonsBoostRecovery] Disabled.');
+    return null;
+  }
+
   if (recoveryStarted) return recoveryTimer;
   recoveryStarted = true;
 
