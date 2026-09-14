@@ -5,6 +5,7 @@ import { launchIdentity, type PonsLaunch } from './ponsHistoricalLaunchScanner.j
 import { describePonsTelegramError } from './ponsProvenDeveloperTelegram.js';
 import { createPonsProvenDeveloperAlert, type PonsProvenDeveloperAlert } from './ponsProvenDeveloperAlert.js';
 import { decidePonsShadowLaunch, evaluatePonsProvenDeveloperLaunch, toPonsLiveMarketEvidence, type PonsShadowDecision } from './ponsProvenDeveloperLaunch.js';
+import { queuePonsNormalAlertFastLane } from './ponsNormalAlertFastLane.js';
 
 export type PonsLiveRouteResult = {
   status: 'IGNORED' | 'NORMAL_PATH' | 'PROVEN_PROCESSED' | 'DUPLICATE';
@@ -40,24 +41,28 @@ export function createPonsLiveLaunchRouter(overrides: Partial<PonsLiveRouterDepe
   };
   const processed = new Set<string>();
 
+  const normalPath = (launch: PonsLaunch, reason: string, developerTier = 'UNKNOWN'): PonsLiveRouteResult => {
+    queuePonsNormalAlertFastLane(launch);
+    return { status: 'NORMAL_PATH', reason, provenDeveloper: false, alert: null, decision: null,
+      developerTier, validation: 'NOT_RUN', alertDelivery: 'NOT_APPLICABLE' };
+  };
+
   return async function routePonsLiveLaunch(launch: PonsLaunch): Promise<PonsLiveRouteResult> {
     if (!dependencies.config.liveIntelligenceEnabled) {
-      return { status: 'NORMAL_PATH', reason: 'Pons live intelligence is disabled', provenDeveloper: false, alert: null, decision: null, developerTier: 'UNKNOWN', validation: 'NOT_RUN', alertDelivery: 'NOT_APPLICABLE' };
+      return normalPath(launch, 'Pons live intelligence is disabled');
     }
     const identity = launchIdentity(launch);
     if (processed.has(identity)) return { status: 'DUPLICATE', reason: 'launch already handled', provenDeveloper: false, alert: null, decision: null, developerTier: 'UNKNOWN', validation: 'NOT_RUN', alertDelivery: 'NOT_APPLICABLE' };
     processed.add(identity);
 
-    // Developer intelligence is an enrichment layer, not permission to stall live
-    // launch discovery. If Supabase is temporarily unavailable we deliberately do
-    // NOT infer a proven developer or bypass any security rule; the launch simply
-    // continues on the normal PONS path and the next polling cycle stays alive.
+    // Developer intelligence is enrichment only. Registry failure never grants a
+    // proven-developer bonus; the token enters the same strict market fast lane.
     let developer: PonsDeveloperRegistryEntry | null = null;
     try {
       developer = await dependencies.lookupDeveloper(launch.deployer_address);
     } catch (error) {
       dependencies.log(`[PonsLive] developer registry unavailable deployer=${launch.deployer_address}; continuing normal Pons path reason=${error instanceof Error ? error.message : String(error)}`);
-      return { status: 'NORMAL_PATH', reason: 'developer registry temporarily unavailable; normal Pons path', provenDeveloper: false, alert: null, decision: null, developerTier: 'UNKNOWN', validation: 'NOT_RUN', alertDelivery: 'NOT_APPLICABLE' };
+      return normalPath(launch, 'developer registry temporarily unavailable; normal Pons path');
     }
 
     const ignore = shouldIgnorePonsDeveloperEntry(developer);
@@ -68,7 +73,7 @@ export function createPonsLiveLaunchRouter(overrides: Partial<PonsLiveRouterDepe
     const verifiedPeak = developer?.bestVerifiedPeakMarketCap;
     if (!developer || developer.isBlocked || developer.riskTier || verifiedPeak == null
       || !Number.isFinite(verifiedPeak) || verifiedPeak < dependencies.config.successfulDeveloperMinPeakMarketCap) {
-      return { status: 'NORMAL_PATH', reason: 'developer follows normal Pons path', provenDeveloper: false, alert: null, decision: null, developerTier: developer?.tier ?? 'UNKNOWN', validation: 'NOT_RUN', alertDelivery: 'NOT_APPLICABLE' };
+      return normalPath(launch, 'developer follows normal Pons path', developer?.tier ?? 'UNKNOWN');
     }
 
     const alert = createPonsProvenDeveloperAlert(launch, developer, identity);
