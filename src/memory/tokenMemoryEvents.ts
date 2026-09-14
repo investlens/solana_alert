@@ -81,18 +81,19 @@ function markRecorded(key: string, now = Date.now()) {
 
 async function hasExistingAlertCreated(token: string, chain: string) {
   const { data, error } = await supabase
-    .from('token_memory_events')
-    .select('id')
+    .from('token_memory')
+    .select('alert_created_at')
     .eq('token', token)
     .eq('chain', chain)
-    .eq('event_type', 'ALERT_CREATED')
-    .limit(1);
+    .not('alert_created_at', 'is', null)
+    .limit(1)
+    .maybeSingle();
 
   if (error) {
     console.log('hasExistingAlertCreated error:', { token, error: error.message });
     return false;
   }
-  return Boolean(data?.length);
+  return Boolean(data?.alert_created_at);
 }
 
 export async function recordTokenMemoryEvent(input: TokenMemoryEventInput) {
