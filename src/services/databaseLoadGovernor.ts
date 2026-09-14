@@ -7,6 +7,7 @@ type GovernorSnapshot = {
   consecutiveFailures: number;
   openUntil: number;
   activeBackground: number;
+  backgroundEnabled: boolean;
 };
 
 const FAILURE_THRESHOLD = 3;
@@ -18,6 +19,10 @@ let state: GovernorState = 'CLOSED';
 let consecutiveFailures = 0;
 let openUntil = 0;
 let activeBackground = 0;
+
+function backgroundWorkEnabled(): boolean {
+  return String(process.env.DB_BACKGROUND_WORK_ENABLED ?? 'true').toLowerCase() === 'true';
+}
 
 export function isTransientDatabaseError(error: unknown): boolean {
   const value = error as { code?: unknown; status?: unknown; message?: unknown; details?: unknown } | null;
@@ -34,11 +39,12 @@ function refreshState(now = Date.now()) {
 
 export function databaseGovernorSnapshot(now = Date.now()): GovernorSnapshot {
   refreshState(now);
-  return { state, consecutiveFailures, openUntil, activeBackground };
+  return { state, consecutiveFailures, openUntil, activeBackground, backgroundEnabled: backgroundWorkEnabled() };
 }
 
 export function canStartDatabaseWork(workClass: DatabaseWorkClass, now = Date.now()): boolean {
   if (workClass === 'CRITICAL') return true;
+  if (!backgroundWorkEnabled()) return false;
   refreshState(now);
   if (state === 'OPEN') return false;
   if (activeBackground >= MAX_BACKGROUND_CONCURRENCY) return false;
