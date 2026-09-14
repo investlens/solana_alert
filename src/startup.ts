@@ -99,4 +99,24 @@ startDexPaidFastLane();
 // but never reached Telegram. Delivery records remain the dedupe authority.
 startUndeliveredPonsBoostRecovery();
 
+// Recovery guard: main.ts currently starts this worker unconditionally. During a
+// database incident, patch only its exported startup entry before main.ts imports
+// the module. The tracker logic remains intact and can be restored by flipping the
+// environment flag back to true. This guard is temporary until workers are split
+// into their dedicated queue-backed service.
+if (!enabled('ROBINHOOD_OUTCOME_TRACKER_ENABLED', true)) {
+  const fs = await import('node:fs/promises');
+  const trackerPath = new URL('./chains/robinhood/robinhoodOutcomeTracker.ts', import.meta.url);
+  const source = await fs.readFile(trackerPath, 'utf8');
+  const marker = "export function startRobinhoodOutcomeTracker():\n  void {\n  if (trackerStarted) {";
+  const replacement = "export function startRobinhoodOutcomeTracker():\n  void {\n  console.log('[RobinhoodOutcomeTracker] Disabled during database recovery.');\n  return;\n  if (trackerStarted) {";
+
+  if (source.includes(marker)) {
+    await fs.writeFile(trackerPath, source.replace(marker, replacement), 'utf8');
+    console.log('[Startup] Robinhood outcome tracker recovery guard installed.');
+  } else {
+    console.warn('[Startup] Robinhood outcome tracker recovery guard target not found.');
+  }
+}
+
 await import('./main.js');
