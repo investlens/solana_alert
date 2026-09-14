@@ -53,6 +53,16 @@ export type PonsIgnoreDecision = {
 
 const lower = (value: string) => value.trim().toLowerCase();
 
+// Developer history is useful enrichment, but it must never be allowed to flood an
+// unhealthy database or become an implicit trust signal. A successful lookup is cached
+// briefly. After a DB failure we open a process-local circuit breaker; callers then
+// immediately fall back to the normal PONS safety/scoring path. Unknown developers are
+// never promoted to proven while the registry is unavailable.
+const REGISTRY_CACHE_TTL_MS = Math.max(60_000, Number(process.env.PONS_REGISTRY_CACHE_TTL_MS ?? 10 * 60_000));
+const REGISTRY_FAILURE_BACKOFF_MS = Math.max(60_000, Number(process.env.PONS_REGISTRY_FAILURE_BACKOFF_MS ?? 5 * 60_000));
+const registryCache = new Map<string, { value: PonsDeveloperRegistryEntry | null; expiresAt: number }>();
+let registryUnavailableUntil = 0;
+
 export function registryEntryFromIntelligence(
   intelligence: PonsDeveloperIntelligence,
   now = new Date().toISOString(),
@@ -172,11 +182,28 @@ function fromDb(row: any): PonsDeveloperRegistryEntry {
 }
 
 export async function getPonsDeveloperRegistryEntry(address: string): Promise<PonsDeveloperRegistryEntry | null> {
-  const { supabase } = await import('../../services/supabase.js');
-  const { data, error } = await supabase.from('pons_developer_registry').select('*').eq('chain', 'robinhood')
-    .eq('deployer_address', lower(address)).maybeSingle();
-  if (error) throw new Error(`Pons registry lookup failed: ${error.message}`);
-  return data ? fromDb(data) : null;
+  const key = lower(address);
+  const now = Date.now();
+  const cached = registryCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.value;
+
+  if (registryUnavailableUntil > now) {
+    throw new Error(`Pons registry circuit open for ${Math.ceil((registryUnavailableUntil - now) / 1000)}s`);
+  }
+
+  try {
+    const { supabase } = await import('../../services/supabase.js');
+    const { data, error } = await supabase.from('pons_developer_registry').select('*').eq('chain', 'robinhood')
+      .eq('deployer_address', key).maybeSingle();
+    if (error) throw new Error(`Pons registry lookup failed: ${error.message}`);
+    const value = data ? fromDb(data) : null;
+    registryCache.set(key, { value, expiresAt: now + REGISTRY_CACHE_TTL_MS });
+    registryUnavailableUntil = 0;
+    return value;
+  } catch (error) {
+    registryUnavailableUntil = Date.now() + REGISTRY_FAILURE_BACKOFF_MS;
+    throw error;
+  }
 }
 
 export function shouldIgnorePonsDeveloperEntry(entry: PonsDeveloperRegistryEntry | null): PonsIgnoreDecision {
