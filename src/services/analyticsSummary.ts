@@ -15,5 +15,10 @@ export async function refreshAnalyticsSummary(): Promise<void> {
 }
 
 export function startAnalyticsSummary(): void {
+  const enabled = String(process.env.ANALYTICS_ENGINE_ENABLED ?? 'true').toLowerCase() === 'true';
+  if (!enabled) {
+    console.log('[AnalyticsEngine] disabled during database recovery.');
+    return;
+  }
   startAnalyticsEngine();
 }
