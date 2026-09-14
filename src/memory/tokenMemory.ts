@@ -77,82 +77,39 @@ function buildPreservedRaw(args: {
 }) {
   const existingRaw = asRecord(args.existingRaw);
   const incomingRaw = asRecord(args.incomingRaw);
-
-  /*
-   * Support older rows where raw was stored as one flat object.
-   */
-  const existingAlert =
-    asRecord(existingRaw.alert);
-
-  const existingLatest =
-    asRecord(existingRaw.latest);
-
-  const legacyLooksLikeAlert =
-    existingRaw.source === 'MAIN_ALERT' &&
-    Object.keys(existingAlert).length === 0;
-
-  const preservedAlert =
-    Object.keys(existingAlert).length > 0
-      ? existingAlert
-      : legacyLooksLikeAlert
-        ? existingRaw
-        : {};
-
-  const alert =
-    args.shouldCreateAlertSnapshot &&
-    Object.keys(preservedAlert).length === 0
-      ? incomingRaw
-      : preservedAlert;
+  const existingAlert = asRecord(existingRaw.alert);
+  const existingLatest = asRecord(existingRaw.latest);
+  const legacyLooksLikeAlert = existingRaw.source === 'MAIN_ALERT' && Object.keys(existingAlert).length === 0;
+  const preservedAlert = Object.keys(existingAlert).length > 0 ? existingAlert : legacyLooksLikeAlert ? existingRaw : {};
+  const alert = args.shouldCreateAlertSnapshot && Object.keys(preservedAlert).length === 0 ? incomingRaw : preservedAlert;
 
   return {
-    alert:
-      Object.keys(alert).length > 0
-        ? alert
-        : null,
-
-    latest:
-      Object.keys(incomingRaw).length > 0
-        ? incomingRaw
-        : existingLatest,
-
-    lastSource:
-      typeof incomingRaw.source === 'string'
-        ? incomingRaw.source
-        : existingRaw.lastSource ?? null,
+    alert: Object.keys(alert).length > 0 ? alert : null,
+    latest: Object.keys(incomingRaw).length > 0 ? incomingRaw : existingLatest,
+    lastSource: typeof incomingRaw.source === 'string' ? incomingRaw.source : existingRaw.lastSource ?? null,
   };
 }
 
-export async function hasTokenAlertCreated(
-  token: string
-): Promise<boolean> {
+export async function hasTokenAlertCreated(token: string): Promise<boolean> {
   if (!token) return false;
 
   const { data, error } = await supabase
-    .from('token_memory_events')
-    .select('token')
+    .from('token_memory')
+    .select('alert_created_at')
     .eq('token', token)
-    .eq('event_type', 'ALERT_CREATED')
+    .not('alert_created_at', 'is', null)
     .limit(1)
     .maybeSingle();
 
   if (error) {
-    console.log('hasTokenAlertCreated error:', {
-      token,
-      error: error.message,
-    });
-
-    /*
-     * Do not block alert processing when the lookup itself fails.
-     */
+    console.log('hasTokenAlertCreated error:', { token, error: error.message });
     return false;
   }
 
-  return Boolean(data);
+  return Boolean(data?.alert_created_at);
 }
 
-export async function upsertTokenMemory(
-  input: TokenMemoryInput
-) {
+export async function upsertTokenMemory(input: TokenMemoryInput) {
   if (!input.token) return;
 
   const marketCap = num(input.marketCap);
@@ -180,181 +137,64 @@ export async function upsertTokenMemory(
     .maybeSingle();
 
   if (fetchError) {
-    console.log('upsertTokenMemory fetch error:', {
-      token: input.token,
-      error: fetchError.message,
-    });
+    console.log('upsertTokenMemory fetch error:', { token: input.token, error: fetchError.message });
   }
 
-  const existing =
-    (data as ExistingTokenMemory | null) ?? null;
-
-  const previousPeak = Number(
-    existing?.peak_market_cap ?? 0
-  );
-
-  const previousHighPrice = Number(
-    existing?.highest_price ?? 0
-  );
-
-  const peakMarketCap =
-    marketCap != null
-      ? Math.max(previousPeak, marketCap)
-      : previousPeak || null;
-
-  const highestPrice =
-    price != null
-      ? Math.max(previousHighPrice, price)
-      : previousHighPrice || null;
-
+  const existing = (data as ExistingTokenMemory | null) ?? null;
+  const previousPeak = Number(existing?.peak_market_cap ?? 0);
+  const previousHighPrice = Number(existing?.highest_price ?? 0);
+  const peakMarketCap = marketCap != null ? Math.max(previousPeak, marketCap) : previousPeak || null;
+  const highestPrice = price != null ? Math.max(previousHighPrice, price) : previousHighPrice || null;
   const incomingIsMainAlert = isMainAlert(input.raw);
-
-  /*
-   * Alert baseline must only be created by a genuine MAIN_ALERT.
-   * Pump.fun discovery, wallet tracking, and memory refreshes must
-   * not establish or replace the official alert baseline.
-   */
-  const shouldCreateAlertSnapshot =
-    incomingIsMainAlert &&
-    !existing?.alert_created_at;
-
+  const shouldCreateAlertSnapshot = incomingIsMainAlert && !existing?.alert_created_at;
   const now = new Date().toISOString();
 
   const payload: Record<string, unknown> = {
     token: input.token,
-
-    symbol:
-      input.symbol ??
-      existing?.symbol ??
-      null,
-
-    name:
-      input.name ??
-      existing?.name ??
-      null,
-
-    chain:
-      input.chain ??
-      existing?.chain ??
-      'solana',
-
-    creator_wallet:
-      input.creatorWallet ??
-      existing?.creator_wallet ??
-      null,
-
+    symbol: input.symbol ?? existing?.symbol ?? null,
+    name: input.name ?? existing?.name ?? null,
+    chain: input.chain ?? existing?.chain ?? 'solana',
+    creator_wallet: input.creatorWallet ?? existing?.creator_wallet ?? null,
     last_updated: now,
-
     current_market_cap: marketCap,
     peak_market_cap: peakMarketCap,
-
     current_liquidity: liquidity,
-
     current_price: price,
     highest_price: highestPrice,
-
     buy_count: input.buys ?? 0,
     sell_count: input.sells ?? 0,
-
-    confidence: shouldCreateAlertSnapshot
-      ? input.confidence ?? null
-      : existing?.confidence ?? input.confidence ?? null,
+    confidence: shouldCreateAlertSnapshot ? input.confidence ?? null : existing?.confidence ?? input.confidence ?? null,
     risk_level: input.riskLevel ?? null,
-
     creator_score: input.creatorScore ?? null,
     holder_score: input.holderScore ?? null,
     authority_score: input.authorityScore ?? null,
-
     reached_50k: (peakMarketCap ?? 0) >= 50_000,
     reached_100k: (peakMarketCap ?? 0) >= 100_000,
     reached_250k: (peakMarketCap ?? 0) >= 250_000,
     reached_500k: (peakMarketCap ?? 0) >= 500_000,
     reached_1m: (peakMarketCap ?? 0) >= 1_000_000,
-
-    raw: buildPreservedRaw({
-      existingRaw: existing?.raw,
-      incomingRaw: input.raw,
-      shouldCreateAlertSnapshot,
-    }),
+    raw: buildPreservedRaw({ existingRaw: existing?.raw, incomingRaw: input.raw, shouldCreateAlertSnapshot }),
   };
 
-  /*
-   * Preserve the first observation separately from the alert.
-   */
-  /*
- * Create OR repair the first observation.
- * If the token was first discovered before market cap existed,
- * populate the baseline later when market data becomes available.
- */
-if (
-  marketCap != null &&
-  (
-    !existing ||
-    (existing as any).first_market_cap == null
-  )
-) {
-  payload.first_market_cap = marketCap;
-
-  if (liquidity != null) {
-    payload.first_liquidity = liquidity;
+  if (marketCap != null && (!existing || (existing as any).first_market_cap == null)) {
+    payload.first_market_cap = marketCap;
+    if (liquidity != null) payload.first_liquidity = liquidity;
+    if (price != null) payload.first_price = price;
+    if (!existing) payload.first_seen = now;
   }
 
-  if (price != null) {
-    payload.first_price = price;
+  if (marketCap != null && (shouldCreateAlertSnapshot || (incomingIsMainAlert && existing?.alert_market_cap == null))) {
+    payload.alert_market_cap = marketCap;
+    if (price != null) payload.alert_price = price;
+    if (liquidity != null) payload.alert_liquidity = liquidity;
+    if (!existing?.alert_created_at) payload.alert_created_at = now;
   }
 
-  if (!existing) {
-    payload.first_seen = now;
-  }
-}
+  const cleanPayload = Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
 
-  /*
-   * Create official alert values exactly once.
-   */
-  /*
- * Create OR repair the alert baseline.
- */
-if (
-  marketCap != null &&
-  (
-    shouldCreateAlertSnapshot ||
-    (
-      incomingIsMainAlert &&
-      existing?.alert_market_cap == null
-    )
-  )
-) {
-  payload.alert_market_cap = marketCap;
-
-  if (price != null) {
-    payload.alert_price = price;
-  }
-
-  if (liquidity != null) {
-    payload.alert_liquidity = liquidity;
-  }
-
-  if (!existing?.alert_created_at) {
-    payload.alert_created_at = now;
-  }
-}
-
-  const cleanPayload = Object.fromEntries(
-    Object.entries(payload).filter(
-      ([, value]) => value !== undefined
-    )
-  );
-
-  const { error } = await supabase
-    .from('token_memory')
-    .upsert(cleanPayload, {
-      onConflict: 'token',
-    });
+  const { error } = await supabase.from('token_memory').upsert(cleanPayload, { onConflict: 'token' });
 
   if (error) {
-    console.log('upsertTokenMemory error:', {
-      token: input.token,
-      error: error.message,
-    });
+    console.log('upsertTokenMemory error:', { token: input.token, error: error.message });
   }
 }
