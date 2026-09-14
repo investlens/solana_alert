@@ -22,7 +22,29 @@ type TokenMemoryEventInput = {
 
 const NON_PERSISTED_EVENT_TYPES = new Set(['SNAPSHOT', 'OBSERVATION', 'HEARTBEAT']);
 const recentEvents = new Map<string, number>();
-const RECENT_EVENT_TTL_MS = 60_000;
+
+// token_memory is the compact latest/first/alert/peak state. This event table is
+// therefore a sparse audit/learning stream, not a per-poll telemetry store.
+// Keep important alert lifecycle events responsive while aggressively thinning
+// repeated analytical events for the same token.
+const IMPORTANT_EVENT_TYPES = new Set([
+  'ALERT_CREATED',
+  'ALERT_SENT',
+  'ENTRY',
+  'EXIT',
+  'STOP_LOSS',
+  'TAKE_PROFIT',
+]);
+
+const IMPORTANT_EVENT_TTL_MS = Math.max(
+  60_000,
+  Number(process.env.TOKEN_MEMORY_IMPORTANT_EVENT_TTL_MS ?? 60_000),
+);
+
+const DEFAULT_EVENT_TTL_MS = Math.max(
+  5 * 60_000,
+  Number(process.env.TOKEN_MEMORY_EVENT_TTL_MS ?? 10 * 60_000),
+);
 
 function cleanNumber(value?: number | null) {
   return value != null && Number.isFinite(value) ? value : null;
@@ -36,16 +58,23 @@ function eventKey(chain: string, token: string, eventType: string) {
   return `${chain.toLowerCase()}:${token.toLowerCase()}:${eventType}`;
 }
 
-function recentlyRecorded(key: string, now = Date.now()) {
+function eventTtlMs(eventType: string) {
+  return IMPORTANT_EVENT_TYPES.has(eventType)
+    ? IMPORTANT_EVENT_TTL_MS
+    : DEFAULT_EVENT_TTL_MS;
+}
+
+function recentlyRecorded(key: string, eventType: string, now = Date.now()) {
   const prior = recentEvents.get(key);
-  return prior != null && now - prior < RECENT_EVENT_TTL_MS;
+  return prior != null && now - prior < eventTtlMs(eventType);
 }
 
 function markRecorded(key: string, now = Date.now()) {
   recentEvents.set(key, now);
   if (recentEvents.size > 5_000) {
+    const maxTtlMs = Math.max(IMPORTANT_EVENT_TTL_MS, DEFAULT_EVENT_TTL_MS);
     for (const [candidate, at] of recentEvents) {
-      if (now - at >= RECENT_EVENT_TTL_MS) recentEvents.delete(candidate);
+      if (now - at >= maxTtlMs) recentEvents.delete(candidate);
     }
   }
 }
@@ -75,7 +104,7 @@ export async function recordTokenMemoryEvent(input: TokenMemoryEventInput) {
 
   if (NON_PERSISTED_EVENT_TYPES.has(eventType)) return;
   const key = eventKey(chain, token, eventType);
-  if (recentlyRecorded(key)) return;
+  if (recentlyRecorded(key, eventType)) return;
 
   if (eventType === 'ALERT_CREATED' && await hasExistingAlertCreated(token, chain)) {
     markRecorded(key);
