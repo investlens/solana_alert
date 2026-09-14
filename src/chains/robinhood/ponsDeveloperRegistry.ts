@@ -63,6 +63,10 @@ const REGISTRY_FAILURE_BACKOFF_MS = Math.max(60_000, Number(process.env.PONS_REG
 const registryCache = new Map<string, { value: PonsDeveloperRegistryEntry | null; expiresAt: number }>();
 let registryUnavailableUntil = 0;
 
+function registryDbEnabled(): boolean {
+  return String(process.env.PONS_REGISTRY_DB_ENABLED ?? 'true').toLowerCase() === 'true';
+}
+
 export function registryEntryFromIntelligence(
   intelligence: PonsDeveloperIntelligence,
   now = new Date().toISOString(),
@@ -127,6 +131,7 @@ async function persistEntries(entries: PonsDeveloperRegistryEntry[], deps: PonsR
   if (!entries.length) return;
   const rows = entries.map(entry => dbRow(entry));
   if (deps.upsert) return deps.upsert(rows);
+  if (!registryDbEnabled()) return;
   const { supabase } = await import('../../services/supabase.js');
   const { error } = await supabase.from('pons_developer_registry').upsert(rows, { onConflict: 'chain,deployer_address' });
   if (error) throw new Error(`Pons registry upsert failed: ${error.message}`);
@@ -186,6 +191,10 @@ export async function getPonsDeveloperRegistryEntry(address: string): Promise<Po
   const now = Date.now();
   const cached = registryCache.get(key);
   if (cached && cached.expiresAt > now) return cached.value;
+
+  if (!registryDbEnabled()) {
+    return null;
+  }
 
   if (registryUnavailableUntil > now) {
     throw new Error(`Pons registry circuit open for ${Math.ceil((registryUnavailableUntil - now) / 1000)}s`);
