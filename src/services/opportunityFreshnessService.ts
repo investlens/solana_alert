@@ -14,6 +14,10 @@ function getSweepIntervalMs(): number {
   return Math.max(60 * 1000, Math.floor(raw));
 }
 
+function freshnessEnabled(): boolean {
+  return String(process.env.OPPORTUNITY_FRESHNESS_ENABLED ?? 'true').toLowerCase() === 'true';
+}
+
 let started =
   false;
 
@@ -256,6 +260,11 @@ void {
 
   started =
     true;
+
+  if (!freshnessEnabled()) {
+    console.log('[OpportunityFreshness] disabled during database recovery.');
+    return;
+  }
 
   const sweepIntervalMs = getSweepIntervalMs();
 
