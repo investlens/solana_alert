@@ -1,10 +1,12 @@
 import type { PonsLaunch } from './ponsHistoricalLaunchScanner.js';
 import type { DexProfile, RiskResult } from '../../types.js';
 import { enrichToken, fetchBoostMap, fetchTakeoverSet } from '../../services/dexscreener.js';
+import { getDeliverableUsers } from '../../core/delivery.js';
 
 const MAX_CONCURRENT = Math.max(1, Math.min(5, Number(process.env.PONS_FAST_LANE_CONCURRENCY ?? 2)));
 const MAX_QUEUE = Math.max(5, Math.min(100, Number(process.env.PONS_FAST_LANE_MAX_QUEUE ?? 30)));
 const CONFIRM_MS = Math.max(15_000, Number(process.env.PONS_FAST_LANE_CONFIRM_MS ?? 20_000));
+const RECIPIENT_CACHE_MS = Math.max(60_000, Number(process.env.PONS_FAST_LANE_RECIPIENT_CACHE_MS ?? 300_000));
 const enabled = () => String(process.env.PONS_NORMAL_FAST_LANE_ENABLED ?? 'false').toLowerCase() === 'true';
 
 let active = 0;
@@ -13,6 +15,20 @@ const seen = new Set<string>();
 let cacheAt = 0;
 let boostMapCache: Awaited<ReturnType<typeof fetchBoostMap>> | null = null;
 let takeoverSetCache: Awaited<ReturnType<typeof fetchTakeoverSet>> | null = null;
+let recipientCacheAt = 0;
+let recipientRefreshInFlight: Promise<void> | null = null;
+let recipientCache = new Set<string>();
+
+function adminRecipient(): string {
+  return String(process.env.ADMIN_TELEGRAM_ID ?? process.env.OWNER_CHAT_ID ?? '').trim();
+}
+
+function ensureAdminRecipient(): void {
+  const adminId = adminRecipient();
+  if (adminId) recipientCache.add(adminId);
+}
+
+ensureAdminRecipient();
 
 function tokenKey(launch: PonsLaunch): string {
   return String(launch.token_address ?? '').toLowerCase();
@@ -51,10 +67,36 @@ function escapeHtml(value: unknown): string {
   return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-async function directAdminTelegram(text: string, tokenAddress: string): Promise<void> {
+function refreshRecipientsInBackground(): void {
+  ensureAdminRecipient();
+  if (recipientRefreshInFlight || Date.now() - recipientCacheAt < RECIPIENT_CACHE_MS) return;
+
+  recipientRefreshInFlight = (async () => {
+    try {
+      const users = await getDeliverableUsers();
+      const next = new Set<string>();
+      const adminId = adminRecipient();
+      if (adminId) next.add(adminId);
+      for (const user of users) {
+        const telegramId = String(user.telegram_id ?? '').trim();
+        if (telegramId && !user.is_blocked) next.add(telegramId);
+      }
+      if (next.size > 0) {
+        recipientCache = next;
+        recipientCacheAt = Date.now();
+        console.log(`[PonsFastLane] recipient cache refreshed count=${recipientCache.size}`);
+      }
+    } catch (error) {
+      console.warn(`[PonsFastLane] recipient refresh failed; keeping cached recipients count=${recipientCache.size} reason=${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      recipientRefreshInFlight = null;
+    }
+  })();
+}
+
+async function sendTelegram(chatId: string, text: string, tokenAddress: string): Promise<void> {
   const botToken = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
-  const chatId = String(process.env.ADMIN_TELEGRAM_ID ?? process.env.OWNER_CHAT_ID ?? '').trim();
-  if (!botToken || !chatId) throw new Error('missing Telegram admin configuration');
+  if (!botToken || !chatId) throw new Error('missing Telegram configuration');
   const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -70,6 +112,27 @@ async function directAdminTelegram(text: string, tokenAddress: string): Promise<
     }),
   });
   if (!res.ok) throw new Error(`Telegram ${res.status}: ${await res.text().catch(() => '')}`);
+}
+
+async function directTelegramRecipients(text: string, tokenAddress: string): Promise<{ delivered: number; failed: number }> {
+  ensureAdminRecipient();
+  refreshRecipientsInBackground();
+  const recipients = [...recipientCache];
+  if (!recipients.length) throw new Error('no Telegram recipients available');
+
+  const results = await Promise.allSettled(recipients.map(chatId => sendTelegram(chatId, text, tokenAddress)));
+  let delivered = 0;
+  let failed = 0;
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      delivered += 1;
+      return;
+    }
+    failed += 1;
+    console.warn(`[PonsFastLane] TELEGRAM_FAILED token=${tokenAddress} recipient=${recipients[index]} reason=${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
+  });
+  if (delivered === 0) throw new Error(`Telegram delivery failed for all ${failed} recipients`);
+  return { delivered, failed };
 }
 
 async function evaluate(launch: PonsLaunch): Promise<void> {
@@ -114,8 +177,8 @@ async function evaluate(launch: PonsLaunch): Promise<void> {
     `Developer: <b>UNVERIFIED</b> — no proven-dev bonus applied`,
     `<code>${escapeHtml(tokenAddress)}</code>`,
   ].join('\n');
-  await directAdminTelegram(text, tokenAddress);
-  console.log(`[PonsFastLane] ALERT_SENT token=${tokenAddress} bucket=${secondBucket} score=${second.result.score}`);
+  const delivery = await directTelegramRecipients(text, tokenAddress);
+  console.log(`[PonsFastLane] ALERT_SENT token=${tokenAddress} bucket=${secondBucket} score=${second.result.score} delivered=${delivery.delivered} failed=${delivery.failed}`);
 }
 
 async function drain(): Promise<void> {
@@ -130,6 +193,7 @@ async function drain(): Promise<void> {
 
 export function queuePonsNormalAlertFastLane(launch: PonsLaunch): void {
   if (!enabled()) return;
+  refreshRecipientsInBackground();
   const key = tokenKey(launch);
   if (!key || seen.has(key)) return;
   seen.add(key);
