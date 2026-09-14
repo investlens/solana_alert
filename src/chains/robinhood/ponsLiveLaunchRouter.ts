@@ -47,7 +47,19 @@ export function createPonsLiveLaunchRouter(overrides: Partial<PonsLiveRouterDepe
     const identity = launchIdentity(launch);
     if (processed.has(identity)) return { status: 'DUPLICATE', reason: 'launch already handled', provenDeveloper: false, alert: null, decision: null, developerTier: 'UNKNOWN', validation: 'NOT_RUN', alertDelivery: 'NOT_APPLICABLE' };
     processed.add(identity);
-    const developer = await dependencies.lookupDeveloper(launch.deployer_address);
+
+    // Developer intelligence is an enrichment layer, not permission to stall live
+    // launch discovery. If Supabase is temporarily unavailable we deliberately do
+    // NOT infer a proven developer or bypass any security rule; the launch simply
+    // continues on the normal PONS path and the next polling cycle stays alive.
+    let developer: PonsDeveloperRegistryEntry | null = null;
+    try {
+      developer = await dependencies.lookupDeveloper(launch.deployer_address);
+    } catch (error) {
+      dependencies.log(`[PonsLive] developer registry unavailable deployer=${launch.deployer_address}; continuing normal Pons path reason=${error instanceof Error ? error.message : String(error)}`);
+      return { status: 'NORMAL_PATH', reason: 'developer registry temporarily unavailable; normal Pons path', provenDeveloper: false, alert: null, decision: null, developerTier: 'UNKNOWN', validation: 'NOT_RUN', alertDelivery: 'NOT_APPLICABLE' };
+    }
+
     const ignore = shouldIgnorePonsDeveloperEntry(developer);
     if (ignore.ignore && (ignore.tier === 'SCAMMER' || ignore.tier === 'SPAM_LAUNCHER')) {
       dependencies.log(`[PonsLive] ignored deployer=${launch.deployer_address} tier=${ignore.tier} reason=${ignore.reason ?? 'blocked'}`);
