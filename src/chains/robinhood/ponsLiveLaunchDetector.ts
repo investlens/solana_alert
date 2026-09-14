@@ -18,6 +18,8 @@ export type PonsLiveDetectorOptions = {
 // chain scanning. Persistence can catch up later; alert discovery stays live.
 const liveCheckpointCache = new Map<string, bigint>();
 
+const ponsLiveDbEnabled = () => String(process.env.PONS_LIVE_DB_ENABLED ?? 'true').toLowerCase() === 'true';
+
 export async function pollPonsLiveLaunchesOnce(
   rpc: PonsScannerRpc,
   storage: PonsLiveDetectorStorage,
@@ -34,19 +36,30 @@ export async function pollPonsLiveLaunchesOnce(
   for (const factory of factories) {
     let checkpoint: bigint | null = null;
     if (options.fromBlock == null) {
-      try {
-        checkpoint = await retryPonsOperation('liveCheckpointRead', () => storage.getLiveCheckpoint(factory.id), retry);
-        if (checkpoint != null) liveCheckpointCache.set(factory.id, checkpoint);
-      } catch (error) {
+      if (!ponsLiveDbEnabled()) {
         const cached = liveCheckpointCache.get(factory.id);
         if (cached == null) {
-          // On a cold start we deliberately scan a conservative recent window
-          // rather than jumping to head and silently missing launches.
           checkpoint = head > 300n ? head - 300n : 0n;
-          log(`[PonsLive] checkpoint database unavailable factory=${factory.id}; cold-start recovery from block=${checkpoint + 1n}`);
+          log(`[PonsLive] DB recovery mode factory=${factory.id}; cold-start recovery from block=${checkpoint + 1n}`);
         } else {
           checkpoint = cached;
-          log(`[PonsLive] checkpoint database unavailable factory=${factory.id}; using memory checkpoint=${cached}`);
+        }
+      } else {
+        try {
+          checkpoint = await retryPonsOperation('liveCheckpointRead', () => storage.getLiveCheckpoint(factory.id), retry);
+          if (checkpoint != null) liveCheckpointCache.set(factory.id, checkpoint);
+          else checkpoint = liveCheckpointCache.get(factory.id) ?? null;
+        } catch (error) {
+          const cached = liveCheckpointCache.get(factory.id);
+          if (cached == null) {
+            // On a cold start we deliberately scan a conservative recent window
+            // rather than jumping to head and silently missing launches.
+            checkpoint = head > 300n ? head - 300n : 0n;
+            log(`[PonsLive] checkpoint database unavailable factory=${factory.id}; cold-start recovery from block=${checkpoint + 1n}`);
+          } else {
+            checkpoint = cached;
+            log(`[PonsLive] checkpoint database unavailable factory=${factory.id}; using memory checkpoint=${cached}`);
+          }
         }
       }
     }
@@ -93,7 +106,7 @@ export async function pollPonsLiveLaunchesOnce(
       seen.add(identity); launches.push(launch);
     }
 
-    if (launches.length) {
+    if (launches.length && ponsLiveDbEnabled()) {
       try {
         await retryPonsOperation('liveLaunchUpsert', () => storage.persistLaunches(launches), retry);
       } catch (error) {
@@ -107,10 +120,12 @@ export async function pollPonsLiveLaunchesOnce(
     // reached the router. This prevents a persistence outage from halting the
     // scanner while preserving at-least-once alert handling semantics.
     liveCheckpointCache.set(factory.id, to);
-    try {
-      await retryPonsOperation('liveCheckpointUpsert', () => storage.setLiveCheckpoint(factory, to), retry);
-    } catch (error) {
-      log(`[PonsLive] checkpoint persistence unavailable factory=${factory.id}; memory checkpoint=${to}`);
+    if (ponsLiveDbEnabled()) {
+      try {
+        await retryPonsOperation('liveCheckpointUpsert', () => storage.setLiveCheckpoint(factory, to), retry);
+      } catch (error) {
+        log(`[PonsLive] checkpoint persistence unavailable factory=${factory.id}; memory checkpoint=${to}`);
+      }
     }
     log(`[PonsLive] factory=${factory.id} blocks=${from}-${to} detected=${launches.length}`);
   }
