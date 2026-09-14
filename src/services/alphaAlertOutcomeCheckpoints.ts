@@ -17,6 +17,10 @@ export const OUTCOME_ELIGIBLE_ALERT_TYPES: readonly string[] = [];
 const OUTCOME_CANDIDATE_LIMIT = 50;
 const OUTCOME_POLL_MS = 30_000;
 
+function checkpointEnabled(): boolean {
+  return String(process.env.ALPHA_OUTCOME_CHECKPOINT_ENABLED ?? 'true').toLowerCase() === 'true';
+}
+
 type EventRow = { id: number; asset_id: string; chain: string; price: number | string | null; price_provenance?: string | null; market_index_state?: string | null; alerted_at: string; semantic_event_type?: string | null; alert_type?: string | null };
 type PriorRow = { alert_event_id?: number; checkpoint_seconds?: number; current_price: number | string | null; peak_price: number | string | null; peak_roi: number | string | null; time_to_peak_seconds: number | null };
 const positive = (value: unknown): number | null => { const number = Number(value); return Number.isFinite(number) && number > 0 ? number : null; };
@@ -172,6 +176,10 @@ let started = false;
 export function startAlphaOutcomeCheckpointService(): void {
   if (started) return;
   started = true;
+  if (!checkpointEnabled()) {
+    console.log('[AlphaOutcomeCheckpoints] disabled during database recovery.');
+    return;
+  }
   const run = () => void runAlphaOutcomeCheckpointCycle().catch(error => console.warn(`[AlphaOutcomeCheckpoints] Cycle failed: ${describeBackgroundError(error)}`));
   run();
   setInterval(run, Number(process.env.ALPHA_OUTCOME_CHECKPOINT_POLL_MS ?? OUTCOME_POLL_MS));
