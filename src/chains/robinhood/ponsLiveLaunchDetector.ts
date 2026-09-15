@@ -20,6 +20,19 @@ const liveCheckpointCache = new Map<string, bigint>();
 
 const ponsLiveDbEnabled = () => String(process.env.PONS_LIVE_DB_ENABLED ?? 'true').toLowerCase() === 'true';
 
+function liveFactories(): PonsFactoryDeployment[] {
+  const configured = String(process.env.PONS_LIVE_FACTORY_IDS ?? 'v2-current')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean);
+  const allowed = new Set(configured);
+  const deployments = getPonsFactoryDeployments().filter(factory => factory.enabled);
+  const selected = deployments.filter(factory => allowed.has(factory.id));
+  if (selected.length) return selected;
+  const current = deployments.find(factory => factory.id === 'v2-current');
+  return current ? [current] : deployments;
+}
+
 export async function pollPonsLiveLaunchesOnce(
   rpc: PonsScannerRpc,
   storage: PonsLiveDetectorStorage,
@@ -29,7 +42,7 @@ export async function pollPonsLiveLaunchesOnce(
   const log = options.log ?? console.log;
   const retry = { ...options.retry, onRetry: options.retry?.onRetry ?? log };
   const head = await retryPonsOperation('liveGetBlockNumber', () => rpc.getBlockNumber(), retry);
-  const factories = options.factories ?? getPonsFactoryDeployments().filter(factory => factory.enabled);
+  const factories = options.factories ?? liveFactories();
   const seen = new Set<string>();
   let detected = 0; let handled = 0; let duplicates = 0;
 
@@ -110,9 +123,6 @@ export async function pollPonsLiveLaunchesOnce(
 
       for (const launch of launches) { await handleLaunch(launch); handled += 1; }
 
-      // Advance only after this factory's range has reached the router. A failed
-      // factory keeps its previous checkpoint and retries later, while every
-      // other factory continues in the same poll cycle.
       liveCheckpointCache.set(factory.id, to);
       if (ponsLiveDbEnabled()) {
         try {
