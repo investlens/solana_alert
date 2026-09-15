@@ -3,7 +3,7 @@ import { recordOpportunity } from '../../core/opportunityRegistry.js';
 import { assessTokenIntelligence, type IntelligenceObservation, type TokenIntelligenceState } from '../../intelligence/tokenIntelligenceState.js';
 import { recordOpportunityAndEmit } from '../../services/opportunityService.js';
 import { qualifyPremiumOpportunity } from '../../services/opportunityDeliveryService.js';
-import { runDatabaseWork } from '../../services/databaseLoadGovernor.js';
+import { runDatabaseWork, isTransientDatabaseError } from '../../services/databaseLoadGovernor.js';
 import { supabase } from '../../services/supabase.js';
 import { getRobinhoodMarketSnapshot } from './market.js';
 import { DexScreenerHttpTimeoutError, DexScreenerMalformedResponseError, DexScreenerProviderHttpError,
@@ -125,22 +125,33 @@ async function loadUniverse() {
   const now = Date.now();
   if (cachedUniverse.length && now - lastUniverseRefreshAt < UNIVERSE_REFRESH_MS) return cachedUniverse;
   const cutoff = new Date(now - config.existingTokenRetentionHours * 3_600_000).toISOString();
-  // Lifecycle monitoring is an alert-producing control path. It must not silently starve behind generic background DB work.
-  const loaded = await runDatabaseWork('CRITICAL', async () => {
-    const [opportunities, events, watched] = await Promise.all([
-      supabase.from('opportunities').select('asset_id,status,strategy_key,last_observed_at,updated_at')
-        .eq('chain', 'robinhood').in('status', ['NEW', 'WATCHING', 'APPROVED']).order('updated_at', { ascending: false }).limit(MAX_UNIVERSE_ROWS_PER_SOURCE),
-      supabase.from('alpha_alert_events').select('asset_id,alerted_at,semantic_event_type').eq('chain', 'robinhood')
-        .in('semantic_event_type', MEANINGFUL_EVENT_TYPES).gte('alerted_at', cutoff).order('alerted_at', { ascending: false }).limit(MAX_UNIVERSE_ROWS_PER_SOURCE),
-      supabase.from('user_opportunity_watchlist').select('updated_at,opportunities(asset_id,chain)').limit(MAX_UNIVERSE_ROWS_PER_SOURCE),
-    ]);
-    for (const result of [opportunities, events, watched]) if (result.error) throw result.error;
-    return buildExistingTokenUniverse({ opportunities: opportunities.data ?? [], events: events.data ?? [], watched: watched.data as unknown as UniverseRow[] ?? [] });
-  });
-  if (loaded === null) return cachedUniverse;
-  cachedUniverse = loaded;
-  lastUniverseRefreshAt = now;
-  return cachedUniverse;
+  try {
+    const loaded = await runDatabaseWork('CRITICAL', async () => {
+      const [opportunities, events, watched] = await Promise.all([
+        supabase.from('opportunities').select('asset_id,status,strategy_key,last_observed_at,updated_at')
+          .eq('chain', 'robinhood').in('status', ['NEW', 'WATCHING', 'APPROVED']).order('updated_at', { ascending: false }).limit(MAX_UNIVERSE_ROWS_PER_SOURCE),
+        supabase.from('alpha_alert_events').select('asset_id,alerted_at,semantic_event_type').eq('chain', 'robinhood')
+          .in('semantic_event_type', MEANINGFUL_EVENT_TYPES).gte('alerted_at', cutoff).order('alerted_at', { ascending: false }).limit(MAX_UNIVERSE_ROWS_PER_SOURCE),
+        supabase.from('user_opportunity_watchlist').select('updated_at,opportunities(asset_id,chain)').limit(MAX_UNIVERSE_ROWS_PER_SOURCE),
+      ]);
+      for (const result of [opportunities, events, watched]) if (result.error) throw result.error;
+      return buildExistingTokenUniverse({ opportunities: opportunities.data ?? [], events: events.data ?? [], watched: watched.data as unknown as UniverseRow[] ?? [] });
+    });
+    if (loaded === null) return cachedUniverse;
+    cachedUniverse = loaded;
+    lastUniverseRefreshAt = now;
+    return cachedUniverse;
+  } catch (error) {
+    if (cachedUniverse.length && isTransientDatabaseError(error)) {
+      console.warn('[ExistingTokenScanner] universe refresh unavailable; using last-good universe.', {
+        cachedUniverse: cachedUniverse.length,
+        ageMs: Math.max(0, now - lastUniverseRefreshAt),
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      return cachedUniverse;
+    }
+    throw error;
+  }
 }
 
 async function scanToken(entry: ExistingTokenUniverseEntry) {
