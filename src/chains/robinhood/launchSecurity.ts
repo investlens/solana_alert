@@ -16,6 +16,11 @@ let recentPonsTokens = new Set<string>();
 let recentPonsCacheAt = 0;
 let recentPonsRefresh: Promise<void> | null = null;
 
+export function rememberAuthoritativePonsToken(tokenAddress: string): void {
+  const token = normalize(tokenAddress);
+  if (token) recentPonsTokens.add(token);
+}
+
 async function refreshRecentPonsCache(): Promise<void> {
   if (recentPonsRefresh) return recentPonsRefresh;
   recentPonsRefresh = (async () => {
@@ -29,12 +34,12 @@ async function refreshRecentPonsCache(): Promise<void> {
         .order('created_at', { ascending: false })
         .limit(RECENT_PONS_CACHE_LIMIT);
       if (error) throw error;
-      const next = new Set<string>();
+      const next = new Set<string>(recentPonsTokens);
       for (const row of data ?? []) {
         const token = normalize(String(row.token_address ?? ''));
         if (token) next.add(token);
       }
-      if (next.size) recentPonsTokens = next;
+      recentPonsTokens = next;
       recentPonsCacheAt = Date.now();
     } catch (error) {
       console.warn('[RobinhoodLaunchSecurity] Recent PONS cache refresh failed; retaining last-good census.', {
@@ -51,6 +56,7 @@ async function refreshRecentPonsCache(): Promise<void> {
 export async function classifyRobinhoodLaunch(tokenAddress: string): Promise<LaunchClassification> {
   const token = normalize(tokenAddress);
 
+  if (recentPonsTokens.has(token)) return 'PONS';
   if (Date.now() - recentPonsCacheAt >= RECENT_PONS_CACHE_MS) {
     await refreshRecentPonsCache();
   }
@@ -66,13 +72,11 @@ export async function classifyRobinhoodLaunch(tokenAddress: string): Promise<Lau
       .maybeSingle();
     if (error) throw error;
     if (data) {
-      recentPonsTokens.add(token);
+      rememberAuthoritativePonsToken(token);
       return 'PONS';
     }
     return 'CUSTOM';
   } catch (error) {
-    // A database outage must never turn a token that was already authoritatively
-    // identified as PONS into CUSTOM. Unknown tokens still fail closed.
     if (recentPonsTokens.has(token)) return 'PONS';
     console.warn('[RobinhoodLaunchSecurity] PONS census lookup failed; unknown token remains fail-closed CUSTOM.', {
       token,
