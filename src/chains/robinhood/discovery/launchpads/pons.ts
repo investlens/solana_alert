@@ -7,7 +7,8 @@ import {
 } from '../../tokenMetadata.js';
 
 import {
-  robinhoodPublicClient,
+  getRobinhoodBlockNumberResilient,
+  getRobinhoodLogsResilient,
 } from '../../rpc.js';
 
 import type {
@@ -44,8 +45,7 @@ export async function discoverFromPons(
     Date.now();
 
   const latestBlock =
-    await robinhoodPublicClient
-      .getBlockNumber();
+    await getRobinhoodBlockNumberResilient();
 
   const requestedFromBlock =
     latestBlock > lookbackBlocks
@@ -71,25 +71,25 @@ export async function discoverFromPons(
   );
 
   const logs =
-    await robinhoodPublicClient
-      .getLogs({
-        address:
-          PONS_ACTIVE_FACTORY,
+    await getRobinhoodLogsResilient({
+      address:
+        PONS_ACTIVE_FACTORY,
 
-        event:
-          tokenLaunchedEvent,
+      event:
+        tokenLaunchedEvent,
 
-        fromBlock,
+      fromBlock,
 
-        toBlock:
-          latestBlock,
-      });
+      toBlock:
+        latestBlock,
+    });
 
   const tokens:
     RobinhoodDiscoveredToken[] =
       [];
 
-  for (const log of logs) {
+  for (const rawLog of logs) {
+    const log = rawLog as any;
     const args =
       log.args;
 
