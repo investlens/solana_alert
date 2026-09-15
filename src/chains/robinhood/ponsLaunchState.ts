@@ -15,6 +15,10 @@ import {
   requestRobinhoodRpcResilient,
 } from './rpc.js';
 
+import {
+  supabase,
+} from '../../services/supabase.js';
+
 const FACTORY_ABI =
   parseAbi([
     'function getLaunchedToken(address token) view returns ((address token,address deployer,address pairedToken,address positionManager,uint256 positionId,uint256 dexId,uint256 launchConfigId,uint256 restrictionsEndBlock,uint256 supply,bool isToken0,uint24 poolFee,bool exists,uint256 initialBuyAmount) launched)',
@@ -72,100 +76,81 @@ async function rawEthCall(args: {
   return result as Hex;
 }
 
+async function indexedFactoryForToken(token: Address): Promise<Address | null> {
+  try {
+    const { data, error } = await supabase
+      .from('pons_launches')
+      .select('factory_address')
+      .eq('chain', 'robinhood')
+      .ilike('token_address', token.toLowerCase())
+      .order('block_number', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+    const factoryAddress = String(data?.factory_address ?? '').trim();
+    return factoryAddress ? getAddress(factoryAddress) : null;
+  } catch (error) {
+    console.warn('[PonsLaunchState] indexed factory lookup failed; using active factory fallback', {
+      token,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+async function readLaunchFromFactory(token: Address, factory: Address): Promise<PonsLaunchState> {
+  const data = encodeFunctionData({
+    abi: FACTORY_ABI,
+    functionName: 'getLaunchedToken',
+    args: [token],
+  });
+
+  const raw = await rawEthCall({ address: factory, data });
+  const launched = decodeFunctionResult({
+    abi: FACTORY_ABI,
+    functionName: 'getLaunchedToken',
+    data: raw,
+  });
+
+  return {
+    token: getAddress(launched.token),
+    deployer: getAddress(launched.deployer),
+    pairedToken: getAddress(launched.pairedToken),
+    positionManager: getAddress(launched.positionManager),
+    positionId: launched.positionId,
+    dexId: launched.dexId,
+    launchConfigId: launched.launchConfigId,
+    restrictionsEndBlock: launched.restrictionsEndBlock,
+    supply: launched.supply,
+    isToken0: launched.isToken0,
+    poolFee: Number(launched.poolFee),
+    exists: launched.exists,
+    initialBuyAmount: launched.initialBuyAmount,
+  };
+}
+
 export async function getPonsLaunchState(
   tokenAddress: string,
 ): Promise<PonsLaunchState> {
-  const token =
-    getAddress(
-      tokenAddress,
-    );
+  const token = getAddress(tokenAddress);
+  const indexedFactory = await indexedFactoryForToken(token);
+  const activeFactory = getAddress(PONS_CONTRACTS.factory);
 
-  const factory =
-    getAddress(
-      PONS_CONTRACTS.factory,
-    );
+  if (indexedFactory) {
+    const indexedLaunch = await readLaunchFromFactory(token, indexedFactory);
+    if (indexedLaunch.exists) return indexedLaunch;
 
-  const data =
-    encodeFunctionData({
-      abi:
-        FACTORY_ABI,
-
-      functionName:
-        'getLaunchedToken',
-
-      args: [
-        token,
-      ],
+    console.warn('[PonsLaunchState] indexed factory did not confirm launch; checking active factory', {
+      token,
+      indexedFactory,
+      activeFactory,
     });
+  }
 
-  const raw =
-    await rawEthCall({
-      address:
-        factory,
+  if (!indexedFactory || indexedFactory.toLowerCase() !== activeFactory.toLowerCase()) {
+    return readLaunchFromFactory(token, activeFactory);
+  }
 
-      data,
-    });
-
-  const launched =
-    decodeFunctionResult({
-      abi:
-        FACTORY_ABI,
-
-      functionName:
-        'getLaunchedToken',
-
-      data:
-        raw,
-    });
-
-  return {
-    token:
-      getAddress(
-        launched.token,
-      ),
-
-    deployer:
-      getAddress(
-        launched.deployer,
-      ),
-
-    pairedToken:
-      getAddress(
-        launched.pairedToken,
-      ),
-
-    positionManager:
-      getAddress(
-        launched.positionManager,
-      ),
-
-    positionId:
-      launched.positionId,
-
-    dexId:
-      launched.dexId,
-
-    launchConfigId:
-      launched.launchConfigId,
-
-    restrictionsEndBlock:
-      launched.restrictionsEndBlock,
-
-    supply:
-      launched.supply,
-
-    isToken0:
-      launched.isToken0,
-
-    poolFee:
-      Number(
-        launched.poolFee,
-      ),
-
-    exists:
-      launched.exists,
-
-    initialBuyAmount:
-      launched.initialBuyAmount,
-  };
+  return readLaunchFromFactory(token, indexedFactory);
 }
