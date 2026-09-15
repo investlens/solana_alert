@@ -9,6 +9,7 @@ import {
 
 const OFFICIAL_RPC = 'https://rpc.mainnet.chain.robinhood.com';
 const PUBLICNODE_RPC = 'https://robinhood-rpc.publicnode.com';
+const LOG_REPLAY_CHUNK_BLOCKS = BigInt(Math.max(5, Number(process.env.ROBINHOOD_LOG_REPLAY_CHUNK_BLOCKS ?? 25)));
 
 export const robinhoodPublicClient =
   createPublicClient({
@@ -87,15 +88,60 @@ async function withRobinhoodRpcFailover<T>(
   throw lastError ?? new Error(`No Robinhood RPC provider available for ${operation}`);
 }
 
+async function getLogsFromProviders(args: any, operation = 'getLogs'): Promise<any[]> {
+  return withRobinhoodRpcFailover(operation, async client =>
+    await client.getLogs(args as any) as any[]);
+}
+
+function canChunkLogRange(args: any): args is { fromBlock: bigint; toBlock: bigint } & Record<string, unknown> {
+  return typeof args?.fromBlock === 'bigint'
+    && typeof args?.toBlock === 'bigint'
+    && args.toBlock >= args.fromBlock;
+}
+
+function logIdentity(log: any): string {
+  return `${String(log?.transactionHash ?? '')}:${String(log?.logIndex ?? '')}:${String(log?.blockNumber ?? '')}:${String(log?.address ?? '')}`;
+}
+
 /**
- * Log scanning is the most failure-prone Robinhood RPC workload. The official
- * endpoint can fail transiently, while PublicNode may reject older ranges as
- * archive requests. Try each configured provider independently instead of
- * allowing a single endpoint outage to stop launch discovery.
+ * Log scanning is the most failure-prone Robinhood RPC workload. First try the
+ * complete requested range across all configured providers. If every provider
+ * rejects a multi-block range, replay that exact range in small non-overlapping
+ * chunks. Checkpoints are still advanced only by the caller after all chunks
+ * succeed, so partial recovery can never silently skip launches.
  */
 export async function getRobinhoodLogsResilient(args: any): Promise<any[]> {
-  return withRobinhoodRpcFailover('getLogs', async client =>
-    await client.getLogs(args as any) as any[]);
+  try {
+    return await getLogsFromProviders(args);
+  } catch (initialError) {
+    if (!canChunkLogRange(args)) throw initialError;
+    const blockCount = args.toBlock - args.fromBlock + 1n;
+    if (blockCount <= LOG_REPLAY_CHUNK_BLOCKS) throw initialError;
+
+    console.warn('[RobinhoodRpc] full getLogs range failed; replaying in chunks', {
+      fromBlock: args.fromBlock.toString(),
+      toBlock: args.toBlock.toString(),
+      blockCount: blockCount.toString(),
+      chunkBlocks: LOG_REPLAY_CHUNK_BLOCKS.toString(),
+    });
+
+    const collected: any[] = [];
+    for (let fromBlock = args.fromBlock; fromBlock <= args.toBlock; fromBlock += LOG_REPLAY_CHUNK_BLOCKS) {
+      const toBlock = fromBlock + LOG_REPLAY_CHUNK_BLOCKS - 1n < args.toBlock
+        ? fromBlock + LOG_REPLAY_CHUNK_BLOCKS - 1n
+        : args.toBlock;
+      const chunk = await getLogsFromProviders({ ...args, fromBlock, toBlock }, 'getLogsChunk');
+      collected.push(...chunk);
+    }
+
+    const deduped = new Map<string, any>();
+    for (const log of collected) deduped.set(logIdentity(log), log);
+    return [...deduped.values()].sort((left, right) => {
+      const blockDelta = Number((left?.blockNumber ?? 0n) - (right?.blockNumber ?? 0n));
+      if (blockDelta !== 0) return blockDelta;
+      return Number((left?.logIndex ?? 0) - (right?.logIndex ?? 0));
+    });
+  }
 }
 
 export async function getRobinhoodBlockNumberResilient(): Promise<bigint> {
