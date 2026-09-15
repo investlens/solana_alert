@@ -127,6 +127,10 @@ function chunks<T>(values: T[], size: number): T[][] {
   return result;
 }
 
+function indexedAddressFilter(batch: Address[]): Address | Address[] {
+  return batch.length === 1 ? batch[0]! : batch;
+}
+
 function transferEvidenceFromReceipt(receipt: any): RobinhoodTransferEvidence[] {
   const transfers: RobinhoodTransferEvidence[] = [];
   for (const log of receipt.logs) {
@@ -194,17 +198,19 @@ export async function scanRobinhoodWalletActivity(args: {
   if (!args.wallets.length || args.fromBlock > args.toBlock) return [];
   const transferLogs: any[] = [];
   for (const batch of chunks(args.wallets, ADDRESS_BATCH_SIZE)) {
+    const walletFilter = indexedAddressFilter(batch);
     const [outgoing, incoming] = await Promise.all([
-      robinhoodPublicClient.getLogs({ event: transferEvent, args: { from: batch }, fromBlock: args.fromBlock, toBlock: args.toBlock }),
-      robinhoodPublicClient.getLogs({ event: transferEvent, args: { to: batch }, fromBlock: args.fromBlock, toBlock: args.toBlock }),
+      robinhoodPublicClient.getLogs({ event: transferEvent, args: { from: walletFilter }, fromBlock: args.fromBlock, toBlock: args.toBlock }),
+      robinhoodPublicClient.getLogs({ event: transferEvent, args: { to: walletFilter }, fromBlock: args.fromBlock, toBlock: args.toBlock }),
     ]);
     transferLogs.push(...outgoing, ...incoming);
   }
   const launchLogs: any[] = [];
   for (const batch of chunks(args.wallets, ADDRESS_BATCH_SIZE)) {
+    const deployerFilter = indexedAddressFilter(batch);
     const [v1LaunchLogs, v2LaunchLogs] = await Promise.all([
-      robinhoodPublicClient.getLogs({ address: getAddress(PONS_CONTRACTS.factory), event: tokenLaunchedEvent, args: { deployer: batch }, fromBlock: args.fromBlock, toBlock: args.toBlock }),
-      robinhoodPublicClient.getLogs({ address: getAddress(PONS_V2_LIVE_EMITTER), event: tokenLaunchedV2Event, args: { deployer: batch }, fromBlock: args.fromBlock, toBlock: args.toBlock }),
+      robinhoodPublicClient.getLogs({ address: getAddress(PONS_CONTRACTS.factory), event: tokenLaunchedEvent, args: { deployer: deployerFilter }, fromBlock: args.fromBlock, toBlock: args.toBlock }),
+      robinhoodPublicClient.getLogs({ address: getAddress(PONS_V2_LIVE_EMITTER), event: tokenLaunchedV2Event, args: { deployer: deployerFilter }, fromBlock: args.fromBlock, toBlock: args.toBlock }),
     ]);
     launchLogs.push(...v1LaunchLogs, ...v2LaunchLogs);
   }
