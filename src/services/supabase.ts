@@ -92,7 +92,11 @@ function isCriticalRequest(url: string, init?: RequestInit): boolean {
     url.includes('/rest/v1/strategy_settings') ||
     url.includes('/rest/v1/alerts') ||
     url.includes('/rest/v1/alert_deliveries') ||
+    url.includes('/rest/v1/alpha_alert_events') ||
     url.includes('/rest/v1/alpha_alert_event_deliveries') ||
+    url.includes('/rest/v1/opportunities') ||
+    url.includes('/rest/v1/opportunity_deliveries') ||
+    url.includes('/rest/v1/user_opportunity_watchlist') ||
     url.includes('/rest/v1/pons_launches') ||
     url.includes('/rest/v1/users')
   ) {
@@ -106,7 +110,11 @@ function isCriticalRequest(url: string, init?: RequestInit): boolean {
     url.includes('/rest/v1/wallet_') ||
     url.includes('/rest/v1/alerts') ||
     url.includes('/rest/v1/alert_deliveries') ||
-    url.includes('/rest/v1/alpha_alert_event_deliveries')
+    url.includes('/rest/v1/alpha_alert_events') ||
+    url.includes('/rest/v1/alpha_alert_event_deliveries') ||
+    url.includes('/rest/v1/opportunities') ||
+    url.includes('/rest/v1/opportunity_deliveries') ||
+    url.includes('/rest/v1/user_opportunity_watchlist')
   )) {
     return true;
   }
@@ -120,6 +128,8 @@ function cacheableCriticalGet(url: string, init?: RequestInit): boolean {
     url.includes('/rest/v1/user_tracked_wallets') ||
     url.includes('/rest/v1/wallet_activity_deliveries') ||
     url.includes('/rest/v1/strategy_settings') ||
+    url.includes('/rest/v1/opportunities') ||
+    url.includes('/rest/v1/user_opportunity_watchlist') ||
     url.includes('/rest/v1/pons_launches') ||
     isDeliverableUsersRead(url, init)
   );
@@ -230,8 +240,6 @@ async function rememberCriticalGet(url: string, response: Response): Promise<Res
   };
   lastGoodCriticalGets.set(url, cache);
 
-  // Keep the cache bounded. Critical URLs are mostly a small set of stable
-  // query shapes, but this prevents unbounded growth from per-user queries.
   if (lastGoodCriticalGets.size > 200) {
     const oldest = lastGoodCriticalGets.keys().next().value;
     if (oldest) lastGoodCriticalGets.delete(oldest);
@@ -251,8 +259,6 @@ async function resilientFetch(input: RequestInfo | URL, init?: RequestInit): Pro
 
   await acquireLane(lane);
 
-  // The timeout starts only after the request has obtained its lane. Queue
-  // time must never consume the network timeout budget.
   const boundedInit: RequestInit = {
     ...init,
     signal: init?.signal ?? AbortSignal.timeout(SUPABASE_REQUEST_TIMEOUT_MS),
