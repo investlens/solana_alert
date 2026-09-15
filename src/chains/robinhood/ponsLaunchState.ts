@@ -8,12 +8,12 @@ import {
 } from 'viem';
 
 import {
-  robinhoodChain,
-} from './config.js';
-
-import {
   PONS_CONTRACTS,
 } from './ponsContracts.js';
+
+import {
+  requestRobinhoodRpcResilient,
+} from './rpc.js';
 
 const FACTORY_ABI =
   parseAbi([
@@ -52,80 +52,24 @@ async function rawEthCall(args: {
   address: Address;
   data: Hex;
 }): Promise<Hex> {
-  const rpcUrl =
-    robinhoodChain
-      .rpcUrls
-      .default
-      .http[0];
-
-  const response =
-    await fetch(
-      rpcUrl,
+  const result = await requestRobinhoodRpcResilient({
+    method: 'eth_call',
+    params: [
       {
-        method:
-          'POST',
-
-        headers: {
-          'Content-Type':
-            'application/json',
-        },
-
-        body:
-          JSON.stringify({
-            jsonrpc:
-              '2.0',
-
-            id:
-              1,
-
-            method:
-              'eth_call',
-
-            params: [
-              {
-                to:
-                  args.address,
-
-                data:
-                  args.data,
-              },
-
-              'latest',
-            ],
-          }),
+        to: args.address,
+        data: args.data,
       },
-    );
+      'latest',
+    ],
+  });
 
-  if (!response.ok) {
-    throw new Error(
-      `Robinhood eth_call HTTP ${response.status}`,
-    );
-  }
-
-  const payload =
-    await response.json() as {
-      result?: Hex;
-
-      error?: {
-        code?: number;
-        message?: string;
-      };
-    };
-
-  if (payload.error) {
-    throw new Error(
-      payload.error.message ??
-      'Robinhood eth_call failed',
-    );
-  }
-
-  if (!payload.result) {
+  if (!result) {
     throw new Error(
       'Robinhood eth_call returned no result',
     );
   }
 
-  return payload.result;
+  return result as Hex;
 }
 
 export async function getPonsLaunchState(
