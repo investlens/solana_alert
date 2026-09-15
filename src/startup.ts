@@ -92,12 +92,14 @@ if (enabled('SYSTEM_WATCHDOG_DB_ENABLED', false)) {
   console.log('[SystemWatchdog] DB-backed watchdog disabled during database recovery.');
 }
 
-// Keep this critical Robinhood/PONS discovery fast lane alive.
+// Keep this critical Robinhood/PONS discovery fast lane alive when explicitly enabled.
 startDexPaidFastLane();
 
 // Recover verified PONS BOOST events that were persisted during a Railway restart
 // but never reached Telegram. Delivery records remain the dedupe authority.
 startUndeliveredPonsBoostRecovery();
+
+const fs = await import('node:fs/promises');
 
 // Recovery guard: main.ts currently starts this worker unconditionally. During a
 // database incident, patch only its exported startup entry before main.ts imports
@@ -105,7 +107,6 @@ startUndeliveredPonsBoostRecovery();
 // environment flag back to true. This guard is temporary until workers are split
 // into their dedicated queue-backed service.
 if (!enabled('ROBINHOOD_OUTCOME_TRACKER_ENABLED', true)) {
-  const fs = await import('node:fs/promises');
   const trackerPath = new URL('./chains/robinhood/robinhoodOutcomeTracker.ts', import.meta.url);
   const source = await fs.readFile(trackerPath, 'utf8');
   const marker = "export function startRobinhoodOutcomeTracker():\n  void {\n  if (trackerStarted) {";
@@ -116,6 +117,40 @@ if (!enabled('ROBINHOOD_OUTCOME_TRACKER_ENABLED', true)) {
     console.log('[Startup] Robinhood outcome tracker recovery guard installed.');
   } else {
     console.warn('[Startup] Robinhood outcome tracker recovery guard target not found.');
+  }
+}
+
+// Admin trading is intentionally disabled in the current production recovery profile.
+// Do not let trade-state restoration or the 5-second position manager hold alert startup
+// hostage to Supabase while there are no live admin trades to protect.
+if (!enabled('ADMIN_TRADING_ENABLED', false)) {
+  const managerPath = new URL('./core/autoTradeManager.ts', import.meta.url);
+  let source = await fs.readFile(managerPath, 'utf8');
+
+  const restoreMarker = "export async function restoreOpenTradesForStartup(dependencies: {\n  restore?: typeof restoreOpenTrades;\n  log?: (message: string) => void;\n} = {}): Promise<boolean> {\n  try {";
+  const restoreReplacement = "export async function restoreOpenTradesForStartup(dependencies: {\n  restore?: typeof restoreOpenTrades;\n  log?: (message: string) => void;\n} = {}): Promise<boolean> {\n  tradingRestorationStatus = 'READY';\n  console.log('[AutoTrade] Startup restoration skipped because admin trading is disabled.');\n  return true;\n  try {";
+
+  const managerMarker = "export async function runAutoTradeManager() {\n  if (Date.now() - lastRunAt < POSITION_CHECK_INTERVAL_MS) return;";
+  const managerReplacement = "export async function runAutoTradeManager() {\n  if (!config.adminTradingEnabled) return;\n  if (Date.now() - lastRunAt < POSITION_CHECK_INTERVAL_MS) return;";
+
+  let changed = false;
+  if (source.includes(restoreMarker)) {
+    source = source.replace(restoreMarker, restoreReplacement);
+    changed = true;
+  } else {
+    console.warn('[Startup] Auto-trade restoration recovery guard target not found.');
+  }
+
+  if (source.includes(managerMarker)) {
+    source = source.replace(managerMarker, managerReplacement);
+    changed = true;
+  } else {
+    console.warn('[Startup] Auto-trade manager recovery guard target not found.');
+  }
+
+  if (changed) {
+    await fs.writeFile(managerPath, source, 'utf8');
+    console.log('[Startup] Disabled-trading recovery guards installed; alert startup is independent of trade DB state.');
   }
 }
 
