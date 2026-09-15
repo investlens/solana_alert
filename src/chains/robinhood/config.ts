@@ -2,6 +2,22 @@ import {
   defineChain,
 } from 'viem';
 
+const OFFICIAL_PUBLIC_RPC = 'https://rpc.mainnet.chain.robinhood.com';
+const PUBLICNODE_RPC = 'https://robinhood-rpc.publicnode.com';
+
+function robinhoodRpcUrls(): string[] {
+  const configured = String(process.env.ROBINHOOD_RPC_URL ?? '').trim();
+  const fallback = String(process.env.ROBINHOOD_RPC_FALLBACK_URL ?? PUBLICNODE_RPC).trim();
+
+  return [...new Set([
+    configured,
+    fallback,
+    OFFICIAL_PUBLIC_RPC,
+  ].filter(Boolean))];
+}
+
+const rpcHttpUrls = robinhoodRpcUrls();
+
 export const robinhoodChain =
   defineChain({
     id: 4663,
@@ -16,15 +32,11 @@ export const robinhoodChain =
 
     rpcUrls: {
       default: {
-        http: [
-          'https://rpc.mainnet.chain.robinhood.com',
-        ],
+        http: rpcHttpUrls,
       },
 
       public: {
-        http: [
-          'https://rpc.mainnet.chain.robinhood.com',
-        ],
+        http: rpcHttpUrls,
       },
     },
 
