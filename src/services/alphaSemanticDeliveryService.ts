@@ -5,6 +5,7 @@ import { evaluateRobinhoodPositiveAlertSecurity } from '../chains/robinhood/laun
 import { evaluatePositiveAlertSecurity, isPositiveSemanticEvent, labelLaunchType, type LaunchClassification } from '../security/positiveAlertSecurity.js';
 import { createLeaseToken, DELIVERY_LEASE_SECONDS } from './reservationLease.js';
 import { DEX_PAID_STRATEGY_KEY, isStrategyEnabledForUser, X_REPUTED_MENTION_STRATEGY_KEY } from './strategyService.js';
+import { getEphemeralSemanticEventEvidence } from './alphaSemanticEventService.js';
 import { supabase } from './supabase.js';
 import { sendTelegramWithMessageId } from './telegram.js';
 import { deliverReservedTelegram } from './telegramDeliveryContract.js';
@@ -105,11 +106,13 @@ export async function deliverAlphaSemanticEvent(args: {
   onRecipientFailure?: (user: DeliverableUser, error: unknown,
     stage: 'recipient_setup' | 'telegram_send' | 'delivery_completion') => void;
 }, dependencies: SemanticDeliveryDependencies = productionDependencies): Promise<{ delivered: number; failed: number }> {
+  const ephemeralMode = dependencies === productionDependencies && (args.event.ephemeral === true || args.event.id < 0);
   let launchType: LaunchClassification | null = null;
   if (dependencies === productionDependencies && isPositiveSemanticEvent(args.event.type) &&
       ['robinhood', 'solana'].includes(args.event.chain.toLowerCase())) {
-    let raw: Record<string, unknown> | null = args.event.rawSnapshot ?? null;
-    if (!raw && !args.event.ephemeral) {
+    let raw: Record<string, unknown> | null = args.event.rawSnapshot ??
+      (ephemeralMode ? getEphemeralSemanticEventEvidence(args.event.eventIdentity) : null);
+    if (!raw && !ephemeralMode) {
       try {
         raw = await loadSemanticRawSnapshot(args.event.id);
       } catch (error) {
@@ -160,12 +163,12 @@ export async function deliverAlphaSemanticEvent(args: {
       liquidityUsd: safety.liquidityUsd,
       pairAgeMinutes: safety.pairAgeMinutes,
       ponsDeployer: safety.ponsDeployer,
-      ephemeral: Boolean(args.event.ephemeral),
+      ephemeral: ephemeralMode,
     });
   }
 
   let deliveryMessage = args.message;
-  if (dependencies === productionDependencies && !args.preserveMessage && !args.event.ephemeral) {
+  if (dependencies === productionDependencies && !args.preserveMessage && !ephemeralMode) {
     try {
       const comparison = await loadPriorDeliveredAlertComparison({ currentEventId: args.event.id, assetId: args.event.assetId, chain: args.event.chain });
       deliveryMessage = renderMomentumUpdate(comparison) ?? args.message;
@@ -189,7 +192,7 @@ export async function deliverAlphaSemanticEvent(args: {
       const preferenceKey = preferenceKeyForSemanticEvent(args.event);
       if (preferenceKey && !await dependencies.strategyEnabled(user.telegram_id, preferenceKey)) continue;
 
-      if (dependencies === productionDependencies && args.event.ephemeral) {
+      if (ephemeralMode) {
         if (!claimEphemeralDelivery(args.event, user)) continue;
         try {
           const sendResult = await dependencies.send(user.telegram_id, deliveryMessage, args.buttons);
