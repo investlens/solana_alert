@@ -10,6 +10,7 @@ import {
   getRobinhoodBlockNumberResilient,
   getRobinhoodLogsResilient,
 } from '../../rpc.js';
+import { rememberAuthoritativePonsToken } from '../../launchSecurity.js';
 
 import type {
   RobinhoodDiscoveryBatch,
@@ -59,6 +60,10 @@ export async function discoverFromPons(
     const args = log.args;
     const tokenAddress = args.token;
     if (!tokenAddress) continue;
+
+    // The factory log itself is authoritative PONS lineage. Seed this before
+    // any database access so a Supabase outage cannot downgrade the token to CUSTOM.
+    rememberAuthoritativePonsToken(tokenAddress);
 
     let tokenMetadata: Awaited<ReturnType<typeof getRobinhoodTokenMetadata>> | null = null;
     try {
