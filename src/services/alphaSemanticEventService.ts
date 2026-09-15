@@ -1,7 +1,15 @@
 import { supabase } from './supabase.js';
+import { isTransientDatabaseError } from './databaseLoadGovernor.js';
 import { normalizeCoreDecisionMetrics, normalizeNotificationMarketContext, verifiedPonsPreIndexValuation } from '../ui/notificationMarketContext.js';
 
 export type AlphaSemanticEventType = 'DEX_PAID' | 'BOOST' | 'VOLUME_SURGE' | 'BUILDING' | 'CONFIRMED' | 'RUNNER' | 'COOLING' | 'WEAKENING' | 'DANGER' | 'DEV_TRANSFER' | 'DEV_SELL' | 'DEV_BURN' | 'LIQUIDITY_RISK' | 'WALLET_CLUSTER' | 'RUNNER_50' | 'RUNNER_100' | 'ATH_OBSERVATION' | 'NEW_ATH' | 'X_REPUTED_MENTION' | 'PONS_PROVEN_DEV_LAUNCH';
+
+export type AlphaSemanticEventRecord = {
+  id: number;
+  event_identity: string;
+  ephemeral?: boolean;
+  raw_snapshot?: Record<string, unknown>;
+};
 
 const OUTCOME_PRICE_TYPES = new Set<AlphaSemanticEventType>([
   'DEX_PAID',
@@ -89,7 +97,7 @@ export async function persistAlphaSemanticEventRecord(args: {
   identity: string; type: AlphaSemanticEventType; assetId: string; chain: string;
   intelligenceState?: string | null; strategyKey?: string | null; symbol?: string | null;
   rawSnapshot: Record<string, unknown>; alertedAt?: string;
-}): Promise<{ id: number; event_identity: string } | null> {
+}): Promise<AlphaSemanticEventRecord | null> {
   const alertedAt = args.alertedAt ?? new Date().toISOString();
   const rawSnapshot = await ensureVerifiedOutcomeEntryPrice(args);
   const event = buildAlphaSemanticEvent({ ...args, rawSnapshot }, alertedAt);
@@ -99,18 +107,43 @@ export async function persistAlphaSemanticEventRecord(args: {
   return data ? { id: Number(data.id), event_identity: String(data.event_identity) } : null;
 }
 
+function stableEphemeralEventId(eventIdentity: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < eventIdentity.length; index += 1) {
+    hash ^= eventIdentity.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return -Math.max(1, hash >>> 0);
+}
+
 export async function persistOrLoadAlphaSemanticEventRecord(args: {
   identity: string; type: AlphaSemanticEventType; assetId: string; chain: string;
   intelligenceState?: string | null; strategyKey?: string | null; symbol?: string | null;
   rawSnapshot: Record<string, unknown>; alertedAt?: string;
-}): Promise<{ id: number; event_identity: string }> {
-  const inserted = await persistAlphaSemanticEventRecord(args);
-  if (inserted) return inserted;
+}): Promise<AlphaSemanticEventRecord> {
   const eventIdentity = `v2:${args.type}:${args.identity}`;
-  const { data, error } = await supabase.from('alpha_alert_events').select('id,event_identity')
-    .eq('event_identity', eventIdentity).single();
-  if (error) throw error;
-  return { id: Number(data.id), event_identity: String(data.event_identity) };
+  try {
+    const inserted = await persistAlphaSemanticEventRecord(args);
+    if (inserted) return inserted;
+    const { data, error } = await supabase.from('alpha_alert_events').select('id,event_identity')
+      .eq('event_identity', eventIdentity).single();
+    if (error) throw error;
+    return { id: Number(data.id), event_identity: String(data.event_identity) };
+  } catch (error) {
+    if (!isTransientDatabaseError(error)) throw error;
+    console.warn('[AlphaSemanticEvent] Persistence unavailable; using transient in-memory event identity.', {
+      eventIdentity,
+      type: args.type,
+      assetId: args.assetId,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      id: stableEphemeralEventId(eventIdentity),
+      event_identity: eventIdentity,
+      ephemeral: true,
+      raw_snapshot: structuredClone(args.rawSnapshot),
+    };
+  }
 }
 
 export function buildAlphaSemanticEvent(args: {
