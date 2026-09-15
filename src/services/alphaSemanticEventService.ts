@@ -11,6 +11,19 @@ export type AlphaSemanticEventRecord = {
   raw_snapshot?: Record<string, unknown>;
 };
 
+type EphemeralEvidence = { rawSnapshot: Record<string, unknown>; cachedAt: number };
+const EPHEMERAL_EVIDENCE_TTL_MS = 6 * 60 * 60 * 1000;
+const ephemeralEvidence = new Map<string, EphemeralEvidence>();
+
+export function getEphemeralSemanticEventEvidence(eventIdentity: string): Record<string, unknown> | null {
+  const now = Date.now();
+  for (const [key, value] of ephemeralEvidence) {
+    if (now - value.cachedAt > EPHEMERAL_EVIDENCE_TTL_MS) ephemeralEvidence.delete(key);
+  }
+  const cached = ephemeralEvidence.get(eventIdentity);
+  return cached ? structuredClone(cached.rawSnapshot) : null;
+}
+
 const OUTCOME_PRICE_TYPES = new Set<AlphaSemanticEventType>([
   'DEX_PAID',
   'BOOST',
@@ -131,6 +144,8 @@ export async function persistOrLoadAlphaSemanticEventRecord(args: {
     return { id: Number(data.id), event_identity: String(data.event_identity) };
   } catch (error) {
     if (!isTransientDatabaseError(error)) throw error;
+    const rawSnapshot = structuredClone(args.rawSnapshot);
+    ephemeralEvidence.set(eventIdentity, { rawSnapshot, cachedAt: Date.now() });
     console.warn('[AlphaSemanticEvent] Persistence unavailable; using transient in-memory event identity.', {
       eventIdentity,
       type: args.type,
@@ -141,7 +156,7 @@ export async function persistOrLoadAlphaSemanticEventRecord(args: {
       id: stableEphemeralEventId(eventIdentity),
       event_identity: eventIdentity,
       ephemeral: true,
-      raw_snapshot: structuredClone(args.rawSnapshot),
+      raw_snapshot: rawSnapshot,
     };
   }
 }
