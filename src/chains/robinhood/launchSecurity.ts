@@ -9,7 +9,7 @@ function normalize(value: string): string {
   return value.trim().toLowerCase();
 }
 
-const RECENT_PONS_CACHE_MS = 60_000;
+const RECENT_PONS_CACHE_MS = 5 * 60_000;
 const RECENT_PONS_CACHE_HOURS = 2;
 const RECENT_PONS_CACHE_LIMIT = 1_500;
 let recentPonsTokens = new Set<string>();
@@ -46,6 +46,10 @@ async function refreshRecentPonsCache(): Promise<void> {
         lookbackHours: RECENT_PONS_CACHE_HOURS,
       });
     } catch (error) {
+      // Back off after a failed refresh so a Supabase outage cannot force every
+      // candidate back through the same census query. Authoritative live PONS
+      // tokens already remembered in memory remain usable.
+      recentPonsCacheAt = Date.now();
       console.warn('[RobinhoodLaunchSecurity] Recent PONS cache refresh failed; retaining last-good census.', {
         cachedTokens: recentPonsTokens.size,
         reason: error instanceof Error ? error.message : String(error),
@@ -88,11 +92,15 @@ export async function classifyRobinhoodLaunch(tokenAddress: string): Promise<Lau
   if (recentPonsTokens.has(token)) return 'PONS';
 
   try {
+    // EVM addresses are exact identifiers. Avoid ILIKE here: it prevents the
+    // existing btree index from serving this very hot lookup efficiently.
+    // Live PONS detections are normalized and remembered above, while the DB
+    // lookup remains a durable fallback for normalized historical rows.
     const { data, error } = await supabase
       .from('pons_launches')
       .select('id')
       .eq('chain', 'robinhood')
-      .ilike('token_address', token)
+      .eq('token_address', token)
       .limit(1)
       .maybeSingle();
     if (error) throw error;
