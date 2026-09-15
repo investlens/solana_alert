@@ -10,6 +10,7 @@ import {
 import {
   scanRobinhoodSellability,
 } from '../chains/robinhood/security/sellabilityScanner.js';
+import { classifyRobinhoodLaunch } from '../chains/robinhood/launchSecurity.js';
 
 export type RecordOpportunityAndEmitInput =
   OpportunityInput;
@@ -48,7 +49,7 @@ function numericPoolFee(
   return null;
 }
 
-function isPonsOpportunity(
+function hasExplicitPonsIdentity(
   args: RecordOpportunityAndEmitInput,
 ): boolean {
   const strategy =
@@ -67,6 +68,26 @@ function isPonsOpportunity(
     strategy.startsWith('PONS_') ||
     sourceAgent.includes('PONS')
   );
+}
+
+async function isPonsOpportunity(
+  args: RecordOpportunityAndEmitInput,
+): Promise<boolean> {
+  if (hasExplicitPonsIdentity(args)) {
+    return true;
+  }
+
+  const chain = String(args.chain ?? '').toLowerCase();
+  if (chain !== 'robinhood') {
+    return false;
+  }
+
+  // Existing-token lifecycle strategies intentionally use generic strategy
+  // names (EXISTING_TOKEN_*). Preserve authoritative launch lineage so a
+  // genuine PONS token does not get misclassified as generic ONCHAIN and
+  // blocked solely because an ONCHAIN pool-fee hint is unavailable.
+  // classifyRobinhoodLaunch() is fail-closed: lookup failures return CUSTOM.
+  return (await classifyRobinhoodLaunch(args.assetId)) === 'PONS';
 }
 
 async function passesRobinhoodSellabilityGate(
@@ -92,7 +113,7 @@ async function passesRobinhoodSellabilityGate(
   }
 
   const source =
-    isPonsOpportunity(args)
+    (await isPonsOpportunity(args))
       ? 'PONS'
       : 'ONCHAIN';
 
