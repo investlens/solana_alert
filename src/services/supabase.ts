@@ -76,7 +76,8 @@ function isDeliverableUsersRead(url: string, init?: RequestInit): boolean {
 }
 
 function isDeliveryReservation(url: string): boolean {
-  return url.includes('/rest/v1/rpc/reserve_opportunity_delivery');
+  return url.includes('/rest/v1/rpc/reserve_opportunity_delivery') ||
+    url.includes('/rest/v1/rpc/reserve_alpha_semantic_delivery');
 }
 
 function isCriticalRequest(url: string, init?: RequestInit): boolean {
@@ -91,6 +92,8 @@ function isCriticalRequest(url: string, init?: RequestInit): boolean {
     url.includes('/rest/v1/strategy_settings') ||
     url.includes('/rest/v1/alerts') ||
     url.includes('/rest/v1/alert_deliveries') ||
+    url.includes('/rest/v1/alpha_alert_event_deliveries') ||
+    url.includes('/rest/v1/pons_launches') ||
     url.includes('/rest/v1/users')
   ) {
     return true;
@@ -102,7 +105,8 @@ function isCriticalRequest(url: string, init?: RequestInit): boolean {
     url.includes('/rest/v1/user_') ||
     url.includes('/rest/v1/wallet_') ||
     url.includes('/rest/v1/alerts') ||
-    url.includes('/rest/v1/alert_deliveries')
+    url.includes('/rest/v1/alert_deliveries') ||
+    url.includes('/rest/v1/alpha_alert_event_deliveries')
   )) {
     return true;
   }
@@ -116,6 +120,7 @@ function cacheableCriticalGet(url: string, init?: RequestInit): boolean {
     url.includes('/rest/v1/user_tracked_wallets') ||
     url.includes('/rest/v1/wallet_activity_deliveries') ||
     url.includes('/rest/v1/strategy_settings') ||
+    url.includes('/rest/v1/pons_launches') ||
     isDeliverableUsersRead(url, init)
   );
 }
@@ -146,9 +151,9 @@ function reservationKey(body: string | null): string | null {
   if (!body) return null;
   try {
     const parsed = JSON.parse(body) as Record<string, unknown>;
-    const opportunityId = String(parsed.p_opportunity_id ?? '');
+    const opportunityId = String(parsed.p_opportunity_id ?? parsed.p_alert_event_id ?? '');
     const telegramId = String(parsed.p_telegram_id ?? '');
-    const identity = String(parsed.p_delivery_identity ?? '');
+    const identity = String(parsed.p_delivery_identity ?? parsed.p_delivery_channel ?? '');
     if (!opportunityId || !telegramId) return null;
     return `${opportunityId}:${telegramId}:${identity}`;
   } catch {
