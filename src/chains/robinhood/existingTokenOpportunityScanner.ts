@@ -72,7 +72,7 @@ export function buildExistingTokenUniverse(args: { now?: number; opportunities?:
   const merged = new Map<string, ExistingTokenUniverseEntry>();
   const add = (row: UniverseRow, tier: ExistingTokenTier, watched = false) => {
     const raw = row.asset_id ?? row.token_address ?? row.opportunities?.asset_id;
-    if (!raw || (row.opportunities?.chain && row.opportunities.chain !== 'robinhood')) return;
+    if (!raw || (row.opportunities?.chain && row.opportunities?.chain !== 'robinhood')) return;
     const token = normalize(raw); const seen = Date.parse(rowTime(row));
     const extended = watched || (['NEW', 'WATCHING', 'APPROVED'].includes(String(row.status ?? '').toUpperCase()) &&
       ['EXISTING_TOKEN_MONITOR', 'EXISTING_TOKEN_REIGNITION', 'EXISTING_TOKEN_BREAKOUT', 'EXISTING_TOKEN_RUNNER'].includes(String(row.strategy_key ?? '').toUpperCase()));
@@ -233,6 +233,7 @@ export async function refreshExistingTokenOpportunityScanner() {
         : error instanceof DexScreenerHttpTimeoutError ? 'HTTP_TIMEOUT' : error instanceof DexScreenerMalformedResponseError ? 'MALFORMED_RESPONSE'
         : error instanceof DexScreenerProviderHttpError ? 'PROVIDER_HTTP_ERROR' : isDexScreenerProviderBackoffError(error) ? 'RATE_LIMITED'
         : reason.startsWith('scanner persistence failed') ? 'PERSISTENCE_FAILED' : 'TOKEN_SCAN_FAILED';
+      if (category === 'NO_USABLE_PAIR') recordCompletedExistingTokenScans([entry]);
       if (category === 'DEFERRED_QUEUE_CAPACITY') metrics.queue_deferred++; else if (category === 'NO_USABLE_PAIR') metrics.no_market++; else metrics.failed++;
       metrics.failure_reasons[category] = (metrics.failure_reasons[category] ?? 0) + 1;
       console.warn('[ExistingTokenScanner] token failed', { token: entry.token, category, reason });
