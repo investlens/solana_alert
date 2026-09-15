@@ -1,6 +1,6 @@
 import { parseAbiItem } from 'viem';
 import { getPonsFactoryDeployments, type PonsFactoryDeployment } from './ponsContracts.js';
-import { decodePonsLaunch, launchIdentity, retryPonsOperation, type PonsLaunch, type PonsRetryOptions, type PonsRpcLog, type PonsScannerRpc } from './ponsHistoricalLaunchScanner.js';
+import { concisePonsError, decodePonsLaunch, launchIdentity, retryPonsOperation, type PonsLaunch, type PonsRetryOptions, type PonsRpcLog, type PonsScannerRpc } from './ponsHistoricalLaunchScanner.js';
 
 export type PonsLiveDetectorStorage = {
   getLiveCheckpoint(factoryId: string): Promise<bigint | null>;
@@ -34,100 +34,97 @@ export async function pollPonsLiveLaunchesOnce(
   let detected = 0; let handled = 0; let duplicates = 0;
 
   for (const factory of factories) {
-    let checkpoint: bigint | null = null;
-    if (options.fromBlock == null) {
-      if (!ponsLiveDbEnabled()) {
-        const cached = liveCheckpointCache.get(factory.id);
-        if (cached == null) {
-          checkpoint = head > 300n ? head - 300n : 0n;
-          log(`[PonsLive] DB recovery mode factory=${factory.id}; cold-start recovery from block=${checkpoint + 1n}`);
-        } else {
-          checkpoint = cached;
-        }
-      } else {
-        try {
-          checkpoint = await retryPonsOperation('liveCheckpointRead', () => storage.getLiveCheckpoint(factory.id), retry);
-          if (checkpoint != null) liveCheckpointCache.set(factory.id, checkpoint);
-          else checkpoint = liveCheckpointCache.get(factory.id) ?? null;
-        } catch (error) {
+    try {
+      let checkpoint: bigint | null = null;
+      if (options.fromBlock == null) {
+        if (!ponsLiveDbEnabled()) {
           const cached = liveCheckpointCache.get(factory.id);
           if (cached == null) {
-            // On a cold start we deliberately scan a conservative recent window
-            // rather than jumping to head and silently missing launches.
             checkpoint = head > 300n ? head - 300n : 0n;
-            log(`[PonsLive] checkpoint database unavailable factory=${factory.id}; cold-start recovery from block=${checkpoint + 1n}`);
+            log(`[PonsLive] DB recovery mode factory=${factory.id}; cold-start recovery from block=${checkpoint + 1n}`);
           } else {
             checkpoint = cached;
-            log(`[PonsLive] checkpoint database unavailable factory=${factory.id}; using memory checkpoint=${cached}`);
+          }
+        } else {
+          try {
+            checkpoint = await retryPonsOperation('liveCheckpointRead', () => storage.getLiveCheckpoint(factory.id), retry);
+            if (checkpoint != null) liveCheckpointCache.set(factory.id, checkpoint);
+            else checkpoint = liveCheckpointCache.get(factory.id) ?? null;
+          } catch (error) {
+            const cached = liveCheckpointCache.get(factory.id);
+            if (cached == null) {
+              checkpoint = head > 300n ? head - 300n : 0n;
+              log(`[PonsLive] checkpoint database unavailable factory=${factory.id}; cold-start recovery from block=${checkpoint + 1n}`);
+            } else {
+              checkpoint = cached;
+              log(`[PonsLive] checkpoint database unavailable factory=${factory.id}; using memory checkpoint=${cached}`);
+            }
           }
         }
       }
-    }
 
-    // This service is the real-time lane, not the historical backfill worker.
-    // If its dedicated live checkpoint is stale, staying on that checkpoint can
-    // make the scanner permanently lose ground on a busy factory. Recover to a
-    // recent head window instead. Historical checkpoints/tables are untouched,
-    // so the normal backfill path can still fill the skipped history safely.
-    if (options.fromBlock == null && checkpoint != null) {
-      const maxLag = options.maxLiveLagBlocks ?? 10_000n;
-      const recoveryBlocks = options.liveRecoveryBlocks ?? 1_000n;
-      const lag = head > checkpoint ? head - checkpoint : 0n;
-      if (lag > maxLag) {
-        const recoveredCheckpoint = head > recoveryBlocks ? head - recoveryBlocks : 0n;
-        log(`[PonsLive] stale live checkpoint factory=${factory.id} lagBlocks=${lag}; recovering near head from block=${recoveredCheckpoint + 1n}`);
-        checkpoint = recoveredCheckpoint;
-        liveCheckpointCache.set(factory.id, checkpoint);
+      if (options.fromBlock == null && checkpoint != null) {
+        const maxLag = options.maxLiveLagBlocks ?? 10_000n;
+        const recoveryBlocks = options.liveRecoveryBlocks ?? 1_000n;
+        const lag = head > checkpoint ? head - checkpoint : 0n;
+        if (lag > maxLag) {
+          const recoveredCheckpoint = head > recoveryBlocks ? head - recoveryBlocks : 0n;
+          log(`[PonsLive] stale live checkpoint factory=${factory.id} lagBlocks=${lag}; recovering near head from block=${recoveredCheckpoint + 1n}`);
+          checkpoint = recoveredCheckpoint;
+          liveCheckpointCache.set(factory.id, checkpoint);
+        }
       }
-    }
 
-    const requestedFrom = options.fromBlock ?? (checkpoint == null ? head : checkpoint + 1n);
-    const maximum = options.maxBlocksPerPoll ?? 2_500n;
-    const from = requestedFrom;
-    if (from > head) continue;
-    const to = from + maximum - 1n < head ? from + maximum - 1n : head;
-    const logs = await retryPonsOperation('liveGetLogs', () => rpc.getLogs({
-      address: factory.address, event: parseAbiItem(factory.tokenLaunchedEvent), fromBlock: from, toBlock: to,
-    }), retry);
-    const blockTimestamps = new Map<bigint, bigint>();
-    const launches: PonsLaunch[] = [];
-    for (const event of logs as readonly PonsRpcLog[]) {
-      if (event.blockNumber == null) continue;
-      let timestamp = blockTimestamps.get(event.blockNumber);
-      if (timestamp == null) {
-        timestamp = (await retryPonsOperation('liveGetBlock', () => rpc.getBlock({ blockNumber: event.blockNumber! }), retry)).timestamp;
-        blockTimestamps.set(event.blockNumber, timestamp);
+      const requestedFrom = options.fromBlock ?? (checkpoint == null ? head : checkpoint + 1n);
+      const maximum = options.maxBlocksPerPoll ?? 2_500n;
+      const from = requestedFrom;
+      if (from > head) continue;
+      const to = from + maximum - 1n < head ? from + maximum - 1n : head;
+      const logs = await retryPonsOperation('liveGetLogs', () => rpc.getLogs({
+        address: factory.address, event: parseAbiItem(factory.tokenLaunchedEvent), fromBlock: from, toBlock: to,
+      }), retry);
+      const blockTimestamps = new Map<bigint, bigint>();
+      const launches: PonsLaunch[] = [];
+      for (const event of logs as readonly PonsRpcLog[]) {
+        if (event.blockNumber == null) continue;
+        let timestamp = blockTimestamps.get(event.blockNumber);
+        if (timestamp == null) {
+          timestamp = (await retryPonsOperation('liveGetBlock', () => rpc.getBlock({ blockNumber: event.blockNumber! }), retry)).timestamp;
+          blockTimestamps.set(event.blockNumber, timestamp);
+        }
+        const launch = decodePonsLaunch(factory, event, timestamp);
+        if (!launch) continue;
+        detected += 1;
+        const identity = launchIdentity(launch);
+        if (seen.has(identity)) { duplicates += 1; continue; }
+        seen.add(identity); launches.push(launch);
       }
-      const launch = decodePonsLaunch(factory, event, timestamp);
-      if (!launch) continue;
-      detected += 1;
-      const identity = launchIdentity(launch);
-      if (seen.has(identity)) { duplicates += 1; continue; }
-      seen.add(identity); launches.push(launch);
-    }
 
-    if (launches.length && ponsLiveDbEnabled()) {
-      try {
-        await retryPonsOperation('liveLaunchUpsert', () => storage.persistLaunches(launches), retry);
-      } catch (error) {
-        log(`[PonsLive] launch persistence unavailable factory=${factory.id}; routing ${launches.length} launch(es) without blocking alerts`);
+      if (launches.length && ponsLiveDbEnabled()) {
+        try {
+          await retryPonsOperation('liveLaunchUpsert', () => storage.persistLaunches(launches), retry);
+        } catch (error) {
+          log(`[PonsLive] launch persistence unavailable factory=${factory.id}; routing ${launches.length} launch(es) without blocking alerts`);
+        }
       }
-    }
 
-    for (const launch of launches) { await handleLaunch(launch); handled += 1; }
+      for (const launch of launches) { await handleLaunch(launch); handled += 1; }
 
-    // Advance process-local progress only after every launch in the range has
-    // reached the router. This prevents a persistence outage from halting the
-    // scanner while preserving at-least-once alert handling semantics.
-    liveCheckpointCache.set(factory.id, to);
-    if (ponsLiveDbEnabled()) {
-      try {
-        await retryPonsOperation('liveCheckpointUpsert', () => storage.setLiveCheckpoint(factory, to), retry);
-      } catch (error) {
-        log(`[PonsLive] checkpoint persistence unavailable factory=${factory.id}; memory checkpoint=${to}`);
+      // Advance only after this factory's range has reached the router. A failed
+      // factory keeps its previous checkpoint and retries later, while every
+      // other factory continues in the same poll cycle.
+      liveCheckpointCache.set(factory.id, to);
+      if (ponsLiveDbEnabled()) {
+        try {
+          await retryPonsOperation('liveCheckpointUpsert', () => storage.setLiveCheckpoint(factory, to), retry);
+        } catch (error) {
+          log(`[PonsLive] checkpoint persistence unavailable factory=${factory.id}; memory checkpoint=${to}`);
+        }
       }
+      log(`[PonsLive] factory=${factory.id} blocks=${from}-${to} detected=${launches.length}`);
+    } catch (error) {
+      log(`[PonsLive] factory=${factory.id} scan failed reason=${concisePonsError(error)}; continuing other factories`);
     }
-    log(`[PonsLive] factory=${factory.id} blocks=${from}-${to} detected=${launches.length}`);
   }
   return { detected, handled, duplicates };
 }
