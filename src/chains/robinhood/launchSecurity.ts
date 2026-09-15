@@ -10,8 +10,6 @@ function normalize(value: string): string {
 }
 
 const RECENT_PONS_CACHE_MS = 60_000;
-// Real-time positive alerts only need a compact recent launch census. Older tokens
-// still fall through to the exact per-token authoritative lookup below.
 const RECENT_PONS_CACHE_HOURS = 2;
 const RECENT_PONS_CACHE_LIMIT = 1_500;
 let recentPonsTokens = new Set<string>();
@@ -62,17 +60,17 @@ async function refreshRecentPonsCache(): Promise<void> {
 async function verifyPonsOnChainDuringDatabaseOutage(tokenAddress: string): Promise<boolean> {
   try {
     const { getPonsLaunchState } = await import('./ponsLaunchState.js');
-    const state = await getPonsLaunchState(tokenAddress);
+    const state = await getPonsLaunchState(tokenAddress, { skipIndexedLookup: true });
     if (!state.exists || normalize(state.token) !== normalize(tokenAddress)) return false;
     rememberAuthoritativePonsToken(tokenAddress);
-    console.log('[RobinhoodLaunchSecurity] PONS identity verified directly by factory during census outage.', {
+    console.log('[RobinhoodLaunchSecurity] PONS identity verified directly by current factory during census outage.', {
       token: normalize(tokenAddress),
       deployer: state.deployer,
       launchConfigId: state.launchConfigId.toString(),
     });
     return true;
   } catch (error) {
-    console.warn('[RobinhoodLaunchSecurity] On-chain PONS fallback could not verify token.', {
+    console.warn('[RobinhoodLaunchSecurity] Direct factory PONS fallback could not verify token.', {
       token: normalize(tokenAddress),
       reason: error instanceof Error ? error.message : String(error),
     });
@@ -106,7 +104,7 @@ export async function classifyRobinhoodLaunch(tokenAddress: string): Promise<Lau
   } catch (error) {
     if (recentPonsTokens.has(token)) return 'PONS';
     if (await verifyPonsOnChainDuringDatabaseOutage(tokenAddress)) return 'PONS';
-    console.warn('[RobinhoodLaunchSecurity] PONS census unavailable and factory did not verify token; remaining fail-closed CUSTOM.', {
+    console.warn('[RobinhoodLaunchSecurity] PONS census unavailable and current factory did not verify token; remaining fail-closed CUSTOM.', {
       token,
       cachedPonsTokens: recentPonsTokens.size,
       reason: error instanceof Error ? error.message : String(error),
