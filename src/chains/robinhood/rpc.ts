@@ -46,8 +46,9 @@ export const robinhoodArchiveClient =
   });
 
 const robinhoodRpcUrls = [...new Set([
-  OFFICIAL_RPC,
   String(process.env.ROBINHOOD_RPC_URL ?? '').trim(),
+  robinhoodArchiveRpcUrl,
+  OFFICIAL_RPC,
   String(process.env.ROBINHOOD_RPC_FALLBACK_URL ?? '').trim(),
   PUBLICNODE_RPC,
 ].filter(Boolean))];
@@ -150,6 +151,11 @@ export async function getRobinhoodBlockNumberResilient(): Promise<bigint> {
 
 export async function getRobinhoodBlockResilient(args: any): Promise<any> {
   return withRobinhoodRpcFailover('getBlock', client => client.getBlock(args as any));
+}
+
+export async function requestRobinhoodRpcResilient(args: any): Promise<any> {
+  const method = String(args?.method ?? 'rpcRequest');
+  return withRobinhoodRpcFailover(method, client => (client as any).request(args));
 }
 
 export const robinhoodResilientScannerRpc = {
