@@ -30,7 +30,8 @@ export function isTransientDatabaseError(error: unknown): boolean {
     .filter(Boolean).join(' ').toLowerCase();
   return text.includes('pgrst002') || text.includes('pgrst003') || text.includes('503') || text.includes('504') ||
     text.includes('statement timeout') || text.includes('canceling statement') || text.includes('fetch failed') ||
-    text.includes('connect timeout') || text.includes('connection timeout') || text.includes('schema cache');
+    text.includes('connect timeout') || text.includes('connection timeout') || text.includes('schema cache') ||
+    text.includes('aborted due to timeout') || text.includes('operation was aborted');
 }
 
 function refreshState(now = Date.now()) {
