@@ -125,7 +125,8 @@ async function loadUniverse() {
   const now = Date.now();
   if (cachedUniverse.length && now - lastUniverseRefreshAt < UNIVERSE_REFRESH_MS) return cachedUniverse;
   const cutoff = new Date(now - config.existingTokenRetentionHours * 3_600_000).toISOString();
-  const loaded = await runDatabaseWork('BACKGROUND', async () => {
+  // Lifecycle monitoring is an alert-producing control path. It must not silently starve behind generic background DB work.
+  const loaded = await runDatabaseWork('CRITICAL', async () => {
     const [opportunities, events, watched] = await Promise.all([
       supabase.from('opportunities').select('asset_id,status,strategy_key,last_observed_at,updated_at')
         .eq('chain', 'robinhood').in('status', ['NEW', 'WATCHING', 'APPROVED']).order('updated_at', { ascending: false }).limit(MAX_UNIVERSE_ROWS_PER_SOURCE),
