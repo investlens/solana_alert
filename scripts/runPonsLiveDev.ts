@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { robinhoodPublicClient } from '../src/chains/robinhood/rpc.js';
+import { robinhoodResilientScannerRpc } from '../src/chains/robinhood/rpc.js';
 import { getPonsLiveConfig } from '../src/chains/robinhood/ponsLiveConfig.js';
 import { pollPonsLiveLaunchesOnce, supabasePonsLiveDetectorStorage } from '../src/chains/robinhood/ponsLiveLaunchDetector.js';
 import { createPonsLiveLaunchRouter } from '../src/chains/robinhood/ponsLiveLaunchRouter.js';
@@ -89,13 +89,13 @@ const dryStorage = {
 };
 if (mode.kind === 'ONCE') {
   console.log('[PonsLive] mode=SHADOW dryRun=true liveStateWrites=0 realTrades=0');
-  const result = await pollPonsLiveLaunchesOnce(robinhoodPublicClient as never, dryStorage, route, { retry: liveRetry });
+  const result = await pollPonsLiveLaunchesOnce(robinhoodResilientScannerRpc as never, dryStorage, route, { retry: liveRetry });
   console.log(`[PonsLive] complete detected=${result.detected} handled=${result.handled} duplicates=${result.duplicates} liveStateWrites=0 realTrades=0`);
 } else {
   console.log('[PonsLive] mode=SHADOW dryRun=true realTrades=0 liveStateWrites=enabled');
   startPonsOutcomeCollectionLoop();
   await runPonsLivePollingLoop({
     pollIntervalMs: ponsLivePollInterval(),
-    poll: () => pollPonsLiveLaunchesOnce(robinhoodPublicClient as never, supabasePonsLiveDetectorStorage, route, { retry: liveRetry }),
+    poll: () => pollPonsLiveLaunchesOnce(robinhoodResilientScannerRpc as never, supabasePonsLiveDetectorStorage, route, { retry: liveRetry }),
   });
 }
