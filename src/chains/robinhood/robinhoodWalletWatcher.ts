@@ -13,7 +13,7 @@ import { recordWalletTrade } from '../../agents/smartWalletAgent.js';
 import { recordWalletBuy, recordWalletSell } from '../../agents/walletIntelligenceAgent.js';
 import { getRobinhoodMarketSnapshot } from './market.js';
 import { PONS_CONTRACTS } from './ponsContracts.js';
-import { robinhoodPublicClient } from './rpc.js';
+import { robinhoodArchiveClient, robinhoodPublicClient } from './rpc.js';
 import { getRobinhoodTokenMetadata } from './tokenMetadata.js';
 
 const transferEvent = parseAbiItem(
@@ -200,8 +200,8 @@ export async function scanRobinhoodWalletActivity(args: {
   for (const batch of chunks(args.wallets, ADDRESS_BATCH_SIZE)) {
     const walletFilter = indexedAddressFilter(batch);
     const [outgoing, incoming] = await Promise.all([
-      robinhoodPublicClient.getLogs({ event: transferEvent, args: { from: walletFilter }, fromBlock: args.fromBlock, toBlock: args.toBlock }),
-      robinhoodPublicClient.getLogs({ event: transferEvent, args: { to: walletFilter }, fromBlock: args.fromBlock, toBlock: args.toBlock }),
+      robinhoodArchiveClient.getLogs({ event: transferEvent, args: { from: walletFilter }, fromBlock: args.fromBlock, toBlock: args.toBlock }),
+      robinhoodArchiveClient.getLogs({ event: transferEvent, args: { to: walletFilter }, fromBlock: args.fromBlock, toBlock: args.toBlock }),
     ]);
     transferLogs.push(...outgoing, ...incoming);
   }
@@ -209,8 +209,8 @@ export async function scanRobinhoodWalletActivity(args: {
   for (const batch of chunks(args.wallets, ADDRESS_BATCH_SIZE)) {
     const deployerFilter = indexedAddressFilter(batch);
     const [v1LaunchLogs, v2LaunchLogs] = await Promise.all([
-      robinhoodPublicClient.getLogs({ address: getAddress(PONS_CONTRACTS.factory), event: tokenLaunchedEvent, args: { deployer: deployerFilter }, fromBlock: args.fromBlock, toBlock: args.toBlock }),
-      robinhoodPublicClient.getLogs({ address: getAddress(PONS_V2_LIVE_EMITTER), event: tokenLaunchedV2Event, args: { deployer: deployerFilter }, fromBlock: args.fromBlock, toBlock: args.toBlock }),
+      robinhoodArchiveClient.getLogs({ address: getAddress(PONS_CONTRACTS.factory), event: tokenLaunchedEvent, args: { deployer: deployerFilter }, fromBlock: args.fromBlock, toBlock: args.toBlock }),
+      robinhoodArchiveClient.getLogs({ address: getAddress(PONS_V2_LIVE_EMITTER), event: tokenLaunchedV2Event, args: { deployer: deployerFilter }, fromBlock: args.fromBlock, toBlock: args.toBlock }),
     ]);
     launchLogs.push(...v1LaunchLogs, ...v2LaunchLogs);
   }
@@ -220,11 +220,11 @@ export async function scanRobinhoodWalletActivity(args: {
   const events: WalletWatchEvent[] = [];
   for (const hash of txHashes) {
     const [transaction, receipt] = await Promise.all([
-      robinhoodPublicClient.getTransaction({ hash }),
-      robinhoodPublicClient.getTransactionReceipt({ hash }),
+      robinhoodArchiveClient.getTransaction({ hash }),
+      robinhoodArchiveClient.getTransactionReceipt({ hash }),
     ]);
     const transfers = transferEvidenceFromReceipt(receipt);
-    const block = await robinhoodPublicClient.getBlock({ blockNumber: receipt.blockNumber });
+    const block = await robinhoodArchiveClient.getBlock({ blockNumber: receipt.blockNumber });
     for (const wallet of args.wallets) {
       const launchedTokens = launchLogs.filter(log => log.transactionHash === hash && log.args.deployer && sameAddress(log.args.deployer, wallet))
         .flatMap(log => log.args.token ? [getAddress(log.args.token)] : []);
