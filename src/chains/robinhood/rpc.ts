@@ -22,6 +22,25 @@ export const robinhoodPublicClient =
     ),
   });
 
+const robinhoodArchiveRpcUrl = String(
+  process.env.ROBINHOOD_ARCHIVE_RPC_URL
+    ?? 'https://robinhood-mainnet-rpc.blockreq.com/v1/rpc/public',
+).trim();
+
+export const robinhoodArchiveClient =
+  createPublicClient({
+    chain: robinhoodChain,
+
+    transport: http(
+      robinhoodArchiveRpcUrl,
+      {
+        timeout: 12_000,
+        retryCount: 2,
+        retryDelay: 500,
+      },
+    ),
+  });
+
 export async function testRobinhoodRpc():
   Promise<{
     chainId: number;
