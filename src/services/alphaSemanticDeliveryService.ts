@@ -15,6 +15,8 @@ type InlineButton = { text: string; callback_data?: string; url?: string };
 export type UserFacingSemanticEvent = {
   id: number; eventIdentity: string; type: string; assetId: string; chain: string;
   strategyKey?: string | null;
+  ephemeral?: boolean;
+  rawSnapshot?: Record<string, unknown> | null;
 };
 
 type SemanticDeliveryDependencies = {
@@ -27,6 +29,27 @@ type SemanticDeliveryDependencies = {
   send: (telegramId: string, message: string, buttons?: InlineButton[][]) => Promise<number | null | void>;
   blocked: (telegramId: string) => Promise<void>;
 };
+
+const EPHEMERAL_CLAIM_TTL_MS = 6 * 60 * 60 * 1000;
+const ephemeralClaims = new Map<string, number>();
+
+function ephemeralClaimKey(event: UserFacingSemanticEvent, user: DeliverableUser): string {
+  return `${event.eventIdentity}:${user.telegram_id}`;
+}
+
+function claimEphemeralDelivery(event: UserFacingSemanticEvent, user: DeliverableUser, now = Date.now()): boolean {
+  for (const [key, claimedAt] of ephemeralClaims) {
+    if (now - claimedAt > EPHEMERAL_CLAIM_TTL_MS) ephemeralClaims.delete(key);
+  }
+  const key = ephemeralClaimKey(event, user);
+  if (ephemeralClaims.has(key)) return false;
+  ephemeralClaims.set(key, now);
+  return true;
+}
+
+function releaseEphemeralDelivery(event: UserFacingSemanticEvent, user: DeliverableUser): void {
+  ephemeralClaims.delete(ephemeralClaimKey(event, user));
+}
 
 export function preferenceKeyForSemanticEvent(event: UserFacingSemanticEvent): string | null {
   if (event.type === 'DEX_PAID') return DEX_PAID_STRATEGY_KEY;
@@ -85,13 +108,21 @@ export async function deliverAlphaSemanticEvent(args: {
   let launchType: LaunchClassification | null = null;
   if (dependencies === productionDependencies && isPositiveSemanticEvent(args.event.type) &&
       ['robinhood', 'solana'].includes(args.event.chain.toLowerCase())) {
-    let raw: Record<string, unknown> | null = null;
-    try {
-      raw = await loadSemanticRawSnapshot(args.event.id);
-    } catch (error) {
-      console.warn('[AlphaSemanticDelivery] Security evidence unavailable; positive alert suppressed fail-closed.', {
+    let raw: Record<string, unknown> | null = args.event.rawSnapshot ?? null;
+    if (!raw && !args.event.ephemeral) {
+      try {
+        raw = await loadSemanticRawSnapshot(args.event.id);
+      } catch (error) {
+        console.warn('[AlphaSemanticDelivery] Security evidence unavailable; positive alert suppressed fail-closed.', {
+          alertEventId: args.event.id, token: args.event.assetId,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+        return { delivered: 0, failed: 0 };
+      }
+    }
+    if (!raw) {
+      console.warn('[AlphaSemanticDelivery] Ephemeral security evidence missing; positive alert suppressed fail-closed.', {
         alertEventId: args.event.id, token: args.event.assetId,
-        reason: error instanceof Error ? error.message : String(error),
       });
       return { delivered: 0, failed: 0 };
     }
@@ -129,11 +160,12 @@ export async function deliverAlphaSemanticEvent(args: {
       liquidityUsd: safety.liquidityUsd,
       pairAgeMinutes: safety.pairAgeMinutes,
       ponsDeployer: safety.ponsDeployer,
+      ephemeral: Boolean(args.event.ephemeral),
     });
   }
 
   let deliveryMessage = args.message;
-  if (dependencies === productionDependencies && !args.preserveMessage) {
+  if (dependencies === productionDependencies && !args.preserveMessage && !args.event.ephemeral) {
     try {
       const comparison = await loadPriorDeliveredAlertComparison({ currentEventId: args.event.id, assetId: args.event.assetId, chain: args.event.chain });
       deliveryMessage = renderMomentumUpdate(comparison) ?? args.message;
@@ -156,6 +188,36 @@ export async function deliverAlphaSemanticEvent(args: {
     try {
       const preferenceKey = preferenceKeyForSemanticEvent(args.event);
       if (preferenceKey && !await dependencies.strategyEnabled(user.telegram_id, preferenceKey)) continue;
+
+      if (dependencies === productionDependencies && args.event.ephemeral) {
+        if (!claimEphemeralDelivery(args.event, user)) continue;
+        try {
+          const sendResult = await dependencies.send(user.telegram_id, deliveryMessage, args.buttons);
+          delivered += 1;
+          args.onTelegramAccepted?.(user);
+          console.log('[AlphaSemanticDelivery] Ephemeral Telegram accepted during DB outage.', {
+            eventIdentity: args.event.eventIdentity,
+            semanticEventType: args.event.type,
+            telegramId: user.telegram_id,
+            telegramMessageId: Number.isFinite(Number(sendResult)) ? Number(sendResult) : null,
+          });
+        } catch (error) {
+          releaseEphemeralDelivery(args.event, user);
+          failed += 1;
+          args.onFailure?.(error);
+          args.onRecipientFailure?.(user, error, 'telegram_send');
+          const reason = error instanceof Error ? error.message : String(error);
+          if (reason.includes('403')) await dependencies.blocked(user.telegram_id).catch(() => undefined);
+          console.error('[AlphaSemanticDelivery] Ephemeral Telegram delivery failed:', {
+            eventIdentity: args.event.eventIdentity,
+            semanticEventType: args.event.type,
+            telegramId: user.telegram_id,
+            reason,
+          });
+        }
+        continue;
+      }
+
       const leaseToken = createLeaseToken();
       if (!await dependencies.reserve(args.event, user, leaseToken)) continue;
       const result = await deliverReservedTelegram({
