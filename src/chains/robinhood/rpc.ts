@@ -44,14 +44,14 @@ export const robinhoodArchiveClient =
     ),
   });
 
-const robinhoodLogRpcUrls = [...new Set([
+const robinhoodRpcUrls = [...new Set([
   OFFICIAL_RPC,
   String(process.env.ROBINHOOD_RPC_URL ?? '').trim(),
   String(process.env.ROBINHOOD_RPC_FALLBACK_URL ?? '').trim(),
   PUBLICNODE_RPC,
 ].filter(Boolean))];
 
-const robinhoodLogClients = robinhoodLogRpcUrls.map(url => ({
+const robinhoodRpcClients = robinhoodRpcUrls.map(url => ({
   url,
   client: createPublicClient({
     chain: robinhoodChain,
@@ -68,6 +68,25 @@ function conciseRpcError(error: unknown): string {
   return message.replace(/\s+/g, ' ').slice(0, 220);
 }
 
+async function withRobinhoodRpcFailover<T>(
+  operation: string,
+  run: (client: (typeof robinhoodRpcClients)[number]['client']) => Promise<T>,
+): Promise<T> {
+  let lastError: unknown = null;
+  for (const { url, client } of robinhoodRpcClients) {
+    try {
+      return await run(client);
+    } catch (error) {
+      lastError = error;
+      console.warn(`[RobinhoodRpc] ${operation} provider failed; trying next provider`, {
+        provider: url,
+        reason: conciseRpcError(error),
+      });
+    }
+  }
+  throw lastError ?? new Error(`No Robinhood RPC provider available for ${operation}`);
+}
+
 /**
  * Log scanning is the most failure-prone Robinhood RPC workload. The official
  * endpoint can fail transiently, while PublicNode may reject older ranges as
@@ -75,36 +94,23 @@ function conciseRpcError(error: unknown): string {
  * allowing a single endpoint outage to stop launch discovery.
  */
 export async function getRobinhoodLogsResilient(args: any): Promise<any[]> {
-  let lastError: unknown = null;
-  for (const { url, client } of robinhoodLogClients) {
-    try {
-      return await client.getLogs(args as any) as any[];
-    } catch (error) {
-      lastError = error;
-      console.warn('[RobinhoodRpc] getLogs provider failed; trying next provider', {
-        provider: url,
-        reason: conciseRpcError(error),
-      });
-    }
-  }
-  throw lastError ?? new Error('No Robinhood RPC provider available for eth_getLogs');
+  return withRobinhoodRpcFailover('getLogs', async client =>
+    await client.getLogs(args as any) as any[]);
 }
 
 export async function getRobinhoodBlockNumberResilient(): Promise<bigint> {
-  let lastError: unknown = null;
-  for (const { url, client } of robinhoodLogClients) {
-    try {
-      return await client.getBlockNumber();
-    } catch (error) {
-      lastError = error;
-      console.warn('[RobinhoodRpc] blockNumber provider failed; trying next provider', {
-        provider: url,
-        reason: conciseRpcError(error),
-      });
-    }
-  }
-  throw lastError ?? new Error('No Robinhood RPC provider available for eth_blockNumber');
+  return withRobinhoodRpcFailover('blockNumber', client => client.getBlockNumber());
 }
+
+export async function getRobinhoodBlockResilient(args: any): Promise<any> {
+  return withRobinhoodRpcFailover('getBlock', client => client.getBlock(args as any));
+}
+
+export const robinhoodResilientScannerRpc = {
+  getBlockNumber: getRobinhoodBlockNumberResilient,
+  getLogs: getRobinhoodLogsResilient,
+  getBlock: getRobinhoodBlockResilient,
+};
 
 export async function testRobinhoodRpc():
   Promise<{
