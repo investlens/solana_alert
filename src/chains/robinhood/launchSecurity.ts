@@ -10,8 +10,10 @@ function normalize(value: string): string {
 }
 
 const RECENT_PONS_CACHE_MS = 60_000;
-const RECENT_PONS_CACHE_HOURS = 48;
-const RECENT_PONS_CACHE_LIMIT = 10_000;
+// Real-time positive alerts only need a compact recent launch census. Older tokens
+// still fall through to the exact per-token authoritative lookup below.
+const RECENT_PONS_CACHE_HOURS = 2;
+const RECENT_PONS_CACHE_LIMIT = 1_500;
 let recentPonsTokens = new Set<string>();
 let recentPonsCacheAt = 0;
 let recentPonsRefresh: Promise<void> | null = null;
@@ -41,6 +43,10 @@ async function refreshRecentPonsCache(): Promise<void> {
       }
       recentPonsTokens = next;
       recentPonsCacheAt = Date.now();
+      console.log('[RobinhoodLaunchSecurity] Recent PONS census refreshed.', {
+        cachedTokens: recentPonsTokens.size,
+        lookbackHours: RECENT_PONS_CACHE_HOURS,
+      });
     } catch (error) {
       console.warn('[RobinhoodLaunchSecurity] Recent PONS cache refresh failed; retaining last-good census.', {
         cachedTokens: recentPonsTokens.size,
