@@ -59,6 +59,27 @@ async function refreshRecentPonsCache(): Promise<void> {
   return recentPonsRefresh;
 }
 
+async function verifyPonsOnChainDuringDatabaseOutage(tokenAddress: string): Promise<boolean> {
+  try {
+    const { getPonsLaunchState } = await import('./ponsLaunchState.js');
+    const state = await getPonsLaunchState(tokenAddress);
+    if (!state.exists || normalize(state.token) !== normalize(tokenAddress)) return false;
+    rememberAuthoritativePonsToken(tokenAddress);
+    console.log('[RobinhoodLaunchSecurity] PONS identity verified directly by factory during census outage.', {
+      token: normalize(tokenAddress),
+      deployer: state.deployer,
+      launchConfigId: state.launchConfigId.toString(),
+    });
+    return true;
+  } catch (error) {
+    console.warn('[RobinhoodLaunchSecurity] On-chain PONS fallback could not verify token.', {
+      token: normalize(tokenAddress),
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
 export async function classifyRobinhoodLaunch(tokenAddress: string): Promise<LaunchClassification> {
   const token = normalize(tokenAddress);
 
@@ -84,7 +105,8 @@ export async function classifyRobinhoodLaunch(tokenAddress: string): Promise<Lau
     return 'CUSTOM';
   } catch (error) {
     if (recentPonsTokens.has(token)) return 'PONS';
-    console.warn('[RobinhoodLaunchSecurity] PONS census lookup failed; unknown token remains fail-closed CUSTOM.', {
+    if (await verifyPonsOnChainDuringDatabaseOutage(tokenAddress)) return 'PONS';
+    console.warn('[RobinhoodLaunchSecurity] PONS census unavailable and factory did not verify token; remaining fail-closed CUSTOM.', {
       token,
       cachedPonsTokens: recentPonsTokens.size,
       reason: error instanceof Error ? error.message : String(error),
