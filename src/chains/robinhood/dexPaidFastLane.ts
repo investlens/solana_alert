@@ -15,6 +15,10 @@ let running = false;
 let timer: ReturnType<typeof setInterval> | null = null;
 let firstCycle = true;
 
+function enabled(): boolean {
+  return String(process.env.DEX_PAID_FAST_LANE_ENABLED ?? 'true').toLowerCase() === 'true';
+}
+
 function key(address: string) { return address.trim().toLowerCase(); }
 
 function remember(token: RobinhoodDiscoveredToken) {
@@ -29,7 +33,7 @@ function prune() {
 }
 
 async function cycle() {
-  if (running) return;
+  if (!enabled() || running) return;
   running = true;
   const startedAt = Date.now();
   try {
@@ -70,6 +74,10 @@ async function cycle() {
 export function startDexPaidFastLane() {
   if (started) return;
   started = true;
+  if (!enabled()) {
+    console.log('[DexPaidFastLane] disabled; normal DEX_PAID observer remains active');
+    return;
+  }
   console.log('[DexPaidFastLane] Started', {
     intervalSeconds: INTERVAL_MS / 1000,
     maxChecksPerCycle: MAX_CHECKS_PER_CYCLE,
