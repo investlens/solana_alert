@@ -82,6 +82,15 @@ if (mode.kind === 'REPLAY') {
   await replayPonsLiveLaunch(mode.tokenAddress, supabasePonsLiveReplaySource, route);
   process.exit(0);
 }
+
+let recoveryCheckpoint: number | null = null;
+const recoveryMemoryStorage = {
+  getLiveCheckpoint: async () => recoveryCheckpoint,
+  persistLaunches: async () => {},
+  setLiveCheckpoint: async (_chain: string, _factoryId: string, blockNumber: number) => {
+    recoveryCheckpoint = blockNumber;
+  },
+};
 const dryStorage = {
   getLiveCheckpoint: async () => null,
   persistLaunches: async () => {},
@@ -92,10 +101,12 @@ if (mode.kind === 'ONCE') {
   const result = await pollPonsLiveLaunchesOnce(robinhoodResilientScannerRpc as never, dryStorage, route, { retry: liveRetry });
   console.log(`[PonsLive] complete detected=${result.detected} handled=${result.handled} duplicates=${result.duplicates} liveStateWrites=0 realTrades=0`);
 } else {
-  console.log('[PonsLive] mode=SHADOW dryRun=true realTrades=0 liveStateWrites=enabled');
+  const dbWritesEnabled = String(process.env.PONS_LIVE_DB_ENABLED ?? 'true').toLowerCase() === 'true';
+  const storage = dbWritesEnabled ? supabasePonsLiveDetectorStorage : recoveryMemoryStorage;
+  console.log(`[PonsLive] mode=SHADOW dryRun=true realTrades=0 liveStateWrites=${dbWritesEnabled ? 'enabled' : 'disabled-memory-checkpoint'}`);
   startPonsOutcomeCollectionLoop();
   await runPonsLivePollingLoop({
     pollIntervalMs: ponsLivePollInterval(),
-    poll: () => pollPonsLiveLaunchesOnce(robinhoodResilientScannerRpc as never, supabasePonsLiveDetectorStorage, route, { retry: liveRetry }),
+    poll: () => pollPonsLiveLaunchesOnce(robinhoodResilientScannerRpc as never, storage as never, route, { retry: liveRetry }),
   });
 }
