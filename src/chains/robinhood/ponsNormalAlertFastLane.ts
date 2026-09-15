@@ -7,11 +7,14 @@ const MAX_CONCURRENT = Math.max(1, Math.min(5, Number(process.env.PONS_FAST_LANE
 const MAX_QUEUE = Math.max(5, Math.min(100, Number(process.env.PONS_FAST_LANE_MAX_QUEUE ?? 30)));
 const CONFIRM_MS = Math.max(15_000, Number(process.env.PONS_FAST_LANE_CONFIRM_MS ?? 20_000));
 const RECIPIENT_CACHE_MS = Math.max(60_000, Number(process.env.PONS_FAST_LANE_RECIPIENT_CACHE_MS ?? 300_000));
+const RETRY_MS = Math.max(5_000, Number(process.env.PONS_FAST_LANE_RETRY_MS ?? 15_000));
+const MAX_TRANSIENT_RETRIES = Math.max(1, Math.min(8, Number(process.env.PONS_FAST_LANE_MAX_RETRIES ?? 4)));
 const enabled = () => String(process.env.PONS_NORMAL_FAST_LANE_ENABLED ?? 'false').toLowerCase() === 'true';
 
 let active = 0;
 const queue: PonsLaunch[] = [];
 const seen = new Set<string>();
+const retryAttempts = new Map<string, number>();
 let cacheAt = 0;
 let boostMapCache: Awaited<ReturnType<typeof fetchBoostMap>> | null = null;
 let takeoverSetCache: Awaited<ReturnType<typeof fetchTakeoverSet>> | null = null;
@@ -181,12 +184,59 @@ async function evaluate(launch: PonsLaunch): Promise<void> {
   console.log(`[PonsFastLane] ALERT_SENT token=${tokenAddress} bucket=${secondBucket} score=${second.result.score} delivered=${delivery.delivered} failed=${delivery.failed}`);
 }
 
+function isTransientDexScreenerFailure(error: unknown): boolean {
+  const reason = error instanceof Error ? error.message : String(error ?? '');
+  const normalized = reason.toLowerCase();
+  return normalized.includes('dexscreener provider backoff')
+    || normalized.includes('provider backoff active')
+    || normalized.includes('queue capacity')
+    || normalized.includes('queue full');
+}
+
+function scheduleTransientRetry(launch: PonsLaunch, error: unknown): boolean {
+  if (!isTransientDexScreenerFailure(error)) return false;
+  const key = tokenKey(launch);
+  if (!key) return false;
+  const attempt = (retryAttempts.get(key) ?? 0) + 1;
+  if (attempt > MAX_TRANSIENT_RETRIES) {
+    retryAttempts.delete(key);
+    console.warn(`[PonsFastLane] transient retry exhausted token=${key} attempts=${attempt - 1}`);
+    return false;
+  }
+
+  retryAttempts.set(key, attempt);
+  const delayMs = RETRY_MS * attempt;
+  console.warn(`[PonsFastLane] transient provider failure; retry scheduled token=${key} attempt=${attempt}/${MAX_TRANSIENT_RETRIES} delayMs=${delayMs}`);
+  setTimeout(() => {
+    if (queue.length >= MAX_QUEUE) {
+      console.warn(`[PonsFastLane] retry queue full; rescheduling token=${key} attempt=${attempt}`);
+      setTimeout(() => {
+        if (queue.length < MAX_QUEUE) {
+          queue.push(launch);
+          void drain();
+        }
+      }, RETRY_MS);
+      return;
+    }
+    queue.push(launch);
+    void drain();
+  }, delayMs);
+  return true;
+}
+
 async function drain(): Promise<void> {
   while (active < MAX_CONCURRENT && queue.length) {
     const launch = queue.shift()!;
+    const key = tokenKey(launch);
     active += 1;
     void evaluate(launch)
-      .catch(error => console.warn(`[PonsFastLane] evaluation failed token=${tokenKey(launch)} reason=${error instanceof Error ? error.message : String(error)}`))
+      .then(() => { if (key) retryAttempts.delete(key); })
+      .catch(error => {
+        if (!scheduleTransientRetry(launch, error)) {
+          if (key) retryAttempts.delete(key);
+          console.warn(`[PonsFastLane] evaluation failed token=${key} reason=${error instanceof Error ? error.message : String(error)}`);
+        }
+      })
       .finally(() => { active -= 1; void drain(); });
   }
 }
