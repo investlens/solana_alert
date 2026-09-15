@@ -17,240 +17,100 @@ import type {
 } from '../types.js';
 
 const PONS_ACTIVE_FACTORY =
-  '0xA5aAb3F0c6EeadF30Ef1D3Eb997108E976351feB' as const;
+  '0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e' as const;
 
 const PONS_ACTIVE_FACTORY_START_BLOCK =
-  8_991_118n;
+  27_027_321n;
 
-/*
- * Don't scan the entire factory history every cycle.
- *
- * The first live implementation looks backwards over a
- * bounded recent block range. Later we'll persist a cursor
- * so every block is processed exactly once.
- */
 const DEFAULT_LOOKBACK_BLOCKS =
   2_000n;
 
 const tokenLaunchedEvent =
   parseAbiItem(
-    'event TokenLaunched(address indexed token, address indexed deployer, address indexed dexFactory, address pairToken, address pool, uint256 dexId, uint256 launchConfigId, uint256 positionId, uint256 restrictionsEndBlock, uint256 initialBuyAmount)',
+    'event TokenLaunched(address indexed token, address indexed curve, address indexed deployer, address pairToken, uint256 launchConfigId, uint256 graduationThreshold)',
   );
 
 export async function discoverFromPons(
   lookbackBlocks:
     bigint = DEFAULT_LOOKBACK_BLOCKS,
 ): Promise<RobinhoodDiscoveryBatch> {
-  const discoveredAt =
-    Date.now();
+  const discoveredAt = Date.now();
+  const latestBlock = await getRobinhoodBlockNumberResilient();
+  const requestedFromBlock = latestBlock > lookbackBlocks ? latestBlock - lookbackBlocks : PONS_ACTIVE_FACTORY_START_BLOCK;
+  const fromBlock = requestedFromBlock < PONS_ACTIVE_FACTORY_START_BLOCK ? PONS_ACTIVE_FACTORY_START_BLOCK : requestedFromBlock;
 
-  const latestBlock =
-    await getRobinhoodBlockNumberResilient();
+  console.log('[PonsDiscovery] Scanning:', {
+    factory: 'v2-current',
+    fromBlock: fromBlock.toString(),
+    toBlock: latestBlock.toString(),
+  });
 
-  const requestedFromBlock =
-    latestBlock > lookbackBlocks
-      ? latestBlock -
-        lookbackBlocks
-      : PONS_ACTIVE_FACTORY_START_BLOCK;
+  const logs = await getRobinhoodLogsResilient({
+    address: PONS_ACTIVE_FACTORY,
+    event: tokenLaunchedEvent,
+    fromBlock,
+    toBlock: latestBlock,
+  });
 
-  const fromBlock =
-    requestedFromBlock <
-    PONS_ACTIVE_FACTORY_START_BLOCK
-      ? PONS_ACTIVE_FACTORY_START_BLOCK
-      : requestedFromBlock;
-
-  console.log(
-    '[PonsDiscovery] Scanning:',
-    {
-      fromBlock:
-        fromBlock.toString(),
-
-      toBlock:
-        latestBlock.toString(),
-    },
-  );
-
-  const logs =
-    await getRobinhoodLogsResilient({
-      address:
-        PONS_ACTIVE_FACTORY,
-
-      event:
-        tokenLaunchedEvent,
-
-      fromBlock,
-
-      toBlock:
-        latestBlock,
-    });
-
-  const tokens:
-    RobinhoodDiscoveredToken[] =
-      [];
+  const tokens: RobinhoodDiscoveredToken[] = [];
 
   for (const rawLog of logs) {
     const log = rawLog as any;
-    const args =
-      log.args;
+    const args = log.args;
+    const tokenAddress = args.token;
+    if (!tokenAddress) continue;
 
-    const tokenAddress =
-      args.token;
-
-    if (!tokenAddress) {
-      continue;
-    }
-
-    let tokenMetadata:
-      Awaited<
-        ReturnType<
-          typeof getRobinhoodTokenMetadata
-        >
-      > | null = null;
-
+    let tokenMetadata: Awaited<ReturnType<typeof getRobinhoodTokenMetadata>> | null = null;
     try {
-      tokenMetadata =
-        await getRobinhoodTokenMetadata(
-          tokenAddress,
-        );
+      tokenMetadata = await getRobinhoodTokenMetadata(tokenAddress);
     } catch (error) {
-      console.error(
-        '[PonsDiscovery] Metadata enrichment failed:',
-        {
-          token:
-            tokenAddress,
-
-          error:
-            error instanceof Error
-              ? error.message
-              : String(error),
-        },
-      );
+      console.error('[PonsDiscovery] Metadata enrichment failed:', {
+        token: tokenAddress,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
 
     const metadata = {
-
-      tokenDecimals:
-        tokenMetadata?.decimals ??
-        null,
-
-      totalSupplyRaw:
-        tokenMetadata
-          ?.totalSupplyRaw
-          ?.toString() ??
-        null,
-
-      bytecodeExists:
-        tokenMetadata?.bytecodeExists ??
-        false,
-
-      metadataReadErrors:
-        tokenMetadata?.readErrors ??
-        [],
-
-      deployer:
-        args.deployer,
-
-      dexFactory:
-        args.dexFactory,
-
-      pairToken:
-        args.pairToken,
-
-      dexId:
-        args.dexId?.toString(),
-
-      launchConfigId:
-        args.launchConfigId
-          ?.toString(),
-
-      positionId:
-        args.positionId
-          ?.toString(),
-
-      restrictionsEndBlock:
-        args.restrictionsEndBlock
-          ?.toString(),
-
-      initialBuyAmount:
-        args.initialBuyAmount
-          ?.toString(),
-
-      blockNumber:
-        log.blockNumber
-          ?.toString(),
-
-      transactionHash:
-        log.transactionHash,
+      tokenDecimals: tokenMetadata?.decimals ?? null,
+      totalSupplyRaw: tokenMetadata?.totalSupplyRaw?.toString() ?? null,
+      bytecodeExists: tokenMetadata?.bytecodeExists ?? false,
+      metadataReadErrors: tokenMetadata?.readErrors ?? [],
+      deployer: args.deployer,
+      curve: args.curve,
+      pairToken: args.pairToken,
+      launchConfigId: args.launchConfigId?.toString(),
+      graduationThreshold: args.graduationThreshold?.toString(),
+      blockNumber: log.blockNumber?.toString(),
+      transactionHash: log.transactionHash,
+      factoryVersion: 'v2-current',
     };
 
     tokens.push({
-      symbol:
-        tokenMetadata?.symbol ??
-        undefined,
-
-      name:
-        tokenMetadata?.name ??
-        undefined,
-
-      chain:
-        'robinhood',
-
+      symbol: tokenMetadata?.symbol ?? undefined,
+      name: tokenMetadata?.name ?? undefined,
+      chain: 'robinhood',
       tokenAddress,
-
       discoveredAt,
-
-      source:
-        'PONS',
-
-      sourceType:
-        'LAUNCHPAD',
-
-      sourceId:
-        log.transactionHash ??
-        undefined,
-
-      sources: [
-        {
-          source:
-            'PONS',
-
-          sourceType:
-            'LAUNCHPAD',
-
-          discoveredAt,
-
-          sourceId:
-            log.transactionHash ??
-            undefined,
-
-          pairAddress:
-            args.pool,
-
-          metadata,
-        },
-      ],
-
-      pairAddress:
-        args.pool,
-
-      dexId:
-        'uniswap',
-
+      source: 'PONS',
+      sourceType: 'LAUNCHPAD',
+      sourceId: log.transactionHash ?? undefined,
+      sources: [{
+        source: 'PONS',
+        sourceType: 'LAUNCHPAD',
+        discoveredAt,
+        sourceId: log.transactionHash ?? undefined,
+        metadata,
+      }],
+      dexId: 'pons-v2',
       metadata,
     });
   }
 
-  console.log(
-    '[PonsDiscovery] Launches found:',
-    tokens.length,
-  );
+  console.log('[PonsDiscovery] Launches found:', tokens.length);
 
   return {
-    source:
-      'PONS',
-
+    source: 'PONS',
     discoveredAt,
-
     tokens,
   };
 }
