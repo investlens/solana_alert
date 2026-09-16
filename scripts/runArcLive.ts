@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { verifyArcMainnet, getArcBlockNumber } from '../src/chains/arc/rpc.js';
 import { discoverArcV4Pools } from '../src/chains/arc/uniswap.js';
+import { normalizeArcPoolCandidate } from '../src/chains/arc/candidate.js';
 
 const POLL_MS = Math.max(2_000, Number(process.env.ARC_LIVE_POLL_INTERVAL_MS ?? 5_000));
 const ENABLED = String(process.env.ARC_LIVE_ENABLED ?? 'false').toLowerCase() === 'true';
@@ -26,23 +27,26 @@ async function main() {
     const cappedTo = fromBlock + BigInt(MAX_BLOCKS - 1);
     const toBlock = current < cappedTo ? current : cappedTo;
     const pools = await discoverArcV4Pools(fromBlock, toBlock);
+    const candidates = pools.map(normalizeArcPoolCandidate).filter((x): x is NonNullable<typeof x> => Boolean(x));
 
     console.log('[ArcLive] scan', {
       fromBlock: fromBlock.toString(),
       toBlock: toBlock.toString(),
       poolsDetected: pools.length,
+      launchCandidates: candidates.length,
     });
 
-    for (const pool of pools) {
-      console.log('[ArcLive] NEW_POOL', {
-        blockNumber: pool.blockNumber.toString(),
-        tx: pool.transactionHash,
-        poolId: pool.poolId,
-        currency0: pool.currency0,
-        currency1: pool.currency1,
-        fee: pool.fee,
-        tickSpacing: pool.tickSpacing,
-        hooks: pool.hooks,
+    for (const candidate of candidates) {
+      console.log('[ArcLive] CANDIDATE', {
+        chain: candidate.chain,
+        source: candidate.source,
+        assetId: candidate.assetId,
+        quoteAsset: candidate.quoteAsset,
+        poolId: candidate.poolId,
+        blockNumber: candidate.blockNumber.toString(),
+        tx: candidate.transactionHash,
+        fee: candidate.fee,
+        hooks: candidate.hooks,
       });
     }
 
