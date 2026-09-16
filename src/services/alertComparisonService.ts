@@ -76,8 +76,14 @@ export async function loadPriorDeliveredAlertComparison(args: { currentEventId: 
   const { data: current, error: currentError } = await supabase.from('alpha_alert_events').select(fields).eq('id', args.currentEventId).maybeSingle();
   if (currentError) throw currentError;
   if (!current) return { hasPriorAlert: false, historyStatus: 'UNAVAILABLE' };
-  const { data: candidates, error } = await supabase.from('alpha_alert_events').select(fields)
-    .eq('chain', args.chain.toLowerCase()).ilike('asset_id', args.assetId).lt('alerted_at', current.alerted_at).order('alerted_at', { ascending: false }).limit(100);
+  // Use the database-side lower(asset_id) lookup so Postgres can use
+  // alpha_alert_events_asset_time_idx. Keep the 100-row history window intact.
+  const { data: candidates, error } = await supabase.rpc('select_prior_alpha_alert_candidates', {
+    p_chain: args.chain,
+    p_asset_id: args.assetId,
+    p_before: current.alerted_at,
+    p_limit: 100,
+  });
   if (error) throw error;
   const positiveCandidates = (candidates ?? []).filter(row => ACTIONABLE_TYPES.has(String(row.semantic_event_type ?? row.alert_type ?? '').toUpperCase()) ||
     ['BUY', 'CHECK_ENTRY'].includes(String(row.lifecycle_action ?? '').toUpperCase()));
