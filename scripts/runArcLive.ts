@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { verifyArcMainnet, getArcBlockNumber } from '../src/chains/arc/rpc.js';
 import { discoverArcV4Pools } from '../src/chains/arc/uniswap.js';
 import { normalizeArcPoolCandidate } from '../src/chains/arc/candidate.js';
+import { enrichArcCandidate } from '../src/chains/arc/enrichment.js';
 
 const POLL_MS = Math.max(2_000, Number(process.env.ARC_LIVE_POLL_INTERVAL_MS ?? 5_000));
 const ENABLED = String(process.env.ARC_LIVE_ENABLED ?? 'false').toLowerCase() === 'true';
@@ -37,16 +38,16 @@ async function main() {
     });
 
     for (const candidate of candidates) {
-      console.log('[ArcLive] CANDIDATE', {
-        chain: candidate.chain,
-        source: candidate.source,
-        assetId: candidate.assetId,
-        quoteAsset: candidate.quoteAsset,
-        poolId: candidate.poolId,
-        blockNumber: candidate.blockNumber.toString(),
-        tx: candidate.transactionHash,
-        fee: candidate.fee,
-        hooks: candidate.hooks,
+      const enriched = await enrichArcCandidate(candidate);
+      console.log('[ArcLive] ENRICHED_CANDIDATE', {
+        assetId: enriched.assetId,
+        symbol: enriched.symbol,
+        name: enriched.name,
+        decimals: enriched.decimals,
+        eligibleForScoring: enriched.eligibleForScoring,
+        safetyReasons: enriched.safetyReasons,
+        poolId: enriched.poolId,
+        tx: enriched.transactionHash,
       });
     }
 
