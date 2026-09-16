@@ -33,8 +33,11 @@ const factorReasons = (comparison: AlertComparison): { factors: string[]; reason
 };
 
 export function evaluateProAlertNotification(comparison: AlertComparison): ProAlertDecision {
+  // Alert-history enrichment is useful for repeat/momentum decisions, but it is
+  // not a safety gate. If Supabase history is temporarily unavailable, keep the
+  // qualified live ENTRY path available instead of silently suppressing it.
   if (comparison.historyStatus === 'UNAVAILABLE') {
-    return { intent: 'INTERNAL', notify: false, reasons: [], factors: [] };
+    return { intent: 'ENTRY', notify: true, reasons: [], factors: ['HISTORY_UNAVAILABLE'] };
   }
   const evidence = factorReasons(comparison);
   const drawdown = comparison.drawdownFromPriorStructuralPricePct;
