@@ -43,6 +43,8 @@ async function failover<T>(operation: string, fn: (client: typeof clients[number
 export const getArcBlockNumber = () => failover('blockNumber', client => client.getBlockNumber());
 export const getArcLogs = (args: any) => failover('getLogs', client => client.getLogs(args as any) as Promise<any[]>);
 export const getArcBlock = (args: any) => failover('getBlock', client => client.getBlock(args as any));
+export const getArcBytecode = (address: `0x${string}`) => failover('getBytecode', client => client.getBytecode({ address }));
+export const readArcContract = (args: any) => failover('readContract', client => client.readContract(args as any));
 
 export async function verifyArcMainnet(): Promise<{ chainId: number; blockNumber: bigint }> {
   return failover('verify', async client => {
