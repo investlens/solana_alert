@@ -16,7 +16,8 @@
     "pons:collect-outcomes": "tsx scripts/collectPonsOutcomes.ts",
     "pons:refresh-dev-registry": "tsx scripts/refreshPonsDeveloperRegistry.ts",
     "pons:live-dev": "tsx scripts/runPonsLiveDev.ts",
-    "pons:learn-devs": "tsx scripts/learnPonsDevelopers.ts"
+    "pons:learn-devs": "tsx scripts/learnPonsDevelopers.ts",
+    "arc:live": "tsx scripts/runArcLive.ts"
   },
   "dependencies": {
     "@solana/web3.js": "^1.98.4",
