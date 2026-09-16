@@ -12,6 +12,7 @@ const PUBLICNODE_RPC = 'https://robinhood-rpc.publicnode.com';
 const LOG_REPLAY_CHUNK_BLOCKS = BigInt(Math.max(5, Number(process.env.ROBINHOOD_LOG_REPLAY_CHUNK_BLOCKS ?? 25)));
 const RPC_COOLDOWN_MS = Math.max(15_000, Number(process.env.ROBINHOOD_RPC_COOLDOWN_MS ?? 60_000));
 const RPC_FAILURE_THRESHOLD = Math.max(1, Number(process.env.ROBINHOOD_RPC_FAILURE_THRESHOLD ?? 2));
+const RPC_BUSY_WAIT_MS = Math.max(10, Number(process.env.ROBINHOOD_RPC_BUSY_WAIT_MS ?? 25));
 
 export const robinhoodPublicClient =
   createPublicClient({
@@ -67,7 +68,7 @@ const robinhoodRpcClients = robinhoodRpcUrls.map(url => ({
   }),
 }));
 
-type RpcProviderHealth = { failures: number; cooldownUntil: number };
+type RpcProviderHealth = { failures: number; cooldownUntil: number; inFlight: number };
 const rpcProviderHealth = new Map<string, RpcProviderHealth>();
 
 function conciseRpcError(error: unknown): string {
@@ -78,7 +79,7 @@ function conciseRpcError(error: unknown): string {
 function providerHealth(url: string): RpcProviderHealth {
   const existing = rpcProviderHealth.get(url);
   if (existing) return existing;
-  const created = { failures: 0, cooldownUntil: 0 };
+  const created = { failures: 0, cooldownUntil: 0, inFlight: 0 };
   rpcProviderHealth.set(url, created);
   return created;
 }
@@ -94,9 +95,32 @@ function markProviderFailure(url: string): void {
   const health = providerHealth(url);
   health.failures += 1;
   if (health.failures >= RPC_FAILURE_THRESHOLD) {
-    health.cooldownUntil = Date.now() + RPC_COOLDOWN_MS;
+    health.cooldownUntil = Math.max(health.cooldownUntil, Date.now() + RPC_COOLDOWN_MS);
     console.warn('[RobinhoodRpc] provider circuit opened', { provider: url, failures: health.failures, cooldownMs: RPC_COOLDOWN_MS });
   }
+}
+
+async function runProvider<T>(
+  url: string,
+  client: (typeof robinhoodRpcClients)[number]['client'],
+  run: (client: (typeof robinhoodRpcClients)[number]['client']) => Promise<T>,
+): Promise<T> {
+  const health = providerHealth(url);
+  health.inFlight += 1;
+  try {
+    const result = await run(client);
+    markProviderSuccess(url);
+    return result;
+  } catch (error) {
+    markProviderFailure(url);
+    throw error;
+  } finally {
+    health.inFlight = Math.max(0, health.inFlight - 1);
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 async function withRobinhoodRpcFailover<T>(
@@ -104,35 +128,66 @@ async function withRobinhoodRpcFailover<T>(
   run: (client: (typeof robinhoodRpcClients)[number]['client']) => Promise<T>,
 ): Promise<T> {
   let lastError: unknown = null;
+
+  // A provider gets at most one request at a time. Concurrent PONS work therefore
+  // fans out across healthy fallbacks instead of stampeding the same endpoint.
+  // As soon as a request opens a circuit, all later calls observe the shared
+  // cooldown immediately. No scoring, launch routing or alert semantics change.
+  for (let pass = 0; pass < 2; pass += 1) {
+    const now = Date.now();
+    let eligible = 0;
+    let busy = 0;
+
+    for (const { url, client } of robinhoodRpcClients) {
+      const health = providerHealth(url);
+      if (health.cooldownUntil > now) continue;
+      eligible += 1;
+      if (health.inFlight > 0) {
+        busy += 1;
+        continue;
+      }
+
+      try {
+        return await runProvider(url, client, run);
+      } catch (error) {
+        lastError = error;
+        console.warn(`[RobinhoodRpc] ${operation} provider failed; trying next provider`, {
+          provider: url,
+          reason: conciseRpcError(error),
+        });
+      }
+    }
+
+    // If every healthy provider is already serving another live request, wait a
+    // tiny bounded interval and re-evaluate shared health instead of forcing a
+    // concurrent request through a rate-limited provider.
+    if (eligible > 0 && busy === eligible && pass === 0) {
+      await sleep(RPC_BUSY_WAIT_MS);
+      continue;
+    }
+    break;
+  }
+
+  // Only probe a cooled provider when there is no healthy provider available.
+  // Never probe one that is already in flight; that would recreate the stampede.
   const now = Date.now();
-  let attempted = 0;
-  for (const { url, client } of robinhoodRpcClients) {
-    const health = providerHealth(url);
-    if (health.cooldownUntil > now) continue;
-    attempted += 1;
+  const probe = [...robinhoodRpcClients]
+    .filter(({ url }) => providerHealth(url).inFlight === 0)
+    .sort((a, b) => providerHealth(a.url).cooldownUntil - providerHealth(b.url).cooldownUntil)[0];
+
+  if (probe && robinhoodRpcClients.every(({ url }) => providerHealth(url).cooldownUntil > now)) {
     try {
-      const result = await run(client);
-      markProviderSuccess(url);
-      return result;
+      return await runProvider(probe.url, probe.client, run);
     } catch (error) {
       lastError = error;
-      markProviderFailure(url);
-      console.warn(`[RobinhoodRpc] ${operation} provider failed; trying next provider`, { provider: url, reason: conciseRpcError(error) });
+      console.warn(`[RobinhoodRpc] ${operation} cooldown probe failed`, {
+        provider: probe.url,
+        reason: conciseRpcError(error),
+      });
     }
   }
-  if (attempted === 0 && robinhoodRpcClients.length) {
-    const probe = [...robinhoodRpcClients].sort((a, b) => providerHealth(a.url).cooldownUntil - providerHealth(b.url).cooldownUntil)[0];
-    try {
-      const result = await run(probe.client);
-      markProviderSuccess(probe.url);
-      return result;
-    } catch (error) {
-      lastError = error;
-      markProviderFailure(probe.url);
-      console.warn(`[RobinhoodRpc] ${operation} cooldown probe failed`, { provider: probe.url, reason: conciseRpcError(error) });
-    }
-  }
-  throw lastError ?? new Error(`No Robinhood RPC provider available for ${operation}`);
+
+  throw lastError ?? new Error(`No healthy Robinhood RPC provider available for ${operation}`);
 }
 
 async function getLogsFromProviders(args: any, operation = 'getLogs'): Promise<any[]> {
