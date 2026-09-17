@@ -52,15 +52,21 @@ test('Telegram failure is not marked delivered and remains retryable', async () 
   assert.deepEqual(logs, ['BOOST_FALLBACK_FAILED', 'BOOST_FALLBACK_SENT']);
 });
 
-test('observer keeps optional database failures from terminating the critical boost path', async () => {
+test('observer keeps the critical BOOST path independent from Supabase and market-quality gates', async () => {
   const source = await readFile(new URL('../src/chains/robinhood/robinhoodBoostObserver.ts', import.meta.url), 'utf8');
-  assert.match(source, /Save failed:[\s\S]{0,260}return `preindex:/);
-  assert.match(source, /Semantic event unavailable; admin fallback eligible/);
-  assert.match(source, /Semantic delivery unavailable; admin fallback eligible/);
-  assert.match(source, /Optional volume event unavailable/);
-  assert.match(source, /onTelegramAccepted:[\s\S]{0,300}recordAcceptedAdminBoostNotification/);
-  assert.match(source, /stage === 'telegram_send'[\s\S]{0,220}adminTelegramFailed = true/);
-  assert.match(source, /for \([\s\S]{0,120}const boost[\s\S]{0,180}try \{[\s\S]{0,180}processBoost/);
-  assert.match(source, /if \(!await ensureBoostBaseline\(\)\) return;/);
-  assert.match(source, /storedTotal \?\? boost\.totalAmount/);
+  const compact = source.replace(/\s+/g, '');
+
+  assert.doesNotMatch(source, /services\/supabase/);
+  assert.doesNotMatch(source, /getRobinhoodMarketSnapshot/);
+  assert.doesNotMatch(source, /persistOrLoadAlphaSemanticEventRecord/);
+  assert.doesNotMatch(source, /deliverAlphaSemanticEvent/);
+  assert.match(source, /BOOST_SECURITY_DECISION/);
+  assert.match(compact, /security\.status==='SCAM'/);
+  assert.match(source, /BOOST_BLOCKED_SECURITY/);
+  assert.match(compact, /securityStatus:security\.status/);
+  assert.match(source, /deliverAdminBoostFallback/);
+  assert.match(source, /BOOST_ALERT_VERIFIED/);
+  assert.match(compact, /supabase:'bypassed'/);
+  assert.match(compact, /for\(constboostofboosts\)\{try\{if\(awaitprocessBoost\(boost\)\)/);
+  assert.match(compact, /if\(!awaitensureBoostBaseline\(\)\)return;/);
 });
