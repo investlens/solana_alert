@@ -31,6 +31,16 @@ const SUPABASE_REQUEST_TIMEOUT_MS = Math.max(
   Number(process.env.SUPABASE_REQUEST_TIMEOUT_MS ?? 5_000),
 );
 
+const SUPABASE_CRITICAL_QUEUE_WAIT_MS = Math.max(
+  100,
+  Number(process.env.SUPABASE_CRITICAL_QUEUE_WAIT_MS ?? 750),
+);
+
+const SUPABASE_BACKGROUND_QUEUE_WAIT_MS = Math.max(
+  250,
+  Number(process.env.SUPABASE_BACKGROUND_QUEUE_WAIT_MS ?? 2_000),
+);
+
 const CRITICAL_CONCURRENCY = Math.max(
   1,
   Number(process.env.SUPABASE_CRITICAL_CONCURRENCY ?? 2),
@@ -135,6 +145,12 @@ function cacheableCriticalGet(url: string, init?: RequestInit): boolean {
   );
 }
 
+function laneQueueWaitMs(lane: Lane): number {
+  return lane === 'critical'
+    ? SUPABASE_CRITICAL_QUEUE_WAIT_MS
+    : SUPABASE_BACKGROUND_QUEUE_WAIT_MS;
+}
+
 async function acquireLane(lane: Lane): Promise<void> {
   const state = lanes[lane];
   if (state.active < state.limit) {
@@ -142,11 +158,27 @@ async function acquireLane(lane: Lane): Promise<void> {
     return;
   }
 
-  await new Promise<void>((resolve) => {
-    state.queue.push(() => {
+  const waitMs = laneQueueWaitMs(lane);
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const enter = () => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
       state.active += 1;
       resolve();
-    });
+    };
+
+    state.queue.push(enter);
+    timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      const index = state.queue.indexOf(enter);
+      if (index >= 0) state.queue.splice(index, 1);
+      reject(new Error(`Supabase ${lane} lane queue wait exceeded ${waitMs}ms`));
+    }, waitMs);
   });
 }
 
@@ -256,15 +288,17 @@ async function resilientFetch(input: RequestInfo | URL, init?: RequestInit): Pro
   const key = reservation ? reservationKey(body) : null;
   const critical = isCriticalRequest(url, init);
   const lane: Lane = critical ? 'critical' : 'background';
-
-  await acquireLane(lane);
-
-  const boundedInit: RequestInit = {
-    ...init,
-    signal: init?.signal ?? AbortSignal.timeout(SUPABASE_REQUEST_TIMEOUT_MS),
-  };
+  let acquired = false;
 
   try {
+    await acquireLane(lane);
+    acquired = true;
+
+    const boundedInit: RequestInit = {
+      ...init,
+      signal: init?.signal ?? AbortSignal.timeout(SUPABASE_REQUEST_TIMEOUT_MS),
+    };
+
     const response = await fetch(input, boundedInit);
 
     if (usersRead && response.ok) {
@@ -356,7 +390,7 @@ async function resilientFetch(input: RequestInfo | URL, init?: RequestInit): Pro
     });
     throw error;
   } finally {
-    releaseLane(lane);
+    if (acquired) releaseLane(lane);
   }
 }
 
