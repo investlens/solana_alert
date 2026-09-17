@@ -6,6 +6,7 @@ import { describePonsTelegramError } from './ponsProvenDeveloperTelegram.js';
 import { createPonsProvenDeveloperAlert, type PonsProvenDeveloperAlert } from './ponsProvenDeveloperAlert.js';
 import { decidePonsShadowLaunch, evaluatePonsProvenDeveloperLaunch, toPonsLiveMarketEvidence, type PonsShadowDecision } from './ponsProvenDeveloperLaunch.js';
 import { queuePonsNormalAlertFastLane } from './ponsNormalAlertFastLane.js';
+import { rememberAuthoritativePonsToken } from './launchSecurity.js';
 
 export type PonsLiveRouteResult = {
   status: 'IGNORED' | 'NORMAL_PATH' | 'PROVEN_PROCESSED' | 'DUPLICATE';
@@ -18,6 +19,7 @@ export type PonsLiveRouterDependencies = {
   loadMarket(tokenAddress: string): Promise<ChainMarketSnapshot | null>;
   emitAlert(alert: PonsProvenDeveloperAlert): Promise<void>;
   emitDecision(decision: PonsShadowDecision): Promise<void>;
+  rememberPonsToken(tokenAddress: string): void;
   sleep(ms: number): Promise<void>;
   config: PonsLiveConfig;
   log(line: string): void;
@@ -36,6 +38,7 @@ export function createPonsLiveLaunchRouter(overrides: Partial<PonsLiveRouterDepe
       if (result.failed > 0) throw new Error(`Telegram delivery failed recipients=${result.failed}`);
     },
     emitDecision: async decision => { console.log(`[PonsLive] SHADOW ${decision.action} reason=${decision.reason}`); },
+    rememberPonsToken: rememberAuthoritativePonsToken,
     sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
     config: getPonsLiveConfig(), log: console.log, ...overrides,
   };
@@ -54,6 +57,11 @@ export function createPonsLiveLaunchRouter(overrides: Partial<PonsLiveRouterDepe
     const identity = launchIdentity(launch);
     if (processed.has(identity)) return { status: 'DUPLICATE', reason: 'launch already handled', provenDeveloper: false, alert: null, decision: null, developerTier: 'UNKNOWN', validation: 'NOT_RUN', alertDelivery: 'NOT_APPLICABLE' };
     processed.add(identity);
+
+    // The live PONS detector is authoritative provenance. Cache that fact before
+    // database-backed enrichment so later security classification stays correct
+    // during Supabase outages. This does not bypass any PONS safety gates.
+    dependencies.rememberPonsToken(launch.token_address);
 
     // Developer intelligence is enrichment only. Registry failure never grants a
     // proven-developer bonus; the token enters the same strict market fast lane.
