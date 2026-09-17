@@ -54,18 +54,19 @@ test('Telegram failure is not marked delivered and remains retryable', async () 
 
 test('observer keeps the critical BOOST path independent from Supabase and market-quality gates', async () => {
   const source = await readFile(new URL('../src/chains/robinhood/robinhoodBoostObserver.ts', import.meta.url), 'utf8');
+  const compact = source.replace(/\s+/g, '');
 
   assert.doesNotMatch(source, /services\/supabase/);
   assert.doesNotMatch(source, /getRobinhoodMarketSnapshot/);
   assert.doesNotMatch(source, /persistOrLoadAlphaSemanticEventRecord/);
   assert.doesNotMatch(source, /deliverAlphaSemanticEvent/);
   assert.match(source, /BOOST_SECURITY_DECISION/);
-  assert.match(source, /security\.status\s*===\s*'SCAM'/);
+  assert.match(compact, /security\.status==='SCAM'/);
   assert.match(source, /BOOST_BLOCKED_SECURITY/);
-  assert.match(source, /securityStatus:security\.status/);
+  assert.match(compact, /securityStatus:security\.status/);
   assert.match(source, /deliverAdminBoostFallback/);
   assert.match(source, /BOOST_ALERT_VERIFIED/);
-  assert.match(source, /supabase:'bypassed'/);
-  assert.match(source, /for\(const boost of boosts\)\{try\{if\(await processBoost\(boost\)\)/);
-  assert.match(source, /if\(!await ensureBoostBaseline\(\)\)return;/);
+  assert.match(compact, /supabase:'bypassed'/);
+  assert.match(compact, /for\(constboostofboosts\)\{try\{if\(awaitprocessBoost\(boost\)\)/);
+  assert.match(compact, /if\(!awaitensureBoostBaseline\(\)\)return;/);
 });
