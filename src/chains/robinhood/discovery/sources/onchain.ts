@@ -8,7 +8,7 @@ import {
 } from '../../ponsContracts.js';
 
 import {
-  robinhoodPublicClient,
+  robinhoodResilientScannerRpc,
 } from '../../rpc.js';
 
 import type {
@@ -110,7 +110,7 @@ Promise<RobinhoodDiscoveryBatch> {
 
 
   const latestBlock =
-    await robinhoodPublicClient
+    await robinhoodResilientScannerRpc
       .getBlockNumber();
 
 
@@ -166,7 +166,7 @@ Promise<RobinhoodDiscoveryBatch> {
 
 
   const logs =
-    await robinhoodPublicClient
+    await robinhoodResilientScannerRpc
       .getLogs({
         address:
           PONS_CONTRACTS
