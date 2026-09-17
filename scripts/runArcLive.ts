@@ -16,9 +16,9 @@ const watchClaims = new Map<string, number>();
 
 function html(value: unknown): string {
   return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;');
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 function compactUsd(value: number | null): string {
