@@ -60,7 +60,7 @@ test('observer keeps the critical BOOST path independent from Supabase and marke
   assert.doesNotMatch(source, /persistOrLoadAlphaSemanticEventRecord/);
   assert.doesNotMatch(source, /deliverAlphaSemanticEvent/);
   assert.match(source, /BOOST_SECURITY_DECISION/);
-  assert.match(source, /security\.status === 'SCAM'/);
+  assert.match(source, /security\.status\s*===\s*'SCAM'/);
   assert.match(source, /BOOST_BLOCKED_SECURITY/);
   assert.match(source, /securityStatus:security\.status/);
   assert.match(source, /deliverAdminBoostFallback/);
