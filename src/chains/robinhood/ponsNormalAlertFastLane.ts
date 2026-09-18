@@ -11,6 +11,10 @@ const RECIPIENT_CACHE_MS = Math.max(60_000, Number(process.env.PONS_FAST_LANE_RE
 const RETRY_MS = Math.max(5_000, Number(process.env.PONS_FAST_LANE_RETRY_MS ?? 15_000));
 const MAX_TRANSIENT_RETRIES = Math.max(1, Math.min(8, Number(process.env.PONS_FAST_LANE_MAX_RETRIES ?? 4)));
 const enabled = () => String(process.env.PONS_NORMAL_FAST_LANE_ENABLED ?? 'false').toLowerCase() === 'true';
+const FOLLOWUP_ENABLED = String(process.env.PONS_LEAN_FOLLOWUP_ENABLED ?? 'false').toLowerCase() === 'true';
+const FOLLOWUP_INTERVAL_MS = Math.max(60_000, Number(process.env.PONS_LEAN_FOLLOWUP_INTERVAL_MS ?? 90_000));
+const FOLLOWUP_TTL_MS = Math.max(5 * 60_000, Number(process.env.PONS_LEAN_FOLLOWUP_TTL_MS ?? 20 * 60_000));
+const FOLLOWUP_MAX = Math.max(3, Math.min(20, Number(process.env.PONS_LEAN_FOLLOWUP_MAX ?? 10)));
 
 let active = 0;
 const queue: PonsLaunch[] = [];
@@ -19,6 +23,27 @@ const retryAttempts = new Map<string, number>();
 let recipientCacheAt = 0;
 let recipientRefreshInFlight: Promise<void> | null = null;
 let recipientCache = new Set<string>();
+
+type LeanFollowup = {
+  token: string;
+  symbol: string;
+  name: string;
+  firstSeenAt: number;
+  expiresAt: number;
+  lastCheckedAt: number;
+  lastPrice: number;
+  lastScore: number;
+  lastRatio: number;
+  lastBucket: 'HIGH_BUY' | 'BUY' | 'IGNORE';
+  weakestRatio: number;
+  lowestScore: number;
+  opportunitySent: boolean;
+  reversalSent: boolean;
+};
+
+const leanFollowups = new Map<string, LeanFollowup>();
+let followupTimer: ReturnType<typeof setInterval> | null = null;
+let followupRunning = false;
 
 function adminRecipient(): string {
   return String(process.env.ADMIN_TELEGRAM_ID ?? process.env.OWNER_CHAT_ID ?? '').trim();
@@ -143,6 +168,8 @@ async function evaluate(launch: PonsLaunch): Promise<void> {
   const first = await enrich(tokenAddress);
   if (!first) return;
   const firstBucket = bucket(first.result);
+  registerLeanFollowup(tokenAddress, first.pair, first.result);
+  ensureLeanFollowupLoop();
   if (firstBucket === 'IGNORE') {
     console.log(`[PonsFastLane] reject initial token=${tokenAddress} score=${first.result.score} safety=${first.result.marketSafetyScore}`);
     return;
@@ -152,6 +179,7 @@ async function evaluate(launch: PonsLaunch): Promise<void> {
   const second = await enrich(tokenAddress);
   if (!second) return;
   const secondBucket = bucket(second.result);
+  registerLeanFollowup(tokenAddress, second.pair, second.result);
   if (secondBucket === 'IGNORE') {
     console.log(`[PonsFastLane] reject confirmation token=${tokenAddress} bucket=IGNORE`);
     return;
@@ -181,6 +209,138 @@ async function evaluate(launch: PonsLaunch): Promise<void> {
   ].join('\n');
   const delivery = await directTelegramRecipients(text, tokenAddress);
   console.log(`[PonsFastLane] ALERT_SENT token=${tokenAddress} bucket=${secondBucket} score=${second.result.score} delivered=${delivery.delivered} failed=${delivery.failed}`);
+}
+
+
+function ratioOf(result: RiskResult): number {
+  return result.sells5m <= 0 ? (result.buys5m > 0 ? 99 : 0) : result.buys5m / result.sells5m;
+}
+
+function followupEligible(result: RiskResult): boolean {
+  const ratio = ratioOf(result);
+  return bucket(result) !== 'IGNORE' || (
+    result.score >= 65 &&
+    result.marketSafetyScore >= 50 &&
+    result.liquidityUsd >= 5_000 &&
+    result.volume5m >= 1_500 &&
+    result.buys5m >= 20 &&
+    ratio >= 0.75
+  );
+}
+
+function registerLeanFollowup(tokenAddress: string, pair: any, result: RiskResult): void {
+  if (!FOLLOWUP_ENABLED || !followupEligible(result)) return;
+  const now = Date.now();
+  const ratio = ratioOf(result);
+  const existing = leanFollowups.get(tokenAddress);
+  const next: LeanFollowup = existing ?? {
+    token: tokenAddress,
+    symbol: String(pair?.baseToken?.symbol ?? 'UNKNOWN'),
+    name: String(pair?.baseToken?.name ?? ''),
+    firstSeenAt: now,
+    expiresAt: now + FOLLOWUP_TTL_MS,
+    lastCheckedAt: 0,
+    lastPrice: Number(result.currentPrice || 0),
+    lastScore: result.score,
+    lastRatio: ratio,
+    lastBucket: bucket(result),
+    weakestRatio: ratio,
+    lowestScore: result.score,
+    opportunitySent: false,
+    reversalSent: false,
+  };
+  next.symbol = String(pair?.baseToken?.symbol ?? next.symbol);
+  next.name = String(pair?.baseToken?.name ?? next.name);
+  next.lastPrice = Number(result.currentPrice || next.lastPrice || 0);
+  next.lastScore = result.score;
+  next.lastRatio = ratio;
+  next.lastBucket = bucket(result);
+  next.weakestRatio = Math.min(next.weakestRatio, ratio);
+  next.lowestScore = Math.min(next.lowestScore, result.score);
+  next.expiresAt = Math.max(next.expiresAt, now + FOLLOWUP_TTL_MS);
+  leanFollowups.set(tokenAddress, next);
+
+  if (leanFollowups.size > FOLLOWUP_MAX) {
+    const oldest = [...leanFollowups.values()].sort((a, b) => a.firstSeenAt - b.firstSeenAt)[0];
+    if (oldest) leanFollowups.delete(oldest.token);
+  }
+}
+
+async function sendLeanFollowupAlert(kind: 'OPPORTUNITY' | 'REVERSAL', item: LeanFollowup, pair: any, result: RiskResult): Promise<void> {
+  const currentBucket = bucket(result);
+  const ratio = ratioOf(result);
+  const price = Number(result.currentPrice || 0);
+  const pricePct = item.lastPrice > 0 && price > 0 ? ((price - item.lastPrice) / item.lastPrice) * 100 : 0;
+  const text = [
+    kind === 'REVERSAL' ? '🔄 <b>AlphaOS PONS TREND REVERSAL</b>' : '🎯 <b>AlphaOS PONS OPPORTUNITY</b>',
+    `<b>${escapeHtml(pair?.baseToken?.symbol ?? item.symbol)}</b> — ${escapeHtml(pair?.baseToken?.name ?? item.name)}`,
+    `State: <b>${currentBucket}</b> | Score: <b>${Math.round(result.score)}</b> | Safety: <b>${Math.round(result.marketSafetyScore)}</b>`,
+    `Liquidity: <b>${Math.round(result.liquidityUsd).toLocaleString()}</b> | 5m Vol: <b>${Math.round(result.volume5m).toLocaleString()}</b>`,
+    `Buys/Sells: <b>${result.buys5m}/${result.sells5m}</b> | Ratio: <b>${ratio.toFixed(2)}x</b>`,
+    `Move since last check: <b>${pricePct >= 0 ? '+' : ''}${pricePct.toFixed(1)}%</b>`,
+    kind === 'REVERSAL'
+      ? `Recovery: score low ${Math.round(item.lowestScore)} → ${Math.round(result.score)} | buy-ratio low ${item.weakestRatio.toFixed(2)}x → ${ratio.toFixed(2)}x`
+      : 'Fresh launch has strengthened into AlphaOS entry criteria.',
+    `<code>${escapeHtml(item.token)}</code>`,
+  ].join('\n');
+  const delivery = await directTelegramRecipients(text, item.token);
+  console.log(`[PonsLeanFollowup] ${kind}_ALERT_SENT token=${item.token} bucket=${currentBucket} score=${result.score} delivered=${delivery.delivered} failed=${delivery.failed}`);
+}
+
+async function runLeanFollowups(): Promise<void> {
+  if (!FOLLOWUP_ENABLED || followupRunning || leanFollowups.size === 0) return;
+  followupRunning = true;
+  try {
+    const now = Date.now();
+    for (const [token, item] of leanFollowups) {
+      if (Date.now() > item.expiresAt) {
+        leanFollowups.delete(token);
+        continue;
+      }
+      if (now - item.lastCheckedAt < FOLLOWUP_INTERVAL_MS) continue;
+      item.lastCheckedAt = now;
+      try {
+        const current = await enrich(token);
+        if (!current) continue;
+        const currentBucket = bucket(current.result);
+        const currentRatio = ratioOf(current.result);
+        const recovered = item.lastBucket === 'IGNORE' &&
+          currentBucket !== 'IGNORE' &&
+          current.result.score >= item.lowestScore + 6 &&
+          currentRatio >= 1.4 &&
+          item.weakestRatio < 1.2;
+        const opportunity = currentBucket !== 'IGNORE' && !item.opportunitySent;
+
+        if (recovered && !item.reversalSent) {
+          await sendLeanFollowupAlert('REVERSAL', item, current.pair, current.result);
+          item.reversalSent = true;
+          item.opportunitySent = true;
+        } else if (opportunity) {
+          await sendLeanFollowupAlert('OPPORTUNITY', item, current.pair, current.result);
+          item.opportunitySent = true;
+        }
+
+        item.lastPrice = Number(current.result.currentPrice || item.lastPrice || 0);
+        item.lastScore = current.result.score;
+        item.lastRatio = currentRatio;
+        item.lastBucket = currentBucket;
+        item.weakestRatio = Math.min(item.weakestRatio, currentRatio);
+        item.lowestScore = Math.min(item.lowestScore, current.result.score);
+
+        if (item.opportunitySent && item.reversalSent) leanFollowups.delete(token);
+      } catch (error) {
+        console.warn(`[PonsLeanFollowup] check failed token=${token} reason=${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  } finally {
+    followupRunning = false;
+  }
+}
+
+function ensureLeanFollowupLoop(): void {
+  if (!FOLLOWUP_ENABLED || followupTimer) return;
+  followupTimer = setInterval(() => { void runLeanFollowups(); }, FOLLOWUP_INTERVAL_MS);
+  console.log(`[PonsLeanFollowup] enabled intervalMs=${FOLLOWUP_INTERVAL_MS} ttlMs=${FOLLOWUP_TTL_MS} max=${FOLLOWUP_MAX} dbWrites=0`);
 }
 
 function isTransientDexScreenerFailure(error: unknown): boolean {
