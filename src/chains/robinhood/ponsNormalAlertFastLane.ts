@@ -1,6 +1,7 @@
 import type { PonsLaunch } from './ponsHistoricalLaunchScanner.js';
 import type { DexProfile, RiskResult } from '../../types.js';
-import { enrichToken, fetchBoostMap, fetchTakeoverSet } from '../../services/dexscreener.js';
+import { chooseBestPair, fetchPairs } from '../../services/dexscreener.js';
+import { scoreToken } from '../../core/scoring.js';
 import { getDeliverableUsers } from '../../core/delivery.js';
 
 const MAX_CONCURRENT = Math.max(1, Math.min(5, Number(process.env.PONS_FAST_LANE_CONCURRENCY ?? 2)));
@@ -15,9 +16,6 @@ let active = 0;
 const queue: PonsLaunch[] = [];
 const seen = new Set<string>();
 const retryAttempts = new Map<string, number>();
-let cacheAt = 0;
-let boostMapCache: Awaited<ReturnType<typeof fetchBoostMap>> | null = null;
-let takeoverSetCache: Awaited<ReturnType<typeof fetchTakeoverSet>> | null = null;
 let recipientCacheAt = 0;
 let recipientRefreshInFlight: Promise<void> | null = null;
 let recipientCache = new Set<string>();
@@ -52,18 +50,19 @@ function bucket(result: RiskResult): 'HIGH_BUY' | 'BUY' | 'IGNORE' {
   return 'IGNORE';
 }
 
-async function maps() {
-  if (!boostMapCache || !takeoverSetCache || Date.now() - cacheAt > 60_000) {
-    [boostMapCache, takeoverSetCache] = await Promise.all([fetchBoostMap(), fetchTakeoverSet()]);
-    cacheAt = Date.now();
-  }
-  return { boostMap: boostMapCache, takeoverSet: takeoverSetCache };
-}
-
 async function enrich(tokenAddress: string) {
-  const { boostMap, takeoverSet } = await maps();
   const profile: DexProfile = { chainId: 'robinhood', tokenAddress };
-  return enrichToken(profile, boostMap, takeoverSet);
+  const pairs = await fetchPairs(tokenAddress);
+  const pair = chooseBestPair(pairs, tokenAddress);
+  if (!pair) return null;
+  const result = await scoreToken({
+    pair,
+    profile,
+    paidApproved: false,
+    boostAmount: 0,
+    hasTakeover: false,
+  });
+  return { pair, result };
 }
 
 function escapeHtml(value: unknown): string {
