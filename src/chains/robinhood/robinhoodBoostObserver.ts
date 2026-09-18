@@ -2,6 +2,8 @@ import { fetchRobinhoodBoosts } from './discovery.js';
 import { boostMetadataFallback, resolveBoostMetadata } from './boostMetadataResolver.js';
 import { sendTelegramWithMessageId } from '../../services/telegram.js';
 import { config } from '../../config.js';
+import { getDeliverableUsers } from '../../core/delivery.js';
+import { runtimeDeliverableUsers } from '../../services/runtimeSubscriberRegistry.js';
 
 const BOOST_INTERVAL_MS = 15_000;
 export const BOOSTED_OPPORTUNITY_THRESHOLD = 200;
@@ -18,6 +20,9 @@ export function boostPresentationState(totalBoostAmount: number) {
 
 const boostTotals = new Map<string, number>();
 const acceptedAdminBoostNotifications = new Set<string>();
+let boostRecipientCacheAt = 0;
+let boostRecipientCache = new Set<string>();
+const BOOST_RECIPIENT_CACHE_MS = 5 * 60_000;
 let boostObserverStarted = false;
 let boostObserverRunning = false;
 let boostBaselineReady = false;
@@ -30,11 +35,46 @@ function money(value: number): string { if(value>=1_000_000)return `$${(value/1_
 export function boostFallbackIdentity(tokenAddress:string,totalBoostAmount:number):string{return `${normalize(tokenAddress)}:${totalBoostAmount}`;}
 export function recordAcceptedAdminBoostNotification(tokenAddress:string,totalBoostAmount:number):void{acceptedAdminBoostNotifications.add(boostFallbackIdentity(tokenAddress,totalBoostAmount));}
 
+async function boostRecipients(): Promise<string[]> {
+  const now = Date.now();
+  if (now - boostRecipientCacheAt > BOOST_RECIPIENT_CACHE_MS) {
+    const next = new Set<string>();
+    if (config.adminTelegramId) next.add(String(config.adminTelegramId));
+    for (const user of runtimeDeliverableUsers({ allRealtime: true })) {
+      if (user.telegram_id && !user.is_blocked) next.add(String(user.telegram_id));
+    }
+    try {
+      const users = await Promise.race([
+        getDeliverableUsers(),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('recipient lookup timeout')), 1500)),
+      ]);
+      for (const user of users) if (user.telegram_id && !user.is_blocked) next.add(String(user.telegram_id));
+    } catch (error) {
+      console.warn('[RobinhoodBoostObserver] Recipient DB refresh unavailable; using runtime/admin cache', {
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (next.size) {
+      boostRecipientCache = next;
+      boostRecipientCacheAt = now;
+    }
+  }
+  if (!boostRecipientCache.size && config.adminTelegramId) boostRecipientCache.add(String(config.adminTelegramId));
+  return [...boostRecipientCache];
+}
+
 export async function deliverAdminBoostFallback(args:{tokenAddress:string;totalBoostAmount:number;message:string;buttons?:BoostAction[][]},dependencies:{send?:typeof sendTelegramWithMessageId;adminTelegramId?:string;log?:(event:string,details:Record<string,unknown>)=>void}={}):Promise<boolean>{
  const identity=boostFallbackIdentity(args.tokenAddress,args.totalBoostAmount); if(acceptedAdminBoostNotifications.has(identity))return false;
  const log=dependencies.log??((event,details)=>console.log(`[RobinhoodBoostObserver] ${event}`,details));
- try{const result=await(dependencies.send??sendTelegramWithMessageId)(dependencies.adminTelegramId??config.adminTelegramId,args.message,args.buttons);acceptedAdminBoostNotifications.add(identity);log('BOOST_FALLBACK_SENT',{token:normalize(args.tokenAddress),totalBoost:args.totalBoostAmount,messageId:(result as any)?.message_id??(result as any)?.messageId??null});return true;}
- catch(error){const reason=error instanceof Error?error.message:String(error);log('BOOST_FALLBACK_FAILED',{token:normalize(args.tokenAddress),totalBoost:args.totalBoostAmount,reason:reason.replace(/\s+/g,' ').slice(0,240)});return false;}
+ const send=dependencies.send??sendTelegramWithMessageId;
+ const recipients=dependencies.adminTelegramId ? [dependencies.adminTelegramId] : await boostRecipients();
+ if (!recipients.length) return false;
+ const results=await Promise.allSettled(recipients.map(chatId=>send(chatId,args.message,args.buttons)));
+ const delivered=results.filter(r=>r.status==='fulfilled').length;
+ const failed=results.length-delivered;
+ if(delivered>0){acceptedAdminBoostNotifications.add(identity);log('BOOST_DELIVERED',{token:normalize(args.tokenAddress),totalBoost:args.totalBoostAmount,delivered,failed});return true;}
+ log('BOOST_DELIVERY_FAILED',{token:normalize(args.tokenAddress),totalBoost:args.totalBoostAmount,delivered,failed});
+ return false;
 }
 export function resetRobinhoodBoostFallbackForTests():void{acceptedAdminBoostNotifications.clear();}
 
@@ -52,8 +92,22 @@ export function buildBoostMessage(args:{symbol:string;name?:string|null;tokenAdd
 }
 
 export function buildBoostActions(args:{tokenAddress:string;chartUrl?:string|null;opportunityId?:number|null;strategyKey?:string|null;rawData?:Record<string,unknown>|null}):BoostAction[][]{
- const intel:BoostAction={text:'🔬 Full Intel',callback_data:`FULL_INTEL_${args.tokenAddress}`.slice(0,64)};if(!args.opportunityId)return[[intel]];
- const rows:BoostAction[][]=[[intel]];if(args.chartUrl)rows[0].push({text:'📊 Chart',url:args.chartUrl});rows.push([{text:'⭐ Track',callback_data:`TRACK_${args.opportunityId}`},{text:'📋 Copy CA',callback_data:`COPY_CA_${args.tokenAddress}`}]);rows.push([{text:'🔕 Mute',callback_data:`MUTE_${args.opportunityId}`}]);return rows;
+ const token=args.tokenAddress;
+ const dex=args.chartUrl || `https://dexscreener.com/robinhood/${encodeURIComponent(token)}`;
+ const explorer=`https://robinhoodchain.blockscout.com/token/${encodeURIComponent(token)}`;
+ return [
+   [
+     {text:'🔬 Full Intel',callback_data:`FI_RH_${token}`},
+     {text:'📊 Dex',url:dex},
+   ],
+   [
+     {text:'⭐ Track',callback_data:`BOOST_TRACK_${token}`},
+     {text:'🔎 Explorer',url:explorer},
+   ],
+   [
+     {text:'📋 Copy CA',callback_data:`COPY_CA_${token}`},
+   ],
+ ];
 }
 
 export async function enrichDeliveredBoostAlert():Promise<number>{return 0;}
