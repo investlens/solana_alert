@@ -34,12 +34,13 @@ export async function enrichArcCandidate(candidate: ArcLaunchCandidate): Promise
   const contractCodePresent = Boolean(bytecode && bytecode !== '0x');
   if (!contractCodePresent) reasons.push('NO_CONTRACT_CODE');
 
-  const [name, symbol, decimalsRaw, totalSupplyRaw] = await Promise.all([
-    safeRead<string>(candidate.assetId, 'name'),
-    safeRead<string>(candidate.assetId, 'symbol'),
-    safeRead<number>(candidate.assetId, 'decimals'),
-    safeRead<bigint>(candidate.assetId, 'totalSupply'),
-  ]);
+  // ARC production currently has a small RPC provider set guarded against
+  // concurrent stampedes. Read the tiny ERC-20 metadata set sequentially so
+  // valid tokens are not misclassified merely because another eth_call is in flight.
+  const symbol = await safeRead<string>(candidate.assetId, 'symbol');
+  const decimalsRaw = await safeRead<number>(candidate.assetId, 'decimals');
+  const totalSupplyRaw = await safeRead<bigint>(candidate.assetId, 'totalSupply');
+  const name = await safeRead<string>(candidate.assetId, 'name');
 
   const decimals = decimalsRaw === null ? null : Number(decimalsRaw);
   const metadataReadable = Boolean(symbol && decimals !== null && totalSupplyRaw !== null);
