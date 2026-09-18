@@ -96,6 +96,7 @@ async function processMarketRetries(): Promise<void> {
       volume5mUsd: market.volume5mUsd,
       buys5m: market.buys5m,
       sells5m: market.sells5m,
+      hooks: market.hooks,
       alertable: assessment.alertable,
       blockedBy: assessment.security.reasons,
     });
@@ -145,6 +146,7 @@ async function main() {
         buys5m: market.buys5m,
         sells5m: market.sells5m,
         marketCapUsd: market.marketCapUsd,
+        hooks: market.hooks,
         alertable: assessment.alertable,
         status: assessment.status,
         blockedBy: assessment.security.reasons,
