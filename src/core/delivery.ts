@@ -2,6 +2,7 @@ import { supabase } from '../services/supabase.js';
 import {
   eventEngine,
 } from '../services/eventEngine.js';
+import { isTransientDatabaseError } from '../services/databaseLoadGovernor.js';
 
 export type DeliverableUser = {
   telegram_id: string;
@@ -20,6 +21,28 @@ export async function expireDueSubscriptions() {
   if (error) throw error;
 }
 
+function emergencyAdminRecipient(): DeliverableUser | null {
+  const telegramId = String(
+    process.env.OWNER_CHAT_ID ??
+    process.env.ADMIN_TELEGRAM_ID ??
+    '',
+  ).trim();
+
+  if (!telegramId) return null;
+
+  return {
+    telegram_id: telegramId,
+    username: null,
+    first_name: 'AlphaOS Admin',
+    tier: 'admin',
+    subscription_status: 'active',
+    free_trial_used: 0,
+    free_trial_limit: 0,
+    paid_active_until: null,
+    is_blocked: false,
+  };
+}
+
 export async function getDeliverableUsers(): Promise<DeliverableUser[]> {
   const { data, error } = await supabase
     .from('users')
@@ -30,6 +53,18 @@ export async function getDeliverableUsers(): Promise<DeliverableUser[]> {
 
   if (error) {
     console.error('getDeliverableUsers failed:', error);
+
+    if (isTransientDatabaseError(error)) {
+      const admin = emergencyAdminRecipient();
+      if (admin) {
+        console.warn('[Delivery] Database unavailable; using emergency admin recipient for live Telegram continuity.', {
+          telegramId: admin.telegram_id,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+        return [admin];
+      }
+    }
+
     throw error;
   }
 
