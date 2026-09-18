@@ -46,6 +46,18 @@ export async function enrichArcMarket(token: ArcTokenEnrichment): Promise<ArcMar
     const pairs: Pair[] = Array.isArray(payload?.pairs) ? payload.pairs : [];
     const asset = token.assetId.toLowerCase();
     const quote = token.quoteAsset.toLowerCase();
+    if (pairs.length > 0) {
+      console.log('[ArcMarket] provider pairs returned', {
+        assetId: token.assetId,
+        candidates: pairs.slice(0, 8).map(pair => ({
+          chainId: pair.chainId ?? null,
+          pairAddress: pair.pairAddress ?? null,
+          base: pair.baseToken?.address ?? null,
+          quote: pair.quoteToken?.address ?? null,
+          liquidityUsd: n(pair.liquidity?.usd),
+        })),
+      });
+    }
     const matching = pairs.filter(pair => {
       const chain = String(pair.chainId ?? '').toLowerCase();
       const base = String(pair.baseToken?.address ?? '').toLowerCase();
