@@ -738,3 +738,130 @@ export async function pollRobinhoodTrackedWalletsExplorer(
 
   return { events, checkpointBlocks, wallets: scannedWallets };
 }
+
+
+const LIVE_BLOCK_LOOKBACK = Math.max(
+  5,
+  Math.min(200, Number(process.env.ROBINHOOD_WALLET_LIVE_BLOCK_LOOKBACK ?? 40)),
+);
+let liveBlockCursor: bigint | null = null;
+
+async function pollRobinhoodTrackedWalletsLiveBlocks(
+  processChunk: RobinhoodWalletChunkProcessor,
+): Promise<{ events: WalletWatchEvent[]; checkpointBlocks: Map<string, bigint>; wallets: Address[] }> {
+  const wallets = [...new Map((await getActiveTrackedWalletAddresses('robinhood'))
+    .map(value => getAddress(value))
+    .map(wallet => [wallet.toLowerCase(), wallet])).values()];
+  if (!wallets.length) return { events: [], checkpointBlocks: new Map(), wallets: [] };
+
+  const walletMap = new Map(wallets.map(wallet => [wallet.toLowerCase(), wallet]));
+  const head = await robinhoodPublicClient.getBlockNumber();
+
+  if (liveBlockCursor == null) {
+    liveBlockCursor = head > BigInt(LIVE_BLOCK_LOOKBACK)
+      ? head - BigInt(LIVE_BLOCK_LOOKBACK)
+      : 0n;
+    console.log('[RobinhoodWalletLiveBlocks] initialized', {
+      fromBlock: (liveBlockCursor + 1n).toString(),
+      head: head.toString(),
+      wallets: wallets.length,
+    });
+  }
+
+  if (liveBlockCursor >= head) {
+    return { events: [], checkpointBlocks: new Map(), wallets };
+  }
+
+  const maxPerPoll = BigInt(Math.max(5, Math.min(100, Number(process.env.ROBINHOOD_WALLET_MAX_BLOCKS_PER_POLL ?? 30))));
+  const toBlock = liveBlockCursor + maxPerPoll < head ? liveBlockCursor + maxPerPoll : head;
+  const events: WalletWatchEvent[] = [];
+
+  for (let blockNumber = liveBlockCursor + 1n; blockNumber <= toBlock; blockNumber += 1n) {
+    const block = await robinhoodPublicClient.getBlock({
+      blockNumber,
+      includeTransactions: true,
+    });
+    for (const tx of block.transactions as any[]) {
+      if (!tx || typeof tx !== 'object' || !tx.from || !tx.hash) continue;
+      const wallet = walletMap.get(String(tx.from).toLowerCase());
+      if (!wallet) continue;
+
+      const receipt = await robinhoodPublicClient.getTransactionReceipt({ hash: tx.hash as Hex });
+      const transfers = transferEvidenceFromReceipt(receipt);
+      const classification = classifyRobinhoodWalletTransaction(wallet, {
+        hash: tx.hash as Hex,
+        from: getAddress(tx.from),
+        value: BigInt(tx.value ?? 0),
+        transfers,
+      });
+      if (!classification) continue;
+
+      const metadata = await tokenMetadata(classification.token).catch(() => null);
+      const quoteTransfer = transfers.find(transfer => isQuoteToken(transfer.token) && transfer.value > 0n);
+      const nativeRaw = BigInt(tx.value ?? 0);
+      const nativeAmount = classification.kind === 'buy' && nativeRaw > 0n
+        ? Number(nativeRaw) / 1e18
+        : quoteTransfer
+          ? Number(quoteTransfer.value) / 1e18
+          : null;
+
+      events.push({
+        kind: classification.kind,
+        chain: 'robinhood',
+        wallet,
+        signature: tx.hash as Hex,
+        timestamp: Number(block.timestamp),
+        blockNumber: Number(blockNumber),
+        tokenMint: classification.token,
+        tokenAmount: normalizedAmount(classification.amountRaw, metadata?.decimals ?? null),
+        tokenAmountRaw: classification.amountRaw?.toString() ?? null,
+        tokenDecimals: metadata?.decimals ?? null,
+        tokenSymbol: metadata?.symbol ?? null,
+        tokenName: metadata?.name ?? null,
+        nativeAmount,
+        quoteSymbol: nativeRaw > 0n ? 'ETH' : quoteTransfer ? 'WETH' : null,
+        counterparty: tx.to ? getAddress(tx.to) : null,
+        type: `Live block wallet activity: ${classification.evidence}`,
+        ...(classification.kind === 'buy' || classification.kind === 'sell' ? { amountSol: null } : {}),
+      } as WalletWatchEvent);
+    }
+  }
+
+  const delivery = await processChunk(events);
+  if (delivery.failedWallets.size === 0) {
+    liveBlockCursor = toBlock;
+  } else {
+    console.warn('[RobinhoodWalletLiveBlocks] delivery failed; holding live cursor', {
+      failedWallets: delivery.failedWallets.size,
+      throughBlock: toBlock.toString(),
+    });
+  }
+
+  const checkpointBlocks = new Map<string, bigint>();
+  if (delivery.failedWallets.size === 0) {
+    for (const wallet of wallets) checkpointBlocks.set(wallet.toLowerCase(), toBlock);
+  }
+
+  if (events.length > 0) {
+    console.log('[RobinhoodWalletLiveBlocks] activity processed', {
+      events: events.length,
+      throughBlock: toBlock.toString(),
+    });
+  }
+
+  return { events, checkpointBlocks, wallets };
+}
+
+
+export async function pollRobinhoodTrackedWalletsLean(
+  processChunk: RobinhoodWalletChunkProcessor,
+) {
+  try {
+    return await pollRobinhoodTrackedWalletsExplorer(processChunk);
+  } catch (error) {
+    console.warn('[RobinhoodWalletWatcher] explorer unavailable; using live block fallback', {
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    return pollRobinhoodTrackedWalletsLiveBlocks(processChunk);
+  }
+}
