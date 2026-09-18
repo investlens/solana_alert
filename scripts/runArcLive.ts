@@ -12,6 +12,14 @@ const ENABLED = String(process.env.ARC_LIVE_ENABLED ?? 'false').toLowerCase() ==
 const MAX_BLOCKS = Math.max(1, Number(process.env.ARC_LIVE_MAX_BLOCKS_PER_POLL ?? 250));
 const ALERT_CHAT_ID = String(process.env.ADMIN_TELEGRAM_ID || process.env.OWNER_CHAT_ID || '').trim();
 const delivered = new Set<string>();
+const MARKET_RETRY_DELAY_MS = Math.max(12_000, Number(process.env.ARC_MARKET_RETRY_DELAY_MS ?? 15_000));
+const MARKET_RETRY_MAX_PENDING = Math.max(5, Math.min(50, Number(process.env.ARC_MARKET_RETRY_MAX_PENDING ?? 20)));
+const MARKET_RETRY_PER_POLL = Math.max(1, Math.min(5, Number(process.env.ARC_MARKET_RETRY_PER_POLL ?? 3)));
+type PendingArcRetry = {
+  enriched: Awaited<ReturnType<typeof enrichArcCandidate>>;
+  retryAt: number;
+};
+const pendingMarketRetries = new Map<string, PendingArcRetry>();
 
 function formatUsd(value: number | null | undefined): string {
   return value == null || !Number.isFinite(value) ? 'n/a' : `$${Math.round(value).toLocaleString('en-US')}`;
@@ -43,6 +51,63 @@ async function deliverArcAlert(market: Awaited<ReturnType<typeof enrichArcMarket
   console.log('[ArcLive] ALERT_SENT', { assetId: market.assetId, symbol: market.symbol, messageId });
 }
 
+
+function canRetryMarket(enriched: Awaited<ReturnType<typeof enrichArcCandidate>>): boolean {
+  return enriched.contractCodePresent &&
+    enriched.metadataReadable &&
+    enriched.safetyReasons.length === 0 &&
+    enriched.hooks.toLowerCase() === '0x0000000000000000000000000000000000000000';
+}
+
+function queueMarketRetry(enriched: Awaited<ReturnType<typeof enrichArcCandidate>>): void {
+  const key = enriched.assetId.toLowerCase();
+  if (!canRetryMarket(enriched) || pendingMarketRetries.has(key) || delivered.has(key)) return;
+  if (pendingMarketRetries.size >= MARKET_RETRY_MAX_PENDING) {
+    const oldest = pendingMarketRetries.keys().next().value;
+    if (oldest) pendingMarketRetries.delete(oldest);
+  }
+  pendingMarketRetries.set(key, {
+    enriched,
+    retryAt: Date.now() + MARKET_RETRY_DELAY_MS,
+  });
+  console.log('[ArcLive] MARKET_RETRY_QUEUED', {
+    assetId: enriched.assetId,
+    symbol: enriched.symbol,
+    retryInMs: MARKET_RETRY_DELAY_MS,
+    pending: pendingMarketRetries.size,
+  });
+}
+
+async function processMarketRetries(): Promise<void> {
+  let processed = 0;
+  const now = Date.now();
+  for (const [key, pending] of pendingMarketRetries) {
+    if (processed >= MARKET_RETRY_PER_POLL) break;
+    if (pending.retryAt > now) continue;
+    pendingMarketRetries.delete(key);
+    processed += 1;
+
+    const market = await enrichArcMarket(pending.enriched);
+    const assessment = assessArcForAlert(market);
+    console.log('[ArcLive] MARKET_RETRY_RESULT', {
+      assetId: market.assetId,
+      symbol: market.symbol,
+      liquidityUsd: market.liquidityUsd,
+      volume5mUsd: market.volume5mUsd,
+      buys5m: market.buys5m,
+      sells5m: market.sells5m,
+      alertable: assessment.alertable,
+      blockedBy: assessment.security.reasons,
+    });
+
+    if (assessment.alertable) {
+      await deliverArcAlert(market, assessment.security.warnings).catch(error => {
+        console.error('[ArcLive] ALERT_SEND_FAILED', { assetId: market.assetId, error });
+      });
+    }
+  }
+}
+
 async function main() {
   console.log('[ArcLive] starting', { enabled: ENABLED, pollIntervalMs: POLL_MS, mode: 'LIVE_ALERTS', hasAlertRecipient: Boolean(ALERT_CHAT_ID) });
   const verified = await verifyArcMainnet();
@@ -56,6 +121,7 @@ async function main() {
   let last = verified.blockNumber;
   while (true) {
     await new Promise(resolve => setTimeout(resolve, POLL_MS));
+    await processMarketRetries();
     const current = await getArcBlockNumber();
     if (current <= last) continue;
 
@@ -89,6 +155,8 @@ async function main() {
         await deliverArcAlert(market, assessment.security.warnings).catch(error => {
           console.error('[ArcLive] ALERT_SEND_FAILED', { assetId: market.assetId, error });
         });
+      } else if (market.marketDataSource == null) {
+        queueMarketRetry(enriched);
       }
     }
 
