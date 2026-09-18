@@ -1,9 +1,11 @@
+import { parseAbi } from 'viem';
 import type { PonsLaunch } from './ponsHistoricalLaunchScanner.js';
 import type { DexPair, DexProfile, RiskResult } from '../../types.js';
 import { chooseBestPair, fetchPairs } from '../../services/dexscreener.js';
 import { scoreToken } from '../../core/scoring.js';
 import { getDeliverableUsers } from '../../core/delivery.js';
 import { governedDexScreenerJson } from '../../services/dexscreenerRequestGovernor.js';
+import { robinhoodPublicClient } from './rpc.js';
 
 const MAX_CONCURRENT = Math.max(1, Math.min(5, Number(process.env.PONS_FAST_LANE_CONCURRENCY ?? 2)));
 const MAX_QUEUE = Math.max(5, Math.min(100, Number(process.env.PONS_FAST_LANE_MAX_QUEUE ?? 30)));
@@ -23,6 +25,14 @@ const seen = new Set<string>();
 const retryAttempts = new Map<string, number>();
 const noPairRetries = new Set<string>();
 const NO_PAIR_RETRY_MS = Math.max(30_000, Math.min(120_000, Number(process.env.PONS_NO_PAIR_RETRY_MS ?? 45_000)));
+const PREINDEX_MAX = 10;
+const PREINDEX_RECHECK_MS = 120_000;
+const PREINDEX_ABI = parseAbi([
+  'function token() view returns (address)',
+  'function getReserves() view returns (uint256 quoteReserve,uint256 tokenReserve)',
+  'function graduated() view returns (bool)',
+]);
+const preIndexCandidates = new Set<string>();
 let recipientCacheAt = 0;
 let recipientRefreshInFlight: Promise<void> | null = null;
 let recipientCache = new Set<string>();
@@ -182,6 +192,78 @@ async function directTelegramRecipients(text: string, tokenAddress: string): Pro
   return { delivered, failed };
 }
 
+
+async function validatePonsV2Curve(launch: PonsLaunch): Promise<boolean> {
+  const token = tokenKey(launch);
+  const curve = String(launch.curve_address ?? '').trim();
+  if (!token || !/^0x[0-9a-fA-F]{40}$/.test(curve)) return false;
+  try {
+    const [curveToken, reserves, graduated] = await Promise.all([
+      robinhoodPublicClient.readContract({
+        address: curve as `0x${string}`,
+        abi: PREINDEX_ABI,
+        functionName: 'token',
+      }),
+      robinhoodPublicClient.readContract({
+        address: curve as `0x${string}`,
+        abi: PREINDEX_ABI,
+        functionName: 'getReserves',
+      }),
+      robinhoodPublicClient.readContract({
+        address: curve as `0x${string}`,
+        abi: PREINDEX_ABI,
+        functionName: 'graduated',
+      }),
+    ]);
+    const [quoteReserve, tokenReserve] = reserves as readonly [bigint, bigint];
+    const valid = String(curveToken).toLowerCase() === token &&
+      quoteReserve > 0n && tokenReserve > 0n && !Boolean(graduated);
+    if (valid) {
+      console.log(`[PonsFastLane] PREINDEX_CURVE_VALID token=${token} curve=${curve} quoteReserve=${quoteReserve.toString()} tokenReserve=${tokenReserve.toString()}`);
+    }
+    return valid;
+  } catch (error) {
+    console.warn(`[PonsFastLane] preindex curve validation failed token=${token} reason=${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
+}
+
+function schedulePreIndexRecheck(launch: PonsLaunch): void {
+  const token = tokenKey(launch);
+  if (!token || preIndexCandidates.has(token) || preIndexCandidates.size >= PREINDEX_MAX) return;
+  preIndexCandidates.add(token);
+  setTimeout(() => {
+    void (async () => {
+      try {
+        const resolved = await enrich(token, true);
+        if (resolved) {
+          console.log(`[PonsFastLane] PREINDEX_PAIR_RESOLVED token=${token} pair=${String((resolved.pair as any).pairAddress ?? 'unknown')}`);
+          registerLeanFollowup(token, resolved.pair, resolved.result);
+          ensureLeanFollowupLoop();
+          const currentBucket = bucket(resolved.result);
+          if (currentBucket === 'IGNORE') {
+            console.log(`[PonsFastLane] preindex recheck reject token=${token} score=${resolved.result.score} safety=${resolved.result.marketSafetyScore}`);
+          } else {
+            const text = [
+              `🎯 <b>AlphaOS PONS OPPORTUNITY</b>`,
+              `<b>${escapeHtml(resolved.pair.baseToken?.symbol ?? 'UNKNOWN')}</b> — ${escapeHtml(resolved.pair.baseToken?.name ?? '')}`,
+              `State: <b>${currentBucket}</b> | Score: <b>${Math.round(resolved.result.score)}</b> | Safety: <b>${Math.round(resolved.result.marketSafetyScore)}</b>`,
+              `Liquidity: <b>${Math.round(resolved.result.liquidityUsd).toLocaleString()}</b> | 5m Vol: <b>${Math.round(resolved.result.volume5m).toLocaleString()}</b>`,
+              `<code>${escapeHtml(token)}</code>`,
+            ].join('\n');
+            const delivery = await directTelegramRecipients(text, token);
+            console.log(`[PonsFastLane] PREINDEX_ALERT_SENT token=${token} bucket=${currentBucket} score=${resolved.result.score} delivered=${delivery.delivered} failed=${delivery.failed}`);
+          }
+        } else {
+          console.log(`[PonsFastLane] preindex recheck still unindexed token=${token}`);
+        }
+      } finally {
+        preIndexCandidates.delete(token);
+      }
+    })();
+  }, PREINDEX_RECHECK_MS);
+}
+
 async function evaluate(launch: PonsLaunch): Promise<void> {
   const tokenAddress = tokenKey(launch);
   if (!tokenAddress) return;
@@ -196,8 +278,12 @@ async function evaluate(launch: PonsLaunch): Promise<void> {
         void drain();
       }, NO_PAIR_RETRY_MS);
     } else {
-      console.log(`[PonsFastLane] no verified pair after broad retry; dropping token=${tokenAddress}`);
+      console.log(`[PonsFastLane] no verified pair after broad retry token=${tokenAddress}`);
       noPairRetries.delete(tokenAddress);
+      if (preIndexCandidates.size < PREINDEX_MAX && launch.protocol_version.startsWith('v2') && launch.curve_address) {
+        const curveValid = await validatePonsV2Curve(launch);
+        if (curveValid) schedulePreIndexRecheck(launch);
+      }
     }
     return;
   }
