@@ -21,6 +21,7 @@ const queue: PonsLaunch[] = [];
 const seen = new Set<string>();
 const retryAttempts = new Map<string, number>();
 const noPairRetries = new Set<string>();
+const NO_PAIR_RETRY_MS = Math.max(30_000, Math.min(120_000, Number(process.env.PONS_NO_PAIR_RETRY_MS ?? 45_000)));
 let recipientCacheAt = 0;
 let recipientRefreshInFlight: Promise<void> | null = null;
 let recipientCache = new Set<string>();
@@ -170,11 +171,11 @@ async function evaluate(launch: PonsLaunch): Promise<void> {
   if (!first) {
     if (!noPairRetries.has(tokenAddress)) {
       noPairRetries.add(tokenAddress);
-      console.log(`[PonsFastLane] no indexed pair yet; retry scheduled token=${tokenAddress} delayMs=15000`);
+      console.log(`[PonsFastLane] no indexed pair yet; retry scheduled token=${tokenAddress} delayMs=${NO_PAIR_RETRY_MS}`);
       setTimeout(() => {
         queue.push(launch);
         void drain();
-      }, 15_000);
+      }, NO_PAIR_RETRY_MS);
     } else {
       console.log(`[PonsFastLane] no indexed pair after retry; dropping token=${tokenAddress}`);
       noPairRetries.delete(tokenAddress);
