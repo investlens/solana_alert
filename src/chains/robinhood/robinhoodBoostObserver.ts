@@ -78,6 +78,103 @@ export async function deliverAdminBoostFallback(args:{tokenAddress:string;totalB
 }
 export function resetRobinhoodBoostFallbackForTests():void{acceptedAdminBoostNotifications.clear();}
 
+
+type CustomLiquidityDecision = {
+  allowed: boolean;
+  status: 'LOCKED' | 'BURNED' | 'UNLOCKED' | 'UNKNOWN';
+  reason: string;
+};
+
+function numericPercent(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+function burnLikeLpHolder(holder: Record<string, unknown>): boolean {
+  const address = String(holder.address ?? holder.token_account ?? '').toLowerCase();
+  const tag = String(holder.tag ?? '').toLowerCase();
+  return address === '0x0000000000000000000000000000000000000000'
+    || address === '0x000000000000000000000000000000000000dead'
+    || tag.includes('burn')
+    || tag.includes('dead')
+    || tag.includes('null address')
+    || tag.includes('black hole');
+}
+
+async function checkCustomLiquidityProtection(tokenAddress: string): Promise<CustomLiquidityDecision> {
+  const url = `https://api.gopluslabs.io/api/v1/token_security/4663?contract_addresses=${encodeURIComponent(tokenAddress)}`;
+  try {
+    const response = await fetch(url, {
+      headers: { accept: 'application/json' },
+      signal: AbortSignal.timeout(4_000),
+    });
+    if (!response.ok) {
+      return { allowed: false, status: 'UNKNOWN', reason: `GoPlus HTTP ${response.status}` };
+    }
+
+    const payload = await response.json() as {
+      result?: Record<string, Record<string, unknown>>;
+      code?: number;
+      message?: string;
+    };
+    const key = normalize(tokenAddress);
+    const security = payload.result?.[key]
+      ?? payload.result?.[Object.keys(payload.result ?? {}).find(value => normalize(value) === key) ?? ''];
+    if (!security) {
+      return { allowed: false, status: 'UNKNOWN', reason: 'LP security data unavailable' };
+    }
+
+    if (String(security.is_honeypot ?? '0') === '1') {
+      return { allowed: false, status: 'UNLOCKED', reason: 'GoPlus honeypot flag' };
+    }
+    if (String(security.cannot_sell_all ?? '0') === '1') {
+      return { allowed: false, status: 'UNLOCKED', reason: 'GoPlus sell restriction flag' };
+    }
+
+    const holders = Array.isArray(security.lp_holders)
+      ? security.lp_holders as Record<string, unknown>[]
+      : [];
+    if (!holders.length) {
+      return { allowed: false, status: 'UNKNOWN', reason: 'No independently verified LP-holder evidence' };
+    }
+
+    let protectedPct = 0;
+    let burnedPct = 0;
+    let unlockedPct = 0;
+    for (const holder of holders) {
+      const pct = numericPercent(holder.percent);
+      const locked = String(holder.is_locked ?? '0') === '1';
+      const burned = burnLikeLpHolder(holder);
+      if (locked || burned) protectedPct += pct;
+      if (burned) burnedPct += pct;
+      if (!locked && !burned) unlockedPct += pct;
+    }
+
+    // GoPlus percentages are fractions: 1 = 100%.
+    // Custom alerts fail closed unless at least 95% of observed LP is
+    // independently protected. This tolerates tiny dust LP positions.
+    if (protectedPct >= 0.95) {
+      return {
+        allowed: true,
+        status: burnedPct >= 0.95 ? 'BURNED' : 'LOCKED',
+        reason: `${(protectedPct * 100).toFixed(1)}% of observed LP protected`,
+      };
+    }
+
+    return {
+      allowed: false,
+      status: 'UNLOCKED',
+      reason: `only ${(protectedPct * 100).toFixed(1)}% LP protected; ${(unlockedPct * 100).toFixed(1)}% remains removable`,
+    };
+  } catch (error) {
+    return {
+      allowed: false,
+      status: 'UNKNOWN',
+      reason: error instanceof Error ? error.message.slice(0, 180) : String(error).slice(0, 180),
+    };
+  }
+}
+
 type BoostSecurityDecision={status:'SAFE'|'UNKNOWN'|'SCAM';reason:string};
 async function checkBoostContractSecurity(tokenAddress:string):Promise<BoostSecurityDecision>{
  const rpcUrl=process.env.ROBINHOOD_RPC_URL?.trim(); if(!rpcUrl)return{status:'UNKNOWN',reason:'security RPC not configured'};
@@ -114,7 +211,7 @@ export async function enrichDeliveredBoostAlert():Promise<number>{return 0;}
 export function isMaterialVolumeSurge(args:{previousVolume5m:number|null;currentVolume5m:number|null;previousPrice:number|null;currentPrice:number|null}){return args.previousVolume5m!=null&&args.previousVolume5m>0&&args.currentVolume5m!=null&&args.currentVolume5m>=args.previousVolume5m*1.5&&args.previousPrice!=null&&args.previousPrice>0&&args.currentPrice!=null&&args.currentPrice>=args.previousPrice*0.5;}
 export function volumeIgnitionDecision(args:{previousVolume5m:number|null;currentVolume5m:number|null;previousPrice:number|null;currentPrice:number|null;previousLiquidity?:number|null;currentLiquidity?:number|null;buys5m?:number|null;sells5m?:number|null}){const multiple=args.previousVolume5m!=null&&args.previousVolume5m>0&&args.currentVolume5m!=null?args.currentVolume5m/args.previousVolume5m:null;const priceConstructive=args.previousPrice!=null&&args.previousPrice>0&&args.currentPrice!=null&&args.currentPrice>=args.previousPrice*0.5;const liquidityStable=args.previousLiquidity==null||args.currentLiquidity==null||args.previousLiquidity<=0||args.currentLiquidity>=args.previousLiquidity*0.85;const flowConstructive=args.buys5m==null||args.sells5m==null||args.buys5m>=args.sells5m;return{eligible:multiple!=null&&multiple>=1.5&&priceConstructive&&liquidityStable&&flowConstructive,volumeMultiple:multiple};}
 
-async function processBoost(boost:{tokenAddress:string;amount:number;totalAmount:number}):Promise<boolean>{const tokenKey=normalize(boost.tokenAddress);const previousTotal=boostTotals.get(tokenKey);if(previousTotal!=null&&boost.totalAmount<=previousTotal)return false;const eventType:'NEW'|'INCREASE'=previousTotal==null?'NEW':'INCREASE';const boostAdded=previousTotal==null?boost.amount:Math.max(boost.totalAmount-previousTotal,0);const security=await checkBoostContractSecurity(boost.tokenAddress);console.log('[RobinhoodBoostObserver] BOOST_SECURITY_DECISION',{token:tokenKey,status:security.status,reason:security.reason});if(security.status==='SCAM'){boostTotals.set(tokenKey,boost.totalAmount);console.warn('[RobinhoodBoostObserver] BOOST_BLOCKED_SECURITY',{token:tokenKey,totalBoost:boost.totalAmount,reason:security.reason});return false;}const metadata=await resolveBoostMetadata(boost.tokenAddress,null,500).catch(()=>boostMetadataFallback(boost.tokenAddress));const fallback=boostMetadataFallback(boost.tokenAddress);const symbol=metadata.symbol??fallback.symbol??shortAddress(boost.tokenAddress);const message=buildBoostMessage({symbol,name:metadata.name,tokenAddress:boost.tokenAddress,boostAmount:boostAdded,totalBoostAmount:boost.totalAmount,devHoldingPercent:null,holderTop1Percent:null,eventType,securityStatus:security.status,securityReason:security.reason});const sent=await deliverAdminBoostFallback({tokenAddress:boost.tokenAddress,totalBoostAmount:boost.totalAmount,message,buttons:buildBoostActions({tokenAddress:boost.tokenAddress})});if(sent||acceptedAdminBoostNotifications.has(boostFallbackIdentity(boost.tokenAddress,boost.totalAmount))){boostTotals.set(tokenKey,boost.totalAmount);console.log('[RobinhoodBoostObserver] BOOST_ALERT_VERIFIED',{token:tokenKey,eventType,boostAdded,totalBoost:boost.totalAmount,security:security.status,supabase:'bypassed'});return true;}return false;}
+async function processBoost(boost:{tokenAddress:string;amount:number;totalAmount:number}):Promise<boolean>{const tokenKey=normalize(boost.tokenAddress);const previousTotal=boostTotals.get(tokenKey);if(previousTotal!=null&&boost.totalAmount<=previousTotal)return false;const eventType:'NEW'|'INCREASE'=previousTotal==null?'NEW':'INCREASE';const boostAdded=previousTotal==null?boost.amount:Math.max(boost.totalAmount-previousTotal,0);const security=await checkBoostContractSecurity(boost.tokenAddress);console.log('[RobinhoodBoostObserver] BOOST_SECURITY_DECISION',{token:tokenKey,status:security.status,reason:security.reason});if(security.status==='SCAM'){boostTotals.set(tokenKey,boost.totalAmount);console.warn('[RobinhoodBoostObserver] BOOST_BLOCKED_SECURITY',{token:tokenKey,totalBoost:boost.totalAmount,reason:security.reason});return false;}const liquidityProtection=await checkCustomLiquidityProtection(boost.tokenAddress);console.log('[RobinhoodBoostObserver] CUSTOM_LP_DECISION',{token:tokenKey,status:liquidityProtection.status,allowed:liquidityProtection.allowed,reason:liquidityProtection.reason});if(!liquidityProtection.allowed){boostTotals.set(tokenKey,boost.totalAmount);console.warn('[RobinhoodBoostObserver] BOOST_BLOCKED_LP_CONTROL',{token:tokenKey,totalBoost:boost.totalAmount,status:liquidityProtection.status,reason:liquidityProtection.reason});return false;}const metadata=await resolveBoostMetadata(boost.tokenAddress,null,500).catch(()=>boostMetadataFallback(boost.tokenAddress));const fallback=boostMetadataFallback(boost.tokenAddress);const symbol=metadata.symbol??fallback.symbol??shortAddress(boost.tokenAddress);const message=buildBoostMessage({symbol,name:metadata.name,tokenAddress:boost.tokenAddress,boostAmount:boostAdded,totalBoostAmount:boost.totalAmount,devHoldingPercent:null,holderTop1Percent:null,eventType,securityStatus:security.status,securityReason:`${security.reason}; LP ${liquidityProtection.status}: ${liquidityProtection.reason}`});const sent=await deliverAdminBoostFallback({tokenAddress:boost.tokenAddress,totalBoostAmount:boost.totalAmount,message,buttons:buildBoostActions({tokenAddress:boost.tokenAddress})});if(sent||acceptedAdminBoostNotifications.has(boostFallbackIdentity(boost.tokenAddress,boost.totalAmount))){boostTotals.set(tokenKey,boost.totalAmount);console.log('[RobinhoodBoostObserver] BOOST_ALERT_VERIFIED',{token:tokenKey,eventType,boostAdded,totalBoost:boost.totalAmount,security:security.status,supabase:'bypassed'});return true;}return false;}
 
 export async function runRobinhoodBoostObserverCycle():Promise<void>{if(boostObserverRunning)return;boostObserverRunning=true;try{if(!await ensureBoostBaseline())return;const boosts=await fetchRobinhoodBoosts();console.log('[RobinhoodBoostObserver] Feed:',{boosts:boosts.length,mode:'LIVE_ONLY'});let alertsSent=0;for(const boost of boosts){try{if(await processBoost(boost))alertsSent+=1;}catch(error){console.error('[RobinhoodBoostObserver] Token processing failed:',{token:boost.tokenAddress,error:error instanceof Error?error.message:String(error)});}}console.log('[RobinhoodBoostObserver] Cycle complete:',{alertsSent,supabase:'bypassed'});}catch(error){console.error('[RobinhoodBoostObserver] Cycle failed:',error instanceof Error?error.message:String(error));}finally{boostObserverRunning=false;}}
 export function startRobinhoodBoostObserver():ReturnType<typeof setInterval>|null{if(boostObserverStarted)return boostObserverInterval;boostObserverStarted=true;console.log('[RobinhoodBoostObserver] Starting LIVE_ONLY security-only path...');void ensureBoostBaseline();boostObserverInterval=setInterval(()=>void runRobinhoodBoostObserverCycle(),BOOST_INTERVAL_MS);return boostObserverInterval;}
