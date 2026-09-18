@@ -2,16 +2,15 @@ import type { ArcMarketEnrichment } from './market.js';
 import { evaluateArcSecurity, type ArcSecurityDecision } from './security.js';
 
 export type ArcAlertAssessment = {
-  alertable: false;
+  alertable: boolean;
   security: ArcSecurityDecision;
-  status: 'BLOCKED_SECURITY_ENRICHMENT_INCOMPLETE';
+  status: 'READY' | 'BLOCKED_SECURITY';
 };
 
 /**
- * Deliberately fail-closed. Market activity alone can never produce an Arc alert.
- * Holder concentration, deployer ownership/history, liquidity protection,
- * sell simulation and an external risk verdict must all be populated by verified
- * collectors before this gate can ever become alertable.
+ * Fail closed on facts that are known unsafe or on missing core market data.
+ * Optional enrichment that is not yet available is surfaced as a warning and
+ * must not globally disable the live feed.
  */
 export function assessArcForAlert(token: ArcMarketEnrichment): ArcAlertAssessment {
   const security = evaluateArcSecurity({
@@ -22,5 +21,10 @@ export function assessArcForAlert(token: ArcMarketEnrichment): ArcAlertAssessmen
     sellSimulationPassed: null,
     externalRiskFlag: null,
   });
-  return { alertable: false, security, status: 'BLOCKED_SECURITY_ENRICHMENT_INCOMPLETE' };
+
+  return {
+    alertable: security.allowAlert,
+    security,
+    status: security.allowAlert ? 'READY' : 'BLOCKED_SECURITY',
+  };
 }
