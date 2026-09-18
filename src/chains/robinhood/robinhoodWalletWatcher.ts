@@ -423,3 +423,318 @@ export async function initializeRobinhoodWalletCursorAtCurrentBlock(wallet: Addr
   if (error) throw error;
   return currentBlock;
 }
+
+
+type BlockscoutAddress = { hash?: string };
+type BlockscoutTransaction = {
+  hash?: string;
+  block_number?: number | string;
+  timestamp?: string;
+  from?: BlockscoutAddress | string | null;
+  to?: BlockscoutAddress | string | null;
+  value?: string | number | null;
+  status?: string | null;
+  method?: string | null;
+};
+type BlockscoutTransfer = {
+  from?: BlockscoutAddress | string | null;
+  to?: BlockscoutAddress | string | null;
+  token?: Record<string, unknown> | null;
+  total?: Record<string, unknown> | null;
+  value?: string | number | null;
+};
+
+const ROBINHOOD_EXPLORER_BASE_URL = String(
+  process.env.ROBINHOOD_WALLET_EXPLORER_BASE_URL ??
+  'https://robinhoodchain.blockscout.com/api/v2',
+).replace(/\/$/, '');
+const ROBINHOOD_EXPLORER_TIMEOUT_MS = Math.max(
+  2_000,
+  Math.min(15_000, Number(process.env.ROBINHOOD_WALLET_EXPLORER_TIMEOUT_MS ?? 6_000)),
+);
+const ROBINHOOD_EXPLORER_MAX_TX_PER_WALLET = Math.max(
+  5,
+  Math.min(50, Number(process.env.ROBINHOOD_WALLET_EXPLORER_MAX_TX ?? 50)),
+);
+
+function blockscoutAddress(value: BlockscoutAddress | string | null | undefined): string | null {
+  if (typeof value === 'string') return /^0x[a-fA-F0-9]{40}$/.test(value) ? value : null;
+  const hash = String(value?.hash ?? '');
+  return /^0x[a-fA-F0-9]{40}$/.test(hash) ? hash : null;
+}
+
+function blockscoutBigInt(value: unknown): bigint {
+  try {
+    if (typeof value === 'bigint') return value;
+    if (typeof value === 'number' && Number.isFinite(value)) return BigInt(Math.trunc(value));
+    const text = String(value ?? '').trim();
+    return text ? BigInt(text) : 0n;
+  } catch {
+    return 0n;
+  }
+}
+
+async function blockscoutJson<T>(path: string): Promise<T> {
+  const response = await fetch(
+    `${ROBINHOOD_EXPLORER_BASE_URL}${path}`,
+    { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(ROBINHOOD_EXPLORER_TIMEOUT_MS) },
+  );
+  if (!response.ok) throw new Error(`Blockscout HTTP ${response.status}`);
+  return await response.json() as T;
+}
+
+async function explorerTransactions(wallet: Address): Promise<BlockscoutTransaction[]> {
+  const payload = await blockscoutJson<{ items?: BlockscoutTransaction[] }>(
+    `/addresses/${encodeURIComponent(wallet)}/transactions?filter=from`,
+  );
+  return Array.isArray(payload.items)
+    ? payload.items.slice(0, ROBINHOOD_EXPLORER_MAX_TX_PER_WALLET)
+    : [];
+}
+
+function explorerTokenAddress(transfer: BlockscoutTransfer): string | null {
+  const token = transfer.token ?? {};
+  for (const candidate of [
+    token.address,
+    token.address_hash,
+    token.contract_address,
+    token.contract_address_hash,
+    (transfer as any).token_address,
+  ]) {
+    const value = String(candidate ?? '');
+    if (/^0x[a-fA-F0-9]{40}$/.test(value)) return value;
+  }
+  return null;
+}
+
+function explorerTransferValue(transfer: BlockscoutTransfer): bigint {
+  const total = transfer.total ?? {};
+  for (const candidate of [
+    total.value,
+    (transfer as any).value,
+    (transfer as any).amount,
+  ]) {
+    const parsed = blockscoutBigInt(candidate);
+    if (parsed > 0n) return parsed;
+  }
+  return 0n;
+}
+
+function explorerTransferDecimals(transfer: BlockscoutTransfer): number | null {
+  const token = transfer.token ?? {};
+  const total = transfer.total ?? {};
+  for (const candidate of [token.decimals, total.decimals, (transfer as any).decimals]) {
+    const parsed = Number(candidate);
+    if (Number.isInteger(parsed) && parsed >= 0 && parsed <= 30) return parsed;
+  }
+  return null;
+}
+
+function explorerTransferSymbol(transfer: BlockscoutTransfer): string | null {
+  const token = transfer.token ?? {};
+  const value = String(token.symbol ?? '').trim();
+  return value || null;
+}
+
+async function explorerTransfers(hash: Hex): Promise<BlockscoutTransfer[]> {
+  const payload = await blockscoutJson<{ items?: BlockscoutTransfer[] }>(
+    `/transactions/${encodeURIComponent(hash)}/token-transfers?type=ERC-20`,
+  );
+  return Array.isArray(payload.items) ? payload.items : [];
+}
+
+function explorerTimestampSeconds(value: unknown): number {
+  const millis = Date.parse(String(value ?? ''));
+  return Number.isFinite(millis) ? Math.floor(millis / 1000) : Math.floor(Date.now() / 1000);
+}
+
+async function explorerCursorMap(wallets: Address[]): Promise<Map<string, bigint>> {
+  const { data, error } = await supabase
+    .from('wallet_monitor_cursors')
+    .select('wallet_address,last_processed_block')
+    .eq('chain', 'robinhood');
+  if (error) throw error;
+  const monitored = new Set(wallets.map(wallet => wallet.toLowerCase()));
+  return new Map(
+    (data ?? [])
+      .filter(row => monitored.has(String(row.wallet_address).toLowerCase()))
+      .map(row => [String(row.wallet_address).toLowerCase(), BigInt(row.last_processed_block ?? 0)]),
+  );
+}
+
+async function explorerTrackedSinceMap(wallets: Address[]): Promise<Map<string, number>> {
+  const { data, error } = await supabase
+    .from('user_tracked_wallets')
+    .select('wallet_address,created_at')
+    .eq('chain', 'robinhood')
+    .eq('is_active', true);
+  if (error) throw error;
+  const monitored = new Set(wallets.map(wallet => wallet.toLowerCase()));
+  const result = new Map<string, number>();
+  for (const row of data ?? []) {
+    const key = String(row.wallet_address).toLowerCase();
+    if (!monitored.has(key)) continue;
+    const time = Date.parse(String(row.created_at ?? ''));
+    if (!Number.isFinite(time)) continue;
+    const previous = result.get(key);
+    if (previous == null || time < previous) result.set(key, time);
+  }
+  return result;
+}
+
+async function explorerWalletEvents(
+  wallet: Address,
+  transactions: BlockscoutTransaction[],
+  cursor: bigint,
+  trackedSinceMs: number | null,
+): Promise<{ events: WalletWatchEvent[]; maxBlock: bigint }> {
+  const events: WalletWatchEvent[] = [];
+  let maxBlock = cursor;
+
+  // Blockscout returns newest first. Process oldest first so Telegram activity
+  // arrives in chronological order when recovering a short gap.
+  const ordered = [...transactions].reverse();
+  for (const tx of ordered) {
+    const blockNumber = blockscoutBigInt(tx.block_number);
+    if (blockNumber <= cursor) continue;
+    const txTimeMs = Date.parse(String(tx.timestamp ?? ''));
+    if (cursor === 0n && trackedSinceMs != null && Number.isFinite(txTimeMs) && txTimeMs < trackedSinceMs) continue;
+    if (String(tx.status ?? 'ok').toLowerCase() === 'error') {
+      if (blockNumber > maxBlock) maxBlock = blockNumber;
+      continue;
+    }
+    const hashText = String(tx.hash ?? '');
+    const fromText = blockscoutAddress(tx.from);
+    if (!/^0x[a-fA-F0-9]{64}$/.test(hashText) || !fromText || !sameAddress(fromText, wallet)) {
+      if (blockNumber > maxBlock) maxBlock = blockNumber;
+      continue;
+    }
+
+    const hash = hashText as Hex;
+    const rawTransfers = await explorerTransfers(hash);
+    const transferMeta = new Map<string, { decimals: number | null; symbol: string | null }>();
+    const transfers: RobinhoodTransferEvidence[] = [];
+    for (const transfer of rawTransfers) {
+      const token = explorerTokenAddress(transfer);
+      const from = blockscoutAddress(transfer.from);
+      const to = blockscoutAddress(transfer.to);
+      if (!token || !from || !to) continue;
+      const normalizedToken = getAddress(token);
+      transfers.push({
+        token: normalizedToken,
+        from: getAddress(from),
+        to: getAddress(to),
+        value: explorerTransferValue(transfer),
+      });
+      transferMeta.set(normalizedToken.toLowerCase(), {
+        decimals: explorerTransferDecimals(transfer),
+        symbol: explorerTransferSymbol(transfer),
+      });
+    }
+
+    const classification = classifyRobinhoodWalletTransaction(wallet, {
+      hash,
+      from: getAddress(fromText),
+      value: blockscoutBigInt(tx.value),
+      transfers,
+    });
+    if (classification) {
+      const meta = transferMeta.get(classification.token.toLowerCase());
+      const tokenDecimals = meta?.decimals ?? null;
+      const quoteTransfer = transfers.find(transfer =>
+        isQuoteToken(transfer.token) &&
+        (sameAddress(transfer.to, wallet) || sameAddress(transfer.from, wallet) || classification.kind === 'buy'));
+      const nativeRaw = blockscoutBigInt(tx.value);
+      const nativeAmount = classification.kind === 'buy' && nativeRaw > 0n
+        ? Number(nativeRaw) / 1e18
+        : quoteTransfer
+          ? Number(quoteTransfer.value) / 1e18
+          : null;
+
+      events.push({
+        kind: classification.kind,
+        chain: 'robinhood',
+        wallet,
+        signature: hash,
+        timestamp: explorerTimestampSeconds(tx.timestamp),
+        blockNumber: Number(blockNumber),
+        tokenMint: classification.token,
+        tokenAmount: normalizedAmount(classification.amountRaw, tokenDecimals),
+        tokenAmountRaw: classification.amountRaw?.toString() ?? null,
+        tokenDecimals,
+        tokenSymbol: meta?.symbol ?? null,
+        tokenName: null,
+        nativeAmount,
+        quoteSymbol: nativeRaw > 0n ? 'ETH' : quoteTransfer ? 'WETH' : null,
+        counterparty: blockscoutAddress(tx.to),
+        type: `Blockscout live wallet activity: ${classification.evidence}`,
+        ...(classification.kind === 'buy' || classification.kind === 'sell' ? { amountSol: null } : {}),
+      } as WalletWatchEvent);
+    }
+    if (blockNumber > maxBlock) maxBlock = blockNumber;
+  }
+
+  return { events, maxBlock };
+}
+
+/**
+ * Lean Robinhood wallet watcher.
+ *
+ * The chain produces blocks too quickly for range-based eth_getLogs polling.
+ * Blockscout already indexes address activity, so this path performs one
+ * address-transaction request per active wallet and only fetches token transfers
+ * when a new outgoing transaction exists.
+ */
+export async function pollRobinhoodTrackedWalletsExplorer(
+  processChunk: RobinhoodWalletChunkProcessor,
+): Promise<{ events: WalletWatchEvent[]; checkpointBlocks: Map<string, bigint>; wallets: Address[] }> {
+  const wallets = [...new Map((await getActiveTrackedWalletAddresses('robinhood'))
+    .map(value => getAddress(value))
+    .map(wallet => [wallet.toLowerCase(), wallet])).values()];
+  if (!wallets.length) return { events: [], checkpointBlocks: new Map(), wallets: [] };
+
+  const cursors = await explorerCursorMap(wallets);
+  const trackedSince = await explorerTrackedSinceMap(wallets);
+  const events: WalletWatchEvent[] = [];
+  const checkpointBlocks = new Map<string, bigint>();
+  const scannedWallets: Address[] = [];
+
+  for (const wallet of wallets) {
+    const key = wallet.toLowerCase();
+    try {
+      const transactions = await explorerTransactions(wallet);
+      const cursor = cursors.get(key) ?? 0n;
+      const scanned = await explorerWalletEvents(wallet, transactions, cursor, trackedSince.get(key) ?? null);
+      events.push(...scanned.events);
+
+      const delivery = await processChunk(scanned.events);
+      if (delivery.failedWallets.has(key)) {
+        console.warn('[RobinhoodWalletExplorer] delivery failed; cursor held', {
+          wallet,
+          events: scanned.events.length,
+        });
+        continue;
+      }
+
+      if (scanned.maxBlock > cursor) {
+        await commitRobinhoodWalletCheckpoints([wallet], scanned.maxBlock);
+        checkpointBlocks.set(key, scanned.maxBlock);
+      }
+      scannedWallets.push(wallet);
+      if (scanned.events.length > 0) {
+        console.log('[RobinhoodWalletExplorer] activity processed', {
+          wallet,
+          events: scanned.events.length,
+          throughBlock: scanned.maxBlock.toString(),
+        });
+      }
+    } catch (error) {
+      console.warn('[RobinhoodWalletExplorer] wallet poll failed', {
+        wallet,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return { events, checkpointBlocks, wallets: scannedWallets };
+}
