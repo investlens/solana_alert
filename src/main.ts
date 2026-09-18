@@ -90,7 +90,7 @@ import { confirmMomentum } from './services/momentumConfirmation.js';
 import type { DexProfile, RiskResult, TokenState } from './types.js';
 import { pollWatchedWallets } from './core/walletWatcher.js';
 import {
-  pollRobinhoodTrackedWallets,
+  pollRobinhoodTrackedWalletsExplorer,
 } from './chains/robinhood/robinhoodWalletWatcher.js';
 import { deliverLegacyAlert } from './core/legacyAlertDelivery.js';
 
@@ -669,7 +669,7 @@ async function startWalletWatch() {
       );
 
       if (String(process.env.ROBINHOOD_WALLET_WATCH_ENABLED ?? 'false').toLowerCase() === 'true') {
-        await pollRobinhoodTrackedWallets(deliverTrackedWalletActivity);
+        await pollRobinhoodTrackedWalletsExplorer(deliverTrackedWalletActivity);
       }
 
       /*
