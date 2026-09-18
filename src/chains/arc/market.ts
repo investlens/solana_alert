@@ -1,5 +1,6 @@
 import { governedDexScreenerJson } from '../../services/dexscreenerRequestGovernor.js';
 import type { ArcTokenEnrichment } from './enrichment.js';
+import { ARC_USDC_ADDRESS } from './config.js';
 
 export type ArcMarketEnrichment = ArcTokenEnrichment & {
   marketDataSource: 'DEXSCREENER' | null;
@@ -46,6 +47,9 @@ export async function enrichArcMarket(token: ArcTokenEnrichment): Promise<ArcMar
     const pairs: Pair[] = Array.isArray(payload?.pairs) ? payload.pairs : [];
     const asset = token.assetId.toLowerCase();
     const quote = token.quoteAsset.toLowerCase();
+    const normalizedQuote = quote === '0x0000000000000000000000000000000000000000'
+      ? ARC_USDC_ADDRESS.toLowerCase()
+      : quote;
     if (pairs.length > 0) {
       console.log('[ArcMarket] provider pairs returned', {
         assetId: token.assetId,
@@ -62,7 +66,7 @@ export async function enrichArcMarket(token: ArcTokenEnrichment): Promise<ArcMar
       const chain = String(pair.chainId ?? '').toLowerCase();
       const base = String(pair.baseToken?.address ?? '').toLowerCase();
       const q = String(pair.quoteToken?.address ?? '').toLowerCase();
-      return chain.includes('arc') && ((base === asset && q === quote) || (base === quote && q === asset));
+      return chain.includes('arc') && ((base === asset && q === normalizedQuote) || (base === normalizedQuote && q === asset));
     });
     const best = matching.sort((a, b) => (n(b.liquidity?.usd) ?? 0) - (n(a.liquidity?.usd) ?? 0))[0];
     if (!best) throw new Error('No verified Arc pair returned by market provider');
