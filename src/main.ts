@@ -668,7 +668,9 @@ async function startWalletWatch() {
         events,
       );
 
-      await pollRobinhoodTrackedWallets(deliverTrackedWalletActivity);
+      if (String(process.env.ROBINHOOD_WALLET_WATCH_ENABLED ?? 'false').toLowerCase() === 'true') {
+        await pollRobinhoodTrackedWallets(deliverTrackedWalletActivity);
+      }
 
       /*
        * Wallet Telegram delivery is intentionally centralized
