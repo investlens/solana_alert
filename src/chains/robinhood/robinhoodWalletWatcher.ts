@@ -35,6 +35,7 @@ export const ABANDONED_CURSOR_MIN_LAG = 100_000n;
 export const ABANDONED_CURSOR_MIN_AGE_MS = 24 * 60 * 60 * 1_000;
 const ADDRESS_BATCH_SIZE = 50;
 const metadataCache = new Map<string, Awaited<ReturnType<typeof getRobinhoodTokenMetadata>>>();
+const liveOnlyCursorInitialized = new Set<string>();
 
 export type RobinhoodTransferEvidence = {
   token: Address;
@@ -324,6 +325,26 @@ export async function pollRobinhoodTrackedWallets(processChunk: RobinhoodWalletC
     .map(value => getAddress(value)).map(wallet => [wallet.toLowerCase(), wallet])).values()];
   const latest = await robinhoodPublicClient.getBlockNumber();
   const cursors = await initializeMissingCursors(allWallets, latest);
+
+  // Production live-only safety:
+  // On the first poll after each process start, existing Robinhood wallet cursors
+  // are rebased to the current head instead of replaying historical blocks.
+  // This avoids archive-RPC requirements and prevents catch-up traffic storms.
+  const firstRuntimePoll = wallets.filter(wallet => !liveOnlyCursorInitialized.has(wallet.toLowerCase()));
+  if (firstRuntimePoll.length) {
+    await commitRobinhoodWalletCheckpoints(firstRuntimePoll, latest);
+    const initializedAt = new Date();
+    for (const wallet of firstRuntimePoll) {
+      const key = wallet.toLowerCase();
+      cursors.set(key, { block: latest, updatedAt: initializedAt });
+      liveOnlyCursorInitialized.add(key);
+    }
+    console.log('[RobinhoodWalletWatcher] LIVE_ONLY cursors initialized at chain head', {
+      wallets: firstRuntimePoll.length,
+      chainHead: latest.toString(),
+    });
+  }
+
   const activeKeys = new Set(wallets.map(wallet => wallet.toLowerCase()));
   const pausedWallets = allWallets.filter(wallet => !activeKeys.has(wallet.toLowerCase()));
   if (pausedWallets.length) await commitRobinhoodWalletCheckpoints(pausedWallets, latest);
