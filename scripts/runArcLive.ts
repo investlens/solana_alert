@@ -46,7 +46,18 @@ async function deliverArcAlert(market: Awaited<ReturnType<typeof enrichArcMarket
     warnings.length ? `Safety notes: ${warnings.join(', ')}` : 'Safety: core checks passed',
   ].join('\n');
 
-  const messageId = await sendTelegramWithMessageId(ALERT_CHAT_ID, text);
+  const buttons = [[
+    {
+      text: '📈 Live Chart',
+      url: `https://dexscreener.com/arc/${encodeURIComponent(market.assetId)}`,
+    },
+    {
+      text: '🔎 Arc Explorer',
+      url: `https://explorer.arc.io/address/${encodeURIComponent(market.assetId)}`,
+    },
+  ]];
+
+  const messageId = await sendTelegramWithMessageId(ALERT_CHAT_ID, text, buttons);
   delivered.add(key);
   console.log('[ArcLive] ALERT_SENT', { assetId: market.assetId, symbol: market.symbol, messageId });
 }
