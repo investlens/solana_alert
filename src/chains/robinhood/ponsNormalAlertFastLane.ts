@@ -1,8 +1,9 @@
 import type { PonsLaunch } from './ponsHistoricalLaunchScanner.js';
-import type { DexProfile, RiskResult } from '../../types.js';
+import type { DexPair, DexProfile, RiskResult } from '../../types.js';
 import { chooseBestPair, fetchPairs } from '../../services/dexscreener.js';
 import { scoreToken } from '../../core/scoring.js';
 import { getDeliverableUsers } from '../../core/delivery.js';
+import { governedDexScreenerJson } from '../../services/dexscreenerRequestGovernor.js';
 
 const MAX_CONCURRENT = Math.max(1, Math.min(5, Number(process.env.PONS_FAST_LANE_CONCURRENCY ?? 2)));
 const MAX_QUEUE = Math.max(5, Math.min(100, Number(process.env.PONS_FAST_LANE_MAX_QUEUE ?? 30)));
@@ -77,9 +78,26 @@ function bucket(result: RiskResult): 'HIGH_BUY' | 'BUY' | 'IGNORE' {
   return 'IGNORE';
 }
 
-async function enrich(tokenAddress: string) {
+async function fetchBroadRobinhoodPairs(tokenAddress: string): Promise<DexPair[]> {
+  const url = `https://api.dexscreener.com/latest/dex/tokens/${encodeURIComponent(tokenAddress)}`;
+  const payload = (await governedDexScreenerJson<any>({
+    url,
+    caller: 'pons_fast_lane_fallback',
+    endpoint: 'PONS_TOKEN_LOOKUP',
+    priority: 'HIGH',
+    cacheKey: `pons-fallback:${tokenAddress.toLowerCase()}`,
+    cacheTtlMs: 10_000,
+    signal: AbortSignal.timeout(8_000),
+  })).value;
+  const pairs: DexPair[] = Array.isArray(payload?.pairs) ? payload.pairs : [];
+  return pairs.filter(pair => String((pair as any).chainId ?? '').toLowerCase() === 'robinhood');
+}
+
+async function enrich(tokenAddress: string, broadFallback = false) {
   const profile: DexProfile = { chainId: 'robinhood', tokenAddress };
-  const pairs = await fetchPairs(tokenAddress);
+  const pairs = broadFallback
+    ? await fetchBroadRobinhoodPairs(tokenAddress)
+    : await fetchPairs(tokenAddress);
   const pair = chooseBestPair(pairs, tokenAddress);
   if (!pair) return null;
   const result = await scoreToken({
@@ -167,20 +185,24 @@ async function directTelegramRecipients(text: string, tokenAddress: string): Pro
 async function evaluate(launch: PonsLaunch): Promise<void> {
   const tokenAddress = tokenKey(launch);
   if (!tokenAddress) return;
-  const first = await enrich(tokenAddress);
+  const isNoPairRetry = noPairRetries.has(tokenAddress);
+  const first = await enrich(tokenAddress, isNoPairRetry);
   if (!first) {
-    if (!noPairRetries.has(tokenAddress)) {
+    if (!isNoPairRetry) {
       noPairRetries.add(tokenAddress);
-      console.log(`[PonsFastLane] no indexed pair yet; retry scheduled token=${tokenAddress} delayMs=${NO_PAIR_RETRY_MS}`);
+      console.log(`[PonsFastLane] no indexed pair yet; broad retry scheduled token=${tokenAddress} delayMs=${NO_PAIR_RETRY_MS}`);
       setTimeout(() => {
         queue.push(launch);
         void drain();
       }, NO_PAIR_RETRY_MS);
     } else {
-      console.log(`[PonsFastLane] no indexed pair after retry; dropping token=${tokenAddress}`);
+      console.log(`[PonsFastLane] no verified pair after broad retry; dropping token=${tokenAddress}`);
       noPairRetries.delete(tokenAddress);
     }
     return;
+  }
+  if (isNoPairRetry) {
+    console.log(`[PonsFastLane] BROAD_PAIR_RESOLVED token=${tokenAddress} pair=${String((first.pair as any).pairAddress ?? 'unknown')}`);
   }
   noPairRetries.delete(tokenAddress);
   const firstBucket = bucket(first.result);
