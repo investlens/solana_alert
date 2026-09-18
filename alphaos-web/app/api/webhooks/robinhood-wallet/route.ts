@@ -156,6 +156,11 @@ export async function POST(request: Request) {
   try { payload = JSON.parse(raw) as Payload; }
   catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }); }
 
+  console.log('[RobinhoodWalletWebhook] WEBHOOK_ACCEPTED', {
+    type: payload.type ?? null,
+    activityCount: Array.isArray(payload.event?.activity) ? payload.event!.activity!.length : 0,
+  });
+
   if (payload.type !== 'ADDRESS_ACTIVITY') {
     return NextResponse.json({ ok: true, ignored: 'type' });
   }
