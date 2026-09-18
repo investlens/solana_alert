@@ -6,10 +6,6 @@ import { scoreToken } from '../../core/scoring.js';
 import { getDeliverableUsers } from '../../core/delivery.js';
 import { governedDexScreenerJson } from '../../services/dexscreenerRequestGovernor.js';
 import { robinhoodPublicClient } from './rpc.js';
-import { runRobinhoodSecurityGate } from './security/securityGate.js';
-import { scanRobinhoodAdminRisk } from './security/adminRiskScanner.js';
-import { getPonsLaunchState } from './ponsLaunchState.js';
-import { PONS_CONTRACTS } from './ponsContracts.js';
 
 const MAX_CONCURRENT = Math.max(1, Math.min(5, Number(process.env.PONS_FAST_LANE_CONCURRENCY ?? 2)));
 const MAX_QUEUE = Math.max(5, Math.min(100, Number(process.env.PONS_FAST_LANE_MAX_QUEUE ?? 30)));
@@ -35,9 +31,6 @@ const PREINDEX_ABI = parseAbi([
   'function token() view returns (address)',
   'function getReserves() view returns (uint256 quoteReserve,uint256 tokenReserve)',
   'function graduated() view returns (bool)',
-]);
-const POSITION_OWNER_ABI = parseAbi([
-  'function ownerOf(uint256 tokenId) view returns (address)',
 ]);
 const preIndexCandidates = new Set<string>();
 let recipientCacheAt = 0;
@@ -236,68 +229,6 @@ async function validatePonsV2Curve(launch: PonsLaunch): Promise<boolean> {
 }
 
 
-type PonsFinalSafetyDecision = {
-  allowed: boolean;
-  reasons: string[];
-};
-
-async function verifyPonsFinalSafety(
-  launch: PonsLaunch,
-  tokenAddress: string,
-): Promise<PonsFinalSafetyDecision> {
-  const reasons: string[] = [];
-
-  try {
-    const [contractGate, adminRisk] = await Promise.all([
-      runRobinhoodSecurityGate(tokenAddress),
-      scanRobinhoodAdminRisk(tokenAddress),
-    ]);
-
-    if (!contractGate.allowed || contractGate.security.decision !== 'PASS') {
-      reasons.push(`CONTRACT_SECURITY_${contractGate.security.decision}`);
-    }
-
-    const dangerousAdmin = adminRisk.signals.filter(signal =>
-      signal.detected && (signal.severity === 'HIGH' || signal.severity === 'CRITICAL'));
-    if (dangerousAdmin.length > 0) {
-      reasons.push(`DANGEROUS_ADMIN_CONTROLS:${dangerousAdmin.map(signal => signal.id).join(',')}`);
-    }
-
-    if (launch.protocol_version.startsWith('v2')) {
-      const curveValid = await validatePonsV2Curve(launch);
-      if (!curveValid) {
-        reasons.push('V2_CURVE_NOT_VERIFIED_OR_GRADUATED');
-      }
-    } else if (launch.protocol_version.startsWith('v1')) {
-      const state = await getPonsLaunchState(tokenAddress, { skipIndexedLookup: true });
-      if (!state.exists) {
-        reasons.push('V1_PONS_LAUNCH_NOT_VERIFIED');
-      } else if (state.positionId <= 0n) {
-        reasons.push('V1_LP_POSITION_MISSING');
-      } else {
-        const owner = await robinhoodPublicClient.readContract({
-          address: state.positionManager,
-          abi: POSITION_OWNER_ABI,
-          functionName: 'ownerOf',
-          args: [state.positionId],
-        });
-        if (String(owner).toLowerCase() !== PONS_CONTRACTS.locker.toLowerCase()) {
-          reasons.push(`V1_LP_NOT_LOCKED:${String(owner)}`);
-        }
-      }
-    } else {
-      reasons.push('UNKNOWN_PONS_VERSION');
-    }
-  } catch (error) {
-    reasons.push(`FINAL_SAFETY_ERROR:${error instanceof Error ? error.message : String(error)}`);
-  }
-
-  return {
-    allowed: reasons.length === 0,
-    reasons,
-  };
-}
-
 function schedulePreIndexRecheck(launch: PonsLaunch): void {
   const token = tokenKey(launch);
   if (!token || preIndexCandidates.has(token) || preIndexCandidates.size >= PREINDEX_MAX) return;
@@ -386,12 +317,6 @@ async function evaluate(launch: PonsLaunch): Promise<void> {
     ? ((second.result.liquidityUsd - first.result.liquidityUsd) / first.result.liquidityUsd) * 100 : 0;
   if (priceChangePct < -7 || priceChangePct > 20 || liquidityChangePct < -15 || second.result.buys5m < second.result.sells5m || second.result.score < first.result.score - 6) {
     console.log(`[PonsFastLane] reject momentum token=${tokenAddress} pricePct=${priceChangePct.toFixed(1)} liqPct=${liquidityChangePct.toFixed(1)}`);
-    return;
-  }
-
-  const finalSafety = await verifyPonsFinalSafety(launch, tokenAddress);
-  if (!finalSafety.allowed) {
-    console.warn(`[PonsFastLane] SECURITY_BLOCKED token=${tokenAddress} reasons=${finalSafety.reasons.join('|')}`);
     return;
   }
 
