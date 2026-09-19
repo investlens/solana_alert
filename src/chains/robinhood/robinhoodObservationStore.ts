@@ -1,6 +1,7 @@
 import {
   supabase,
 } from '../../services/supabase.js';
+import { runDatabaseWork } from '../../services/databaseLoadGovernor.js';
 
 function dbBackgroundWorkEnabled(): boolean {
   return process.env.DB_BACKGROUND_WORK_ENABLED !== 'false';
@@ -49,7 +50,7 @@ export async function saveRobinhoodObservation(args: SaveRobinhoodObservationArg
 
   const now = new Date().toISOString();
   const normalizedTokenAddress = args.tokenAddress.trim().toLowerCase();
-  const { data, error } = await supabase
+  const result = await runDatabaseWork('BACKGROUND', () => supabase
     .from('robinhood_observations')
     .upsert({
       token_address: normalizedTokenAddress,
@@ -90,7 +91,9 @@ export async function saveRobinhoodObservation(args: SaveRobinhoodObservationArg
       updated_at: now,
     }, { onConflict: 'token_address' })
     .select('id')
-    .single();
+    .single());
+  if (!result) return null;
+  const { data, error } = result;
 
   if (error) {
     console.error('[RobinhoodObservationStore] Save failed:', { token: args.tokenAddress, error: error.message });
@@ -149,7 +152,7 @@ export async function saveRobinhoodRejection(args: SaveRobinhoodRejectionArgs): 
 
   const now = new Date().toISOString();
   const normalizedTokenAddress = args.tokenAddress.trim().toLowerCase();
-  const { data, error } = await supabase
+  const result = await runDatabaseWork('BACKGROUND', () => supabase
     .from('robinhood_observations')
     .upsert({
       token_address: normalizedTokenAddress,
@@ -180,10 +183,12 @@ export async function saveRobinhoodRejection(args: SaveRobinhoodRejectionArgs): 
       updated_at: now,
     }, { onConflict: 'token_address' })
     .select('id')
-    .single();
+    .single());
+  if (!result) return null;
+  const { data, error } = result;
 
   if (error) {
-    console.error('[RobinhoodObservationStore] Rejection save failed:', { token: args.tokenAddress, stage: args.rejectionStage, error: error.message });
+    console.error('[RobinhoodObservationStore] Rejection save failed:, { token: args.tokenAddress, stage: args.rejectionStage, error: error.message });
     return null;
   }
   console.log('[RobinhoodObservationStore] Rejection saved:', { token: args.tokenAddress, stage: args.rejectionStage, id: data?.id ?? null });
