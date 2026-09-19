@@ -964,35 +964,31 @@ async function updateToken(row: MemoryRow) {
     },
   });
 
-  await supabase
-    .from('token_memory')
-    .update({
-      status: outcome,
-      outcome,
-      last_updated: new Date().toISOString(),
-    })
-    .eq('token', row.token);
-
-  await recordTokenMemoryEvent({
-    token: row.token,
-    chain: row.chain ?? 'solana',
-    eventType: 'MEMORY_UPDATE',
-    eventSource: 'MEMORY_TRACKER',
-    marketCap,
-    liquidity,
-    price,
-    buys: result.buys5m,
-    sells: result.sells5m,
-    alphaScore: result.score,
-    aiConfidence: result.score,
-    riskLevel: result.risk,
-    holderScore: result.marketSafetyScore,
-    note: `${pair.baseToken?.symbol ?? row.token} memory updated → ${outcome}`,
-    raw: {
-      outcome,
-      dexUrl: pair.url ?? null,
-    },
-  });
+  // upsertTokenMemory already persists the fresh compact state above. Avoid a
+  // second unconditional token_memory write on every background observation.
+  // Outcome milestones/checkpoint agents persist material lifecycle changes.
+  if (outcome !== 'TRACKING') {
+    await recordTokenMemoryEvent({
+      token: row.token,
+      chain: row.chain ?? 'solana',
+      eventType: `MEMORY_${outcome}`,
+      eventSource: 'MEMORY_TRACKER',
+      marketCap,
+      liquidity,
+      price,
+      buys: result.buys5m,
+      sells: result.sells5m,
+      alphaScore: result.score,
+      aiConfidence: result.score,
+      riskLevel: result.risk,
+      holderScore: result.marketSafetyScore,
+      note: `${pair.baseToken?.symbol ?? row.token} memory state → ${outcome}`,
+      raw: {
+        outcome,
+        dexUrl: pair.url ?? null,
+      },
+    });
+  }
 
   console.log('memory tracker updated:', {
     token: row.token,
