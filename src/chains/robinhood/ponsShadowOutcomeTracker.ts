@@ -707,11 +707,11 @@ export async function syncPonsOpportunity(
 }
 
 const TRACKER_INTERVAL_MS =
-  1_000;
+  Math.max(5_000, Number(process.env.PONS_SHADOW_OUTCOME_INTERVAL_MS ?? 10_000));
 
 
 const MAX_ROWS_PER_CYCLE =
-  25;
+  Math.max(1, Number(process.env.PONS_SHADOW_OUTCOME_MAX_ROWS_PER_CYCLE ?? 8));
 
 
 /*
@@ -735,7 +735,7 @@ const DEV_MOVEMENT_EPSILON_PERCENT =
  * Price is still checked every cycle.
  */
 const DEV_CHECK_INTERVAL_MS =
-  2_000;
+  Math.max(10_000, Number(process.env.PONS_SHADOW_DEV_CHECK_INTERVAL_MS ?? 30_000));
 
 
 type ShadowRow = {
@@ -2378,7 +2378,7 @@ async function updateShadowRow(
       market =
         await getRobinhoodMarketSnapshot(
           row.token_address,
-          { priority: 'HIGH', caller: 'pons_shadow_outcome' },
+          { priority: 'BACKGROUND', caller: 'pons_shadow_outcome', queueWaitTimeoutMs: 5_000 },
         );
     } catch {
       return;
@@ -2513,7 +2513,7 @@ async function updateShadowRow(
     market =
       await getRobinhoodMarketSnapshot(
         row.token_address,
-        { priority: 'HIGH', caller: 'pons_shadow_outcome' },
+        { priority: 'BACKGROUND', caller: 'pons_shadow_outcome', queueWaitTimeoutMs: 5_000 },
       );
   } catch (error) {
     console.log(
