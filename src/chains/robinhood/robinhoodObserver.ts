@@ -2342,6 +2342,12 @@ async function scanVerifiedRobinhoodBurns(): Promise<void> {
         try { symbol = Buffer.from(String(symbolRaw).slice(2), 'hex').toString('utf8').replace(/\\0/g,'').trim() || symbol; } catch {}
         const amount = formatUnits(args.value, Number.isFinite(decimals) ? decimals : 18);
         const market = await getRobinhoodMarketSnapshot(token, { priority:'HIGH', caller:'verified_burn' }).catch(()=>null);
+        // Burn alerts are actionable only for tokens already trading on a DEX.
+        // Fail closed when there is no indexed market, chart/pair, or positive liquidity.
+        if (!market || !market.chartUrl || !Number.isFinite(market.liquidityUsd) || market.liquidityUsd <= 0) {
+          console.info('[RobinhoodBurn] NO_LIQUID_DEX_MARKET_SUPPRESSED', { token, txHash, pct, liquidity:market?.liquidityUsd ?? null });
+          continue;
+        }
         const text = [
           '🔥 <b>AlphaOS · ROBINHOOD SUPPLY BURN</b>','━━━━━━━━━━━━━━━━━━',
           `🔥 <b>${escapeHtml(symbol)}</b>  ·  <code>${token.slice(0,8)}…${token.slice(-6)}</code>`,
