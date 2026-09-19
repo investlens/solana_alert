@@ -17,11 +17,14 @@ let recipientCacheAt = 0;
 let recipientCache = new Set<string>();
 const delivered = new Set<string>();
 const MARKET_RETRY_DELAY_MS = Math.max(12_000, Number(process.env.ARC_MARKET_RETRY_DELAY_MS ?? 15_000));
+const ARC_MIN_NORMAL_ALERT_AGE_MS = Math.max(5 * 60_000, Number(process.env.ARC_MIN_NORMAL_ALERT_AGE_MS ?? 30 * 60_000));
+const ARC_REVERSAL_CONFIRM_MS = Math.max(15_000, Number(process.env.ARC_REVERSAL_CONFIRM_MS ?? 30_000));
 const MARKET_RETRY_MAX_PENDING = Math.max(5, Math.min(50, Number(process.env.ARC_MARKET_RETRY_MAX_PENDING ?? 20)));
 const MARKET_RETRY_PER_POLL = Math.max(1, Math.min(5, Number(process.env.ARC_MARKET_RETRY_PER_POLL ?? 3)));
 type PendingArcRetry = {
   enriched: Awaited<ReturnType<typeof enrichArcCandidate>>;
   retryAt: number;
+  baselinePrice?: number | null;
 };
 const pendingMarketRetries = new Map<string, PendingArcRetry>();
 const arcBoostTotals = new Map<string, number>();
@@ -193,6 +196,17 @@ async function processMarketRetries(): Promise<void> {
     });
 
     if (assessment.alertable) {
+      const pairAgeMs = market.pairCreatedAt ? Math.max(0, Date.now() - market.pairCreatedAt) : 0;
+      if (pairAgeMs < ARC_MIN_NORMAL_ALERT_AGE_MS) {
+        pendingMarketRetries.set(key, { enriched: pending.enriched, retryAt: Date.now() + Math.max(ARC_REVERSAL_CONFIRM_MS, ARC_MIN_NORMAL_ALERT_AGE_MS - pairAgeMs), baselinePrice: market.priceUsd });
+        console.log('[ArcLive] MATURITY_WAIT', { assetId: market.assetId, ageMin: (pairAgeMs / 60_000).toFixed(1) });
+        continue;
+      }
+      if (pending.baselinePrice && market.priceUsd && market.priceUsd <= pending.baselinePrice) {
+        pendingMarketRetries.set(key, { enriched: pending.enriched, retryAt: Date.now() + ARC_REVERSAL_CONFIRM_MS, baselinePrice: market.priceUsd });
+        console.log('[ArcLive] REVERSAL_WAIT', { assetId: market.assetId, previousPrice: pending.baselinePrice, currentPrice: market.priceUsd });
+        continue;
+      }
       await deliverArcAlert(market, assessment.security.warnings).catch(error => {
         console.error('[ArcLive] ALERT_SEND_FAILED', { assetId: market.assetId, error });
       });
@@ -329,9 +343,16 @@ async function main() {
       });
 
       if (assessment.alertable) {
-        await deliverArcAlert(market, assessment.security.warnings).catch(error => {
-          console.error('[ArcLive] ALERT_SEND_FAILED', { assetId: market.assetId, error });
-        });
+        const pairAgeMs = market.pairCreatedAt ? Math.max(0, Date.now() - market.pairCreatedAt) : 0;
+        const key = market.assetId.toLowerCase();
+        if (pairAgeMs < ARC_MIN_NORMAL_ALERT_AGE_MS) {
+          pendingMarketRetries.set(key, { enriched, retryAt: Date.now() + Math.max(ARC_REVERSAL_CONFIRM_MS, ARC_MIN_NORMAL_ALERT_AGE_MS - pairAgeMs), baselinePrice: market.priceUsd });
+          console.log('[ArcLive] MATURITY_WAIT', { assetId: market.assetId, ageMin: (pairAgeMs / 60_000).toFixed(1), waitMin: ((ARC_MIN_NORMAL_ALERT_AGE_MS - pairAgeMs) / 60_000).toFixed(1) });
+        } else {
+          // Existing pools still require a fresh positive move rather than alerting on a stale snapshot.
+          pendingMarketRetries.set(key, { enriched, retryAt: Date.now() + ARC_REVERSAL_CONFIRM_MS, baselinePrice: market.priceUsd });
+          console.log('[ArcLive] REVERSAL_WATCH', { assetId: market.assetId, ageMin: (pairAgeMs / 60_000).toFixed(1) });
+        }
       } else if (market.marketDataSource == null) {
         queueMarketRetry(enriched);
       }
