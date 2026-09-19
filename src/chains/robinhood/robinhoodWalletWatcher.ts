@@ -13,7 +13,7 @@ import { recordWalletTrade } from '../../agents/smartWalletAgent.js';
 import { recordWalletBuy, recordWalletSell } from '../../agents/walletIntelligenceAgent.js';
 import { getRobinhoodMarketSnapshot } from './market.js';
 import { PONS_CONTRACTS } from './ponsContracts.js';
-import { getRobinhoodLogsResilient, robinhoodPublicClient } from './rpc.js';
+import { getRobinhoodBlockNumberResilient, getRobinhoodLogsResilient, robinhoodPublicClient } from './rpc.js';
 import { getRobinhoodTokenMetadata } from './tokenMetadata.js';
 
 const transferEvent = parseAbiItem(
@@ -323,7 +323,7 @@ export async function pollRobinhoodTrackedWallets(processChunk: RobinhoodWalletC
   if (!allWallets.length) return { events: [], checkpointBlocks: new Map(), wallets: [] };
   const wallets = [...new Map((await getActiveTrackedWalletAddresses('robinhood'))
     .map(value => getAddress(value)).map(wallet => [wallet.toLowerCase(), wallet])).values()];
-  const latest = await robinhoodPublicClient.getBlockNumber();
+  const latest = await getRobinhoodBlockNumberResilient();
   const cursors = await initializeMissingCursors(allWallets, latest);
 
   // Production live-only safety:
@@ -415,7 +415,7 @@ export async function commitRobinhoodWalletCheckpoints(wallets: Address[], block
 }
 
 export async function initializeRobinhoodWalletCursorAtCurrentBlock(wallet: Address): Promise<bigint> {
-  const currentBlock = await robinhoodPublicClient.getBlockNumber();
+  const currentBlock = await getRobinhoodBlockNumberResilient();
   const { error } = await supabase.from('wallet_monitor_cursors').upsert(
     [{ chain: 'robinhood', wallet_address: wallet, last_processed_block: currentBlock.toString() }],
     { onConflict: 'chain,wallet_address', ignoreDuplicates: true },
@@ -456,6 +456,12 @@ const ROBINHOOD_EXPLORER_MAX_TX_PER_WALLET = Math.max(
   5,
   Math.min(50, Number(process.env.ROBINHOOD_WALLET_EXPLORER_MAX_TX ?? 50)),
 );
+const ROBINHOOD_EXPLORER_TRANSFER_CACHE_MS = Math.max(
+  30_000,
+  Number(process.env.ROBINHOOD_WALLET_TRANSFER_CACHE_MS ?? 5 * 60_000),
+);
+const explorerTransferCache = new Map<string, { expiresAt: number; value: BlockscoutTransfer[] }>();
+const explorerTransferInflight = new Map<string, Promise<BlockscoutTransfer[]>>();
 
 function blockscoutAddress(value: BlockscoutAddress | string | null | undefined): string | null {
   if (typeof value === 'string') return /^0x[a-fA-F0-9]{40}$/.test(value) ? value : null;
@@ -537,10 +543,28 @@ function explorerTransferSymbol(transfer: BlockscoutTransfer): string | null {
 }
 
 async function explorerTransfers(hash: Hex): Promise<BlockscoutTransfer[]> {
-  const payload = await blockscoutJson<{ items?: BlockscoutTransfer[] }>(
-    `/transactions/${encodeURIComponent(hash)}/token-transfers?type=ERC-20`,
-  );
-  return Array.isArray(payload.items) ? payload.items : [];
+  const key = hash.toLowerCase();
+  const cached = explorerTransferCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  const existing = explorerTransferInflight.get(key);
+  if (existing) return existing;
+
+  const request = (async () => {
+    const payload = await blockscoutJson<{ items?: BlockscoutTransfer[] }>(
+      `/transactions/${encodeURIComponent(hash)}/token-transfers?type=ERC-20`,
+    );
+    const value = Array.isArray(payload.items) ? payload.items : [];
+    explorerTransferCache.set(key, { value, expiresAt: Date.now() + ROBINHOOD_EXPLORER_TRANSFER_CACHE_MS });
+    if (explorerTransferCache.size > 5_000) {
+      const now = Date.now();
+      for (const [candidate, entry] of explorerTransferCache) if (entry.expiresAt <= now) explorerTransferCache.delete(candidate);
+    }
+    return value;
+  })();
+
+  explorerTransferInflight.set(key, request);
+  try { return await request; }
+  finally { explorerTransferInflight.delete(key); }
 }
 
 function explorerTimestampSeconds(value: unknown): number {
@@ -755,7 +779,7 @@ async function pollRobinhoodTrackedWalletsLiveBlocks(
   if (!wallets.length) return { events: [], checkpointBlocks: new Map(), wallets: [] };
 
   const walletMap = new Map(wallets.map(wallet => [wallet.toLowerCase(), wallet]));
-  const head = await robinhoodPublicClient.getBlockNumber();
+  const head = await getRobinhoodBlockNumberResilient();
 
   if (liveBlockCursor == null) {
     liveBlockCursor = head > BigInt(LIVE_BLOCK_LOOKBACK)
