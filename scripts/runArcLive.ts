@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { verifyArcMainnet, getArcBlockNumber } from '../src/chains/arc/rpc.js';
+import { verifyArcMainnet, getArcBlockNumber, getArcLogs, readArcContract } from '../src/chains/arc/rpc.js';
 import { discoverArcV4Pools } from '../src/chains/arc/uniswap.js';
 import { normalizeArcPoolCandidate } from '../src/chains/arc/candidate.js';
 import { enrichArcCandidate } from '../src/chains/arc/enrichment.js';
@@ -8,6 +8,7 @@ import { assessArcForAlert } from '../src/chains/arc/alertGate.js';
 import { sendTelegramWithMessageId } from '../src/services/telegram.js';
 import { getDeliverableUsers } from '../src/core/delivery.js';
 import { supabase } from '../src/services/supabase.js';
+import { decodeEventLog, formatUnits, parseAbiItem } from 'viem';
 
 const POLL_MS = Math.max(2_000, Number(process.env.ARC_LIVE_POLL_INTERVAL_MS ?? 5_000));
 const ENABLED = String(process.env.ARC_LIVE_ENABLED ?? 'false').toLowerCase() === 'true';
@@ -35,6 +36,59 @@ let arcBoostBaselineReady = false;
 const ARC_BOOST_RECOVERY_MAX = Math.max(1, Math.min(20, Number(process.env.ARC_BOOST_RECOVERY_MAX ?? 12)));
 const ARC_BOOST_POLL_MS = Math.max(10_000, Number(process.env.ARC_BOOST_POLL_MS ?? 15_000));
 let lastArcBoostPollAt = 0;
+
+const ARC_BURN_MIN_PERCENT = Math.max(0.01, Number(process.env.ARC_BURN_MIN_PERCENT ?? 0.5));
+const ERC20_TRANSFER_EVENT = parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 value)');
+const ERC20_SUPPLY_ABI = [
+  { type:'function', name:'totalSupply', stateMutability:'view', inputs:[], outputs:[{type:'uint256'}] },
+  { type:'function', name:'decimals', stateMutability:'view', inputs:[], outputs:[{type:'uint8'}] },
+  { type:'function', name:'symbol', stateMutability:'view', inputs:[], outputs:[{type:'string'}] },
+] as const;
+const BURN_ADDRESSES = new Set(['0x0000000000000000000000000000000000000000','0x000000000000000000000000000000000000dead']);
+const burnDelivered = new Set<string>();
+
+async function processArcBurns(fromBlock: bigint, toBlock: bigint): Promise<void> {
+  const logs = await getArcLogs({ fromBlock, toBlock, event: ERC20_TRANSFER_EVENT, args: { to: [...BURN_ADDRESSES] } }).catch(error => {
+    console.warn('[ArcBurn] LOG_SCAN_FAILED', { reason: error instanceof Error ? error.message : String(error) });
+    return [];
+  });
+  for (const log of logs) {
+    try {
+      const token = String(log.address ?? '').toLowerCase();
+      const txHash = String(log.transactionHash ?? '');
+      const identity = `${txHash}:${Number(log.logIndex ?? 0)}`;
+      if (!token || burnDelivered.has(identity)) continue;
+      const decoded = decodeEventLog({ abi:[ERC20_TRANSFER_EVENT], data:log.data, topics:log.topics });
+      const args = decoded.args as { from?: string; to?: string; value?: bigint };
+      if (!args.to || !BURN_ADDRESSES.has(args.to.toLowerCase()) || !args.value || args.value <= 0n) continue;
+      const [totalSupplyRaw, decimalsRaw, symbolRaw] = await Promise.all([
+        readArcContract({ address:token, abi:ERC20_SUPPLY_ABI, functionName:'totalSupply' }),
+        readArcContract({ address:token, abi:ERC20_SUPPLY_ABI, functionName:'decimals' }).catch(()=>18),
+        readArcContract({ address:token, abi:ERC20_SUPPLY_ABI, functionName:'symbol' }).catch(()=>'ARC TOKEN'),
+      ]);
+      const totalSupply = BigInt(totalSupplyRaw as any);
+      if (totalSupply <= 0n) continue;
+      const burnPercent = Number((args.value * 1_000_000n) / totalSupply) / 10_000;
+      if (burnPercent < ARC_BURN_MIN_PERCENT) continue;
+      const decimals = Number(decimalsRaw ?? 18);
+      const symbol = String(symbolRaw || 'ARC TOKEN').slice(0,32);
+      const burned = formatUnits(args.value, decimals);
+      const from = String(args.from ?? '').toLowerCase();
+      const text = ['🔥 <b>SUPPLY BURN DETECTED · ARC</b>','',
+        `<b>${symbol}</b>`, `🔥 Burned  <b>${burnPercent.toFixed(2)}% of total supply</b>`,
+        `🪙 Amount  <b>${burned}</b>`, `👤 Burner  <code>${from.slice(0,8)}…${from.slice(-6)}</code>`,'',
+        `<code>${token}</code>`,'','⚠️ <b>Supply burn detected — not a guarantee of price appreciation.</b>'].join('\\n');
+      const delivery = await broadcastArcAlert(text, [[
+        { text:'🔎 Burn Tx', url:`https://explorer.arc.io/tx/${encodeURIComponent(txHash)}` },
+        { text:'📋 Token', url:`https://explorer.arc.io/address/${encodeURIComponent(token)}` },
+      ]]);
+      burnDelivered.add(identity);
+      console.log('[ArcBurn] ALERT_SENT', { token, symbol, burnPercent, txHash, delivered:delivery.delivered });
+    } catch (error) {
+      console.warn('[ArcBurn] EVENT_SKIPPED', { reason:error instanceof Error ? error.message : String(error) });
+    }
+  }
+}
 
 async function getArcRecipients(): Promise<string[]> {
   const now = Date.now();
@@ -414,6 +468,7 @@ async function main() {
     const fromBlock = last + 1n;
     const cappedTo = fromBlock + BigInt(MAX_BLOCKS - 1);
     const toBlock = current < cappedTo ? current : cappedTo;
+    await processArcBurns(fromBlock, toBlock);
     const pools = await discoverArcV4Pools(fromBlock, toBlock);
     const candidates = pools.map(normalizeArcPoolCandidate).filter((x): x is NonNullable<typeof x> => Boolean(x));
 
