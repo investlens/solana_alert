@@ -156,7 +156,7 @@ function refreshRecipientsInBackground(): void {
   })();
 }
 
-async function sendTelegram(chatId: string, text: string, tokenAddress: string, socials?: RobinhoodTokenSocials): Promise<void> {
+async function sendTelegram(chatId: string, text: string, tokenAddress: string, socials?: RobinhoodTokenSocials, preBond = false): Promise<void> {
   const botToken = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
   if (!botToken || !chatId) throw new Error('missing Telegram configuration');
   const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
@@ -169,7 +169,9 @@ async function sendTelegram(chatId: string, text: string, tokenAddress: string, 
       disable_web_page_preview: true,
       reply_markup: { inline_keyboard: [
         [
-          { text: '📈 Chart', url: `https://dexscreener.com/robinhood/${encodeURIComponent(tokenAddress)}` },
+          preBond
+            ? { text: '🚀 PONS', url: `https://www.ponsfamily.com/launchpad/${encodeURIComponent(tokenAddress)}` }
+            : { text: '📈 Chart', url: `https://dexscreener.com/robinhood/${encodeURIComponent(tokenAddress)}` },
           { text: '🔎 Explorer', url: `https://robinhoodchain.blockscout.com/token/${encodeURIComponent(tokenAddress)}` },
         ],
         [
@@ -183,13 +185,13 @@ async function sendTelegram(chatId: string, text: string, tokenAddress: string, 
   if (!res.ok) throw new Error(`Telegram ${res.status}: ${await res.text().catch(() => '')}`);
 }
 
-async function directTelegramRecipients(text: string, tokenAddress: string, socials?: RobinhoodTokenSocials): Promise<{ delivered: number; failed: number }> {
+async function directTelegramRecipients(text: string, tokenAddress: string, socials?: RobinhoodTokenSocials, preBond = false): Promise<{ delivered: number; failed: number }> {
   ensureAdminRecipient();
   refreshRecipientsInBackground();
   const recipients = [...recipientCache];
   if (!recipients.length) throw new Error('no Telegram recipients available');
 
-  const results = await Promise.allSettled(recipients.map(chatId => sendTelegram(chatId, text, tokenAddress, socials)));
+  const results = await Promise.allSettled(recipients.map(chatId => sendTelegram(chatId, text, tokenAddress, socials, preBond)));
   let delivered = 0;
   let failed = 0;
   results.forEach((result, index) => {
@@ -274,12 +276,15 @@ function schedulePreIndexRecheck(launch: PonsLaunch): void {
           }
 
           // Only promising curves pay the cost of developer-flow enrichment.
-          const devFlow = await scanRobinhoodDevTokenFlow(token);
+          const devFlow = await scanRobinhoodDevTokenFlow(token, launch.deployer_address);
           if ((devFlow.otherDevTransferPercent ?? 0) > 0) {
             console.log(`[PonsFastLane] CURVE_TREND_REJECT_DEV token=${token} transferredPct=${devFlow.otherDevTransferPercent}`);
             return;
           }
           const strong = quoteGrowthPct >= PONS_CURVE_STRONG_QUOTE_GROWTH_PCT;
+          // V2 PONS supply is fixed at 1B. Constant-product spot price is quoteReserve/tokenReserve;
+          // both assets use 18 decimals, so this gives a lightweight pre-bond market cap in ETH.
+          const curveMarketCapEth = (Number(second.quoteReserve) / Number(second.tokenReserve)) * 1_000_000_000;
           const shortCa = token.length > 14 ? `${token.slice(0, 8)}…${token.slice(-6)}` : token;
           const text = [
             strong ? '🔥 <b>AlphaOS · PONS EARLY MOMENTUM</b>' : '🚀 <b>AlphaOS · PONS CURVE OPPORTUNITY</b>',
@@ -289,6 +294,7 @@ function schedulePreIndexRecheck(launch: PonsLaunch): void {
             '',
             `📈 Curve demand     <b>+${quoteGrowthPct.toFixed(2)}%</b>`,
             `🧮 Token reserve    <b>${tokenReserveChangePct.toFixed(2)}%</b>`,
+            `💰 Curve Market Cap <b>${curveMarketCapEth.toFixed(3)} ETH</b>`,
             `⏱️ Confirmation     <b>${Math.round(PREINDEX_RECHECK_MS / 1000)}s</b>`,
             '',
             '🎯 <b>WHY ALPHAOS FLAGGED IT</b>',
@@ -303,7 +309,7 @@ function schedulePreIndexRecheck(launch: PonsLaunch): void {
             '<i>Market/dump risk still applies · AlphaOS</i>',
           ].join('\n');
           const socials = await getRobinhoodTokenSocials(token);
-          const delivery = await directTelegramRecipients(text, token, socials);
+          const delivery = await directTelegramRecipients(text, token, socials, true);
           preIndexAlerted.add(token);
           console.log(`[PonsFastLane] CURVE_ALERT_SENT token=${token} quoteGrowthPct=${quoteGrowthPct.toFixed(2)} delivered=${delivery.delivered} failed=${delivery.failed}`);
         } finally {
