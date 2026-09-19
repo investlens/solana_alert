@@ -278,10 +278,45 @@ async function deliverArcBoost(boost: {tokenAddress:string;amount:number;totalAm
     console.warn('[ArcBoost] BLOCKED_SECURITY', { token:key, totalBoost:boost.totalAmount, eventType, reason:security.reason });
     return false;
   }
-  const text = ['🟣 <b>AlphaOS ARC BOOST</b>','',`<code>${boost.tokenAddress}</code>`,'',
-    `BOOST added: <b>${boost.amount}</b>`,`Total BOOST: <b>${boost.totalAmount}</b>`,
-    `Event: <b>${eventType}</b>`,`Safety: <b>honeypot screen passed</b> — ${security.reason}`,'','⚠️ <b>Do your own diligence.</b>'].join('\\n');
-  const buttons = [[{ text:'🔎 Explorer', url:`https://explorer.arc.io/address/${encodeURIComponent(boost.tokenAddress)}` }]];
+  let symbol = 'ARC TOKEN';
+  let name: string | null = null;
+  let marketCap: number | null = null;
+  let dexUrl: string | null = null;
+  let website: string | null = null;
+  let twitter: string | null = null;
+  let telegram: string | null = null;
+  try {
+    const response = await fetch(`https://api.dexscreener.com/token-pairs/v1/arc/${encodeURIComponent(boost.tokenAddress)}`, { signal: AbortSignal.timeout(3_000) });
+    if (response.ok) {
+      const pairs = await response.json() as any[];
+      const pair = Array.isArray(pairs) ? pairs[0] : null;
+      symbol = String(pair?.baseToken?.symbol || symbol);
+      name = pair?.baseToken?.name ? String(pair.baseToken.name) : null;
+      marketCap = Number.isFinite(Number(pair?.marketCap)) ? Number(pair.marketCap) : Number.isFinite(Number(pair?.fdv)) ? Number(pair.fdv) : null;
+      dexUrl = pair?.url ? String(pair.url) : null;
+      const websites = Array.isArray(pair?.info?.websites) ? pair.info.websites : [];
+      const socials = Array.isArray(pair?.info?.socials) ? pair.info.socials : [];
+      website = websites.find((x:any)=>x?.url)?.url ?? null;
+      twitter = socials.find((x:any)=>String(x?.type).toLowerCase()==='twitter')?.url ?? null;
+      telegram = socials.find((x:any)=>String(x?.type).toLowerCase()==='telegram')?.url ?? null;
+    }
+  } catch {}
+  const text = [
+    '🚀 <b>BOOST DETECTED · ARC</b>',
+    '',
+    `<b>${symbol}</b>${name ? ` · ${name}` : ''}`,
+    `🔥 Boost  <b>${boost.totalAmount} total (+${boost.amount})</b>`,
+    ...(marketCap != null ? [`💰 Market Cap  <b>${formatUsd(marketCap)}</b>`] : []),
+    '🛡️ Sell safety  <b>No honeypot/cannot-sell flag detected</b>',
+    '',
+    `<code>${boost.tokenAddress}</code>`,
+    '',
+    '⚠️ <b>Do your own diligence.</b>',
+  ].join('\\n');
+  const buttons = [
+    [ ...(dexUrl ? [{ text:'📈 Chart', url:dexUrl }] : []), { text:'🔎 Explorer', url:`https://explorer.arc.io/address/${encodeURIComponent(boost.tokenAddress)}` } ],
+    [ ...(website ? [{text:'🌐 Project',url:website}] : []), ...(twitter ? [{text:'𝕏 X',url:twitter}] : []), ...(telegram ? [{text:'✈️ TG',url:telegram}] : []) ],
+  ].filter(row => row.length > 0);
   try {
     const delivery = await broadcastArcAlert(text, buttons);
     arcBoostDelivered.add(identity);
