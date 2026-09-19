@@ -387,6 +387,7 @@ async function resolvePonsDeployer(
 async function
 scanRobinhoodDevTokenFlowUncached(
   tokenAddress: string,
+  knownDeployer?: string | null,
 ): Promise<DevTokenFlowResult> {
   const token =
     getAddress(
@@ -412,10 +413,11 @@ scanRobinhoodDevTokenFlowUncached(
     };
 
   try {
-    const deployerResolution =
-      await resolvePonsDeployer(
-        token,
-      );
+    const deployerResolution = knownDeployer
+      ? { deployer: getAddress(knownDeployer), source: 'PONS_SHADOW_V2' as const }
+      : await resolvePonsDeployer(
+          token,
+        );
 
     if (
       !deployerResolution.deployer
@@ -613,6 +615,15 @@ export async function reuseRobinhoodDevTokenFlow(
 
 export async function scanRobinhoodDevTokenFlow(
   tokenAddress: string,
+  knownDeployer?: string | null,
 ): Promise<DevTokenFlowResult> {
+  if (knownDeployer) {
+    const key = getAddress(tokenAddress).toLowerCase();
+    const cached = flowCache.get(key);
+    if (cached && cached.expiresAt > Date.now() && cached.result.deployerAddress?.toLowerCase() === knownDeployer.toLowerCase()) return cached.result;
+    const result = await scanRobinhoodDevTokenFlowUncached(tokenAddress, knownDeployer);
+    flowCache.set(key, { expiresAt: Date.now() + (result.evidenceStatus === 'UNAVAILABLE' ? FLOW_FAILURE_TTL_MS : FLOW_CACHE_TTL_MS), result });
+    return result;
+  }
   return reuseRobinhoodDevTokenFlow(tokenAddress);
 }
