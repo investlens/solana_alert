@@ -71,8 +71,17 @@ async function processArcBurns(fromBlock: bigint, toBlock: bigint): Promise<void
       // supply as the denominator can falsely report >100% burns.
       const postBurnSupply = BigInt(totalSupplyRaw as any);
       if (postBurnSupply < 0n) continue;
+      const destination = String(args.to).toLowerCase();
+      const isProtocolBurn = destination === '0x0000000000000000000000000000000000000000';
+      // Only a protocol burn to address(0) proves totalSupply was reduced.
+      // A transfer to 0xdead is irreversible-looking but does not itself prove
+      // ERC-20 totalSupply changed, so fail closed and do not alert it here.
+      if (!isProtocolBurn) {
+        console.info('[ArcBurn] UNVERIFIED_BURN_SUPPRESSED', { token, txHash, destination });
+        continue;
+      }
       const preBurnSupply = postBurnSupply + args.value;
-      if (preBurnSupply <= 0n) continue;
+      if (preBurnSupply <= 0n || postBurnSupply >= preBurnSupply) continue;
       const burnPercent = Number((args.value * 1_000_000n) / preBurnSupply) / 10_000;
       // Fail closed on impossible/corrupt calculations; never show >100%.
       if (!Number.isFinite(burnPercent) || burnPercent <= 0 || burnPercent > 100) {
@@ -118,7 +127,7 @@ async function processArcBurns(fromBlock: bigint, toBlock: bigint): Promise<void
         '📊 <b>MARKET</b>',
         `Market Cap    <b>${formatUsd(marketCap)}</b>`,
         `Liquidity     <b>${formatUsd(liquidity)}</b>`,'',
-        '🛡️ <b>Verified on-chain burn</b>','',
+        '🛡️ <b>Verified supply reduction · on-chain</b>','',
         '⚠️ <b>Supply burn is not a guarantee of price appreciation.</b>','',
         '<i>AlphaOS · Find. Analyse. Trade Smarter.</i>',
       ].join('\n');
