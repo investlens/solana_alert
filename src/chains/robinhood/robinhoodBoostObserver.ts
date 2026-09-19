@@ -5,6 +5,7 @@ import { config } from '../../config.js';
 import { getDeliverableUsers } from '../../core/delivery.js';
 import { runtimeDeliverableUsers } from '../../services/runtimeSubscriberRegistry.js';
 import { getPonsLaunchState } from './ponsLaunchState.js';
+import { requestRobinhoodRpcResilient } from './rpc.js';
 
 const BOOST_INTERVAL_MS = 15_000;
 export const BOOSTED_OPPORTUNITY_THRESHOLD = 200;
@@ -178,9 +179,14 @@ async function checkCustomLiquidityProtection(tokenAddress: string): Promise<Cus
 
 type BoostSecurityDecision={status:'SAFE'|'UNKNOWN'|'SCAM';reason:string};
 async function checkBoostContractSecurity(tokenAddress:string):Promise<BoostSecurityDecision>{
- const rpcUrl=process.env.ROBINHOOD_RPC_URL?.trim(); if(!rpcUrl)return{status:'UNKNOWN',reason:'security RPC not configured'};
- try{const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),2500);try{const response=await fetch(rpcUrl,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'eth_getCode',params:[tokenAddress,'latest']}),signal:controller.signal});if(!response.ok)return{status:'UNKNOWN',reason:`security RPC HTTP ${response.status}`};const payload=await response.json() as {result?:string;error?:{message?:string}};if(payload.error)return{status:'UNKNOWN',reason:payload.error.message??'security RPC error'};const code=typeof payload.result==='string'?payload.result.toLowerCase():'';if(!code||code==='0x')return{status:'SCAM',reason:'token address has no deployed contract code'};const ascii=Buffer.from(code.slice(2),'hex').toString('latin1').toLowerCase();const marker=['honeypot','blacklisted','blacklist: blocked','trading disabled'].find(v=>ascii.includes(v));if(marker)return{status:'SCAM',reason:`malicious contract marker: ${marker}`};return{status:'SAFE',reason:'deployed contract code verified; no explicit malicious marker found'};}finally{clearTimeout(timeout);}}
- catch(error){return{status:'UNKNOWN',reason:error instanceof Error?error.message.slice(0,180):String(error).slice(0,180)}}
+ try{
+  const code=String(await requestRobinhoodRpcResilient({method:'eth_getCode',params:[tokenAddress,'latest']})).toLowerCase();
+  if(!code||code==='0x')return{status:'SCAM',reason:'token address has no deployed contract code'};
+  const ascii=Buffer.from(code.slice(2),'hex').toString('latin1').toLowerCase();
+  const marker=['honeypot','blacklisted','blacklist: blocked','trading disabled'].find(v=>ascii.includes(v));
+  if(marker)return{status:'SCAM',reason:`malicious contract marker: ${marker}`};
+  return{status:'SAFE',reason:'deployed contract code verified; no explicit malicious marker found'};
+ }catch(error){return{status:'UNKNOWN',reason:error instanceof Error?error.message.slice(0,180):String(error).slice(0,180)}}
 }
 
 async function ensureBoostBaseline():Promise<boolean>{if(boostBaselineReady)return true;if(boostBaselinePromise)return boostBaselinePromise;boostBaselinePromise=(async()=>{try{const boosts=await fetchRobinhoodBoosts();for(const boost of boosts)boostTotals.set(normalize(boost.tokenAddress),boost.totalAmount);boostBaselineReady=true;console.log('[RobinhoodBoostObserver] LIVE_ONLY_BASELINE_READY',{tokens:boosts.length,supabase:'bypassed'});return true;}catch(error){console.error('[RobinhoodBoostObserver] Baseline failed:',error instanceof Error?error.message:String(error));return false;}finally{boostBaselinePromise=null;}})();return boostBaselinePromise;}
