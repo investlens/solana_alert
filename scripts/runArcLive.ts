@@ -86,7 +86,10 @@ function formatUsd(value: number | null | undefined): string {
 
 async function deliverArcAlert(market: Awaited<ReturnType<typeof enrichArcMarket>>, warnings: string[]) {
   const key = market.assetId.toLowerCase();
-  if (delivered.has(key)) return;
+  if (delivered.has(key)) {
+    console.log('[ArcLive] DUPLICATE_OPPORTUNITY_SUPPRESSED', { assetId: market.assetId, reason: 'already delivered this runtime' });
+    return;
+  }
 
   const symbol = market.symbol || 'ARC TOKEN';
   const buys = market.buys5m ?? 0;
@@ -205,6 +208,10 @@ async function processMarketRetries(): Promise<void> {
     });
 
     if (assessment.alertable) {
+      if (delivered.has(key)) {
+        console.log('[ArcLive] DUPLICATE_REVERSAL_SUPPRESSED', { assetId: market.assetId, reason: 'opportunity already delivered' });
+        continue;
+      }
       const pairAgeMs = market.pairCreatedAt ? Math.max(0, Date.now() - market.pairCreatedAt) : 0;
       if (pairAgeMs < ARC_MIN_NORMAL_ALERT_AGE_MS) {
         pendingMarketRetries.set(key, { enriched: pending.enriched, retryAt: Date.now() + Math.max(ARC_REVERSAL_CONFIRM_MS, ARC_MIN_NORMAL_ALERT_AGE_MS - Math.max(pairAgeMs, Date.now() - pending.firstSeenAt)), firstSeenAt: pending.firstSeenAt, baselinePrice: market.priceUsd });
@@ -398,6 +405,11 @@ async function main() {
       });
 
       if (assessment.alertable) {
+        const key = market.assetId.toLowerCase();
+        if (delivered.has(key)) {
+          console.log('[ArcLive] DUPLICATE_REVERSAL_SUPPRESSED', { assetId: market.assetId, reason: 'opportunity already delivered' });
+          continue;
+        }
         const pairAgeMs = market.pairCreatedAt ? Math.max(0, Date.now() - market.pairCreatedAt) : 0;
         const key = market.assetId.toLowerCase();
         if (pairAgeMs < ARC_MIN_NORMAL_ALERT_AGE_MS) {
