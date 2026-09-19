@@ -4,6 +4,10 @@ import { coreDecisionEvidenceMetrics, marketContextMetrics, normalizeCoreDecisio
 import { persistOrLoadAlphaSemanticEventRecord } from '../../services/alphaSemanticEventService.js';
 import { deliverAlphaSemanticEvent } from '../../services/alphaSemanticDeliveryService.js';
 import { buildPremiumTokenNotification, verifiedPairAge } from '../../ui/premiumTokenNotification.js';
+import { decodeEventLog, formatUnits, parseAbiItem } from 'viem';
+import { getRobinhoodBlockNumberResilient, getRobinhoodLogsResilient, requestRobinhoodRpcResilient } from './rpc.js';
+import { sendTelegramWithMessageId } from '../../services/telegram.js';
+import { config } from '../../config.js';
 
 import {
   startPostAlertDevWatch,
@@ -2292,6 +2296,77 @@ export async function refreshRobinhoodObserver():
   }
 }
 
+const RH_BURN_MIN_PERCENT = Math.max(0.01, Number(process.env.ROBINHOOD_BURN_MIN_PERCENT ?? 0.5));
+const RH_TRANSFER_EVENT = parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 value)');
+const RH_ERC20_ABI = [
+  { type:'function', name:'totalSupply', stateMutability:'view', inputs:[], outputs:[{type:'uint256'}] },
+  { type:'function', name:'decimals', stateMutability:'view', inputs:[], outputs:[{type:'uint8'}] },
+  { type:'function', name:'symbol', stateMutability:'view', inputs:[], outputs:[{type:'string'}] },
+] as const;
+const RH_ZERO = '0x0000000000000000000000000000000000000000';
+const rhBurnDelivered = new Set<string>();
+let rhBurnLastBlock: bigint | null = null;
+let rhBurnRunning = false;
+
+async function scanVerifiedRobinhoodBurns(): Promise<void> {
+  if (rhBurnRunning) return;
+  rhBurnRunning = true;
+  try {
+    const head = await getRobinhoodBlockNumberResilient();
+    if (rhBurnLastBlock == null) { rhBurnLastBlock = head; console.log('[RobinhoodBurn] BASELINE_READY', { block: head.toString() }); return; }
+    const fromBlock = rhBurnLastBlock + 1n;
+    if (fromBlock > head) return;
+    const logs = await getRobinhoodLogsResilient({ event: RH_TRANSFER_EVENT, args: { to: RH_ZERO }, fromBlock, toBlock: head });
+    rhBurnLastBlock = head;
+    for (const log of logs) {
+      try {
+        const decoded = decodeEventLog({ abi:[RH_TRANSFER_EVENT], data:log.data, topics:log.topics });
+        const args = decoded.args as { from:string; to:string; value:bigint };
+        if (String(args.to).toLowerCase() !== RH_ZERO || args.value <= 0n) continue;
+        const token = String(log.address).toLowerCase();
+        const txHash = String(log.transactionHash ?? '');
+        const identity = `${txHash}:${String(log.logIndex ?? '')}`;
+        if (rhBurnDelivered.has(identity)) continue;
+        const [supplyRaw, decimalsRaw, symbolRaw] = await Promise.all([
+          requestRobinhoodRpcResilient({ method:'eth_call', params:[{to:token,data:'0x18160ddd'},'latest'] }),
+          requestRobinhoodRpcResilient({ method:'eth_call', params:[{to:token,data:'0x313ce567'},'latest'] }),
+          requestRobinhoodRpcResilient({ method:'eth_call', params:[{to:token,data:'0x95d89b41'},'latest'] }),
+        ]);
+        const postSupply = BigInt(String(supplyRaw));
+        const preSupply = postSupply + args.value;
+        if (preSupply <= 0n || postSupply >= preSupply) continue;
+        const pct = Number((args.value * 1_000_000n) / preSupply) / 10_000;
+        if (!Number.isFinite(pct) || pct < RH_BURN_MIN_PERCENT || pct > 100) continue;
+        const decimals = Number(BigInt(String(decimalsRaw)));
+        let symbol = 'TOKEN';
+        try { symbol = Buffer.from(String(symbolRaw).slice(2), 'hex').toString('utf8').replace(/\\0/g,'').trim() || symbol; } catch {}
+        const amount = formatUnits(args.value, Number.isFinite(decimals) ? decimals : 18);
+        const market = await getRobinhoodMarketSnapshot(token, { priority:'HIGH', caller:'verified_burn' }).catch(()=>null);
+        const text = [
+          '🔥 <b>AlphaOS · ROBINHOOD SUPPLY BURN</b>','━━━━━━━━━━━━━━━━━━',
+          `🔥 <b>${escapeHtml(symbol)}</b>  ·  <code>${token.slice(0,8)}…${token.slice(-6)}</code>`,
+          `<code>${token}</code>`,'','🔥 <b>SUPPLY BURN</b>',
+          `Burned        <b>${pct.toFixed(2)}% of total supply</b>`,
+          `Amount        <b>${amount} ${escapeHtml(symbol)}</b>`,'','🔥 <b>BURN DESTINATION</b>',
+          `Burn Address  <code>${RH_ZERO}</code>`,
+          `Source Wallet <code>${args.from.slice(0,8)}…${args.from.slice(-6)}</code>`,'','📊 <b>MARKET</b>',
+          `Market Cap    <b>${formatUsd(market?.marketCapUsd)}</b>`,
+          `Liquidity     <b>${formatUsd(market?.liquidityUsd)}</b>`,'',
+          '🛡️ <b>Verified supply reduction · on-chain</b>','','⚠️ <b>Supply burn is not a guarantee of price appreciation.</b>',
+        ].join('\\n');
+        const recipients = config.adminTelegramId ? [String(config.adminTelegramId)] : [];
+        if (!recipients.length) continue;
+        const results = await Promise.allSettled(recipients.map(chatId => sendTelegramWithMessageId(chatId, text, [[
+          ...(market?.chartUrl ? [{text:'📈 Chart',url:market.chartUrl}] : []),
+          {text:'🔥 Burn Tx',url:`https://robinhoodchain.blockscout.com/tx/${encodeURIComponent(txHash)}`},
+        ],[{text:'🔎 Explorer',url:`https://robinhoodchain.blockscout.com/token/${encodeURIComponent(token)}`}]])));
+        if (results.some(x=>x.status==='fulfilled')) { rhBurnDelivered.add(identity); console.log('[RobinhoodBurn] ALERT_SENT',{token,txHash,pct}); }
+      } catch (error) { console.warn('[RobinhoodBurn] EVENT_SKIPPED',{reason:error instanceof Error?error.message:String(error)}); }
+    }
+  } catch (error) { console.warn('[RobinhoodBurn] SCAN_FAILED',{reason:error instanceof Error?error.message:String(error)}); }
+  finally { rhBurnRunning = false; }
+}
+
 export function startRobinhoodObserver():
   void {
   if (observerStarted) {
@@ -2318,11 +2393,13 @@ export function startRobinhoodObserver():
     );
 
   void refreshRobinhoodObserver();
+  void scanVerifiedRobinhoodBurns();
 
   observerInterval =
     setInterval(
       () => {
         void refreshRobinhoodObserver();
+        void scanVerifiedRobinhoodBurns();
       },
       OBSERVER_INTERVAL_MS,
     );
