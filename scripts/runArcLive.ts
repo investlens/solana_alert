@@ -66,9 +66,19 @@ async function processArcBurns(fromBlock: bigint, toBlock: bigint): Promise<void
         readArcContract({ address:token, abi:ERC20_SUPPLY_ABI, functionName:'decimals' }).catch(()=>18),
         readArcContract({ address:token, abi:ERC20_SUPPLY_ABI, functionName:'symbol' }).catch(()=>'ARC TOKEN'),
       ]);
-      const totalSupply = BigInt(totalSupplyRaw as any);
-      if (totalSupply <= 0n) continue;
-      const burnPercent = Number((args.value * 1_000_000n) / totalSupply) / 10_000;
+      // totalSupply() is read AFTER the burn transaction. For a true ERC-20 burn
+      // the pre-burn supply is current supply + burned amount. Using post-burn
+      // supply as the denominator can falsely report >100% burns.
+      const postBurnSupply = BigInt(totalSupplyRaw as any);
+      if (postBurnSupply < 0n) continue;
+      const preBurnSupply = postBurnSupply + args.value;
+      if (preBurnSupply <= 0n) continue;
+      const burnPercent = Number((args.value * 1_000_000n) / preBurnSupply) / 10_000;
+      // Fail closed on impossible/corrupt calculations; never show >100%.
+      if (!Number.isFinite(burnPercent) || burnPercent <= 0 || burnPercent > 100) {
+        console.warn('[ArcBurn] INVALID_BURN_PERCENT_SUPPRESSED', { token, txHash, burnPercent });
+        continue;
+      }
       if (burnPercent < ARC_BURN_MIN_PERCENT) continue;
       const decimals = Number(decimalsRaw ?? 18);
       const symbol = String(symbolRaw || 'ARC TOKEN').slice(0,32);
