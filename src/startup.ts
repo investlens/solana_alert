@@ -14,7 +14,7 @@ const enabled = (name: string, fallback = false) =>
 
 async function startTelegramPollingEarly() {
   if (!enabled('RUN_TELEGRAM_BOT', false)) return;
-  if (!claimTelegramPollingOwner()) {
+  if (!await claimTelegramPollingOwner()) {
     console.warn('[TelegramPolling] Early startup duplicate suppressed.');
     return;
   }
