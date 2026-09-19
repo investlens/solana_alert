@@ -43,9 +43,14 @@ async function getJson<T>(url: string): Promise<T> {
   }
 
   try {
-    const data = (await governedDexScreenerJson<T>({ url, caller: 'dexscreener_service',
+    const data = (await governedDexScreenerJson<T>({
+      url,
+      caller: 'dexscreener_service',
       endpoint: url.includes('/orders/') ? 'ORDERS' : url.includes('/token-pairs/') ? 'TOKEN_PAIRS'
-        : url.includes('/token-boosts/') ? 'BOOSTS' : url.includes('/token-profiles/') ? 'PROFILES' : 'TAKEOVERS' })).value;
+        : url.includes('/token-boosts/') ? 'BOOSTS' : url.includes('/token-profiles/') ? 'PROFILES' : 'TAKEOVERS',
+      cacheKey: url,
+      cacheTtlMs: cacheMsForUrl(url),
+    })).value;
 
     jsonCache.set(url, {
       expiresAt: now + cacheMsForUrl(url),
