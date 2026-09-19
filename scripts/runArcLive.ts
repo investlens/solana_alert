@@ -74,14 +74,50 @@ async function processArcBurns(fromBlock: bigint, toBlock: bigint): Promise<void
       const symbol = String(symbolRaw || 'ARC TOKEN').slice(0,32);
       const burned = formatUnits(args.value, decimals);
       const from = String(args.from ?? '').toLowerCase();
-      const text = ['🔥 <b>SUPPLY BURN DETECTED · ARC</b>','',
-        `<b>${symbol}</b>`, `🔥 Burned  <b>${burnPercent.toFixed(2)}% of total supply</b>`,
-        `🪙 Amount  <b>${burned}</b>`, `👤 Burner  <code>${from.slice(0,8)}…${from.slice(-6)}</code>`,'',
-        `<code>${token}</code>`,'','⚠️ <b>Supply burn detected — not a guarantee of price appreciation.</b>'].join('\\n');
-      const delivery = await broadcastArcAlert(text, [[
-        { text:'🔎 Burn Tx', url:`https://explorer.arc.io/tx/${encodeURIComponent(txHash)}` },
-        { text:'📋 Token', url:`https://explorer.arc.io/address/${encodeURIComponent(token)}` },
-      ]]);
+      // Locked AlphaOS Burn card: keep detection lean; enrich only after >= threshold qualifies.
+      let marketCap: number | null = null;
+      let liquidity: number | null = null;
+      let dexUrl: string | null = null;
+      let website: string | null = null;
+      let twitter: string | null = null;
+      let telegram: string | null = null;
+      try {
+        const response = await fetch(`https://api.dexscreener.com/token-pairs/v1/arc/${encodeURIComponent(token)}`, { signal: AbortSignal.timeout(3_000) });
+        if (response.ok) {
+          const pairs = await response.json() as any[];
+          const pair = Array.isArray(pairs) ? pairs[0] : null;
+          marketCap = Number.isFinite(Number(pair?.marketCap)) ? Number(pair.marketCap) : Number.isFinite(Number(pair?.fdv)) ? Number(pair.fdv) : null;
+          liquidity = Number.isFinite(Number(pair?.liquidity?.usd)) ? Number(pair.liquidity.usd) : null;
+          dexUrl = pair?.url ? String(pair.url) : null;
+          website = Array.isArray(pair?.info?.websites) ? pair.info.websites.find((x:any)=>x?.url)?.url ?? null : null;
+          const socials = Array.isArray(pair?.info?.socials) ? pair.info.socials : [];
+          twitter = socials.find((x:any)=>String(x?.type).toLowerCase()==='twitter')?.url ?? null;
+          telegram = socials.find((x:any)=>String(x?.type).toLowerCase()==='telegram')?.url ?? null;
+        }
+      } catch {}
+      const shortCa = `${token.slice(0,8)}…${token.slice(-6)}`;
+      const text = [
+        '🔥 <b>AlphaOS · ARC SUPPLY BURN</b>', '━━━━━━━━━━━━━━━━━━',
+        `🔥 <b>${symbol}</b>  ·  <code>${shortCa}</code>`, `<code>${token}</code>`,'',
+        '🔥 <b>SUPPLY BURN</b>',
+        `Burned        <b>${burnPercent.toFixed(2)}% of total supply</b>`,
+        `Amount        <b>${burned} ${symbol}</b>`,'',
+        '👤 <b>BURNER</b>',
+        `Wallet        <code>${from.slice(0,8)}…${from.slice(-6)}</code>`,
+        'Developer     <b>Not verified</b>','',
+        '📊 <b>MARKET</b>',
+        `Market Cap    <b>${formatUsd(marketCap)}</b>`,
+        `Liquidity     <b>${formatUsd(liquidity)}</b>`,'',
+        '🛡️ <b>Verified on-chain burn</b>','',
+        '⚠️ <b>Supply burn is not a guarantee of price appreciation.</b>','',
+        '<i>AlphaOS · Find. Analyse. Trade Smarter.</i>',
+      ].join('\\n');
+      const buttons = [
+        [ ...(dexUrl ? [{ text:'📈 Chart', url:dexUrl }] : []), { text:'🔥 Burn Tx', url:`https://explorer.arc.io/tx/${encodeURIComponent(txHash)}` } ],
+        [ { text:'🔎 Explorer', url:`https://explorer.arc.io/address/${encodeURIComponent(token)}` }, ...(website ? [{text:'🌐 Project',url:website}] : []) ],
+        [ ...(twitter ? [{text:'𝕏 X',url:twitter}] : []), ...(telegram ? [{text:'✈️ TG',url:telegram}] : []) ],
+      ].filter(row => row.length > 0);
+      const delivery = await broadcastArcAlert(text, buttons);
       burnDelivered.add(identity);
       console.log('[ArcBurn] ALERT_SENT', { token, symbol, burnPercent, txHash, delivered:delivery.delivered });
     } catch (error) {
