@@ -14,6 +14,7 @@ const TOKEN_ABI = parseAbi([
   'function symbol() view returns (string)',
   'function decimals() view returns (uint8)',
   'function totalSupply() view returns (uint256)',
+  'function socials() view returns (string twitter, string telegram, string discord, string website, string farcaster)',
 ]);
 
 export type RobinhoodTokenMetadata = {
@@ -281,4 +282,48 @@ export async function getRobinhoodTokenMetadata(
 
     readErrors,
   };
+}
+
+
+export type RobinhoodTokenSocials = {
+  twitter: string | null;
+  telegram: string | null;
+  website: string | null;
+};
+
+const socialsCache = new Map<string, { expiresAt: number; value: RobinhoodTokenSocials }>();
+
+function safeProjectUrl(value: unknown): string | null {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  try {
+    const url = new URL(raw.startsWith('http://') || raw.startsWith('https://') ? raw : `https://${raw}`);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : null;
+  } catch { return null; }
+}
+
+export async function getRobinhoodTokenSocials(tokenAddress: string): Promise<RobinhoodTokenSocials> {
+  const address = getAddress(tokenAddress);
+  const key = address.toLowerCase();
+  const cached = socialsCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  let value: RobinhoodTokenSocials = { twitter: null, telegram: null, website: null };
+  try {
+    const data = encodeFunctionData({ abi: TOKEN_ABI, functionName: 'socials' });
+    const result = await rawEthCall({ address, data });
+    const decoded = decodeFunctionResult({ abi: TOKEN_ABI, functionName: 'socials', data: result }) as readonly [string, string, string, string, string];
+    value = {
+      twitter: safeProjectUrl(decoded[0]),
+      telegram: safeProjectUrl(decoded[1]),
+      website: safeProjectUrl(decoded[3]),
+    };
+  } catch {
+    // Social metadata is optional and must never block an opportunity alert.
+  }
+  socialsCache.set(key, { expiresAt: Date.now() + 30 * 60_000, value });
+  if (socialsCache.size > 2_000) {
+    const oldest = socialsCache.keys().next().value;
+    if (oldest) socialsCache.delete(oldest);
+  }
+  return value;
 }
