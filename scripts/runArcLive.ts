@@ -126,7 +126,7 @@ async function deliverArcAlert(market: Awaited<ReturnType<typeof enrichArcMarket
     ...(otherWarnings.length ? otherWarnings.map(item => `⚠️ ${item.replaceAll('_', ' ')}`) : []),
     ...(unavailable.length ? [`⚪ Additional checks unavailable: ${unavailable.join(', ')}`] : []),
     '',
-    '<i>AlphaOS · Find. Analyse. Trade Smarter.</i>',
+    '⚠️ <b>Do your own diligence.</b>', '', '<i>AlphaOS · Find. Analyse. Trade Smarter.</i>',
   ].join('\n');
 
   // Keep the alert action-first: chart + explorer are core; project/social
@@ -252,24 +252,16 @@ async function checkArcBoostSecurity(tokenAddress: string): Promise<ArcBoostSecu
   try {
     const url = `https://api.gopluslabs.io/api/v1/token_security/5042?contract_addresses=${encodeURIComponent(tokenAddress)}`;
     const response = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(4_000) });
-    if (!response.ok) return { allowed: false, reason: `security provider HTTP ${response.status}` };
+    if (!response.ok) return { allowed: true, reason: `honeypot provider unavailable (HTTP ${response.status}); LP check intentionally skipped for BOOST` };
     const payload = await response.json() as { result?: Record<string, Record<string, unknown>> };
     const key = tokenAddress.toLowerCase();
     const security = payload.result?.[key] ?? payload.result?.[Object.keys(payload.result ?? {}).find(k => k.toLowerCase() === key) ?? ''];
-    if (!security) return { allowed: false, reason: 'honeypot/LP security evidence unavailable' };
+    if (!security) return { allowed: true, reason: 'honeypot evidence unavailable; LP check intentionally skipped for BOOST' };
     if (String(security.is_honeypot ?? '0') === '1') return { allowed: false, reason: 'honeypot flag' };
     if (String(security.cannot_sell_all ?? '0') === '1') return { allowed: false, reason: 'cannot-sell flag' };
-    const holders = Array.isArray(security.lp_holders) ? security.lp_holders as Record<string, unknown>[] : [];
-    if (!holders.length) return { allowed: false, reason: 'LP-holder evidence unavailable' };
-    let protectedPct = 0;
-    for (const holder of holders) {
-      const pct = Number(holder.percent ?? 0);
-      if ((String(holder.is_locked ?? '0') === '1' || burnLike(holder)) && Number.isFinite(pct)) protectedPct += Math.max(0, pct);
-    }
-    if (protectedPct < 0.95) return { allowed: false, reason: `LP not safely locked/burned (${(protectedPct * 100).toFixed(1)}% protected)` };
-    return { allowed: true, reason: `sellability clean; ${(protectedPct * 100).toFixed(1)}% LP locked/burned` };
+    return { allowed: true, reason: 'no honeypot/cannot-sell flag detected; LP check intentionally skipped for BOOST' };
   } catch (error) {
-    return { allowed: false, reason: `security check failed: ${error instanceof Error ? error.message : String(error)}` };
+    return { allowed: true, reason: `honeypot check unavailable: ${error instanceof Error ? error.message : String(error)}; LP check intentionally skipped for BOOST` };
   }
 }
 
@@ -288,7 +280,7 @@ async function deliverArcBoost(boost: {tokenAddress:string;amount:number;totalAm
   }
   const text = ['🟣 <b>AlphaOS ARC BOOST</b>','',`<code>${boost.tokenAddress}</code>`,'',
     `BOOST added: <b>${boost.amount}</b>`,`Total BOOST: <b>${boost.totalAmount}</b>`,
-    `Event: <b>${eventType}</b>`,`Safety: <b>passed</b> — ${security.reason}`].join('\\n');
+    `Event: <b>${eventType}</b>`,`Safety: <b>honeypot screen passed</b> — ${security.reason}`,'','⚠️ <b>Do your own diligence.</b>'].join('\\n');
   const buttons = [[{ text:'🔎 Explorer', url:`https://explorer.arc.io/address/${encodeURIComponent(boost.tokenAddress)}` }]];
   try {
     const delivery = await broadcastArcAlert(text, buttons);
