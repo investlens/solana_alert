@@ -357,16 +357,33 @@ async function evaluate(launch: PonsLaunch): Promise<void> {
     devFlow.devHoldingPercent != null ? `✓ Dev holding ${devFlow.devHoldingPercent.toFixed(2)}%` : null,
     (devFlow.confirmedDevBurnPercent ?? 0) > 0 ? `🔥 Verified dev burn ${devFlow.confirmedDevBurnPercent!.toFixed(2)}%` : null,
   ].filter(Boolean);
+  const symbol = escapeHtml(pair.baseToken?.symbol ?? 'UNKNOWN');
+  const name = escapeHtml(pair.baseToken?.name ?? '');
+  const shortCa = tokenAddress.length > 14
+    ? `${tokenAddress.slice(0, 8)}…${tokenAddress.slice(-6)}`
+    : tokenAddress;
   const text = [
-    `🚨 <b>AlphaOS PONS ${secondBucket}</b>`,
-    `<b>${escapeHtml(pair.baseToken?.symbol ?? 'UNKNOWN')}</b> — ${escapeHtml(pair.baseToken?.name ?? '')}`,
-    `Score: <b>${Math.round(second.result.score)}</b> | Safety: <b>${Math.round(second.result.marketSafetyScore)}</b>`,
-    `Liquidity: <b>${Math.round(second.result.liquidityUsd).toLocaleString()}</b> | 5m Vol: <b>${Math.round(second.result.volume5m).toLocaleString()}</b>`,
-    `Buys/Sells: <b>${second.result.buys5m}/${second.result.sells5m}</b> | Ratio: <b>${ratio.toFixed(2)}x</b>`,
-    '',
-    '<b>Why AlphaOS flagged it</b>',
-    ...(evidence.length ? evidence : ['✓ Market criteria confirmed']),
+    `🚀 <b>AlphaOS · PONS ${secondBucket}</b>`,
+    '━━━━━━━━━━━━━━━━━━',
+    `🔥 <b>${symbol}</b>  ·  <code>${shortCa}</code>`,
+    ...(name ? [`<i>${name}</i>`] : []),
     `<code>${escapeHtml(tokenAddress)}</code>`,
+    '',
+    `⭐ AlphaOS Score  <b>${Math.round(second.result.score)}</b>`,
+    `🛡️ Safety Score   <b>${Math.round(second.result.marketSafetyScore)}</b>`,
+    `💧 Liquidity      <b>${Math.round(second.result.liquidityUsd).toLocaleString()}</b>`,
+    `📊 5m Volume      <b>${Math.round(second.result.volume5m).toLocaleString()}</b>`,
+    `🟢 Buys / Sells   <b>${second.result.buys5m} / ${second.result.sells5m}</b>  ·  <b>${ratio.toFixed(2)}x</b>`,
+    '',
+    '🎯 <b>WHY ALPHAOS FLAGGED IT</b>',
+    ...(evidence.length ? evidence : ['✅ Market criteria confirmed']),
+    '',
+    '🛡️ <b>PONS LAUNCHPAD</b>',
+    '✅ Verified PONS launch',
+    ...(devFlow.devHoldingPercent != null ? [`👨‍💻 Dev holding <b>${devFlow.devHoldingPercent.toFixed(2)}%</b>`] : []),
+    ...((devFlow.confirmedDevBurnPercent ?? 0) > 0 ? [`🔥 Verified dev burn <b>${devFlow.confirmedDevBurnPercent!.toFixed(2)}%</b>`] : []),
+    '',
+    '<i>AlphaOS · Find. Analyse. Trade Smarter.</i>',
   ].join('\n');
   const socials = await getRobinhoodTokenSocials(tokenAddress);
   const delivery = await directTelegramRecipients(text, tokenAddress, socials);
@@ -433,17 +450,29 @@ async function sendLeanFollowupAlert(kind: 'OPPORTUNITY' | 'REVERSAL', item: Lea
   const ratio = ratioOf(result);
   const price = Number(result.currentPrice || 0);
   const pricePct = item.lastPrice > 0 && price > 0 ? ((price - item.lastPrice) / item.lastPrice) * 100 : 0;
+  const shortCa = item.token.length > 14 ? `${item.token.slice(0, 8)}…${item.token.slice(-6)}` : item.token;
   const text = [
-    kind === 'REVERSAL' ? '🔄 <b>AlphaOS PONS TREND REVERSAL</b>' : '🎯 <b>AlphaOS PONS OPPORTUNITY</b>',
-    `<b>${escapeHtml(pair?.baseToken?.symbol ?? item.symbol)}</b> — ${escapeHtml(pair?.baseToken?.name ?? item.name)}`,
-    `State: <b>${currentBucket}</b> | Score: <b>${Math.round(result.score)}</b> | Safety: <b>${Math.round(result.marketSafetyScore)}</b>`,
-    `Liquidity: <b>${Math.round(result.liquidityUsd).toLocaleString()}</b> | 5m Vol: <b>${Math.round(result.volume5m).toLocaleString()}</b>`,
-    `Buys/Sells: <b>${result.buys5m}/${result.sells5m}</b> | Ratio: <b>${ratio.toFixed(2)}x</b>`,
-    `Move since last check: <b>${pricePct >= 0 ? '+' : ''}${pricePct.toFixed(1)}%</b>`,
-    kind === 'REVERSAL'
-      ? `Recovery: score low ${Math.round(item.lowestScore)} → ${Math.round(result.score)} | buy-ratio low ${item.weakestRatio.toFixed(2)}x → ${ratio.toFixed(2)}x`
-      : 'Fresh launch has strengthened into AlphaOS entry criteria.',
+    kind === 'REVERSAL' ? '🔄 <b>AlphaOS · PONS TREND REVERSAL</b>' : '🎯 <b>AlphaOS · PONS OPPORTUNITY</b>',
+    '━━━━━━━━━━━━━━━━━━',
+    `🚀 <b>${escapeHtml(pair?.baseToken?.symbol ?? item.symbol)}</b>  ·  <code>${shortCa}</code>`,
     `<code>${escapeHtml(item.token)}</code>`,
+    '',
+    `⭐ State / Score   <b>${currentBucket} · ${Math.round(result.score)}</b>`,
+    `🛡️ Safety Score   <b>${Math.round(result.marketSafetyScore)}</b>`,
+    `💧 Liquidity      <b>${Math.round(result.liquidityUsd).toLocaleString()}</b>`,
+    `📊 5m Volume      <b>${Math.round(result.volume5m).toLocaleString()}</b>`,
+    `🟢 Buys / Sells   <b>${result.buys5m} / ${result.sells5m}</b>  ·  <b>${ratio.toFixed(2)}x</b>`,
+    `📈 Latest move    <b>${pricePct >= 0 ? '+' : ''}${pricePct.toFixed(1)}%</b>`,
+    '',
+    '🎯 <b>WHY ALPHAOS FLAGGED IT</b>',
+    kind === 'REVERSAL'
+      ? `🔄 Recovery: score ${Math.round(item.lowestScore)} → ${Math.round(result.score)} · buy pressure ${item.weakestRatio.toFixed(2)}x → ${ratio.toFixed(2)}x`
+      : '✅ Fresh launch strengthened into AlphaOS opportunity criteria',
+    '',
+    '🛡️ <b>PONS LAUNCHPAD</b>',
+    '✅ Verified PONS launch',
+    '',
+    '<i>AlphaOS · Find. Analyse. Trade Smarter.</i>',
   ].join('\n');
   const socials = await getRobinhoodTokenSocials(item.token);
   const delivery = await directTelegramRecipients(text, item.token, socials);
