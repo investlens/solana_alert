@@ -7,6 +7,7 @@ import { getDeliverableUsers } from '../../core/delivery.js';
 import { governedDexScreenerJson } from '../../services/dexscreenerRequestGovernor.js';
 import { robinhoodPublicClient } from './rpc.js';
 import { scanRobinhoodDevTokenFlow } from './security/devTokenFlowScanner.js';
+import { getRobinhoodTokenSocials, type RobinhoodTokenSocials } from './tokenMetadata.js';
 
 const MAX_CONCURRENT = Math.max(1, Math.min(5, Number(process.env.PONS_FAST_LANE_CONCURRENCY ?? 2)));
 const MAX_QUEUE = Math.max(5, Math.min(100, Number(process.env.PONS_FAST_LANE_MAX_QUEUE ?? 30)));
@@ -152,7 +153,7 @@ function refreshRecipientsInBackground(): void {
   })();
 }
 
-async function sendTelegram(chatId: string, text: string, tokenAddress: string): Promise<void> {
+async function sendTelegram(chatId: string, text: string, tokenAddress: string, socials?: RobinhoodTokenSocials): Promise<void> {
   const botToken = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
   if (!botToken || !chatId) throw new Error('missing Telegram configuration');
   const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
@@ -164,27 +165,28 @@ async function sendTelegram(chatId: string, text: string, tokenAddress: string):
       parse_mode: 'HTML',
       disable_web_page_preview: true,
       reply_markup: { inline_keyboard: [
-        [{
-          text: '🔎 View on Explorer',
-          url: `https://robinhoodchain.blockscout.com/token/${encodeURIComponent(tokenAddress)}`,
-        }],
-        [{
-          text: '📈 DexScreener (when indexed)',
-          url: `https://dexscreener.com/robinhood/${encodeURIComponent(tokenAddress)}`,
-        }],
-      ] },
+        [
+          { text: '📈 Chart', url: `https://dexscreener.com/robinhood/${encodeURIComponent(tokenAddress)}` },
+          { text: '🔎 Explorer', url: `https://robinhoodchain.blockscout.com/token/${encodeURIComponent(tokenAddress)}` },
+        ],
+        [
+          ...(socials?.website ? [{ text: '🌐 Project', url: socials.website }] : []),
+          ...(socials?.twitter ? [{ text: '𝕏 X', url: socials.twitter }] : []),
+          ...(socials?.telegram ? [{ text: '✈️ TG', url: socials.telegram }] : []),
+        ],
+      ].filter(row => row.length > 0) },
     }),
   });
   if (!res.ok) throw new Error(`Telegram ${res.status}: ${await res.text().catch(() => '')}`);
 }
 
-async function directTelegramRecipients(text: string, tokenAddress: string): Promise<{ delivered: number; failed: number }> {
+async function directTelegramRecipients(text: string, tokenAddress: string, socials?: RobinhoodTokenSocials): Promise<{ delivered: number; failed: number }> {
   ensureAdminRecipient();
   refreshRecipientsInBackground();
   const recipients = [...recipientCache];
   if (!recipients.length) throw new Error('no Telegram recipients available');
 
-  const results = await Promise.allSettled(recipients.map(chatId => sendTelegram(chatId, text, tokenAddress)));
+  const results = await Promise.allSettled(recipients.map(chatId => sendTelegram(chatId, text, tokenAddress, socials)));
   let delivered = 0;
   let failed = 0;
   results.forEach((result, index) => {
@@ -261,7 +263,8 @@ function schedulePreIndexRecheck(launch: PonsLaunch): void {
               `Liquidity: <b>${Math.round(resolved.result.liquidityUsd).toLocaleString()}</b> | 5m Vol: <b>${Math.round(resolved.result.volume5m).toLocaleString()}</b>`,
               `<code>${escapeHtml(token)}</code>`,
             ].join('\n');
-            const delivery = await directTelegramRecipients(text, token);
+            const socials = await getRobinhoodTokenSocials(token);
+            const delivery = await directTelegramRecipients(text, token, socials);
             console.log(`[PonsFastLane] PREINDEX_ALERT_SENT token=${token} bucket=${currentBucket} score=${resolved.result.score} delivered=${delivery.delivered} failed=${delivery.failed}`);
           }
         } else {
@@ -358,7 +361,8 @@ async function evaluate(launch: PonsLaunch): Promise<void> {
     ...(evidence.length ? evidence : ['✓ Market criteria confirmed']),
     `<code>${escapeHtml(tokenAddress)}</code>`,
   ].join('\n');
-  const delivery = await directTelegramRecipients(text, tokenAddress);
+  const socials = await getRobinhoodTokenSocials(tokenAddress);
+  const delivery = await directTelegramRecipients(text, tokenAddress, socials);
   console.log(`[PonsFastLane] ALERT_SENT token=${tokenAddress} bucket=${secondBucket} score=${second.result.score} delivered=${delivery.delivered} failed=${delivery.failed}`);
 }
 
@@ -434,7 +438,8 @@ async function sendLeanFollowupAlert(kind: 'OPPORTUNITY' | 'REVERSAL', item: Lea
       : 'Fresh launch has strengthened into AlphaOS entry criteria.',
     `<code>${escapeHtml(item.token)}</code>`,
   ].join('\n');
-  const delivery = await directTelegramRecipients(text, item.token);
+  const socials = await getRobinhoodTokenSocials(item.token);
+  const delivery = await directTelegramRecipients(text, item.token, socials);
   console.log(`[PonsLeanFollowup] ${kind}_ALERT_SENT token=${item.token} bucket=${currentBucket} score=${result.score} delivered=${delivery.delivered} failed=${delivery.failed}`);
 }
 
