@@ -209,10 +209,21 @@ async function validatePonsV2Curve(launch: PonsLaunch): Promise<boolean> {
   try {
     const readCurve = async (functionName: 'token' | 'getReserves' | 'graduated') => {
       const data = encodeFunctionData({ abi: PREINDEX_ABI, functionName } as any);
-      const raw = await requestRobinhoodRpcResilient({
-        method: 'eth_call',
-        params: [{ to: curve, data }, 'latest'],
-      });
+      let raw: unknown;
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        try {
+          raw = await requestRobinhoodRpcResilient({
+            method: 'eth_call',
+            params: [{ to: curve, data }, 'latest'],
+          });
+          break;
+        } catch (error) {
+          lastError = error;
+          if (attempt < 3) await new Promise(resolve => setTimeout(resolve, attempt * 250));
+        }
+      }
+      if (!raw) throw lastError ?? new Error('PONS curve eth_call returned no result');
       return decodeFunctionResult({ abi: PREINDEX_ABI, functionName, data: raw as `0x${string}` } as any);
     };
     const [curveToken, reserves, graduated] = await Promise.all([
