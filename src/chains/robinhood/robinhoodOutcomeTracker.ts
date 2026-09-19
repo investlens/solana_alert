@@ -24,10 +24,10 @@ import {
 } from './security/devMovementScanner.js';
 
 const TRACKER_INTERVAL_MS =
-  60_000;
+  Math.max(60_000, Number(process.env.ROBINHOOD_OUTCOME_INTERVAL_MS ?? 120_000));
 
 const MAX_ROWS_PER_CYCLE =
-  20;
+  Math.max(1, Number(process.env.ROBINHOOD_OUTCOME_MAX_ROWS_PER_CYCLE ?? 8));
 
 const FRESH_PRIORITY_WINDOW_MS =
   10 * 60 * 1000;
@@ -1188,7 +1188,7 @@ if (
   const market =
     await getRobinhoodMarketSnapshot(
       row.token_address,
-      { priority: 'HIGH', caller: 'robinhood_outcome_tracker' },
+      { priority: 'BACKGROUND', caller: 'robinhood_outcome_tracker', queueWaitTimeoutMs: 5_000 },
     );
 
   if (!market) {
