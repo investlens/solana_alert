@@ -1,4 +1,5 @@
 import { supabase } from '../services/supabase.js';
+import { runDatabaseWork } from '../services/databaseLoadGovernor.js';
 
 type WalletTrade = {
   id: number;
@@ -61,7 +62,7 @@ async function fetchPendingTrades(): Promise<WalletTrade[]> {
     .select('id, wallet, token, market_cap_at_action')
     .eq('action', 'BUY')
     .order('created_at', { ascending: true })
-    .limit(200);
+    .limit(Math.max(10, Number(process.env.WALLET_OUTCOME_BATCH_SIZE ?? 50)));
 
   if (error) {
     console.log('wallet outcome fetch error:', error.message);
@@ -105,7 +106,7 @@ async function fetchTokenMemory(token: string): Promise<TokenMemory | null> {
   return data as TokenMemory | null;
 }
 
-export async function syncWalletTradeOutcomes() {
+async function syncWalletTradeOutcomesWork() {
   const trades = await fetchPendingTrades();
 
   if (!trades.length) {
@@ -181,6 +182,10 @@ export async function syncWalletTradeOutcomes() {
     tradesChecked: trades.length,
     walletsUpdated: affectedWallets.size,
   });
+}
+
+export async function syncWalletTradeOutcomes() {
+  await runDatabaseWork('BACKGROUND', syncWalletTradeOutcomesWork);
 }
 
 function isWinningOutcome(outcome: string) {
