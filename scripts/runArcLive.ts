@@ -111,7 +111,7 @@ async function processArcBurns(fromBlock: bigint, toBlock: bigint): Promise<void
         '🛡️ <b>Verified on-chain burn</b>','',
         '⚠️ <b>Supply burn is not a guarantee of price appreciation.</b>','',
         '<i>AlphaOS · Find. Analyse. Trade Smarter.</i>',
-      ].join('\\n');
+      ].join('\n');
       const buttons = [
         [ ...(dexUrl ? [{ text:'📈 Chart', url:dexUrl }] : []), { text:'🔥 Burn Tx', url:`https://explorer.arc.io/tx/${encodeURIComponent(txHash)}` } ],
         [ { text:'🔎 Explorer', url:`https://explorer.arc.io/address/${encodeURIComponent(token)}` }, ...(website ? [{text:'🌐 Project',url:website}] : []) ],
