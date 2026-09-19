@@ -1,3 +1,4 @@
+import { getSharedJson, setSharedJson } from './sharedJsonCache.js';
 export type DexScreenerPriority = 'HIGH' | 'NORMAL' | 'BACKGROUND';
 
 export type GovernedDexScreenerValue<T> = {
@@ -298,6 +299,16 @@ export async function governedDexScreenerJson<T>(args: {
     metricsFor(args.caller, priority).cacheHit += 1; logActivity(args.caller, args.endpoint, priority);
     return { value: cached.value as T, fetchedAt: cached.fetchedAt, source: 'DEXSCREENER', cache: 'HIT' };
   }
+  if ((args.cacheTtlMs ?? 0) > 0) {
+    const shared = await getSharedJson<T>(`alphaos:dex:${key}`);
+    if (shared) {
+      counters.cacheHits += 1;
+      metricsFor(args.caller, priority).cacheHit += 1;
+      cache.set(key, { value: shared.value, fetchedAt: shared.fetchedAt, expiresAt: now + Math.min(args.cacheTtlMs!, 15_000) });
+      logActivity(args.caller, args.endpoint, priority);
+      return { value: shared.value, fetchedAt: shared.fetchedAt, source: 'DEXSCREENER', cache: 'HIT' };
+    }
+  }
   const existing = inflight.get(key);
   if (existing) {
     counters.inflightHits += 1;
@@ -349,7 +360,10 @@ export async function governedDexScreenerJson<T>(args: {
         try { value = JSON.parse(body) as T; }
         catch { metrics.malformedResponse += 1; throw new DexScreenerMalformedResponseError(); }
         const fetchedAt = new Date(dependencies.now()).toISOString();
-        if ((args.cacheTtlMs ?? 0) > 0) cache.set(key, { value, fetchedAt, expiresAt: dependencies.now() + args.cacheTtlMs! });
+        if ((args.cacheTtlMs ?? 0) > 0) {
+          cache.set(key, { value, fetchedAt, expiresAt: dependencies.now() + args.cacheTtlMs! });
+          void setSharedJson(`alphaos:dex:${key}`, value, fetchedAt, args.cacheTtlMs!);
+        }
         if (recoveryProbe) {
           recoveryRequired = false; recoveryProbeInFlight = false; consecutiveRateLimits = 0;
           log('RECOVERED', { caller: args.caller, endpoint: args.endpoint });
