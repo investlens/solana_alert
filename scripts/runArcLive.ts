@@ -46,16 +46,19 @@ async function deliverArcAlert(market: Awaited<ReturnType<typeof enrichArcMarket
     warnings.length ? `Safety notes: ${warnings.join(', ')}` : 'Safety: core checks passed',
   ].join('\n');
 
-  const buttons = [[
-    {
-      text: '📈 Live Chart',
-      url: `https://dexscreener.com/arc/${encodeURIComponent(market.assetId)}`,
-    },
-    {
-      text: '🔎 Arc Explorer',
-      url: `https://explorer.arc.io/address/${encodeURIComponent(market.assetId)}`,
-    },
-  ]];
+  // Keep the alert action-first: chart + explorer are core; project/social
+  // links appear only when the same market payload already supplied them.
+  const buttons = [
+    [
+      ...(market.dexUrl ? [{ text: '📈 Chart', url: market.dexUrl }] : []),
+      { text: '🔎 Explorer', url: `https://explorer.arc.io/address/${encodeURIComponent(market.assetId)}` },
+    ],
+    [
+      ...(market.projectWebsite ? [{ text: '🌐 Project', url: market.projectWebsite }] : []),
+      ...(market.projectTwitter ? [{ text: '𝕏 X', url: market.projectTwitter }] : []),
+      ...(market.projectTelegram ? [{ text: '✈️ TG', url: market.projectTelegram }] : []),
+    ],
+  ].filter(row => row.length > 0);
 
   const messageId = await sendTelegramWithMessageId(ALERT_CHAT_ID, text, buttons);
   delivered.add(key);
