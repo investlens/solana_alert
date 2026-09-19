@@ -27,6 +27,8 @@ const noPairRetries = new Set<string>();
 const NO_PAIR_RETRY_MS = Math.max(30_000, Math.min(120_000, Number(process.env.PONS_NO_PAIR_RETRY_MS ?? 45_000)));
 const PREINDEX_MAX = 10;
 const PREINDEX_RECHECK_MS = 120_000;
+const PREINDEX_ALERT_MIN_QUOTE_WEI = BigInt(process.env.PONS_PREINDEX_ALERT_MIN_QUOTE_WEI ?? '2000000000000000000');
+const preIndexAlertsSent = new Set<string>();
 const PREINDEX_ABI = parseAbi([
   'function token() view returns (address)',
   'function getReserves() view returns (uint256 quoteReserve,uint256 tokenReserve)',
@@ -220,6 +222,25 @@ async function validatePonsV2Curve(launch: PonsLaunch): Promise<boolean> {
       quoteReserve > 0n && tokenReserve > 0n && !Boolean(graduated);
     if (valid) {
       console.log(`[PonsFastLane] PREINDEX_CURVE_VALID token=${token} curve=${curve} quoteReserve=${quoteReserve.toString()} tokenReserve=${tokenReserve.toString()}`);
+      if (quoteReserve >= PREINDEX_ALERT_MIN_QUOTE_WEI && !preIndexAlertsSent.has(token)) {
+        const quoteEth = Number(quoteReserve) / 1e18;
+        const text = [
+          `⚡ <b>AlphaOS PONS EARLY WATCH</b>`,
+          `Verified PONS V2 launch with live on-chain curve activity.`,
+          `Market indexing: <b>PENDING</b> — DexScreener pair not available yet.`,
+          `Curve reserve: <b>${quoteEth.toFixed(3)} ETH</b>`,
+          `Liquidity protection: <b>PONS LAUNCHPAD</b>`,
+          `Signal: <b>EARLY WATCH</b> — not a BUY score until market data is indexed.`,
+          `<code>${escapeHtml(token)}</code>`,
+        ].join('\n');
+        try {
+          const delivery = await directTelegramRecipients(text, token);
+          preIndexAlertsSent.add(token);
+          console.log(`[PonsFastLane] PREINDEX_EARLY_ALERT_SENT token=${token} quoteReserve=${quoteReserve.toString()} delivered=${delivery.delivered} failed=${delivery.failed}`);
+        } catch (error) {
+          console.warn(`[PonsFastLane] PREINDEX_EARLY_ALERT_FAILED token=${token} reason=${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
     }
     return valid;
   } catch (error) {
