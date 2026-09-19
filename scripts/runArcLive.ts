@@ -414,7 +414,6 @@ async function main() {
           continue;
         }
         const pairAgeMs = market.pairCreatedAt ? Math.max(0, Date.now() - market.pairCreatedAt) : 0;
-        const key = market.assetId.toLowerCase();
         if (pairAgeMs < ARC_MIN_NORMAL_ALERT_AGE_MS) {
           pendingMarketRetries.set(key, { enriched, retryAt: Date.now() + Math.max(ARC_REVERSAL_CONFIRM_MS, ARC_MIN_NORMAL_ALERT_AGE_MS - pairAgeMs), firstSeenAt: Date.now(), baselinePrice: market.priceUsd });
           console.log('[ArcLive] MATURITY_WAIT', { assetId: market.assetId, ageMin: (pairAgeMs / 60_000).toFixed(1), waitMin: ((ARC_MIN_NORMAL_ALERT_AGE_MS - pairAgeMs) / 60_000).toFixed(1) });
