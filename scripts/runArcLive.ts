@@ -20,6 +20,10 @@ type PendingArcRetry = {
   retryAt: number;
 };
 const pendingMarketRetries = new Map<string, PendingArcRetry>();
+const arcBoostTotals = new Map<string, number>();
+let arcBoostBaselineReady = false;
+const ARC_BOOST_POLL_MS = Math.max(10_000, Number(process.env.ARC_BOOST_POLL_MS ?? 15_000));
+let lastArcBoostPollAt = 0;
 
 function formatUsd(value: number | null | undefined): string {
   return value == null || !Number.isFinite(value) ? 'n/a' : `$${Math.round(value).toLocaleString('en-US')}`;
@@ -123,6 +127,89 @@ async function processMarketRetries(): Promise<void> {
   }
 }
 
+type ArcBoost = { chainId?: string; tokenAddress?: string; amount?: number; totalAmount?: number };
+type ArcBoostSecurity = { allowed: boolean; reason: string };
+
+async function fetchArcBoosts(): Promise<Array<{tokenAddress:string;amount:number;totalAmount:number}>> {
+  try {
+    const response = await fetch('https://api.dexscreener.com/token-boosts/latest/v1', { signal: AbortSignal.timeout(4_000) });
+    if (!response.ok) throw new Error(`DexScreener BOOST HTTP ${response.status}`);
+    const payload = await response.json() as ArcBoost[];
+    return (Array.isArray(payload) ? payload : []).filter(item =>
+      String(item.chainId ?? '').toLowerCase().includes('arc') && /^0x[a-fA-F0-9]{40}$/.test(String(item.tokenAddress ?? '')))
+      .map(item => ({ tokenAddress: String(item.tokenAddress), amount: Number(item.amount ?? 0), totalAmount: Number(item.totalAmount ?? 0) }));
+  } catch (error) {
+    console.warn('[ArcBoost] feed unavailable', { reason: error instanceof Error ? error.message : String(error) });
+    return [];
+  }
+}
+
+function burnLike(holder: Record<string, unknown>): boolean {
+  const address = String(holder.address ?? holder.token_account ?? '').toLowerCase();
+  const tag = String(holder.tag ?? '').toLowerCase();
+  return address === '0x0000000000000000000000000000000000000000' ||
+    address === '0x000000000000000000000000000000000000dead' ||
+    tag.includes('burn') || tag.includes('dead') || tag.includes('null address') || tag.includes('black hole');
+}
+
+async function checkArcBoostSecurity(tokenAddress: string): Promise<ArcBoostSecurity> {
+  try {
+    const url = `https://api.gopluslabs.io/api/v1/token_security/5042?contract_addresses=${encodeURIComponent(tokenAddress)}`;
+    const response = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(4_000) });
+    if (!response.ok) return { allowed: false, reason: `security provider HTTP ${response.status}` };
+    const payload = await response.json() as { result?: Record<string, Record<string, unknown>> };
+    const key = tokenAddress.toLowerCase();
+    const security = payload.result?.[key] ?? payload.result?.[Object.keys(payload.result ?? {}).find(k => k.toLowerCase() === key) ?? ''];
+    if (!security) return { allowed: false, reason: 'honeypot/LP security evidence unavailable' };
+    if (String(security.is_honeypot ?? '0') === '1') return { allowed: false, reason: 'honeypot flag' };
+    if (String(security.cannot_sell_all ?? '0') === '1') return { allowed: false, reason: 'cannot-sell flag' };
+    const holders = Array.isArray(security.lp_holders) ? security.lp_holders as Record<string, unknown>[] : [];
+    if (!holders.length) return { allowed: false, reason: 'LP-holder evidence unavailable' };
+    let protectedPct = 0;
+    for (const holder of holders) {
+      const pct = Number(holder.percent ?? 0);
+      if ((String(holder.is_locked ?? '0') === '1' || burnLike(holder)) && Number.isFinite(pct)) protectedPct += Math.max(0, pct);
+    }
+    if (protectedPct < 0.95) return { allowed: false, reason: `LP not safely locked/burned (${(protectedPct * 100).toFixed(1)}% protected)` };
+    return { allowed: true, reason: `sellability clean; ${(protectedPct * 100).toFixed(1)}% LP locked/burned` };
+  } catch (error) {
+    return { allowed: false, reason: `security check failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
+async function processArcBoosts(): Promise<void> {
+  if (Date.now() - lastArcBoostPollAt < ARC_BOOST_POLL_MS) return;
+  lastArcBoostPollAt = Date.now();
+  const boosts = await fetchArcBoosts();
+  if (!arcBoostBaselineReady) {
+    for (const boost of boosts) arcBoostTotals.set(boost.tokenAddress.toLowerCase(), boost.totalAmount);
+    arcBoostBaselineReady = true;
+    console.log('[ArcBoost] BASELINE_READY', { tokens: boosts.length });
+    return;
+  }
+  for (const boost of boosts) {
+    const key = boost.tokenAddress.toLowerCase();
+    const previous = arcBoostTotals.get(key);
+    arcBoostTotals.set(key, boost.totalAmount);
+    if (previous != null && boost.totalAmount <= previous) continue;
+    const security = await checkArcBoostSecurity(boost.tokenAddress);
+    if (!security.allowed) {
+      console.warn('[ArcBoost] BLOCKED_SECURITY', { token: key, totalBoost: boost.totalAmount, reason: security.reason });
+      continue;
+    }
+    const text = ['🟣 <b>AlphaOS ARC BOOST</b>','',`<code>${boost.tokenAddress}</code>`,'',
+      `BOOST added: <b>${boost.amount}</b>`,`Total BOOST: <b>${boost.totalAmount}</b>`,
+      `Safety: <b>passed</b> — ${security.reason}`].join('\n');
+    const buttons = [[{ text:'🔎 Explorer', url:`https://explorer.arc.io/address/${encodeURIComponent(boost.tokenAddress)}` }]];
+    try {
+      const messageId = await sendTelegramWithMessageId(ALERT_CHAT_ID, text, buttons);
+      console.log('[ArcBoost] ALERT_SENT', { token:key, totalBoost:boost.totalAmount, messageId });
+    } catch (error) {
+      console.error('[ArcBoost] ALERT_SEND_FAILED', { token:key, error });
+    }
+  }
+}
+
 async function main() {
   console.log('[ArcLive] starting', { enabled: ENABLED, pollIntervalMs: POLL_MS, mode: 'LIVE_ALERTS', hasAlertRecipient: Boolean(ALERT_CHAT_ID) });
   const verified = await verifyArcMainnet();
@@ -137,6 +224,7 @@ async function main() {
   while (true) {
     await new Promise(resolve => setTimeout(resolve, POLL_MS));
     await processMarketRetries();
+    await processArcBoosts();
     const current = await getArcBlockNumber();
     if (current <= last) continue;
 
