@@ -62,6 +62,37 @@ async function indexedFactoryForToken(token: Address): Promise<Address | null> {
   }
 }
 
+async function indexedPonsLaunchExists(token: Address): Promise<boolean> {
+  try {
+    const { data, error } = await supabase
+      .from('pons_launches')
+      .select('token_address')
+      .eq('chain', 'robinhood')
+      .eq('protocol', 'pons')
+      .ilike('token_address', token.toLowerCase())
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return Boolean(data?.token_address);
+  } catch (error) {
+    console.warn('[PonsLaunchState] indexed PONS provenance lookup failed', {
+      token,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
+export async function isVerifiedPonsLaunch(tokenAddress: string): Promise<boolean> {
+  const token = getAddress(tokenAddress);
+  if (await indexedPonsLaunchExists(token)) return true;
+  try {
+    return Boolean((await getPonsLaunchState(tokenAddress)).exists);
+  } catch {
+    return false;
+  }
+}
+
 async function readLaunchFromFactory(token: Address, factory: Address): Promise<PonsLaunchState> {
   const data = encodeFunctionData({ abi: FACTORY_ABI, functionName: 'getLaunchedToken', args: [token] });
   const raw = await rawEthCall({ address: factory, data });
