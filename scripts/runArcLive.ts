@@ -114,6 +114,12 @@ async function processArcBurns(fromBlock: bigint, toBlock: bigint): Promise<void
           telegram = socials.find((x:any)=>String(x?.type).toLowerCase()==='telegram')?.url ?? null;
         }
       } catch {}
+      // Burn alerts are actionable only once the token has a real DEX market.
+      // Fail closed: no indexed DEX pair or no positive liquidity = no alert.
+      if (!dexUrl || liquidity == null || !Number.isFinite(liquidity) || liquidity <= 0) {
+        console.info('[ArcBurn] NO_LIQUID_DEX_MARKET_SUPPRESSED', { token, txHash, burnPercent, liquidity });
+        continue;
+      }
       const shortCa = `${token.slice(0,8)}…${token.slice(-6)}`;
       const text = [
         '🔥 <b>AlphaOS · ARC SUPPLY BURN</b>', '━━━━━━━━━━━━━━━━━━',
