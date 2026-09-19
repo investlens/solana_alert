@@ -7,6 +7,7 @@ import { enrichArcMarket } from '../src/chains/arc/market.js';
 import { assessArcForAlert } from '../src/chains/arc/alertGate.js';
 import { sendTelegramWithMessageId } from '../src/services/telegram.js';
 import { getDeliverableUsers } from '../src/core/delivery.js';
+import { supabase } from '../src/services/supabase.js';
 
 const POLL_MS = Math.max(2_000, Number(process.env.ARC_LIVE_POLL_INTERVAL_MS ?? 5_000));
 const ENABLED = String(process.env.ARC_LIVE_ENABLED ?? 'false').toLowerCase() === 'true';
@@ -278,6 +279,33 @@ function arcBoostIdentity(tokenAddress: string, totalAmount: number): string {
   return `${tokenAddress.toLowerCase()}:${totalAmount}`;
 }
 
+async function getStoredArcBoostTotal(tokenAddress: string): Promise<number | null> {
+  try {
+    const { data, error } = await supabase.from('alpha_alert_events')
+      .select('boost_total').eq('chain', 'arc').eq('asset_id', tokenAddress)
+      .not('boost_total', 'is', null).order('alerted_at', { ascending: false }).limit(1).maybeSingle();
+    if (error) throw error;
+    const total = Number(data?.boost_total);
+    return Number.isFinite(total) ? total : null;
+  } catch (error) {
+    console.warn('[ArcBoost] persistent baseline unavailable; using live baseline', {
+      token: tokenAddress.toLowerCase(), reason: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+async function persistArcBoostDelivery(boost: {tokenAddress:string;amount:number;totalAmount:number}): Promise<void> {
+  const identity = `v1:arc:boost:${arcBoostIdentity(boost.tokenAddress, boost.totalAmount)}`;
+  const { error } = await supabase.from('alpha_alert_events').upsert({
+    event_identity: identity, opportunity_id: null, asset_id: boost.tokenAddress, chain: 'arc',
+    strategy_key: 'arc_boost', lifecycle_action: 'BOOST', lifecycle_state: 'BOOST', alert_type: 'BOOST',
+    delivery_identity: identity, boost_total: boost.totalAmount, boost_increment: boost.amount,
+    alerted_at: new Date().toISOString(), raw_snapshot: { source: 'ARC_BOOST', totalBoostAmount: boost.totalAmount, boostAmount: boost.amount },
+  }, { onConflict: 'event_identity', ignoreDuplicates: true });
+  if (error) throw error;
+}
+
 async function deliverArcBoost(boost: {tokenAddress:string;amount:number;totalAmount:number}, eventType: 'RECOVERY'|'NEW'|'INCREASE'): Promise<boolean> {
   const key = boost.tokenAddress.toLowerCase();
   const identity = arcBoostIdentity(boost.tokenAddress, boost.totalAmount);
@@ -330,6 +358,7 @@ async function deliverArcBoost(boost: {tokenAddress:string;amount:number;totalAm
   try {
     const delivery = await broadcastArcAlert(text, buttons);
     arcBoostDelivered.add(identity);
+    await persistArcBoostDelivery(boost).catch(error => console.warn('[ArcBoost] PERSIST_FAILED', { token:key, totalBoost:boost.totalAmount, reason:error instanceof Error ? error.message : String(error) }));
     console.log('[ArcBoost] ALERT_SENT', { token:key, totalBoost:boost.totalAmount, eventType, messageId:delivery.adminMessageId, delivered:delivery.delivered, failed:delivery.failed });
     return true;
   } catch (error) {
@@ -343,14 +372,16 @@ async function processArcBoosts(): Promise<void> {
   lastArcBoostPollAt = Date.now();
   const boosts = await fetchArcBoosts();
   if (!arcBoostBaselineReady) {
-    for (const boost of boosts) arcBoostTotals.set(boost.tokenAddress.toLowerCase(), boost.totalAmount);
-    arcBoostBaselineReady = true;
-    console.log('[ArcBoost] BASELINE_READY', { tokens: boosts.length });
-    let recovered = 0;
-    for (const boost of boosts.slice(0, ARC_BOOST_RECOVERY_MAX)) {
-      if (await deliverArcBoost(boost, 'RECOVERY')) recovered += 1;
+    let persisted = 0;
+    for (const boost of boosts) {
+      const storedTotal = await getStoredArcBoostTotal(boost.tokenAddress);
+      arcBoostTotals.set(boost.tokenAddress.toLowerCase(), Math.max(storedTotal ?? boost.totalAmount, boost.totalAmount));
+      if (storedTotal != null) persisted += 1;
     }
-    console.log('[ArcBoost] BASELINE_RECOVERY_COMPLETE', { checked: Math.min(boosts.length, ARC_BOOST_RECOVERY_MAX), recovered });
+    arcBoostBaselineReady = true;
+    console.log('[ArcBoost] BASELINE_READY', { tokens: boosts.length, persisted, recoveryReplay: false });
+    // Current feed entries are baseline on startup. Never replay historical BOOSTs after a restart.
+    // Genuine later increases still produce a new token+total identity and alert normally.
     return;
   }
   for (const boost of boosts) {
