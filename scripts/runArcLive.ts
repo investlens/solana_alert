@@ -47,6 +47,28 @@ const ERC20_SUPPLY_ABI = [
 const BURN_ADDRESSES = new Set(['0x0000000000000000000000000000000000000000','0x000000000000000000000000000000000000dead']);
 const burnDelivered = new Set<string>();
 
+
+async function verifyArcBurnAlertLpSafety(token: string, chainId: string): Promise<{ verified:boolean; protectedPercent:number; reason:string }> {
+  try {
+    const response = await fetch(`https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${encodeURIComponent(token.toLowerCase())}`, { signal: AbortSignal.timeout(3_000) });
+    if (!response.ok) return { verified:false, protectedPercent:0, reason:`goplus_http_${response.status}` };
+    const body = await response.json() as any;
+    const info = body?.result?.[token.toLowerCase()];
+    if (!info || String(info.is_in_dex ?? '') !== '1' || !Array.isArray(info.lp_holders) || !info.lp_holders.length) return { verified:false, protectedPercent:0, reason:'lp_evidence_unavailable' };
+    const protectedPercent = info.lp_holders.reduce((sum:number, holder:any) => {
+      const address = String(holder?.address ?? '').toLowerCase();
+      const tag = String(holder?.tag ?? '').toLowerCase();
+      const protectedLp = String(holder?.is_locked ?? '') === '1'
+        || address === '0x0000000000000000000000000000000000000000'
+        || address === '0x000000000000000000000000000000000000dead'
+        || /burn|dead|blackhole/.test(tag);
+      const pct = Number(holder?.percent ?? 0);
+      return sum + (protectedLp && Number.isFinite(pct) && pct > 0 ? pct : 0);
+    }, 0);
+    return { verified: protectedPercent >= 0.90, protectedPercent, reason: protectedPercent >= 0.90 ? 'locked_or_burned' : 'insufficient_lp_protection' };
+  } catch { return { verified:false, protectedPercent:0, reason:'lp_verification_failed' }; }
+}
+
 async function processArcBurns(fromBlock: bigint, toBlock: bigint): Promise<void> {
   const logs = await getArcLogs({ fromBlock, toBlock, event: ERC20_TRANSFER_EVENT, args: { to: [...BURN_ADDRESSES] } }).catch(error => {
     console.warn('[ArcBurn] LOG_SCAN_FAILED', { reason: error instanceof Error ? error.message : String(error) });
@@ -118,6 +140,11 @@ async function processArcBurns(fromBlock: bigint, toBlock: bigint): Promise<void
       // Fail closed: no indexed DEX pair or no positive liquidity = no alert.
       if (!dexUrl || liquidity == null || !Number.isFinite(liquidity) || liquidity < 2_000) {
         console.info('[ArcBurn] DEX_LIQUIDITY_BELOW_MIN_SUPPRESSED', { token, txHash, burnPercent, liquidity });
+        continue;
+      }
+      const lpSafety = await verifyArcBurnAlertLpSafety(token, '5042');
+      if (!lpSafety.verified) {
+        console.info('[ArcBurn] UNVERIFIED_LP_SAFETY_SUPPRESSED', { token, txHash, burnPercent, liquidity, reason:lpSafety.reason, protectedPercent:lpSafety.protectedPercent });
         continue;
       }
       const shortCa = `${token.slice(0,8)}…${token.slice(-6)}`;
