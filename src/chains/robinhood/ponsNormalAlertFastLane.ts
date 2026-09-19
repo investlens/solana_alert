@@ -28,13 +28,16 @@ const retryAttempts = new Map<string, number>();
 const noPairRetries = new Set<string>();
 const NO_PAIR_RETRY_MS = Math.max(30_000, Math.min(120_000, Number(process.env.PONS_NO_PAIR_RETRY_MS ?? 45_000)));
 const PREINDEX_MAX = 10;
-const PREINDEX_RECHECK_MS = 120_000;
+const PREINDEX_RECHECK_MS = Math.max(15_000, Number(process.env.PONS_CURVE_TREND_CONFIRM_MS ?? 30_000));
+const PONS_CURVE_MIN_QUOTE_GROWTH_PCT = Number(process.env.PONS_CURVE_MIN_QUOTE_GROWTH_PCT ?? 3);
+const PONS_CURVE_STRONG_QUOTE_GROWTH_PCT = Number(process.env.PONS_CURVE_STRONG_QUOTE_GROWTH_PCT ?? 8);
 const PREINDEX_ABI = parseAbi([
   'function token() view returns (address)',
   'function getReserves() view returns (uint256 quoteReserve,uint256 tokenReserve)',
   'function graduated() view returns (bool)',
 ]);
 const preIndexCandidates = new Set<string>();
+const preIndexAlerted = new Set<string>();
 let recipientCacheAt = 0;
 let recipientRefreshInFlight: Promise<void> | null = null;
 let recipientCache = new Set<string>();
@@ -202,86 +205,113 @@ async function directTelegramRecipients(text: string, tokenAddress: string, soci
 }
 
 
-async function validatePonsV2Curve(launch: PonsLaunch): Promise<boolean> {
+async function readPonsV2Curve(launch: PonsLaunch): Promise<{ quoteReserve: bigint; tokenReserve: bigint; graduated: boolean } | null> {
   const token = tokenKey(launch);
   const curve = String(launch.curve_address ?? '').trim();
-  if (!token || !/^0x[0-9a-fA-F]{40}$/.test(curve)) return false;
+  if (!token || !/^0x[0-9a-fA-F]{40}$/.test(curve)) return null;
   try {
     const readCurve = async (functionName: 'token' | 'getReserves' | 'graduated') => {
       const data = encodeFunctionData({ abi: PREINDEX_ABI, functionName } as any);
       let raw: unknown;
       let lastError: unknown;
-      for (let attempt = 1; attempt <= 3; attempt += 1) {
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
         try {
-          raw = await requestRobinhoodRpcResilient({
-            method: 'eth_call',
-            params: [{ to: curve, data }, 'latest'],
-          });
+          raw = await requestRobinhoodRpcResilient({ method: 'eth_call', params: [{ to: curve, data }, 'latest'] });
           break;
         } catch (error) {
           lastError = error;
-          if (attempt < 3) await new Promise(resolve => setTimeout(resolve, attempt * 250));
+          if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 250));
         }
       }
       if (!raw) throw lastError ?? new Error('PONS curve eth_call returned no result');
       return decodeFunctionResult({ abi: PREINDEX_ABI, functionName, data: raw as `0x${string}` } as any);
     };
-    const [curveToken, reserves, graduated] = await Promise.all([
-      readCurve('token'),
-      readCurve('getReserves'),
-      readCurve('graduated'),
-    ]);
+    const [curveToken, reserves, graduated] = await Promise.all([readCurve('token'), readCurve('getReserves'), readCurve('graduated')]);
     const [quoteReserve, tokenReserve] = reserves as readonly [bigint, bigint];
-    const valid = String(curveToken).toLowerCase() === token &&
-      quoteReserve > 0n && tokenReserve > 0n && !Boolean(graduated);
-    if (valid) {
-      // Pre-index curve activity is candidate evidence only. Keep it silent:
-      // user-facing alerts require a meaningful opportunity/event after enrichment.
-      console.log(`[PonsFastLane] PREINDEX_CURVE_VALID token=${token} curve=${curve} quoteReserve=${quoteReserve.toString()} tokenReserve=${tokenReserve.toString()} action=SILENT_CANDIDATE`);
-    }
-    return valid;
+    if (String(curveToken).toLowerCase() !== token || quoteReserve <= 0n || tokenReserve <= 0n) return null;
+    return { quoteReserve, tokenReserve, graduated: Boolean(graduated) };
   } catch (error) {
-    console.warn(`[PonsFastLane] preindex curve validation failed token=${token} reason=${error instanceof Error ? error.message : String(error)}`);
-    return false;
+    console.warn(`[PonsFastLane] curve read failed token=${token} reason=${error instanceof Error ? error.message : String(error)}`);
+    return null;
   }
 }
 
+async function validatePonsV2Curve(launch: PonsLaunch): Promise<boolean> {
+  const token = tokenKey(launch);
+  const snapshot = await readPonsV2Curve(launch);
+  const valid = !!snapshot && !snapshot.graduated;
+  if (valid && snapshot) {
+    console.log(`[PonsFastLane] PREINDEX_CURVE_VALID token=${token} curve=${String(launch.curve_address ?? '')} quoteReserve=${snapshot.quoteReserve.toString()} tokenReserve=${snapshot.tokenReserve.toString()} action=CURVE_TREND_WATCH`);
+  }
+  return valid;
+}
 
 function schedulePreIndexRecheck(launch: PonsLaunch): void {
   const token = tokenKey(launch);
-  if (!token || preIndexCandidates.has(token) || preIndexCandidates.size >= PREINDEX_MAX) return;
+  if (!token || preIndexCandidates.has(token) || preIndexAlerted.has(token) || preIndexCandidates.size >= PREINDEX_MAX) return;
   preIndexCandidates.add(token);
-  setTimeout(() => {
-    void (async () => {
-      try {
-        const resolved = await enrich(token, true);
-        if (resolved) {
-          console.log(`[PonsFastLane] PREINDEX_PAIR_RESOLVED token=${token} pair=${String((resolved.pair as any).pairAddress ?? 'unknown')}`);
-          registerLeanFollowup(token, resolved.pair, resolved.result);
-          ensureLeanFollowupLoop();
-          const currentBucket = bucket(resolved.result);
-          if (currentBucket === 'IGNORE') {
-            console.log(`[PonsFastLane] preindex recheck reject token=${token} score=${resolved.result.score} safety=${resolved.result.marketSafetyScore}`);
-          } else {
-            const text = [
-              `🎯 <b>AlphaOS PONS OPPORTUNITY</b>`,
-              `<b>${escapeHtml(resolved.pair.baseToken?.symbol ?? 'UNKNOWN')}</b> — ${escapeHtml(resolved.pair.baseToken?.name ?? '')}`,
-              `State: <b>${currentBucket}</b> | Score: <b>${Math.round(resolved.result.score)}</b> | Safety: <b>${Math.round(resolved.result.marketSafetyScore)}</b>`,
-              `Liquidity: <b>${Math.round(resolved.result.liquidityUsd).toLocaleString()}</b> | 5m Vol: <b>${Math.round(resolved.result.volume5m).toLocaleString()}</b>`,
-              `<code>${escapeHtml(token)}</code>`,
-            ].join('\n');
-            const socials = await getRobinhoodTokenSocials(token);
-            const delivery = await directTelegramRecipients(text, token, socials);
-            console.log(`[PonsFastLane] PREINDEX_ALERT_SENT token=${token} bucket=${currentBucket} score=${resolved.result.score} delivered=${delivery.delivered} failed=${delivery.failed}`);
+  void (async () => {
+    const first = await readPonsV2Curve(launch);
+    if (!first || first.graduated) {
+      preIndexCandidates.delete(token);
+      return;
+    }
+    setTimeout(() => {
+      void (async () => {
+        try {
+          const second = await readPonsV2Curve(launch);
+          if (!second) return;
+          if (second.graduated) {
+            console.log(`[PonsFastLane] curve bonded during trend watch token=${token}`);
+            return;
           }
-        } else {
-          console.log(`[PonsFastLane] preindex recheck still unindexed token=${token}`);
+          const quoteGrowthPct = Number((second.quoteReserve - first.quoteReserve) * 10_000n / first.quoteReserve) / 100;
+          const tokenReserveChangePct = Number((second.tokenReserve - first.tokenReserve) * 10_000n / first.tokenReserve) / 100;
+          const upward = quoteGrowthPct >= PONS_CURVE_MIN_QUOTE_GROWTH_PCT && tokenReserveChangePct < 0;
+          if (!upward) {
+            console.log(`[PonsFastLane] CURVE_TREND_REJECT token=${token} quoteGrowthPct=${quoteGrowthPct.toFixed(2)} tokenReservePct=${tokenReserveChangePct.toFixed(2)}`);
+            return;
+          }
+
+          // Only promising curves pay the cost of developer-flow enrichment.
+          const devFlow = await scanRobinhoodDevTokenFlow(token);
+          if ((devFlow.otherDevTransferPercent ?? 0) > 0) {
+            console.log(`[PonsFastLane] CURVE_TREND_REJECT_DEV token=${token} transferredPct=${devFlow.otherDevTransferPercent}`);
+            return;
+          }
+          const strong = quoteGrowthPct >= PONS_CURVE_STRONG_QUOTE_GROWTH_PCT;
+          const shortCa = token.length > 14 ? `${token.slice(0, 8)}…${token.slice(-6)}` : token;
+          const text = [
+            strong ? '🔥 <b>AlphaOS · PONS EARLY MOMENTUM</b>' : '🚀 <b>AlphaOS · PONS CURVE OPPORTUNITY</b>',
+            '━━━━━━━━━━━━━━━━━━',
+            `🪙 <b>Verified PONS Launch</b>  ·  <code>${shortCa}</code>`,
+            `<code>${escapeHtml(token)}</code>`,
+            '',
+            `📈 Curve demand     <b>+${quoteGrowthPct.toFixed(2)}%</b>`,
+            `🧮 Token reserve    <b>${tokenReserveChangePct.toFixed(2)}%</b>`,
+            `⏱️ Confirmation     <b>${Math.round(PREINDEX_RECHECK_MS / 1000)}s</b>`,
+            '',
+            '🎯 <b>WHY ALPHAOS FLAGGED IT</b>',
+            '✅ Verified PONS bonding curve',
+            `🟢 Quote reserve grew <b>+${quoteGrowthPct.toFixed(2)}%</b>`,
+            '🟢 Token reserve fell as demand increased',
+            ...((devFlow.devHoldingPercent ?? 0) >= 0 ? [`👨‍💻 Dev holding <b>${Number(devFlow.devHoldingPercent ?? 0).toFixed(2)}%</b>`] : []),
+            ...((devFlow.confirmedDevBurnPercent ?? 0) > 0 ? [`🔥 Verified dev burn <b>${devFlow.confirmedDevBurnPercent!.toFixed(2)}%</b>`] : []),
+            '',
+            '🛡️ <b>PONS LAUNCHPAD</b>',
+            '✅ Pre-bond PONS mechanics verified on-chain',
+            '<i>Market/dump risk still applies · AlphaOS</i>',
+          ].join('\n');
+          const socials = await getRobinhoodTokenSocials(token);
+          const delivery = await directTelegramRecipients(text, token, socials);
+          preIndexAlerted.add(token);
+          console.log(`[PonsFastLane] CURVE_ALERT_SENT token=${token} quoteGrowthPct=${quoteGrowthPct.toFixed(2)} delivered=${delivery.delivered} failed=${delivery.failed}`);
+        } finally {
+          preIndexCandidates.delete(token);
         }
-      } finally {
-        preIndexCandidates.delete(token);
-      }
-    })();
-  }, PREINDEX_RECHECK_MS);
+      })();
+    }, PREINDEX_RECHECK_MS);
+  })();
 }
 
 async function evaluate(launch: PonsLaunch): Promise<void> {
