@@ -47,13 +47,24 @@ export async function deliverPonsProvenDeveloperTelegram(
     },
   });
   const failures: unknown[] = [];
+  const { getRobinhoodTokenSocials } = await import('./tokenMetadata.js');
+  const socials = await getRobinhoodTokenSocials(alert.tokenAddress);
   const result = await deps.deliver({
     event: { id: event.id, eventIdentity: event.event_identity,
       type: 'PONS_PROVEN_DEV_LAUNCH', assetId: alert.tokenAddress,
       chain: 'robinhood', strategyKey: null },
     message: alert.text,
-    buttons: [[{ text: '📈 DexScreener',
-      url: `https://dexscreener.com/robinhood/${encodeURIComponent(alert.tokenAddress)}` }]],
+    buttons: [
+      [
+        { text: '📈 Chart', url: `https://dexscreener.com/robinhood/${encodeURIComponent(alert.tokenAddress)}` },
+        { text: '🔎 Explorer', url: `https://robinhoodchain.blockscout.com/token/${encodeURIComponent(alert.tokenAddress)}` },
+      ],
+      [
+        ...(socials.website ? [{ text: '🌐 Project', url: socials.website }] : []),
+        ...(socials.twitter ? [{ text: '𝕏 X', url: socials.twitter }] : []),
+        ...(socials.telegram ? [{ text: '✈️ TG', url: socials.telegram }] : []),
+      ].filter(button => Boolean(button.url)),
+    ].filter(row => row.length > 0),
     preserveMessage: true,
     onFailure: error => { failures.push(error); },
   });
