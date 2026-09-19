@@ -3,6 +3,7 @@ import type { CreateTokenEventInput, TokenEvent } from '../domain/event.js';
 import { createTokenEvent } from '../domain/event.js';
 import type { TokenLifecycleStatus, TokenMarketSnapshot } from '../domain/token.js';
 import { eventRepository, tokenRepository, type PersistedEventResult } from '../storage/dataCloud/index.js';
+import { runDatabaseWork } from './databaseLoadGovernor.js';
 
 export interface EventEngineOptions {
   persistenceEnabled?: boolean;
@@ -123,23 +124,36 @@ export class EventEngine {
     if (this.persistenceEnabled) {
       try {
         const payload = event.payload ?? {};
-        const token = await tokenRepository.upsert({
-          ...event.token,
-          lifecycleStatus: lifecycleForEvent(event.eventType),
-          creatorWallet: stringFromPayload(payload, 'creatorWallet', 'creator_wallet'),
-          lastSeenAt: event.observedAt,
-          migratedAt: event.eventType === 'DEX_MIGRATED' ? event.occurredAt : undefined,
-          latestSnapshot: marketFromEvent(event),
-          metadata: {
-            latestEventType: event.eventType,
-            latestEventSource: event.source,
-          },
-        });
+        const persist = async () => {
+          const token = await tokenRepository.upsert({
+            ...event.token,
+            lifecycleStatus: lifecycleForEvent(event.eventType),
+            creatorWallet: stringFromPayload(payload, 'creatorWallet', 'creator_wallet'),
+            lastSeenAt: event.observedAt,
+            migratedAt: event.eventType === 'DEX_MIGRATED' ? event.occurredAt : undefined,
+            latestSnapshot: marketFromEvent(event),
+            metadata: {
+              latestEventType: event.eventType,
+              latestEventSource: event.source,
+            },
+          });
 
-        persistence = await eventRepository.insert(event, {
-          tokenId: token.id ?? null,
-          persistedEventKey: persistedKey(event),
-        });
+          return eventRepository.insert(event, {
+            tokenId: token.id ?? null,
+            persistedEventKey: persistedKey(event),
+          });
+        };
+
+        const criticalEventTypes = new Set([
+          'ALERT_GENERATED',
+          'ALERT_SENT',
+          'LIQUIDITY_REMOVED',
+          'TOKEN_DIED',
+          'DEX_MIGRATED',
+        ]);
+        const workClass = criticalEventTypes.has(event.eventType) ? 'CRITICAL' : 'BACKGROUND';
+        const persisted = await runDatabaseWork(workClass, persist);
+        if (persisted) persistence = persisted;
       } catch (error) {
         capturedError = error instanceof Error ? error : new Error(String(error));
         this.logger.error('[EventEngine] Persistence failed:', capturedError.message);
