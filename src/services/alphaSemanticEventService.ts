@@ -1,5 +1,5 @@
 import { supabase } from './supabase.js';
-import { isTransientDatabaseError } from './databaseLoadGovernor.js';
+import { isTransientDatabaseError, runDatabaseWork } from './databaseLoadGovernor.js';
 import { normalizeCoreDecisionMetrics, normalizeNotificationMarketContext, verifiedPonsPreIndexValuation } from '../ui/notificationMarketContext.js';
 
 export type AlphaSemanticEventType = 'DEX_PAID' | 'BOOST' | 'VOLUME_SURGE' | 'BUILDING' | 'CONFIRMED' | 'RUNNER' | 'COOLING' | 'WEAKENING' | 'DANGER' | 'DEV_TRANSFER' | 'DEV_SELL' | 'DEV_BURN' | 'LIQUIDITY_RISK' | 'WALLET_CLUSTER' | 'RUNNER_50' | 'RUNNER_100' | 'ATH_OBSERVATION' | 'NEW_ATH' | 'X_REPUTED_MENTION' | 'PONS_PROVEN_DEV_LAUNCH';
@@ -114,8 +114,17 @@ export async function persistAlphaSemanticEventRecord(args: {
   const alertedAt = args.alertedAt ?? new Date().toISOString();
   const rawSnapshot = await ensureVerifiedOutcomeEntryPrice(args);
   const event = buildAlphaSemanticEvent({ ...args, rawSnapshot }, alertedAt);
-  const { data, error } = await supabase.from('alpha_alert_events').upsert(event,
-    { onConflict: 'event_identity', ignoreDuplicates: true }).select('id,event_identity').maybeSingle();
+  const criticalTypes = new Set<AlphaSemanticEventType>([
+    'DEV_SELL',
+    'DEV_BURN',
+    'LIQUIDITY_RISK',
+    'PONS_PROVEN_DEV_LAUNCH',
+  ]);
+  const workClass = criticalTypes.has(args.type) ? 'CRITICAL' : 'BACKGROUND';
+  const result = await runDatabaseWork(workClass, () => supabase.from('alpha_alert_events').upsert(event,
+    { onConflict: 'event_identity', ignoreDuplicates: true }).select('id,event_identity').maybeSingle());
+  if (!result) return null;
+  const { data, error } = result;
   if (error) throw error;
   return data ? { id: Number(data.id), event_identity: String(data.event_identity) } : null;
 }
