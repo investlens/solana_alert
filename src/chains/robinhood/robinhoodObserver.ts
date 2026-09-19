@@ -2344,8 +2344,8 @@ async function scanVerifiedRobinhoodBurns(): Promise<void> {
         const market = await getRobinhoodMarketSnapshot(token, { priority:'HIGH', caller:'verified_burn' }).catch(()=>null);
         // Burn alerts are actionable only for tokens already trading on a DEX.
         // Fail closed when there is no indexed market, chart/pair, or positive liquidity.
-        if (!market || !market.chartUrl || !Number.isFinite(market.liquidityUsd) || market.liquidityUsd <= 0) {
-          console.info('[RobinhoodBurn] NO_LIQUID_DEX_MARKET_SUPPRESSED', { token, txHash, pct, liquidity:market?.liquidityUsd ?? null });
+        if (!market || !market.chartUrl || !Number.isFinite(market.liquidityUsd) || market.liquidityUsd < 2_000) {
+          console.info('[RobinhoodBurn] DEX_LIQUIDITY_BELOW_MIN_SUPPRESSED', { token, txHash, pct, liquidity:market?.liquidityUsd ?? null });
           continue;
         }
         const text = [
