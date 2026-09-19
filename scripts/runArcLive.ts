@@ -224,7 +224,7 @@ async function processMarketRetries(): Promise<void> {
 }
 
 type ArcBoost = { chainId?: string; tokenAddress?: string; amount?: number; totalAmount?: number };
-type ArcBoostSecurity = { allowed: boolean; reason: string };
+type ArcBoostSecurity = { allowed: boolean; reason: string; devHoldingPercent?: number | null };
 
 async function fetchArcBoosts(): Promise<Array<{tokenAddress:string;amount:number;totalAmount:number}>> {
   try {
@@ -252,16 +252,16 @@ async function checkArcBoostSecurity(tokenAddress: string): Promise<ArcBoostSecu
   try {
     const url = `https://api.gopluslabs.io/api/v1/token_security/5042?contract_addresses=${encodeURIComponent(tokenAddress)}`;
     const response = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(4_000) });
-    if (!response.ok) return { allowed: true, reason: `honeypot provider unavailable (HTTP ${response.status}); LP check intentionally skipped for BOOST` };
+    if (!response.ok) return { allowed: true, reason: `honeypot provider unavailable (HTTP ${response.status}); LP check intentionally skipped for BOOST`, devHoldingPercent: null };
     const payload = await response.json() as { result?: Record<string, Record<string, unknown>> };
     const key = tokenAddress.toLowerCase();
     const security = payload.result?.[key] ?? payload.result?.[Object.keys(payload.result ?? {}).find(k => k.toLowerCase() === key) ?? ''];
-    if (!security) return { allowed: true, reason: 'honeypot evidence unavailable; LP check intentionally skipped for BOOST' };
+    if (!security) return { allowed: true, reason: 'honeypot evidence unavailable; LP check intentionally skipped for BOOST', devHoldingPercent: null };
     if (String(security.is_honeypot ?? '0') === '1') return { allowed: false, reason: 'honeypot flag' };
     if (String(security.cannot_sell_all ?? '0') === '1') return { allowed: false, reason: 'cannot-sell flag' };
-    return { allowed: true, reason: 'no honeypot/cannot-sell flag detected; LP check intentionally skipped for BOOST' };
+    const creatorPctRaw = Number(security.creator_percent ?? security.owner_percent ?? NaN);\n    const devHoldingPercent = Number.isFinite(creatorPctRaw) ? (creatorPctRaw <= 1 ? creatorPctRaw * 100 : creatorPctRaw) : null;\n    return { allowed: true, reason: 'no honeypot/cannot-sell flag detected; LP check intentionally skipped for BOOST', devHoldingPercent };
   } catch (error) {
-    return { allowed: true, reason: `honeypot check unavailable: ${error instanceof Error ? error.message : String(error)}; LP check intentionally skipped for BOOST` };
+    return { allowed: true, reason: `honeypot check unavailable: ${error instanceof Error ? error.message : String(error)}; LP check intentionally skipped for BOOST`, devHoldingPercent: null };
   }
 }
 
