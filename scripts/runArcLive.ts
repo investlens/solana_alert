@@ -29,7 +29,9 @@ type PendingArcRetry = {
 };
 const pendingMarketRetries = new Map<string, PendingArcRetry>();
 const arcBoostTotals = new Map<string, number>();
+const arcBoostDelivered = new Set<string>();
 let arcBoostBaselineReady = false;
+const ARC_BOOST_RECOVERY_MAX = Math.max(1, Math.min(20, Number(process.env.ARC_BOOST_RECOVERY_MAX ?? 12)));
 const ARC_BOOST_POLL_MS = Math.max(10_000, Number(process.env.ARC_BOOST_POLL_MS ?? 15_000));
 let lastArcBoostPollAt = 0;
 
@@ -271,6 +273,34 @@ async function checkArcBoostSecurity(tokenAddress: string): Promise<ArcBoostSecu
   }
 }
 
+function arcBoostIdentity(tokenAddress: string, totalAmount: number): string {
+  return `${tokenAddress.toLowerCase()}:${totalAmount}`;
+}
+
+async function deliverArcBoost(boost: {tokenAddress:string;amount:number;totalAmount:number}, eventType: 'RECOVERY'|'NEW'|'INCREASE'): Promise<boolean> {
+  const key = boost.tokenAddress.toLowerCase();
+  const identity = arcBoostIdentity(boost.tokenAddress, boost.totalAmount);
+  if (arcBoostDelivered.has(identity)) return false;
+  const security = await checkArcBoostSecurity(boost.tokenAddress);
+  if (!security.allowed) {
+    console.warn('[ArcBoost] BLOCKED_SECURITY', { token:key, totalBoost:boost.totalAmount, eventType, reason:security.reason });
+    return false;
+  }
+  const text = ['🟣 <b>AlphaOS ARC BOOST</b>','',`<code>${boost.tokenAddress}</code>`,'',
+    `BOOST added: <b>${boost.amount}</b>`,`Total BOOST: <b>${boost.totalAmount}</b>`,
+    `Event: <b>${eventType}</b>`,`Safety: <b>passed</b> — ${security.reason}`].join('\\n');
+  const buttons = [[{ text:'🔎 Explorer', url:`https://explorer.arc.io/address/${encodeURIComponent(boost.tokenAddress)}` }]];
+  try {
+    const delivery = await broadcastArcAlert(text, buttons);
+    arcBoostDelivered.add(identity);
+    console.log('[ArcBoost] ALERT_SENT', { token:key, totalBoost:boost.totalAmount, eventType, messageId:delivery.adminMessageId, delivered:delivery.delivered, failed:delivery.failed });
+    return true;
+  } catch (error) {
+    console.error('[ArcBoost] ALERT_SEND_FAILED', { token:key, totalBoost:boost.totalAmount, eventType, error });
+    return false;
+  }
+}
+
 async function processArcBoosts(): Promise<void> {
   if (Date.now() - lastArcBoostPollAt < ARC_BOOST_POLL_MS) return;
   lastArcBoostPollAt = Date.now();
@@ -279,6 +309,11 @@ async function processArcBoosts(): Promise<void> {
     for (const boost of boosts) arcBoostTotals.set(boost.tokenAddress.toLowerCase(), boost.totalAmount);
     arcBoostBaselineReady = true;
     console.log('[ArcBoost] BASELINE_READY', { tokens: boosts.length });
+    let recovered = 0;
+    for (const boost of boosts.slice(0, ARC_BOOST_RECOVERY_MAX)) {
+      if (await deliverArcBoost(boost, 'RECOVERY')) recovered += 1;
+    }
+    console.log('[ArcBoost] BASELINE_RECOVERY_COMPLETE', { checked: Math.min(boosts.length, ARC_BOOST_RECOVERY_MAX), recovered });
     return;
   }
   for (const boost of boosts) {
@@ -286,21 +321,7 @@ async function processArcBoosts(): Promise<void> {
     const previous = arcBoostTotals.get(key);
     arcBoostTotals.set(key, boost.totalAmount);
     if (previous != null && boost.totalAmount <= previous) continue;
-    const security = await checkArcBoostSecurity(boost.tokenAddress);
-    if (!security.allowed) {
-      console.warn('[ArcBoost] BLOCKED_SECURITY', { token: key, totalBoost: boost.totalAmount, reason: security.reason });
-      continue;
-    }
-    const text = ['🟣 <b>AlphaOS ARC BOOST</b>','',`<code>${boost.tokenAddress}</code>`,'',
-      `BOOST added: <b>${boost.amount}</b>`,`Total BOOST: <b>${boost.totalAmount}</b>`,
-      `Safety: <b>passed</b> — ${security.reason}`].join('\n');
-    const buttons = [[{ text:'🔎 Explorer', url:`https://explorer.arc.io/address/${encodeURIComponent(boost.tokenAddress)}` }]];
-    try {
-      const messageId = await sendTelegramWithMessageId(ALERT_CHAT_ID, text, buttons);
-      console.log('[ArcBoost] ALERT_SENT', { token:key, totalBoost:boost.totalAmount, messageId });
-    } catch (error) {
-      console.error('[ArcBoost] ALERT_SEND_FAILED', { token:key, error });
-    }
+    await deliverArcBoost(boost, previous == null ? 'NEW' : 'INCREASE');
   }
 }
 
