@@ -6,6 +6,7 @@ import { describePonsTelegramError } from './ponsProvenDeveloperTelegram.js';
 import { createPonsProvenDeveloperAlert, type PonsProvenDeveloperAlert } from './ponsProvenDeveloperAlert.js';
 import { decidePonsShadowLaunch, evaluatePonsProvenDeveloperLaunch, toPonsLiveMarketEvidence, type PonsShadowDecision } from './ponsProvenDeveloperLaunch.js';
 import { queuePonsNormalAlertFastLane } from './ponsNormalAlertFastLane.js';
+import { setSharedJson } from '../../services/sharedJsonCache.js';
 
 export type PonsLiveRouteResult = {
   status: 'IGNORED' | 'NORMAL_PATH' | 'PROVEN_PROCESSED' | 'DUPLICATE';
@@ -54,6 +55,15 @@ export function createPonsLiveLaunchRouter(overrides: Partial<PonsLiveRouterDepe
     const identity = launchIdentity(launch);
     if (processed.has(identity)) return { status: 'DUPLICATE', reason: 'launch already handled', provenDeveloper: false, alert: null, decision: null, developerTier: 'UNKNOWN', validation: 'NOT_RUN', alertDelivery: 'NOT_APPLICABLE' };
     processed.add(identity);
+
+    // Publish cheap cross-service PONS provenance before any enrichment. This is
+    // fail-open and lets BOOST routing recognize V2 launches without DB/RPC work.
+    void setSharedJson(
+      `alphaos:pons:verified:${launch.token_address.toLowerCase()}`,
+      { factory: launch.factory_address, protocolVersion: launch.protocol_version },
+      new Date().toISOString(),
+      30 * 24 * 60 * 60 * 1000,
+    );
 
     // Developer intelligence is enrichment only. Registry failure never grants a
     // proven-developer bonus; the token enters the same strict market fast lane.
