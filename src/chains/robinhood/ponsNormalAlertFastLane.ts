@@ -164,10 +164,16 @@ async function sendTelegram(chatId: string, text: string, tokenAddress: string):
       text,
       parse_mode: 'HTML',
       disable_web_page_preview: true,
-      reply_markup: { inline_keyboard: [[{
-        text: '📈 DexScreener',
-        url: `https://dexscreener.com/robinhood/${encodeURIComponent(tokenAddress)}`,
-      }]] },
+      reply_markup: { inline_keyboard: [
+        [{
+          text: '🔎 View on Explorer',
+          url: `https://robinhoodchain.blockscout.com/token/${encodeURIComponent(tokenAddress)}`,
+        }],
+        [{
+          text: '📈 DexScreener (when indexed)',
+          url: `https://dexscreener.com/robinhood/${encodeURIComponent(tokenAddress)}`,
+        }],
+      ] },
     }),
   });
   if (!res.ok) throw new Error(`Telegram ${res.status}: ${await res.text().catch(() => '')}`);
