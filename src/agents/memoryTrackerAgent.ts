@@ -7,6 +7,7 @@ import { confirmMomentum } from '../services/momentumConfirmation.js';
 import { recordOpportunityAndEmit } from '../services/opportunityService.js';
 import { transitionActiveStrategyOpportunity } from '../core/opportunityRegistry.js';
 import type { RiskResult } from '../types.js';
+import { runDatabaseWork } from '../services/databaseLoadGovernor.js';
 
 export type MemoryRow = {
   token: string;
@@ -27,8 +28,8 @@ export type MemoryRow = {
   raw: Record<string, unknown> | null;
 };
 
-const POLL_MS = Number(process.env.MEMORY_TRACKER_POLL_MS ?? 10 * 60 * 1000);
-const BATCH_SIZE = Number(process.env.MEMORY_TRACKER_BATCH_SIZE ?? 15);
+const POLL_MS = Math.max(10 * 60_000, Number(process.env.MEMORY_TRACKER_POLL_MS ?? 15 * 60_000));
+const BATCH_SIZE = Math.max(1, Number(process.env.MEMORY_TRACKER_BATCH_SIZE ?? 8));
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -1007,7 +1008,12 @@ export async function startMemoryTracker() {
 
   while (true) {
     try {
-      const rows = await fetchMemoryBatch();
+      const rows = await runDatabaseWork('BACKGROUND', fetchMemoryBatch);
+
+      if (!rows) {
+        await sleep(POLL_MS);
+        continue;
+      }
 
       if (!rows.length) {
         console.log('memory tracker: no tokens to update');
@@ -1016,7 +1022,7 @@ export async function startMemoryTracker() {
       for (const row of rows) {
         try {
           await updateToken(row);
-          await sleep(1200);
+          await sleep(3000);
         } catch (error) {
           console.log('memory tracker token error:', {
             token: row.token,
