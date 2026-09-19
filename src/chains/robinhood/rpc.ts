@@ -70,6 +70,21 @@ const robinhoodRpcClients = robinhoodRpcUrls.map(url => ({
 
 type RpcProviderHealth = { failures: number; cooldownUntil: number; inFlight: number };
 const rpcProviderHealth = new Map<string, RpcProviderHealth>();
+const RPC_BLOCK_NUMBER_CACHE_MS = Math.max(250, Number(process.env.ROBINHOOD_BLOCK_NUMBER_CACHE_MS ?? 1_000));
+let blockNumberCache: { value: bigint; expiresAt: number } | null = null;
+let blockNumberInFlight: Promise<bigint> | null = null;
+const rpcRequestCache = new Map<string, { value: unknown; expiresAt: number }>();
+const rpcRequestInflight = new Map<string, Promise<unknown>>();
+const RPC_STATIC_CACHE_MS = Math.max(1_000, Number(process.env.ROBINHOOD_RPC_STATIC_CACHE_MS ?? 30_000));
+
+function stableRpcKey(args: any): string {
+  try { return JSON.stringify(args, (_key, value) => typeof value === 'bigint' ? value.toString() : value); }
+  catch { return ''; }
+}
+
+function cacheableRpcMethod(method: string): boolean {
+  return ['eth_chainId', 'eth_getTransactionReceipt', 'eth_getTransactionByHash', 'eth_getCode'].includes(method);
+}
 
 function conciseRpcError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -229,7 +244,17 @@ export async function getRobinhoodLogsResilient(args: any): Promise<any[]> {
 }
 
 export async function getRobinhoodBlockNumberResilient(): Promise<bigint> {
-  return withRobinhoodRpcFailover('blockNumber', client => client.getBlockNumber());
+  const now = Date.now();
+  if (blockNumberCache && blockNumberCache.expiresAt > now) return blockNumberCache.value;
+  if (blockNumberInFlight) return blockNumberInFlight;
+  blockNumberInFlight = withRobinhoodRpcFailover('blockNumber', client => client.getBlockNumber());
+  try {
+    const value = await blockNumberInFlight;
+    blockNumberCache = { value, expiresAt: Date.now() + RPC_BLOCK_NUMBER_CACHE_MS };
+    return value;
+  } finally {
+    blockNumberInFlight = null;
+  }
 }
 
 export async function getRobinhoodBlockResilient(args: any): Promise<any> {
@@ -238,7 +263,29 @@ export async function getRobinhoodBlockResilient(args: any): Promise<any> {
 
 export async function requestRobinhoodRpcResilient(args: any): Promise<any> {
   const method = String(args?.method ?? 'rpcRequest');
-  return withRobinhoodRpcFailover(method, client => (client as any).request(args));
+  if (!cacheableRpcMethod(method)) return withRobinhoodRpcFailover(method, client => (client as any).request(args));
+
+  const key = stableRpcKey(args);
+  const cached = key ? rpcRequestCache.get(key) : null;
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  const existing = key ? rpcRequestInflight.get(key) : null;
+  if (existing) return existing;
+
+  const request = withRobinhoodRpcFailover(method, client => (client as any).request(args));
+  if (key) rpcRequestInflight.set(key, request);
+  try {
+    const value = await request;
+    if (key) {
+      rpcRequestCache.set(key, { value, expiresAt: Date.now() + RPC_STATIC_CACHE_MS });
+      if (rpcRequestCache.size > 5_000) {
+        const now = Date.now();
+        for (const [candidate, entry] of rpcRequestCache) if (entry.expiresAt <= now) rpcRequestCache.delete(candidate);
+      }
+    }
+    return value;
+  } finally {
+    if (key) rpcRequestInflight.delete(key);
+  }
 }
 
 export const robinhoodResilientScannerRpc = {
