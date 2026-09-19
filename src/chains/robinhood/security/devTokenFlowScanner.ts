@@ -3,9 +3,7 @@ import {
   type Address,
 } from 'viem';
 
-import {
-  robinhoodChain,
-} from '../config.js';
+import { getRobinhoodBlockNumberResilient, requestRobinhoodRpcResilient } from '../rpc.js';
 
 import {
   getPonsLaunchState,
@@ -73,79 +71,8 @@ const FLOW_TIMEOUT_MS = 3_000;
 const flowCache = new Map<string, { expiresAt: number; result: DevTokenFlowResult }>();
 const flowInFlight = new Map<string, Promise<DevTokenFlowResult>>();
 
-function getRpcUrl(): string {
-  const url =
-    robinhoodChain
-      .rpcUrls
-      .default
-      .http[0];
-
-  if (!url) {
-    throw new Error(
-      'Robinhood RPC unavailable',
-    );
-  }
-
-  return url;
-}
-
-async function rpc<T>(
-  method: string,
-  params: unknown[],
-): Promise<T> {
-  const response =
-    await fetch(
-      getRpcUrl(),
-      {
-        method: 'POST',
-
-        headers: {
-          'Content-Type':
-            'application/json',
-        },
-
-        body:
-          JSON.stringify({
-            jsonrpc: '2.0',
-            id: 1,
-            method,
-            params,
-          }),
-      },
-    );
-
-  if (!response.ok) {
-    throw new Error(
-      `RPC HTTP ${response.status}`,
-    );
-  }
-
-  const payload =
-    await response.json() as {
-      result?: T;
-
-      error?: {
-        message?: string;
-      };
-    };
-
-  if (payload.error) {
-    throw new Error(
-      payload.error.message ??
-      `${method} failed`,
-    );
-  }
-
-  if (
-    payload.result ===
-    undefined
-  ) {
-    throw new Error(
-      `${method} returned no result`,
-    );
-  }
-
-  return payload.result;
+async function rpc<T>(method: string, params: unknown[]): Promise<T> {
+  return requestRobinhoodRpcResilient<T>({ method, params });
 }
 
 function toBigInt(
@@ -256,14 +183,7 @@ async function scanRecentDevTransfers(
   burned: bigint;
   transferred: bigint;
 }> {
-  const latestHex =
-    await rpc<string>(
-      'eth_blockNumber',
-      [],
-    );
-
-  const latest =
-    BigInt(latestHex);
+  const latest = await getRobinhoodBlockNumberResilient();
 
   const lookback =
     20_000n;
