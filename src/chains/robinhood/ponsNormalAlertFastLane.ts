@@ -6,6 +6,7 @@ import { scoreToken } from '../../core/scoring.js';
 import { getDeliverableUsers } from '../../core/delivery.js';
 import { governedDexScreenerJson } from '../../services/dexscreenerRequestGovernor.js';
 import { robinhoodPublicClient } from './rpc.js';
+import { scanRobinhoodDevTokenFlow } from './security/devTokenFlowScanner.js';
 
 const MAX_CONCURRENT = Math.max(1, Math.min(5, Number(process.env.PONS_FAST_LANE_CONCURRENCY ?? 2)));
 const MAX_QUEUE = Math.max(5, Math.min(100, Number(process.env.PONS_FAST_LANE_MAX_QUEUE ?? 30)));
@@ -328,16 +329,33 @@ async function evaluate(launch: PonsLaunch): Promise<void> {
     return;
   }
 
+  // Expensive developer enrichment happens only after the token has passed
+  // market criteria + confirmation. Weak launches never reach this RPC stage.
+  const devFlow = await scanRobinhoodDevTokenFlow(tokenAddress);
+  const devSoldOrMoved = (devFlow.otherDevTransferPercent ?? 0) > 0;
+  if (devSoldOrMoved) {
+    console.log(`[PonsFastLane] reject developer movement token=${tokenAddress} transferredPct=${devFlow.otherDevTransferPercent}`);
+    return;
+  }
+
   const pair = second.pair;
   const ratio = second.result.sells5m <= 0 ? second.result.buys5m : second.result.buys5m / second.result.sells5m;
+  const evidence = [
+    priceChangePct >= 0 ? `✓ Price holding/rising (${priceChangePct >= 0 ? '+' : ''}${priceChangePct.toFixed(1)}%)` : null,
+    liquidityChangePct >= -5 ? `✓ Liquidity stable (${liquidityChangePct >= 0 ? '+' : ''}${liquidityChangePct.toFixed(1)}%)` : null,
+    ratio >= 1.6 ? `✓ Buy pressure ${ratio.toFixed(2)}x` : null,
+    devFlow.devHoldingPercent != null ? `✓ Dev holding ${devFlow.devHoldingPercent.toFixed(2)}%` : null,
+    (devFlow.confirmedDevBurnPercent ?? 0) > 0 ? `🔥 Verified dev burn ${devFlow.confirmedDevBurnPercent!.toFixed(2)}%` : null,
+  ].filter(Boolean);
   const text = [
     `🚨 <b>AlphaOS PONS ${secondBucket}</b>`,
     `<b>${escapeHtml(pair.baseToken?.symbol ?? 'UNKNOWN')}</b> — ${escapeHtml(pair.baseToken?.name ?? '')}`,
     `Score: <b>${Math.round(second.result.score)}</b> | Safety: <b>${Math.round(second.result.marketSafetyScore)}</b>`,
-    `Liquidity: <b>$${Math.round(second.result.liquidityUsd).toLocaleString()}</b> | 5m Vol: <b>$${Math.round(second.result.volume5m).toLocaleString()}</b>`,
+    `Liquidity: <b>${Math.round(second.result.liquidityUsd).toLocaleString()}</b> | 5m Vol: <b>${Math.round(second.result.volume5m).toLocaleString()}</b>`,
     `Buys/Sells: <b>${second.result.buys5m}/${second.result.sells5m}</b> | Ratio: <b>${ratio.toFixed(2)}x</b>`,
-    `Confirmation: price ${priceChangePct >= 0 ? '+' : ''}${priceChangePct.toFixed(1)}% | liquidity ${liquidityChangePct >= 0 ? '+' : ''}${liquidityChangePct.toFixed(1)}%`,
-    `Developer: <b>UNVERIFIED</b> — no proven-dev bonus applied`,
+    '',
+    '<b>Why AlphaOS flagged it</b>',
+    ...(evidence.length ? evidence : ['✓ Market criteria confirmed']),
     `<code>${escapeHtml(tokenAddress)}</code>`,
   ].join('\n');
   const delivery = await directTelegramRecipients(text, tokenAddress);
