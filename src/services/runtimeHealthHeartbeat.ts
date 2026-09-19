@@ -12,23 +12,23 @@ const SERVICES = [
 async function heartbeat(): Promise<void> {
   const now = new Date().toISOString();
 
-  for (const service of SERVICES) {
-    const { error } = await supabase
-      .from('system_health')
-      .update({
-        status: 'healthy',
-        message: 'Runtime heartbeat active',
-        last_seen_at: now,
-        updated_at: now,
-      })
-      .eq('service', service);
+  // All runtime services share the same heartbeat timestamp/status, so update them
+  // in one request instead of issuing one Supabase request per service.
+  const { error } = await supabase
+    .from('system_health')
+    .update({
+      status: 'healthy',
+      message: 'Runtime heartbeat active',
+      last_seen_at: now,
+      updated_at: now,
+    })
+    .in('service', [...SERVICES]);
 
-    if (error) {
-      console.warn('[SystemHealth] heartbeat failed', {
-        service,
-        reason: error.message,
-      });
-    }
+  if (error) {
+    console.warn('[SystemHealth] heartbeat failed', {
+      services: SERVICES.length,
+      reason: error.message,
+    });
   }
 }
 
