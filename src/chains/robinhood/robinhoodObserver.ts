@@ -2308,6 +2308,28 @@ const rhBurnDelivered = new Set<string>();
 let rhBurnLastBlock: bigint | null = null;
 let rhBurnRunning = false;
 
+
+async function verifyRobinhoodBurnAlertLpSafety(token: string, chainId: string): Promise<{ verified:boolean; protectedPercent:number; reason:string }> {
+  try {
+    const response = await fetch(`https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${encodeURIComponent(token.toLowerCase())}`, { signal: AbortSignal.timeout(3_000) });
+    if (!response.ok) return { verified:false, protectedPercent:0, reason:`goplus_http_${response.status}` };
+    const body = await response.json() as any;
+    const info = body?.result?.[token.toLowerCase()];
+    if (!info || String(info.is_in_dex ?? '') !== '1' || !Array.isArray(info.lp_holders) || !info.lp_holders.length) return { verified:false, protectedPercent:0, reason:'lp_evidence_unavailable' };
+    const protectedPercent = info.lp_holders.reduce((sum:number, holder:any) => {
+      const address = String(holder?.address ?? '').toLowerCase();
+      const tag = String(holder?.tag ?? '').toLowerCase();
+      const protectedLp = String(holder?.is_locked ?? '') === '1'
+        || address === '0x0000000000000000000000000000000000000000'
+        || address === '0x000000000000000000000000000000000000dead'
+        || /burn|dead|blackhole/.test(tag);
+      const pct = Number(holder?.percent ?? 0);
+      return sum + (protectedLp && Number.isFinite(pct) && pct > 0 ? pct : 0);
+    }, 0);
+    return { verified: protectedPercent >= 0.90, protectedPercent, reason: protectedPercent >= 0.90 ? 'locked_or_burned' : 'insufficient_lp_protection' };
+  } catch { return { verified:false, protectedPercent:0, reason:'lp_verification_failed' }; }
+}
+
 async function scanVerifiedRobinhoodBurns(): Promise<void> {
   if (rhBurnRunning) return;
   rhBurnRunning = true;
@@ -2346,6 +2368,11 @@ async function scanVerifiedRobinhoodBurns(): Promise<void> {
         // Fail closed when there is no indexed market, chart/pair, or positive liquidity.
         if (!market || !market.chartUrl || !Number.isFinite(market.liquidityUsd) || market.liquidityUsd < 2_000) {
           console.info('[RobinhoodBurn] DEX_LIQUIDITY_BELOW_MIN_SUPPRESSED', { token, txHash, pct, liquidity:market?.liquidityUsd ?? null });
+          continue;
+        }
+        const lpSafety = await verifyRobinhoodBurnAlertLpSafety(token, '4663');
+        if (!lpSafety.verified) {
+          console.info('[RobinhoodBurn] UNVERIFIED_LP_SAFETY_SUPPRESSED', { token, txHash, pct, liquidity:market.liquidityUsd, reason:lpSafety.reason, protectedPercent:lpSafety.protectedPercent });
           continue;
         }
         const text = [
