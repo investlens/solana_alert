@@ -266,7 +266,9 @@ async function checkArcBoostSecurity(tokenAddress: string): Promise<ArcBoostSecu
     if (!security) return { allowed: true, reason: 'honeypot evidence unavailable; LP check intentionally skipped for BOOST', devHoldingPercent: null };
     if (String(security.is_honeypot ?? '0') === '1') return { allowed: false, reason: 'honeypot flag' };
     if (String(security.cannot_sell_all ?? '0') === '1') return { allowed: false, reason: 'cannot-sell flag' };
-    const creatorPctRaw = Number(security.creator_percent ?? security.owner_percent ?? NaN);\n    const devHoldingPercent = Number.isFinite(creatorPctRaw) ? (creatorPctRaw <= 1 ? creatorPctRaw * 100 : creatorPctRaw) : null;\n    return { allowed: true, reason: 'no honeypot/cannot-sell flag detected; LP check intentionally skipped for BOOST', devHoldingPercent };
+    const creatorPctRaw = Number(security.creator_percent ?? security.owner_percent ?? NaN);
+    const devHoldingPercent = Number.isFinite(creatorPctRaw) ? (creatorPctRaw <= 1 ? creatorPctRaw * 100 : creatorPctRaw) : null;
+    return { allowed: true, reason: 'no honeypot/cannot-sell flag detected; LP check intentionally skipped for BOOST', devHoldingPercent };
   } catch (error) {
     return { allowed: true, reason: `honeypot check unavailable: ${error instanceof Error ? error.message : String(error)}; LP check intentionally skipped for BOOST`, devHoldingPercent: null };
   }
@@ -313,13 +315,14 @@ async function deliverArcBoost(boost: {tokenAddress:string;amount:number;totalAm
     '',
     `<b>${symbol}</b>${name ? ` · ${name}` : ''}`,
     `🔥 Boost  <b>${boost.totalAmount} total (+${boost.amount})</b>`,
-    ...(marketCap != null ? [`💰 Market Cap  <b>${formatUsd(marketCap)}</b>`] : []),
+    `💰 Market Cap  <b>${formatUsd(marketCap)}</b>`,
+    `👤 Dev Holding  <b>${security.devHoldingPercent == null ? 'Not available' : `${security.devHoldingPercent.toFixed(2)}%`}</b>`,
     '🛡️ Sell safety  <b>No honeypot/cannot-sell flag detected</b>',
     '',
     `<code>${boost.tokenAddress}</code>`,
     '',
     '⚠️ <b>Do your own diligence.</b>',
-  ].join('\\n');
+  ].join('\n');
   const buttons = [
     [ ...(dexUrl ? [{ text:'📈 Chart', url:dexUrl }] : []), { text:'🔎 Explorer', url:`https://explorer.arc.io/address/${encodeURIComponent(boost.tokenAddress)}` } ],
     [ ...(website ? [{text:'🌐 Project',url:website}] : []), ...(twitter ? [{text:'𝕏 X',url:twitter}] : []), ...(telegram ? [{text:'✈️ TG',url:telegram}] : []) ],
