@@ -24,6 +24,7 @@ const MARKET_RETRY_PER_POLL = Math.max(1, Math.min(5, Number(process.env.ARC_MAR
 type PendingArcRetry = {
   enriched: Awaited<ReturnType<typeof enrichArcCandidate>>;
   retryAt: number;
+  firstSeenAt: number;
   baselinePrice?: number | null;
 };
 const pendingMarketRetries = new Map<string, PendingArcRetry>();
@@ -163,6 +164,7 @@ function queueMarketRetry(enriched: Awaited<ReturnType<typeof enrichArcCandidate
   pendingMarketRetries.set(key, {
     enriched,
     retryAt: Date.now() + MARKET_RETRY_DELAY_MS,
+    firstSeenAt: Date.now(),
   });
   console.log('[ArcLive] MARKET_RETRY_QUEUED', {
     assetId: enriched.assetId,
@@ -182,6 +184,11 @@ async function processMarketRetries(): Promise<void> {
     processed += 1;
 
     const market = await enrichArcMarket(pending.enriched);
+    if (market.marketDataSource == null) {
+      pendingMarketRetries.set(key, { ...pending, retryAt: Date.now() + MARKET_RETRY_DELAY_MS });
+      console.log('[ArcLive] PRE_BOND_WAIT', { assetId: pending.enriched.assetId, ageMin: ((Date.now() - pending.firstSeenAt) / 60_000).toFixed(1), reason: 'PAIR_NOT_INDEXED' });
+      continue;
+    }
     const assessment = assessArcForAlert(market);
     console.log('[ArcLive] MARKET_RETRY_RESULT', {
       assetId: market.assetId,
@@ -198,12 +205,12 @@ async function processMarketRetries(): Promise<void> {
     if (assessment.alertable) {
       const pairAgeMs = market.pairCreatedAt ? Math.max(0, Date.now() - market.pairCreatedAt) : 0;
       if (pairAgeMs < ARC_MIN_NORMAL_ALERT_AGE_MS) {
-        pendingMarketRetries.set(key, { enriched: pending.enriched, retryAt: Date.now() + Math.max(ARC_REVERSAL_CONFIRM_MS, ARC_MIN_NORMAL_ALERT_AGE_MS - pairAgeMs), baselinePrice: market.priceUsd });
+        pendingMarketRetries.set(key, { enriched: pending.enriched, retryAt: Date.now() + Math.max(ARC_REVERSAL_CONFIRM_MS, ARC_MIN_NORMAL_ALERT_AGE_MS - Math.max(pairAgeMs, Date.now() - pending.firstSeenAt)), firstSeenAt: pending.firstSeenAt, baselinePrice: market.priceUsd });
         console.log('[ArcLive] MATURITY_WAIT', { assetId: market.assetId, ageMin: (pairAgeMs / 60_000).toFixed(1) });
         continue;
       }
       if (pending.baselinePrice && market.priceUsd && market.priceUsd <= pending.baselinePrice) {
-        pendingMarketRetries.set(key, { enriched: pending.enriched, retryAt: Date.now() + ARC_REVERSAL_CONFIRM_MS, baselinePrice: market.priceUsd });
+        pendingMarketRetries.set(key, { enriched: pending.enriched, retryAt: Date.now() + ARC_REVERSAL_CONFIRM_MS, firstSeenAt: pending.firstSeenAt, baselinePrice: market.priceUsd });
         console.log('[ArcLive] REVERSAL_WAIT', { assetId: market.assetId, previousPrice: pending.baselinePrice, currentPrice: market.priceUsd });
         continue;
       }
@@ -346,11 +353,11 @@ async function main() {
         const pairAgeMs = market.pairCreatedAt ? Math.max(0, Date.now() - market.pairCreatedAt) : 0;
         const key = market.assetId.toLowerCase();
         if (pairAgeMs < ARC_MIN_NORMAL_ALERT_AGE_MS) {
-          pendingMarketRetries.set(key, { enriched, retryAt: Date.now() + Math.max(ARC_REVERSAL_CONFIRM_MS, ARC_MIN_NORMAL_ALERT_AGE_MS - pairAgeMs), baselinePrice: market.priceUsd });
+          pendingMarketRetries.set(key, { enriched, retryAt: Date.now() + Math.max(ARC_REVERSAL_CONFIRM_MS, ARC_MIN_NORMAL_ALERT_AGE_MS - pairAgeMs), firstSeenAt: Date.now(), baselinePrice: market.priceUsd });
           console.log('[ArcLive] MATURITY_WAIT', { assetId: market.assetId, ageMin: (pairAgeMs / 60_000).toFixed(1), waitMin: ((ARC_MIN_NORMAL_ALERT_AGE_MS - pairAgeMs) / 60_000).toFixed(1) });
         } else {
           // Existing pools still require a fresh positive move rather than alerting on a stale snapshot.
-          pendingMarketRetries.set(key, { enriched, retryAt: Date.now() + ARC_REVERSAL_CONFIRM_MS, baselinePrice: market.priceUsd });
+          pendingMarketRetries.set(key, { enriched, retryAt: Date.now() + ARC_REVERSAL_CONFIRM_MS, firstSeenAt: Date.now(), baselinePrice: market.priceUsd });
           console.log('[ArcLive] REVERSAL_WATCH', { assetId: market.assetId, ageMin: (pairAgeMs / 60_000).toFixed(1) });
         }
       } else if (market.marketDataSource == null) {
