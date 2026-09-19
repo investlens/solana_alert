@@ -2,6 +2,7 @@ import { supabase } from '../services/supabase.js';
 import { enrichTokenByMintAddress } from '../services/dexscreener.js';
 import { recordTokenMemoryEvent } from '../memory/tokenMemoryEvents.js';
 import { evaluateSecondChanceCheckpoint } from '../engines/secondChanceMomentumEngine.js';
+import { runDatabaseWork } from '../services/databaseLoadGovernor.js';
 
 type CheckpointKey = '5M' | '15M' | '30M' | '1H' | '6H' | '24H';
 
@@ -39,8 +40,8 @@ const CHECKPOINTS: CheckpointDefinition[] = [
   { key: '24H', minutes: 1440, checkedColumn: 'checked_24h_at', marketCapColumn: 'market_cap_24h', returnColumn: 'return_24h_pct' },
 ];
 
-const POLL_MS = Number(process.env.OUTCOME_CHECKPOINT_POLL_MS ?? 60_000);
-const BATCH_SIZE = Number(process.env.OUTCOME_CHECKPOINT_BATCH_SIZE ?? 100);
+const POLL_MS = Math.max(120_000, Number(process.env.OUTCOME_CHECKPOINT_POLL_MS ?? 300_000));
+const BATCH_SIZE = Math.max(5, Number(process.env.OUTCOME_CHECKPOINT_BATCH_SIZE ?? 25));
 
 function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
@@ -229,7 +230,11 @@ export async function startOutcomeCheckpointAgent() {
   console.log('Starting AlphaOS outcome checkpoint agent...');
   while (true) {
     try {
-      const rows = await fetchRows();
+      const rows = await runDatabaseWork('BACKGROUND', fetchRows);
+      if (!rows) {
+        await sleep(POLL_MS);
+        continue;
+      }
       console.log('Outcome agent fetched rows:', rows.length);
       for (const row of rows) {
         const checkpoint = getNextDueCheckpoint(row);
