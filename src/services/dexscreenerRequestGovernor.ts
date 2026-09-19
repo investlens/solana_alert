@@ -302,11 +302,20 @@ export async function governedDexScreenerJson<T>(args: {
   if ((args.cacheTtlMs ?? 0) > 0) {
     const shared = await getSharedJson<T>(`alphaos:dex:${key}`);
     if (shared) {
-      counters.cacheHits += 1;
-      metricsFor(args.caller, priority).cacheHit += 1;
-      cache.set(key, { value: shared.value, fetchedAt: shared.fetchedAt, expiresAt: now + Math.min(args.cacheTtlMs!, 15_000) });
-      logActivity(args.caller, args.endpoint, priority);
-      return { value: shared.value, fetchedAt: shared.fetchedAt, source: 'DEXSCREENER', cache: 'HIT' };
+      const fetchedAtMs = Date.parse(shared.fetchedAt);
+      const ageMs = Number.isFinite(fetchedAtMs) ? Math.max(0, now - fetchedAtMs) : args.cacheTtlMs!;
+      const remainingTtlMs = Math.max(0, args.cacheTtlMs! - ageMs);
+      if (remainingTtlMs > 0) {
+        counters.cacheHits += 1;
+        metricsFor(args.caller, priority).cacheHit += 1;
+        cache.set(key, {
+          value: shared.value,
+          fetchedAt: shared.fetchedAt,
+          expiresAt: now + Math.min(remainingTtlMs, 15_000),
+        });
+        logActivity(args.caller, args.endpoint, priority);
+        return { value: shared.value, fetchedAt: shared.fetchedAt, source: 'DEXSCREENER', cache: 'HIT' };
+      }
     }
   }
   const existing = inflight.get(key);
