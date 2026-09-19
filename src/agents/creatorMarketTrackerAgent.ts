@@ -2,6 +2,7 @@ import { supabase } from '../services/supabase.js';
 import { enrichTokenByMintAddress } from '../services/dexscreener.js';
 import { markProvenCreator } from '../core/creatorIntelStore.js';
 import { fetchDexscreenerPairMarketCap } from '../services/dexscreenerPairs.js';
+import { runDatabaseWork } from '../services/databaseLoadGovernor.js';
 
 type CreatorLaunchRow = {
   creator_wallet: string | null;
@@ -36,13 +37,13 @@ function creatorGradeFromMarketCap(peakMarketCap: number): string {
   return 'UNRATED';
 }
 
-export async function runCreatorMarketTracker(): Promise<void> {
+async function runCreatorMarketTrackerWork(): Promise<void> {
   const { data, error } = await supabase
     .from('creator_launches')
     .select(`creator_wallet, token, symbol, peak_market_cap, crossed_500k, crossed_1m`)
     .eq('crossed_1m', false)
     .order('last_checked_at', { ascending: true, nullsFirst: true })
-    .limit(25);
+    .limit(Math.max(1, Number(process.env.CREATOR_MARKET_TRACKER_BATCH_SIZE ?? 8)));
 
   if (error) {
     console.log('creator market tracker fetch error:', error);
@@ -138,6 +139,10 @@ export async function runCreatorMarketTracker(): Promise<void> {
       if (retryUpdateError) console.log('creator market tracker retry timestamp error:', { token: row.token, error: retryUpdateError });
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
   }
+}
+
+export async function runCreatorMarketTracker(): Promise<void> {
+  await runDatabaseWork('BACKGROUND', runCreatorMarketTrackerWork);
 }
