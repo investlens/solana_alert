@@ -1,4 +1,5 @@
 import { supabase } from '../services/supabase.js';
+import { runDatabaseWork } from '../services/databaseLoadGovernor.js';
 
 export type AgentDecision = {
   token?: string | null;
@@ -10,8 +11,21 @@ export type AgentDecision = {
   inputData?: Record<string, unknown>;
 };
 
+const recentAgentDecisions = new Map<string, number>();
+const AGENT_DECISION_DEDUP_MS = Math.max(
+  5 * 60_000,
+  Number(process.env.AGENT_DECISION_DEDUP_MS ?? 30 * 60_000),
+);
+
 export async function recordAgentDecision(args: AgentDecision) {
-  const { error } = await supabase.from('agent_memory').insert({
+  const token = String(args.token ?? '').trim().toLowerCase();
+  const key = [args.agent, token || 'unknown', args.decision, Math.round(args.confidence / 5) * 5]
+    .join(':');
+  const now = Date.now();
+  const prior = recentAgentDecisions.get(key);
+  if (prior != null && now - prior < AGENT_DECISION_DEDUP_MS) return;
+
+  const result = await runDatabaseWork('BACKGROUND', () => supabase.from('agent_memory').insert({
     token: args.token ?? null,
     symbol: args.symbol ?? null,
     agent: args.agent,
@@ -19,10 +33,20 @@ export async function recordAgentDecision(args: AgentDecision) {
     reason: args.reason,
     confidence: args.confidence,
     input_data: args.inputData ?? {},
-  });
+  }));
 
+  if (!result) return;
+  const { error } = result;
   if (error) {
     console.log('recordAgentDecision error:', error);
+    return;
+  }
+
+  recentAgentDecisions.set(key, now);
+  if (recentAgentDecisions.size > 10_000) {
+    for (const [candidate, at] of recentAgentDecisions) {
+      if (now - at >= AGENT_DECISION_DEDUP_MS) recentAgentDecisions.delete(candidate);
+    }
   }
 }
 
