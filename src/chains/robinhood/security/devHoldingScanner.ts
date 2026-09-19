@@ -8,9 +8,7 @@ import {
   type Hex,
 } from 'viem';
 
-import {
-  robinhoodChain,
-} from '../config.js';
+import { requestRobinhoodRpcResilient } from '../rpc.js';
 
 import {
   getPonsLaunchState,
@@ -51,86 +49,13 @@ export type RobinhoodDevHoldingResult = {
   scannedAt: number;
 };
 
-async function rawEthCall(args: {
-  address: Address;
-  data: Hex;
-}): Promise<Hex> {
-  const rpcUrl =
-    robinhoodChain
-      .rpcUrls
-      .default
-      .http[0];
-
-  const response =
-    await fetch(
-      rpcUrl,
-      {
-        method:
-          'POST',
-
-        headers: {
-          'Content-Type':
-            'application/json',
-        },
-
-        body:
-          JSON.stringify({
-            jsonrpc:
-              '2.0',
-
-            id:
-              1,
-
-            method:
-              'eth_call',
-
-            params: [
-              {
-                to:
-                  args.address,
-
-                data:
-                  args.data,
-              },
-
-              'latest',
-            ],
-          }),
-      },
-    );
-
-  if (!response.ok) {
-    throw new Error(
-      `Robinhood eth_call HTTP ${response.status}`,
-    );
-  }
-
-  const payload =
-    await response.json() as {
-      result?: Hex;
-
-      error?: {
-        message?: string;
-      };
-    };
-
-  if (payload.error) {
-    throw new Error(
-      payload.error.message ??
-      'Robinhood eth_call failed',
-    );
-  }
-
-  if (
-    !payload.result ||
-    payload.result === '0x'
-  ) {
-    throw new Error(
-      'balanceOf returned no result',
-    );
-  }
-
-  return payload.result;
+async function rawEthCall(args: { address: Address; data: Hex }): Promise<Hex> {
+  const result = await requestRobinhoodRpcResilient<Hex>({
+    method: 'eth_call',
+    params: [{ to: args.address, data: args.data }, 'latest'],
+  });
+  if (!result || result === '0x') throw new Error('balanceOf returned no result');
+  return result;
 }
 
 export async function scanRobinhoodDevHolding(
