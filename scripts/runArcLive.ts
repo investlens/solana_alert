@@ -37,17 +37,41 @@ async function deliverArcAlert(market: Awaited<ReturnType<typeof enrichArcMarket
   const buys = market.buys5m ?? 0;
   const sells = market.sells5m ?? 0;
   const ratio = sells > 0 ? (buys / sells).toFixed(2) : buys > 0 ? '∞' : 'n/a';
+  const shortCa = market.assetId.length > 14
+    ? `${market.assetId.slice(0, 8)}…${market.assetId.slice(-6)}`
+    : market.assetId;
+  const unavailable = warnings
+    .filter(item => /UNKNOWN/i.test(item))
+    .map(item => item.replace(/_UNKNOWN$/i, '').replaceAll('_', ' ').toLowerCase())
+    .map(item => item.replace(/\b\w/g, char => char.toUpperCase()));
+  const otherWarnings = warnings.filter(item => !/UNKNOWN/i.test(item));
+  const ratioNumber = sells > 0 ? buys / sells : buys > 0 ? 99 : 0;
+  const evidence = [
+    ratioNumber >= 1.5 ? `🟢 Strong <b>${ratio}x</b> buy pressure` : null,
+    (market.volume5mUsd ?? 0) > 0 ? `📊 <b>${formatUsd(market.volume5mUsd)}</b> activity in 5m` : null,
+    (market.liquidityUsd ?? 0) > 0 ? `💧 <b>${formatUsd(market.liquidityUsd)}</b> liquidity` : null,
+  ].filter(Boolean);
+
   const text = [
-    '🟣 <b>AlphaOS ARC Opportunity</b>',
-    '',
-    `<b>${symbol}</b>`,
+    '🟣 <b>AlphaOS · ARC OPPORTUNITY</b>',
+    '━━━━━━━━━━━━━━━━━━',
+    `🚀 <b>${symbol}</b>  ·  <code>${shortCa}</code>`,
     `<code>${market.assetId}</code>`,
     '',
-    `Liquidity: <b>${formatUsd(market.liquidityUsd)}</b>`,
-    `5m Volume: <b>${formatUsd(market.volume5mUsd)}</b>`,
-    `Buys / Sells: <b>${buys} / ${sells}</b> (${ratio}x)`,
-    `Market Cap: <b>${formatUsd(market.marketCapUsd)}</b>`,
-    warnings.length ? `Safety notes: ${warnings.join(', ')}` : 'Safety: core checks passed',
+    `💧 Liquidity     <b>${formatUsd(market.liquidityUsd)}</b>`,
+    `📊 5m Volume     <b>${formatUsd(market.volume5mUsd)}</b>`,
+    `🟢 Buys / Sells  <b>${buys} / ${sells}</b>  ·  <b>${ratio}x</b>`,
+    `💰 Market Cap    <b>${formatUsd(market.marketCapUsd)}</b>`,
+    '',
+    '🎯 <b>WHY ALPHAOS FLAGGED IT</b>',
+    ...(evidence.length ? evidence : ['• Market opportunity criteria passed']),
+    '',
+    '🛡️ <b>SAFETY</b>',
+    '✅ Core ARC contract checks passed',
+    ...(otherWarnings.length ? otherWarnings.map(item => `⚠️ ${item.replaceAll('_', ' ')}`) : []),
+    ...(unavailable.length ? [`⚪ Additional checks unavailable: ${unavailable.join(', ')}`] : []),
+    '',
+    '<i>AlphaOS · Find. Analyse. Trade Smarter.</i>',
   ].join('\n');
 
   // Keep the alert action-first: chart + explorer are core; project/social
@@ -59,7 +83,7 @@ async function deliverArcAlert(market: Awaited<ReturnType<typeof enrichArcMarket
     ],
     [
       ...(market.projectWebsite ? [{ text: '🌐 Project', url: market.projectWebsite }] : []),
-      ...(market.projectTwitter ? [{ text: '𝕏 X', url: market.projectTwitter }] : []),
+      ...(market.projectTwitter ? [{ text: '𝕏', url: market.projectTwitter }] : []),
       ...(market.projectTelegram ? [{ text: '✈️ TG', url: market.projectTelegram }] : []),
     ],
   ].filter(row => row.length > 0);
