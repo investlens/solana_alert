@@ -1,11 +1,11 @@
-import { parseAbi } from 'viem';
+import { decodeFunctionResult, encodeFunctionData, parseAbi } from 'viem';
 import type { PonsLaunch } from './ponsHistoricalLaunchScanner.js';
 import type { DexPair, DexProfile, RiskResult } from '../../types.js';
 import { chooseBestPair, fetchPairs } from '../../services/dexscreener.js';
 import { scoreToken } from '../../core/scoring.js';
 import { getDeliverableUsers } from '../../core/delivery.js';
 import { governedDexScreenerJson } from '../../services/dexscreenerRequestGovernor.js';
-import { robinhoodPublicClient } from './rpc.js';
+import { requestRobinhoodRpcResilient } from './rpc.js';
 import { scanRobinhoodDevTokenFlow } from './security/devTokenFlowScanner.js';
 import { getRobinhoodTokenSocials, type RobinhoodTokenSocials } from './tokenMetadata.js';
 
@@ -207,22 +207,18 @@ async function validatePonsV2Curve(launch: PonsLaunch): Promise<boolean> {
   const curve = String(launch.curve_address ?? '').trim();
   if (!token || !/^0x[0-9a-fA-F]{40}$/.test(curve)) return false;
   try {
+    const readCurve = async (functionName: 'token' | 'getReserves' | 'graduated') => {
+      const data = encodeFunctionData({ abi: PREINDEX_ABI, functionName } as any);
+      const raw = await requestRobinhoodRpcResilient({
+        method: 'eth_call',
+        params: [{ to: curve, data }, 'latest'],
+      });
+      return decodeFunctionResult({ abi: PREINDEX_ABI, functionName, data: raw as `0x${string}` } as any);
+    };
     const [curveToken, reserves, graduated] = await Promise.all([
-      robinhoodPublicClient.readContract({
-        address: curve as `0x${string}`,
-        abi: PREINDEX_ABI,
-        functionName: 'token',
-      }),
-      robinhoodPublicClient.readContract({
-        address: curve as `0x${string}`,
-        abi: PREINDEX_ABI,
-        functionName: 'getReserves',
-      }),
-      robinhoodPublicClient.readContract({
-        address: curve as `0x${string}`,
-        abi: PREINDEX_ABI,
-        functionName: 'graduated',
-      }),
+      readCurve('token'),
+      readCurve('getReserves'),
+      readCurve('graduated'),
     ]);
     const [quoteReserve, tokenReserve] = reserves as readonly [bigint, bigint];
     const valid = String(curveToken).toLowerCase() === token &&
