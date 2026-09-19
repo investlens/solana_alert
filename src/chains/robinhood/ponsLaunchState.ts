@@ -10,6 +10,7 @@ import {
 import { PONS_CONTRACTS, getPonsFactoryDeployments } from './ponsContracts.js';
 import { requestRobinhoodRpcResilient } from './rpc.js';
 import { supabase } from '../../services/supabase.js';
+import { getSharedJson } from '../../services/sharedJsonCache.js';
 
 const FACTORY_ABI = parseAbi([
   'function getLaunchedToken(address token) view returns ((address token,address deployer,address pairedToken,address positionManager,uint256 positionId,uint256 dexId,uint256 launchConfigId,uint256 restrictionsEndBlock,uint256 supply,bool isToken0,uint24 poolFee,bool exists,uint256 initialBuyAmount) launched)',
@@ -85,6 +86,10 @@ async function indexedPonsLaunchExists(token: Address): Promise<boolean> {
 
 export async function isVerifiedPonsLaunch(tokenAddress: string): Promise<boolean> {
   const token = getAddress(tokenAddress);
+  const shared = await getSharedJson<{ factory?: string; protocolVersion?: string }>(
+    `alphaos:pons:verified:${token.toLowerCase()}`,
+  );
+  if (shared) return true;
   if (await indexedPonsLaunchExists(token)) return true;
   try {
     return Boolean((await getPonsLaunchState(tokenAddress)).exists);
