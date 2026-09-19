@@ -11,6 +11,10 @@ export type ArcMarketEnrichment = ArcTokenEnrichment & {
   marketCapUsd: number | null;
   priceUsd: number | null;
   pairCreatedAt: number | null;
+  dexUrl: string | null;
+  projectWebsite: string | null;
+  projectTwitter: string | null;
+  projectTelegram: string | null;
 };
 
 type Pair = {
@@ -25,6 +29,8 @@ type Pair = {
   fdv?: number | string | null;
   priceUsd?: number | string | null;
   pairCreatedAt?: number | null;
+  url?: string;
+  info?: { websites?: Array<{ url?: string }>; socials?: Array<{ type?: string; url?: string }> };
 };
 
 const n = (value: unknown): number | null => {
@@ -80,12 +86,16 @@ export async function enrichArcMarket(token: ArcTokenEnrichment): Promise<ArcMar
       marketCapUsd: n(best.marketCap) ?? n(best.fdv),
       priceUsd: n(best.priceUsd),
       pairCreatedAt: n(best.pairCreatedAt),
+      dexUrl: typeof best.url === 'string' && best.url.startsWith('http') ? best.url : `https://dexscreener.com/arc/${token.assetId}`,
+      projectWebsite: best.info?.websites?.find(item => typeof item?.url === 'string' && item.url.startsWith('http'))?.url ?? null,
+      projectTwitter: best.info?.socials?.find(item => /twitter|x/i.test(String(item?.type ?? '')) && typeof item?.url === 'string' && item.url.startsWith('http'))?.url ?? null,
+      projectTelegram: best.info?.socials?.find(item => /telegram/i.test(String(item?.type ?? '')) && typeof item?.url === 'string' && item.url.startsWith('http'))?.url ?? null,
     };
   } catch (error) {
     console.warn('[ArcMarket] market enrichment unavailable; candidate remains non-alertable', {
       assetId: token.assetId,
       reason: error instanceof Error ? error.message : String(error),
     });
-    return { ...token, marketDataSource: null, liquidityUsd: null, volume5mUsd: null, buys5m: null, sells5m: null, marketCapUsd: null, priceUsd: null, pairCreatedAt: null };
+    return { ...token, marketDataSource: null, liquidityUsd: null, volume5mUsd: null, buys5m: null, sells5m: null, marketCapUsd: null, priceUsd: null, pairCreatedAt: null, dexUrl: null, projectWebsite: null, projectTwitter: null, projectTelegram: null };
   }
 }
