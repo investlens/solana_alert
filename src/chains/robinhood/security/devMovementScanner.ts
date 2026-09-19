@@ -6,9 +6,7 @@ import {
   type Hex,
 } from 'viem';
 
-import {
-  robinhoodChain,
-} from '../config.js';
+import { getRobinhoodBlockNumberResilient, requestRobinhoodRpcResilient } from '../rpc.js';
 
 import {
   getPonsLaunchState,
@@ -62,80 +60,12 @@ export type RobinhoodDevMovementResult = {
 };
 
 
-async function rpcRequest<T>(
-  method: string,
-  params: unknown[],
-): Promise<T> {
-  const rpcUrl =
-    robinhoodChain
-      .rpcUrls
-      .default
-      .http[0];
-
-  const response =
-    await fetch(
-      rpcUrl,
-      {
-        method:
-          'POST',
-
-        headers: {
-          'Content-Type':
-            'application/json',
-        },
-
-        body:
-          JSON.stringify({
-            jsonrpc:
-              '2.0',
-
-            id:
-              1,
-
-            method,
-
-            params,
-          }),
-      },
-    );
-
-  if (!response.ok) {
-    throw new Error(
-      `Robinhood RPC HTTP ${response.status}`,
-    );
-  }
-
-  const payload =
-    await response.json() as {
-      result?: T;
-
-      error?: {
-        message?: string;
-      };
-    };
-
-  if (payload.error) {
-    throw new Error(
-      payload.error.message ??
-      `Robinhood RPC ${method} failed`,
-    );
-  }
-
-  return payload.result as T;
+async function rpcRequest<T>(method: string, params: unknown[]): Promise<T> {
+  return requestRobinhoodRpcResilient<T>({ method, params });
 }
 
-
-async function getLatestBlockNumber():
-Promise<bigint> {
-  const result =
-    await rpcRequest<Hex>(
-      'eth_blockNumber',
-      [],
-    );
-
-  return BigInt(
-    result,
-  );
+async function getLatestBlockNumber(): Promise<bigint> {
+  return getRobinhoodBlockNumberResilient();
 }
 
 
