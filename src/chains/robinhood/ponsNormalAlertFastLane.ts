@@ -29,6 +29,7 @@ const noPairRetries = new Set<string>();
 const NO_PAIR_RETRY_MS = Math.max(30_000, Math.min(120_000, Number(process.env.PONS_NO_PAIR_RETRY_MS ?? 45_000)));
 const PREINDEX_MAX = 10;
 const PREINDEX_RECHECK_MS = Math.max(15_000, Number(process.env.PONS_CURVE_TREND_CONFIRM_MS ?? 30_000));
+const PONS_MIN_ALERT_AGE_MS = Math.max(5 * 60_000, Number(process.env.PONS_MIN_ALERT_AGE_MS ?? 30 * 60_000));
 const PONS_CURVE_MIN_QUOTE_GROWTH_PCT = Number(process.env.PONS_CURVE_MIN_QUOTE_GROWTH_PCT ?? 3);
 const PONS_CURVE_STRONG_QUOTE_GROWTH_PCT = Number(process.env.PONS_CURVE_STRONG_QUOTE_GROWTH_PCT ?? 8);
 const PREINDEX_ABI = parseAbi([
@@ -252,72 +253,80 @@ function schedulePreIndexRecheck(launch: PonsLaunch): void {
   const token = tokenKey(launch);
   if (!token || preIndexCandidates.has(token) || preIndexAlerted.has(token) || preIndexCandidates.size >= PREINDEX_MAX) return;
   preIndexCandidates.add(token);
-  void (async () => {
-    const first = await readPonsV2Curve(launch);
-    if (!first || first.graduated) {
-      preIndexCandidates.delete(token);
-      return;
-    }
-    setTimeout(() => {
-      void (async () => {
-        try {
-          const second = await readPonsV2Curve(launch);
-          if (!second) return;
-          if (second.graduated) {
-            console.log(`[PonsFastLane] curve bonded during trend watch token=${token}`);
-            return;
-          }
-          const quoteGrowthPct = Number((second.quoteReserve - first.quoteReserve) * 10_000n / first.quoteReserve) / 100;
-          const tokenReserveChangePct = Number((second.tokenReserve - first.tokenReserve) * 10_000n / first.tokenReserve) / 100;
-          const upward = quoteGrowthPct >= PONS_CURVE_MIN_QUOTE_GROWTH_PCT && tokenReserveChangePct < 0;
-          if (!upward) {
-            console.log(`[PonsFastLane] CURVE_TREND_REJECT token=${token} quoteGrowthPct=${quoteGrowthPct.toFixed(2)} tokenReservePct=${tokenReserveChangePct.toFixed(2)}`);
-            return;
-          }
 
-          // Only promising curves pay the cost of developer-flow enrichment.
-          const devFlow = await scanRobinhoodDevTokenFlow(token, launch.deployer_address);
-          if ((devFlow.otherDevTransferPercent ?? 0) > 0) {
-            console.log(`[PonsFastLane] CURVE_TREND_REJECT_DEV token=${token} transferredPct=${devFlow.otherDevTransferPercent}`);
-            return;
+  const launchedAt = Date.parse(launch.block_timestamp);
+  const ageMs = Number.isFinite(launchedAt) ? Math.max(0, Date.now() - launchedAt) : 0;
+  const maturityWaitMs = Math.max(0, PONS_MIN_ALERT_AGE_MS - ageMs);
+  console.log(`[PonsFastLane] MATURITY_WATCH token=${token} ageMin=${(ageMs / 60_000).toFixed(1)} waitMin=${(maturityWaitMs / 60_000).toFixed(1)}`);
+
+  setTimeout(() => {
+    void (async () => {
+      const baseline = await readPonsV2Curve(launch);
+      if (!baseline || baseline.graduated) {
+        preIndexCandidates.delete(token);
+        return;
+      }
+      setTimeout(() => {
+        void (async () => {
+          try {
+            const second = await readPonsV2Curve(launch);
+            if (!second || second.graduated) return;
+            const quoteGrowthPct = Number((second.quoteReserve - baseline.quoteReserve) * 10_000n / baseline.quoteReserve) / 100;
+            const tokenReserveChangePct = Number((second.tokenReserve - baseline.tokenReserve) * 10_000n / baseline.tokenReserve) / 100;
+            const upward = quoteGrowthPct >= PONS_CURVE_MIN_QUOTE_GROWTH_PCT && tokenReserveChangePct < 0;
+            if (!upward) {
+              console.log(`[PonsFastLane] MATURE_TREND_REJECT token=${token} quoteGrowthPct=${quoteGrowthPct.toFixed(2)} tokenReservePct=${tokenReserveChangePct.toFixed(2)}`);
+              return;
+            }
+
+            const devFlow = await scanRobinhoodDevTokenFlow(token, launch.deployer_address);
+            const devMoved = (devFlow.otherDevTransferPercent ?? 0) > 0;
+            const devBurned = (devFlow.confirmedDevBurnPercent ?? 0) > 0;
+            const devHolding = devFlow.devHoldingPercent;
+            // Alert only when we can positively establish that the dev still holds tokens
+            // or that the dev burned supply. Unknown/zero holding is not enough evidence.
+            const devSafe = devBurned || (devHolding != null && devHolding > 0 && !devMoved);
+            if (!devSafe) {
+              console.log(`[PonsFastLane] MATURE_TREND_REJECT_DEV token=${token} holdingPct=${devHolding ?? 'unknown'} burnedPct=${devFlow.confirmedDevBurnPercent ?? 0} movedPct=${devFlow.otherDevTransferPercent ?? 0}`);
+              return;
+            }
+
+            const strong = quoteGrowthPct >= PONS_CURVE_STRONG_QUOTE_GROWTH_PCT;
+            const curveMarketCapEth = (Number(second.quoteReserve) / Number(second.tokenReserve)) * 1_000_000_000;
+            const shortCa = token.length > 14 ? `${token.slice(0, 8)}…${token.slice(-6)}` : token;
+            const ageMin = Number.isFinite(launchedAt) ? Math.max(30, Math.floor((Date.now() - launchedAt) / 60_000)) : 30;
+            const text = [
+              strong ? '🔥 <b>AlphaOS · PONS SUSTAINED MOMENTUM</b>' : '🚀 <b>AlphaOS · PONS TREND REVERSAL</b>',
+              '━━━━━━━━━━━━━━━━━━',
+              `🪙 <b>Verified PONS Launch</b>  ·  <code>${shortCa}</code>`,
+              `<code>${escapeHtml(token)}</code>`,
+              '',
+              `🕒 Launch age       <b>${ageMin}m+</b>`,
+              `📈 Fresh trend       <b>+${quoteGrowthPct.toFixed(2)}%</b>`,
+              `🧮 Token reserve     <b>${tokenReserveChangePct.toFixed(2)}%</b>`,
+              `💰 Curve Market Cap  <b>${curveMarketCapEth.toFixed(3)} ETH</b>`,
+              '',
+              '🎯 <b>WHY ALPHAOS FLAGGED IT</b>',
+              '✅ Survived the high-risk first 30 minutes',
+              `🟢 Fresh buying trend confirmed over ${Math.round(PREINDEX_RECHECK_MS / 1000)}s`,
+              ...(devHolding != null && devHolding > 0 ? [`👨‍💻 Dev still holding <b>${devHolding.toFixed(2)}%</b>`] : []),
+              ...(devBurned ? [`🔥 Verified dev burn <b>${devFlow.confirmedDevBurnPercent!.toFixed(2)}%</b>`] : []),
+              '',
+              '🛡️ <b>PONS LAUNCHPAD</b>',
+              '✅ Verified PONS bonding curve',
+              '<i>Market/dump risk still applies · AlphaOS</i>',
+            ].join('\n');
+            const socials = await getRobinhoodTokenSocials(token);
+            const delivery = await directTelegramRecipients(text, token, socials, true);
+            preIndexAlerted.add(token);
+            console.log(`[PonsFastLane] MATURE_CURVE_ALERT_SENT token=${token} ageMin=${ageMin} quoteGrowthPct=${quoteGrowthPct.toFixed(2)} delivered=${delivery.delivered} failed=${delivery.failed}`);
+          } finally {
+            preIndexCandidates.delete(token);
           }
-          const strong = quoteGrowthPct >= PONS_CURVE_STRONG_QUOTE_GROWTH_PCT;
-          // V2 PONS supply is fixed at 1B. Constant-product spot price is quoteReserve/tokenReserve;
-          // both assets use 18 decimals, so this gives a lightweight pre-bond market cap in ETH.
-          const curveMarketCapEth = (Number(second.quoteReserve) / Number(second.tokenReserve)) * 1_000_000_000;
-          const shortCa = token.length > 14 ? `${token.slice(0, 8)}…${token.slice(-6)}` : token;
-          const text = [
-            strong ? '🔥 <b>AlphaOS · PONS EARLY MOMENTUM</b>' : '🚀 <b>AlphaOS · PONS CURVE OPPORTUNITY</b>',
-            '━━━━━━━━━━━━━━━━━━',
-            `🪙 <b>Verified PONS Launch</b>  ·  <code>${shortCa}</code>`,
-            `<code>${escapeHtml(token)}</code>`,
-            '',
-            `📈 Curve demand     <b>+${quoteGrowthPct.toFixed(2)}%</b>`,
-            `🧮 Token reserve    <b>${tokenReserveChangePct.toFixed(2)}%</b>`,
-            `💰 Curve Market Cap <b>${curveMarketCapEth.toFixed(3)} ETH</b>`,
-            `⏱️ Confirmation     <b>${Math.round(PREINDEX_RECHECK_MS / 1000)}s</b>`,
-            '',
-            '🎯 <b>WHY ALPHAOS FLAGGED IT</b>',
-            '✅ Verified PONS bonding curve',
-            `🟢 Quote reserve grew <b>+${quoteGrowthPct.toFixed(2)}%</b>`,
-            '🟢 Token reserve fell as demand increased',
-            ...((devFlow.devHoldingPercent ?? 0) >= 0 ? [`👨‍💻 Dev holding <b>${Number(devFlow.devHoldingPercent ?? 0).toFixed(2)}%</b>`] : []),
-            ...((devFlow.confirmedDevBurnPercent ?? 0) > 0 ? [`🔥 Verified dev burn <b>${devFlow.confirmedDevBurnPercent!.toFixed(2)}%</b>`] : []),
-            '',
-            '🛡️ <b>PONS LAUNCHPAD</b>',
-            '✅ Pre-bond PONS mechanics verified on-chain',
-            '<i>Market/dump risk still applies · AlphaOS</i>',
-          ].join('\n');
-          const socials = await getRobinhoodTokenSocials(token);
-          const delivery = await directTelegramRecipients(text, token, socials, true);
-          preIndexAlerted.add(token);
-          console.log(`[PonsFastLane] CURVE_ALERT_SENT token=${token} quoteGrowthPct=${quoteGrowthPct.toFixed(2)} delivered=${delivery.delivered} failed=${delivery.failed}`);
-        } finally {
-          preIndexCandidates.delete(token);
-        }
-      })();
-    }, PREINDEX_RECHECK_MS);
-  })();
+        })();
+      }, PREINDEX_RECHECK_MS);
+    })();
+  }, maturityWaitMs);
 }
 
 async function evaluate(launch: PonsLaunch): Promise<void> {
