@@ -188,7 +188,7 @@ export async function saveRobinhoodRejection(args: SaveRobinhoodRejectionArgs): 
   const { data, error } = result;
 
   if (error) {
-    console.error('[RobinhoodObservationStore] Rejection save failed:, { token: args.tokenAddress, stage: args.rejectionStage, error: error.message });
+    console.error('[RobinhoodObservationStore] Rejection save failed:', { token: args.tokenAddress, stage: args.rejectionStage, error: error.message });
     return null;
   }
   console.log('[RobinhoodObservationStore] Rejection saved:', { token: args.tokenAddress, stage: args.rejectionStage, id: data?.id ?? null });
