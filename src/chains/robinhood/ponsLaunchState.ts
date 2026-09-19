@@ -7,7 +7,7 @@ import {
   type Hex,
 } from 'viem';
 
-import { PONS_CONTRACTS } from './ponsContracts.js';
+import { PONS_CONTRACTS, getPonsFactoryDeployments } from './ponsContracts.js';
 import { requestRobinhoodRpcResilient } from './rpc.js';
 import { supabase } from '../../services/supabase.js';
 
@@ -97,18 +97,27 @@ export async function getPonsLaunchState(
   }
 
   const indexedFactory = await indexedFactoryForToken(token);
-  if (indexedFactory) {
-    const indexedLaunch = await readLaunchFromFactory(token, indexedFactory);
-    if (indexedLaunch.exists) return indexedLaunch;
-    console.warn('[PonsLaunchState] indexed factory did not confirm launch; checking active factory', {
-      token,
-      indexedFactory,
-      activeFactory,
-    });
+  const factories = [...new Set([
+    indexedFactory,
+    activeFactory,
+    ...getPonsFactoryDeployments().filter(factory => factory.enabled).map(factory => getAddress(factory.address)),
+  ].filter((value): value is Address => Boolean(value)).map(value => value.toLowerCase()))].map(value => getAddress(value));
+
+  let fallback: PonsLaunchState | null = null;
+  for (const factory of factories) {
+    try {
+      const launch = await readLaunchFromFactory(token, factory);
+      fallback ??= launch;
+      if (launch.exists) return launch;
+    } catch (error) {
+      console.warn('[PonsLaunchState] factory verification failed; trying next known PONS factory', {
+        token,
+        factory,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
-  if (!indexedFactory || indexedFactory.toLowerCase() !== activeFactory.toLowerCase()) {
-    return readLaunchFromFactory(token, activeFactory);
-  }
-  return readLaunchFromFactory(token, indexedFactory);
+  if (fallback) return fallback;
+  throw new Error(`Unable to verify PONS launch state for ${token} across known factories`);
 }
