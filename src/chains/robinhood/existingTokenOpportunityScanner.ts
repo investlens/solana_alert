@@ -180,9 +180,20 @@ async function scanToken(entry: ExistingTokenUniverseEntry) {
   let qualified = false, emitted = false;
   if (result.alertable && result.transition) {
     const qualification = qualifyPremiumOpportunity(rawData, 'CHECK_ENTRY', entry.token);
-    const cooldownPassed = !prior.lastAlertAt || Date.now() - Date.parse(prior.lastAlertAt) >= config.existingTokenAlertCooldownMinutes * 60_000;
+    // Normal/reversal opportunities are one-shot per token. BOOST events are handled
+    // by the separate boost observer and intentionally remain repeatable on genuine
+    // additional boost purchases.
+    const priorNormalAlert = Boolean(prior.lastAlertAt);
     qualified = qualification.eligible;
-    if (qualified && (cooldownPassed || result.previousState !== result.assessment.state)) {
+    if (qualified && priorNormalAlert) {
+      console.log('[ExistingTokenScanner] DUPLICATE_REVERSAL_SUPPRESSED', {
+        token: entry.token,
+        priorAlertAt: prior.lastAlertAt,
+        previousState: result.previousState,
+        currentState: result.assessment.state,
+      });
+    }
+    if (qualified && !priorNormalAlert) {
       const kind = result.reentry ? 'REIGNITION' : result.assessment.state === 'RUNNER' ? 'RUNNER' : 'BREAKOUT';
       const title = result.reentry ? `${market.symbol} 🔄 TREND REVERSAL` : `${market.symbol} Existing Token ${kind}`;
       const actionRaw = { ...rawData, lastAlertState: result.assessment.state, lastAlertAt: observedAt };
