@@ -7,9 +7,7 @@ import {
   type Hex,
 } from 'viem';
 
-import {
-  robinhoodChain,
-} from './config.js';
+import { requestRobinhoodRpcResilient } from './rpc.js';
 
 const TOKEN_ABI = parseAbi([
   'function name() view returns (string)',
@@ -39,78 +37,17 @@ async function rawEthCall(args: {
   data: Hex;
   signal?: AbortSignal;
 }): Promise<Hex> {
-  const rpcUrl =
-    robinhoodChain.rpcUrls.default.http[0];
-
-  const response =
-    await fetch(rpcUrl, {
-      method: 'POST',
-
-      headers: {
-        'Content-Type':
-          'application/json',
-      },
-
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-
-        id: 1,
-
-        method: 'eth_call',
-
-        params: [
-          {
-            to: args.address,
-            data: args.data,
-          },
-
-          'latest',
-        ],
-      }),
-      signal: args.signal,
-    });
-
-  if (!response.ok) {
-    throw new Error(
-      `Robinhood eth_call HTTP ${response.status}`,
-    );
-  }
-
-  const payload =
-    await response.json() as {
-      result?: Hex;
-
-      error?: {
-        code?: number;
-        message?: string;
-      };
-    };
-
-  if (payload.error) {
-    throw new Error(
-      `Robinhood eth_call failed: ` +
-      `${payload.error.code ?? ''} ` +
-      `${payload.error.message ?? 'Unknown RPC error'}`,
-    );
-  }
-
-  if (!payload.result) {
-    throw new Error(
-      'Robinhood eth_call returned no result',
-    );
-  }
-
-  return payload.result;
+  return await requestRobinhoodRpcResilient({
+    method: 'eth_call',
+    params: [{ to: args.address, data: args.data }, 'latest'],
+  }) as Hex;
 }
 
-async function rawGetCode(address: Address, signal?: AbortSignal): Promise<Hex> {
-  const rpcUrl = robinhoodChain.rpcUrls.default.http[0];
-  const response = await fetch(rpcUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getCode', params: [address, 'latest'] }), signal });
-  if (!response.ok) throw new Error(`Robinhood eth_getCode HTTP ${response.status}`);
-  const payload = await response.json() as { result?: Hex; error?: { message?: string } };
-  if (payload.error || !payload.result) throw new Error(payload.error?.message ?? 'Robinhood eth_getCode failed');
-  return payload.result;
+async function rawGetCode(address: Address, _signal?: AbortSignal): Promise<Hex> {
+  return await requestRobinhoodRpcResilient({
+    method: 'eth_getCode',
+    params: [address, 'latest'],
+  }) as Hex;
 }
 
 async function readName(
