@@ -68,11 +68,20 @@ export async function enrichArcMarket(token: ArcTokenEnrichment): Promise<ArcMar
         })),
       });
     }
+    // ARC providers currently expose bonded pools with either the canonical
+    // quote asset or the native/zero-address quote. Accept both representations
+    // while still requiring the requested token to be the base asset. This
+    // avoids treating a real bonded ARC pool as PRE_BOND_WAIT without relaxing
+    // token identity or chain verification.
+    const acceptedQuotes = new Set([
+      normalizedQuote,
+      '0x0000000000000000000000000000000000000000',
+    ]);
     const matching = pairs.filter(pair => {
       const chain = String(pair.chainId ?? '').toLowerCase();
       const base = String(pair.baseToken?.address ?? '').toLowerCase();
       const q = String(pair.quoteToken?.address ?? '').toLowerCase();
-      return chain.includes('arc') && ((base === asset && q === normalizedQuote) || (base === normalizedQuote && q === asset));
+      return chain === 'arc' && base === asset && acceptedQuotes.has(q);
     });
     const best = matching.sort((a, b) => (n(b.liquidity?.usd) ?? 0) - (n(a.liquidity?.usd) ?? 0))[0];
     if (!best) throw new Error('No verified Arc pair returned by market provider');
