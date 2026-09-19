@@ -6,11 +6,15 @@ import { enrichArcCandidate } from '../src/chains/arc/enrichment.js';
 import { enrichArcMarket } from '../src/chains/arc/market.js';
 import { assessArcForAlert } from '../src/chains/arc/alertGate.js';
 import { sendTelegramWithMessageId } from '../src/services/telegram.js';
+import { getDeliverableUsers } from '../src/core/delivery.js';
 
 const POLL_MS = Math.max(2_000, Number(process.env.ARC_LIVE_POLL_INTERVAL_MS ?? 5_000));
 const ENABLED = String(process.env.ARC_LIVE_ENABLED ?? 'false').toLowerCase() === 'true';
 const MAX_BLOCKS = Math.max(1, Number(process.env.ARC_LIVE_MAX_BLOCKS_PER_POLL ?? 250));
 const ALERT_CHAT_ID = String(process.env.ADMIN_TELEGRAM_ID || process.env.OWNER_CHAT_ID || '').trim();
+const RECIPIENT_CACHE_MS = Math.max(60_000, Number(process.env.ARC_RECIPIENT_CACHE_MS ?? 300_000));
+let recipientCacheAt = 0;
+let recipientCache = new Set<string>();
 const delivered = new Set<string>();
 const MARKET_RETRY_DELAY_MS = Math.max(12_000, Number(process.env.ARC_MARKET_RETRY_DELAY_MS ?? 15_000));
 const MARKET_RETRY_MAX_PENDING = Math.max(5, Math.min(50, Number(process.env.ARC_MARKET_RETRY_MAX_PENDING ?? 20)));
@@ -25,13 +29,58 @@ let arcBoostBaselineReady = false;
 const ARC_BOOST_POLL_MS = Math.max(10_000, Number(process.env.ARC_BOOST_POLL_MS ?? 15_000));
 let lastArcBoostPollAt = 0;
 
+async function getArcRecipients(): Promise<string[]> {
+  const now = Date.now();
+  if (recipientCache.size && now - recipientCacheAt < RECIPIENT_CACHE_MS) return [...recipientCache];
+  const next = new Set<string>();
+  if (ALERT_CHAT_ID) next.add(ALERT_CHAT_ID);
+  try {
+    const users = await getDeliverableUsers();
+    for (const user of users) {
+      const telegramId = String(user.telegram_id ?? '').trim();
+      if (telegramId && !user.is_blocked) next.add(telegramId);
+    }
+    if (next.size) {
+      recipientCache = next;
+      recipientCacheAt = now;
+    }
+  } catch (error) {
+    console.warn('[ArcLive] recipient refresh failed; using cached/admin recipients', {
+      cached: recipientCache.size,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  }
+  if (!recipientCache.size && ALERT_CHAT_ID) recipientCache.add(ALERT_CHAT_ID);
+  return [...recipientCache];
+}
+
+async function broadcastArcAlert(text: string, buttons: any[][]): Promise<{delivered:number;failed:number;adminMessageId:number|null}> {
+  const recipients = await getArcRecipients();
+  if (!recipients.length) throw new Error('no ARC Telegram recipients available');
+  const results = await Promise.allSettled(recipients.map(chatId => sendTelegramWithMessageId(chatId, text, buttons)));
+  let deliveredCount = 0;
+  let failed = 0;
+  let adminMessageId: number | null = null;
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      deliveredCount += 1;
+      if (recipients[index] === ALERT_CHAT_ID) adminMessageId = result.value;
+    } else {
+      failed += 1;
+      console.warn('[ArcLive] RECIPIENT_SEND_FAILED', { recipient: recipients[index], reason: result.reason instanceof Error ? result.reason.message : String(result.reason) });
+    }
+  });
+  if (!deliveredCount) throw new Error(`ARC Telegram delivery failed for all ${failed} recipients`);
+  return { delivered: deliveredCount, failed, adminMessageId };
+}
+
 function formatUsd(value: number | null | undefined): string {
   return value == null || !Number.isFinite(value) ? 'n/a' : `$${Math.round(value).toLocaleString('en-US')}`;
 }
 
 async function deliverArcAlert(market: Awaited<ReturnType<typeof enrichArcMarket>>, warnings: string[]) {
   const key = market.assetId.toLowerCase();
-  if (!ALERT_CHAT_ID || delivered.has(key)) return;
+  if (delivered.has(key)) return;
 
   const symbol = market.symbol || 'ARC TOKEN';
   const buys = market.buys5m ?? 0;
@@ -88,9 +137,9 @@ async function deliverArcAlert(market: Awaited<ReturnType<typeof enrichArcMarket
     ],
   ].filter(row => row.length > 0);
 
-  const messageId = await sendTelegramWithMessageId(ALERT_CHAT_ID, text, buttons);
+  const delivery = await broadcastArcAlert(text, buttons);
   delivered.add(key);
-  console.log('[ArcLive] ALERT_SENT', { assetId: market.assetId, symbol: market.symbol, messageId });
+  console.log('[ArcLive] ALERT_SENT', { assetId: market.assetId, symbol: market.symbol, messageId: delivery.adminMessageId, delivered: delivery.delivered, failed: delivery.failed });
 }
 
 
