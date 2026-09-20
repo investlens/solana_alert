@@ -174,7 +174,10 @@ async function scanToken(entry: ExistingTokenUniverseEntry) {
   // fetched by this scanner. It performs no additional RPC/HTTP/DB work and cannot
   // deliver alerts or alter the existing qualification path.
   if ((process.env.LIFECYCLE_INTELLIGENCE_MODE ?? 'off').toLowerCase() === 'observe') {
+    const priorComparable = [...result.history].slice(0, -1).reverse().find(row => finitePositive((row as IntelligenceObservation & { price?: number }).price));
+    const priorComparablePrice = finitePositive((priorComparable as IntelligenceObservation & { price?: number } | undefined)?.price);
     const previousLiquidity = [...result.history].slice(0, -1).reverse().find(row => finitePositive(row.liquidity))?.liquidity ?? null;
+    const comparableMovePct = priorComparablePrice ? (market.priceUsd - priorComparablePrice) / priorComparablePrice * 100 : null;
     const lifecycle = classifyLifecycleObservation({
       chain: 'ROBINHOOD',
       tokenAddress: entry.token,
@@ -185,7 +188,7 @@ async function scanToken(entry: ExistingTokenUniverseEntry) {
       volume5mUsd: volume5m,
       buys5m: market.buys5m,
       sells5m: market.sells5m,
-      priceChange5mPct: result.history[result.history.length - 1]?.roi ?? null,
+      priceChange5mPct: comparableMovePct,
       drawdownFromHighPct: result.peakMarketCap && marketCap ? (marketCap - result.peakMarketCap) / result.peakMarketCap * 100 : null,
       creatorHoldingVerified: false,
       creatorBurnVerified: false,
