@@ -62,3 +62,14 @@ test("classifies graduation, convergence, creator relaunch and liquidity acceler
   ]));
   assert.equal(result.mode, "SHADOW");
 });
+
+
+test("observation integration remains opt-in and side-effect free by contract", async () => {
+  const source = await import("node:fs/promises").then(fs =>
+    fs.readFile(new URL("../src/chains/robinhood/existingTokenOpportunityScanner.ts", import.meta.url), "utf8")
+  );
+  assert.match(source, /LIFECYCLE_INTELLIGENCE_MODE/);
+  assert.match(source, /=== 'observe'/);
+  assert.match(source, /\[LifecycleIntel\] OBSERVE/);
+  assert.doesNotMatch(source, /LifecycleIntel[^\n]*(send|deliver|telegram|recordOpportunityAndEmit)/i);
+});
