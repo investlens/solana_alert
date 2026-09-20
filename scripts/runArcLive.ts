@@ -5,6 +5,8 @@ import { normalizeArcPoolCandidate } from '../src/chains/arc/candidate.js';
 import { enrichArcCandidate } from '../src/chains/arc/enrichment.js';
 import { enrichArcMarket } from '../src/chains/arc/market.js';
 import { assessArcForAlert } from '../src/chains/arc/alertGate.js';
+import { collectArcWalletRiskEvidence } from '../src/chains/arc/walletRiskEvidence.js';
+import { assessArcWalletRiskShadow, formatArcWalletRiskShadow } from '../src/chains/arc/walletRiskShadow.js';
 import { sendTelegramWithMessageId } from '../src/services/telegram.js';
 import { getDeliverableUsers } from '../src/core/delivery.js';
 import { supabase } from '../src/services/supabase.js';
@@ -21,6 +23,7 @@ const delivered = new Set<string>();
 const MARKET_RETRY_DELAY_MS = Math.max(12_000, Number(process.env.ARC_MARKET_RETRY_DELAY_MS ?? 15_000));
 const ARC_MIN_NORMAL_ALERT_AGE_MS = Math.max(5 * 60_000, Number(process.env.ARC_MIN_NORMAL_ALERT_AGE_MS ?? 30 * 60_000));
 const ARC_REVERSAL_CONFIRM_MS = Math.max(15_000, Number(process.env.ARC_REVERSAL_CONFIRM_MS ?? 30_000));
+const ARC_WALLET_RISK_SHADOW_ENABLED = String(process.env.ARC_WALLET_RISK_SHADOW_ENABLED ?? 'false').toLowerCase() === 'true';
 const MARKET_RETRY_MAX_PENDING = Math.max(5, Math.min(50, Number(process.env.ARC_MARKET_RETRY_MAX_PENDING ?? 20)));
 const MARKET_RETRY_PER_POLL = Math.max(1, Math.min(5, Number(process.env.ARC_MARKET_RETRY_PER_POLL ?? 3)));
 type PendingArcRetry = {
@@ -322,6 +325,16 @@ function queueMarketRetry(enriched: Awaited<ReturnType<typeof enrichArcCandidate
   });
 }
 
+function runArcWalletRiskShadow(market: Awaited<ReturnType<typeof enrichArcMarket>>): void {
+  if (!ARC_WALLET_RISK_SHADOW_ENABLED) return;
+  // Fire-and-forget by design: production opportunity delivery must never await
+  // wallet intelligence. Failure only produces a shadow log.
+  void collectArcWalletRiskEvidence(market.assetId, market.liquidityUsd)
+    .then(evidence => assessArcWalletRiskShadow(evidence))
+    .then(risk => console.log(...formatArcWalletRiskShadow(risk), { assetId: market.assetId, evidence: risk.evidence }))
+    .catch(error => console.warn('[ArcWalletRiskShadow] FAILED', { assetId: market.assetId, reason: error instanceof Error ? error.message : String(error) }));
+}
+
 async function processMarketRetries(): Promise<void> {
   let processed = 0;
   const now = Date.now();
@@ -366,6 +379,9 @@ async function processMarketRetries(): Promise<void> {
         console.log('[ArcLive] REVERSAL_WAIT', { assetId: market.assetId, previousPrice: pending.baselinePrice, currentPrice: market.priceUsd });
         continue;
       }
+      // Shadow intelligence is intentionally non-blocking and does not alter
+      // assessment, delivery, dedupe, BOOST or burn behavior.
+      runArcWalletRiskShadow(market);
       await deliverArcAlert(market, assessment.security.warnings).catch(error => {
         console.error('[ArcLive] ALERT_SEND_FAILED', { assetId: market.assetId, error });
       });
