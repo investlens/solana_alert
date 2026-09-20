@@ -1,6 +1,7 @@
 import { config } from '../../config.js';
 import { recordOpportunity } from '../../core/opportunityRegistry.js';
 import { assessTokenIntelligence, type IntelligenceObservation, type TokenIntelligenceState } from '../../intelligence/tokenIntelligenceState.js';
+import { classifyLifecycleObservation } from '../../intelligence/lifecycleIntelligence.js';
 import { recordOpportunityAndEmit } from '../../services/opportunityService.js';
 import { qualifyPremiumOpportunity } from '../../services/opportunityDeliveryService.js';
 import { runDatabaseWork, isTransientDatabaseError } from '../../services/databaseLoadGovernor.js';
@@ -169,6 +170,33 @@ async function scanToken(entry: ExistingTokenUniverseEntry) {
   const marketCap = finitePositive(market.marketCapUsd); const liquidity = finitePositive(market.liquidityUsd); const volume5m = finitePositive(market.volume5mUsd);
   const result = assessExistingTokenObservation({ prior, observedAt, price: market.priceUsd, marketCap, liquidity, volume5m, buys5m: market.buys5m, sells5m: market.sells5m });
   const firstAt = result.history[0]?.observedAt ?? observedAt; const elapsedSec = Math.max(0, (Date.parse(observedAt) - Date.parse(firstAt)) / 1000);
+  // Observation-only lifecycle intelligence: consumes the market snapshot already
+  // fetched by this scanner. It performs no additional RPC/HTTP/DB work and cannot
+  // deliver alerts or alter the existing qualification path.
+  if ((process.env.LIFECYCLE_INTELLIGENCE_MODE ?? 'off').toLowerCase() === 'observe') {
+    const previousLiquidity = [...result.history].slice(0, -1).reverse().find(row => finitePositive(row.liquidity))?.liquidity ?? null;
+    const lifecycle = classifyLifecycleObservation({
+      chain: 'ROBINHOOD',
+      tokenAddress: entry.token,
+      symbol: market.symbol,
+      ageMinutes: elapsedSec / 60,
+      liquidityUsd: liquidity,
+      previousLiquidityUsd: previousLiquidity,
+      volume5mUsd: volume5m,
+      buys5m: market.buys5m,
+      sells5m: market.sells5m,
+      priceChange5mPct: result.history[result.history.length - 1]?.roi ?? null,
+      drawdownFromHighPct: result.peakMarketCap && marketCap ? (marketCap - result.peakMarketCap) / result.peakMarketCap * 100 : null,
+      creatorHoldingVerified: false,
+      creatorBurnVerified: false,
+    });
+    if (lifecycle.signals.length) console.log('[LifecycleIntel] OBSERVE', {
+      token: entry.token,
+      symbol: market.symbol,
+      signals: lifecycle.signals,
+      reasons: lifecycle.reasons,
+    });
+  }
   const firstVolume = result.history.find(x => finitePositive(x.volume5m))?.volume5m ?? null; const peakRoi = Math.max(...result.history.map(x => x.roi));
   const rawData = { ...existingRisk, existingTokenScanner: true, state: result.assessment.state, intelligenceState: result.assessment.state,
     previousIntelligenceState: result.previousState, observations: result.history, marketCap, liquidity, volume5m, previousVolume5m: firstVolume,
