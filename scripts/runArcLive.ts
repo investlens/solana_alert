@@ -246,7 +246,7 @@ async function deliverArcAlert(market: Awaited<ReturnType<typeof enrichArcMarket
     : market.assetId;
   const unavailable = warnings
     .filter(item => /UNKNOWN/i.test(item))
-    .map(item => item.replace(/_UNKNOWN$/i, '').replaceAll('_', ' ').toLowerCase())
+    .map(item => item.replace(/_UNKNOWN$/i, '').split('_').join(' ').toLowerCase())
     .map(item => item.replace(/\b\w/g, char => char.toUpperCase()));
   const otherWarnings = warnings.filter(item => !/UNKNOWN/i.test(item));
   const ratioNumber = sells > 0 ? buys / sells : buys > 0 ? 99 : 0;
@@ -272,7 +272,7 @@ async function deliverArcAlert(market: Awaited<ReturnType<typeof enrichArcMarket
     '',
     '🛡️ <b>SAFETY</b>',
     '✅ Core ARC contract checks passed',
-    ...(otherWarnings.length ? otherWarnings.map(item => `⚠️ ${item.replaceAll('_', ' ')}`) : []),
+    ...(otherWarnings.length ? otherWarnings.map(item => `⚠️ ${item.split('_').join(' ')}`) : []),
     ...(unavailable.length ? [`⚪ Additional checks unavailable: ${unavailable.join(', ')}`] : []),
     '',
     '⚠️ <b>Do your own diligence.</b>', '', '<i>AlphaOS · Find. Analyse. Trade Smarter.</i>',
