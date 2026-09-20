@@ -99,7 +99,7 @@ export function assessArcWalletRiskShadow(input: ArcWalletRiskEvidence): ArcWall
     (earlyBuyerConcentrationPct != null && earlyBuyerConcentrationPct >= 20) ||
     (exitVsLiquidity != null && exitVsLiquidity >= 0.35);
 
-  const state: ArcWalletRiskState = highConcentration || highExitRisk ? 'RISK_DETECTED' : 'VERIFIED';
+  // VERIFIED must mean the core concentration AND dump-resistance evidence are complete.\n  // Missing cluster/exit evidence must never be interpreted as a safe result.\n  const state: ArcWalletRiskState = highConcentration || highExitRisk\n    ? 'RISK_DETECTED'\n    : (!clusterAvailable || !exitAvailable)\n      ? 'NOT_CONFIRMED'\n      : 'VERIFIED';
   const dumpResistance = !clusterAvailable || !exitAvailable
     ? 'INSUFFICIENT_DATA'
     : highConcentration || highExitRisk
