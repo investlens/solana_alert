@@ -80,6 +80,19 @@ async function processArcBurns(fromBlock: bigint, toBlock: bigint): Promise<void
       const txHash = String(log.transactionHash ?? '');
       const identity = `${txHash}:${Number(log.logIndex ?? 0)}`;
       if (!token || burnDelivered.has(identity)) continue;
+      // A standard ERC-20 Transfer has two indexed address topics plus a
+      // 32-byte non-indexed value. Some ARC contracts emit Transfer-like logs
+      // with no data; they cannot prove a burn amount and should be ignored
+      // before viem decoding rather than generating repeated decoder errors.
+      if (!log.data || String(log.data).toLowerCase() === '0x' || String(log.data).length < 66) {
+        console.info('[ArcBurn] MALFORMED_TRANSFER_SUPPRESSED', {
+          token,
+          txHash,
+          dataBytes: Math.max(0, (String(log.data ?? '0x').length - 2) / 2),
+        });
+        burnDelivered.add(identity);
+        continue;
+      }
       const decoded = decodeEventLog({ abi:[ERC20_TRANSFER_EVENT], data:log.data, topics:log.topics });
       const args = decoded.args as { from?: string; to?: string; value?: bigint };
       if (!args.to || !BURN_ADDRESSES.has(args.to.toLowerCase()) || !args.value || args.value <= 0n) continue;

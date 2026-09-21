@@ -76,13 +76,22 @@ async function failover<T>(operation: string, fn: (client: typeof clients[number
     }
 
     // Concurrent enrichment can briefly occupy the only configured provider.
-    // Wait a bounded amount once instead of declaring the whole RPC layer dead.
+    // Wait for a bounded interval instead of probing a provider that is still
+    // in flight. The previous 25ms single wait was too short for normal RPC
+    // latency and produced avoidable provider-failed noise/cooldowns.
     const healthyButBusy = clients.some(provider => {
       const s = state(provider.url);
       return s.cooldownUntil <= Date.now() && s.inFlight > 0;
     });
     if (pass === 0 && healthyButBusy) {
-      await sleep(BUSY_WAIT_MS);
+      const deadline = Date.now() + Math.max(BUSY_WAIT_MS, 750);
+      while (Date.now() < deadline) {
+        await sleep(Math.max(BUSY_WAIT_MS, 25));
+        if (clients.some(provider => {
+          const s = state(provider.url);
+          return s.cooldownUntil <= Date.now() && s.inFlight === 0;
+        })) break;
+      }
       continue;
     }
     break;

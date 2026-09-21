@@ -40,17 +40,43 @@ const n = (value: unknown): number | null => {
 
 export async function enrichArcMarket(token: ArcTokenEnrichment): Promise<ArcMarketEnrichment> {
   try {
-    const url = `https://api.dexscreener.com/latest/dex/tokens/${encodeURIComponent(token.assetId)}`;
-    const payload = (await governedDexScreenerJson<any>({
-      url,
-      caller: 'arc_live_market',
-      endpoint: 'ARC_TOKEN_PAIRS',
-      priority: 'NORMAL',
-      cacheKey: `arc:${token.assetId.toLowerCase()}`,
-      cacheTtlMs: 10_000,
-      signal: AbortSignal.timeout(8_000),
-    })).value;
-    const pairs: Pair[] = Array.isArray(payload?.pairs) ? payload.pairs : [];
+    // Prefer DexScreener's chain-scoped token-pairs endpoint for ARC. The
+    // generic latest/dex/tokens endpoint can omit newly indexed ARC pairs even
+    // when token-pairs/v1 already knows them, which left valid candidates
+    // permanently non-alertable. Keep the generic endpoint as a bounded
+    // fallback so this remains fail-closed rather than broadening eligibility.
+    const pairUrl = `https://api.dexscreener.com/token-pairs/v1/arc/${encodeURIComponent(token.assetId)}`;
+    let pairs: Pair[] = [];
+    try {
+      const scoped = (await governedDexScreenerJson<any>({
+        url: pairUrl,
+        caller: 'arc_live_market',
+        endpoint: 'ARC_TOKEN_PAIRS',
+        priority: 'NORMAL',
+        cacheKey: `arc:pairs:${token.assetId.toLowerCase()}`,
+        cacheTtlMs: 10_000,
+        signal: AbortSignal.timeout(8_000),
+      })).value;
+      pairs = Array.isArray(scoped) ? scoped : Array.isArray(scoped?.pairs) ? scoped.pairs : [];
+    } catch (error) {
+      console.warn('[ArcMarket] chain-scoped pair lookup failed; trying generic fallback', {
+        assetId: token.assetId,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (!pairs.length) {
+      const fallbackUrl = `https://api.dexscreener.com/latest/dex/tokens/${encodeURIComponent(token.assetId)}`;
+      const payload = (await governedDexScreenerJson<any>({
+        url: fallbackUrl,
+        caller: 'arc_live_market',
+        endpoint: 'ARC_TOKEN_PAIRS_FALLBACK',
+        priority: 'NORMAL',
+        cacheKey: `arc:fallback:${token.assetId.toLowerCase()}`,
+        cacheTtlMs: 10_000,
+        signal: AbortSignal.timeout(8_000),
+      })).value;
+      pairs = Array.isArray(payload?.pairs) ? payload.pairs : [];
+    }
     const asset = token.assetId.toLowerCase();
     const quote = token.quoteAsset.toLowerCase();
     const normalizedQuote = quote === '0x0000000000000000000000000000000000000000'
