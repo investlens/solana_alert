@@ -143,3 +143,49 @@ export function selectProfitableWalletDiscoveries(
 
   return [...unique.values()];
 }
+
+
+export type WalletCompletedTrade = {
+  completedAt: string | number | Date;
+  realisedReturnPct: number | null;
+};
+
+/**
+ * Calculates consecutive realised-profit evidence without I/O.
+ * A trade with unknown realised return breaks the streak rather than being
+ * guessed as profitable. Input is sorted newest-first internally.
+ */
+export function calculateProfitableTradeHistory(trades: WalletCompletedTrade[]) {
+  const ordered = [...trades].sort(
+    (a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime(),
+  );
+
+  const evaluable = ordered.filter(
+    trade => trade.realisedReturnPct != null && Number.isFinite(Number(trade.realisedReturnPct)),
+  );
+
+  const profitableTrades = evaluable.filter(
+    trade => Number(trade.realisedReturnPct) > 0,
+  ).length;
+
+  let consecutiveProfitableTrades = 0;
+  for (const trade of ordered) {
+    if (trade.realisedReturnPct == null || !Number.isFinite(Number(trade.realisedReturnPct))) break;
+    if (Number(trade.realisedReturnPct) <= 0) break;
+    consecutiveProfitableTrades += 1;
+  }
+
+  const realisedReturns = evaluable.map(trade => Number(trade.realisedReturnPct));
+  const averageRealisedRoi = realisedReturns.length
+    ? realisedReturns.reduce((sum, value) => sum + value, 0) / realisedReturns.length
+    : null;
+
+  return {
+    completedTrades: ordered.length,
+    evaluableTrades: evaluable.length,
+    profitableTrades,
+    consecutiveProfitableTrades,
+    winRate: evaluable.length ? (profitableTrades / evaluable.length) * 100 : 0,
+    averageRealisedRoi,
+  };
+}
