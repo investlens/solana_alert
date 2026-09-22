@@ -61,8 +61,12 @@ async function fetchPendingTrades(): Promise<WalletTrade[]> {
     .from('wallet_trade_history')
     .select('id, wallet, token, market_cap_at_action')
     .eq('action', 'BUY')
+    // Only revisit rows that have not already been synchronized. This keeps
+    // background DB work bounded as wallet history grows.
+    .is('outcome_synced_at', null)
     .order('created_at', { ascending: true })
-    .limit(Math.max(10, Number(process.env.WALLET_OUTCOME_BATCH_SIZE ?? 50)));
+    // Bound the batch even if configuration is accidentally set too high.
+    .limit(Math.max(1, Math.min(50, Number(process.env.WALLET_OUTCOME_BATCH_SIZE ?? 20))));
 
   if (error) {
     console.log('wallet outcome fetch error:', error.message);
