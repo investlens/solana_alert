@@ -215,3 +215,31 @@ export function profitableWalletFeatureEnabled(
 ) {
   return profitableWalletFeatureMode(value) !== 'off';
 }
+
+
+export type ProfitableWalletRuntimeLimits = {
+  maxCandidatesPerCycle: number;
+  maxHistoryTradesPerWallet: number;
+  minCycleIntervalMs: number;
+};
+
+const boundedInt = (value: unknown, fallback: number, min: number, max: number) => {
+  const parsed = Math.floor(Number(value));
+  return Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
+};
+
+/**
+ * Hard runtime ceilings prevent an accidental env change from turning this
+ * feature into an unbounded DB/provider workload.
+ */
+export function profitableWalletRuntimeLimits(env = process.env): ProfitableWalletRuntimeLimits {
+  return {
+    maxCandidatesPerCycle: boundedInt(env.PROFITABLE_WALLET_MAX_CANDIDATES_PER_CYCLE, 20, 1, 50),
+    maxHistoryTradesPerWallet: boundedInt(env.PROFITABLE_WALLET_MAX_HISTORY_TRADES, 25, 5, 50),
+    minCycleIntervalMs: boundedInt(env.PROFITABLE_WALLET_MIN_CYCLE_MS, 300_000, 60_000, 3_600_000),
+  };
+}
+
+export function capProfitableWalletCandidates<T>(candidates: T[], limits = profitableWalletRuntimeLimits()) {
+  return candidates.slice(0, limits.maxCandidatesPerCycle);
+}
