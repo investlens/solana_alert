@@ -189,3 +189,29 @@ export function calculateProfitableTradeHistory(trades: WalletCompletedTrade[]) 
     averageRealisedRoi,
   };
 }
+
+
+export type ProfitableWalletFeatureMode = 'off' | 'observe' | 'live';
+
+/**
+ * Master kill switch. Defaults OFF so an unset/missing variable can never
+ * activate wallet discovery work accidentally.
+ *
+ * off     = no discovery processing
+ * observe = calculate/log only; no user delivery
+ * live    = eligible for delivery by an explicitly wired caller
+ */
+export function profitableWalletFeatureMode(
+  value = process.env.PROFITABLE_WALLET_INTELLIGENCE_MODE,
+): ProfitableWalletFeatureMode {
+  const normalized = String(value ?? 'off').trim().toLowerCase();
+  if (normalized === 'live') return 'live';
+  if (normalized === 'observe') return 'observe';
+  return 'off';
+}
+
+export function profitableWalletFeatureEnabled(
+  value = process.env.PROFITABLE_WALLET_INTELLIGENCE_MODE,
+) {
+  return profitableWalletFeatureMode(value) !== 'off';
+}
