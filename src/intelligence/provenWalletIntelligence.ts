@@ -98,3 +98,48 @@ export function walletConvergenceKey(token: string, wallet: string) {
 export function profitableWalletDiscoveryIdentity(wallet: string) {
   return `profitable-wallet:${wallet.trim().toLowerCase()}`;
 }
+
+
+export type ProfitableWalletCandidate = {
+  wallet: string;
+  stats: ProvenWalletStats;
+  excluded?: boolean;
+  exclusionReason?: string | null;
+};
+
+export type ProfitableWalletDiscovery = {
+  wallet: string;
+  identity: string;
+  decision: ProvenWalletDecision;
+};
+
+/**
+ * Cheap first-stage funnel. Callers should build these candidates from already
+ * available trade outcomes; this function performs no I/O.
+ *
+ * Only discovery-eligible wallets survive to persistence/delivery. That means
+ * AlphaOS does not need to permanently save every observed wallet.
+ */
+export function selectProfitableWalletDiscoveries(
+  candidates: ProfitableWalletCandidate[],
+): ProfitableWalletDiscovery[] {
+  const unique = new Map<string, ProfitableWalletDiscovery>();
+
+  for (const candidate of candidates) {
+    if (candidate.excluded) continue;
+
+    const wallet = candidate.wallet.trim().toLowerCase();
+    if (!wallet) continue;
+
+    const decision = classifyProvenWallet(candidate.stats);
+    if (!decision.discoveryAlertEligible) continue;
+
+    unique.set(wallet, {
+      wallet,
+      identity: profitableWalletDiscoveryIdentity(wallet),
+      decision,
+    });
+  }
+
+  return [...unique.values()];
+}
