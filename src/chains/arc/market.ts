@@ -1,6 +1,5 @@
 import { governedDexScreenerJson } from '../../services/dexscreenerRequestGovernor.js';
 import type { ArcTokenEnrichment } from './enrichment.js';
-import { ARC_USDC_ADDRESS } from './config.js';
 
 export type ArcMarketEnrichment = ArcTokenEnrichment & {
   marketDataSource: 'DEXSCREENER' | null;
@@ -40,11 +39,6 @@ const n = (value: unknown): number | null => {
 
 export async function enrichArcMarket(token: ArcTokenEnrichment): Promise<ArcMarketEnrichment> {
   try {
-    // Prefer DexScreener's chain-scoped token-pairs endpoint for ARC. The
-    // generic latest/dex/tokens endpoint can omit newly indexed ARC pairs even
-    // when token-pairs/v1 already knows them, which left valid candidates
-    // permanently non-alertable. Keep the generic endpoint as a bounded
-    // fallback so this remains fail-closed rather than broadening eligibility.
     const pairUrl = `https://api.dexscreener.com/token-pairs/v1/arc/${encodeURIComponent(token.assetId)}`;
     let pairs: Pair[] = [];
     try {
@@ -77,11 +71,8 @@ export async function enrichArcMarket(token: ArcTokenEnrichment): Promise<ArcMar
       })).value;
       pairs = Array.isArray(payload?.pairs) ? payload.pairs : [];
     }
+
     const asset = token.assetId.toLowerCase();
-    const quote = token.quoteAsset.toLowerCase();
-    const normalizedQuote = quote === '0x0000000000000000000000000000000000000000'
-      ? ARC_USDC_ADDRESS.toLowerCase()
-      : quote;
     if (pairs.length > 0) {
       console.log('[ArcMarket] provider pairs returned', {
         assetId: token.assetId,
@@ -94,23 +85,24 @@ export async function enrichArcMarket(token: ArcTokenEnrichment): Promise<ArcMar
         })),
       });
     }
-    // ARC providers currently expose bonded pools with either the canonical
-    // quote asset or the native/zero-address quote. Accept both representations
-    // while still requiring the requested token to be the base asset. This
-    // avoids treating a real bonded ARC pool as PRE_BOND_WAIT without relaxing
-    // token identity or chain verification.
-    const acceptedQuotes = new Set([
-      normalizedQuote,
-      '0x0000000000000000000000000000000000000000',
-    ]);
+
+    // DexScreener's ARC token-pairs endpoint is already scoped to the requested
+    // token and chain. Keep independent identity verification here: require the
+    // provider to identify the chain as ARC and the requested token as the base
+    // asset. Do not require one specific quote-token representation: ARC pools
+    // can legitimately expose different quote addresses (native/canonical or
+    // other bonded quote assets), and rejecting those caused valid returned
+    // pairs to become PAIR_NOT_INDEXED. Security remains fail-closed because a
+    // pair with the wrong chain or wrong base token is never accepted.
     const matching = pairs.filter(pair => {
-      const chain = String(pair.chainId ?? '').toLowerCase();
-      const base = String(pair.baseToken?.address ?? '').toLowerCase();
-      const q = String(pair.quoteToken?.address ?? '').toLowerCase();
-      return chain === 'arc' && base === asset && acceptedQuotes.has(q);
+      const chain = String(pair.chainId ?? '').trim().toLowerCase();
+      const base = String(pair.baseToken?.address ?? '').trim().toLowerCase();
+      return chain === 'arc' && base === asset;
     });
+
     const best = matching.sort((a, b) => (n(b.liquidity?.usd) ?? 0) - (n(a.liquidity?.usd) ?? 0))[0];
     if (!best) throw new Error('No verified Arc pair returned by market provider');
+
     return {
       ...token,
       marketDataSource: 'DEXSCREENER',
