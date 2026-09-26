@@ -32,11 +32,29 @@ export async function enrichArcCandidate(candidate: ArcLaunchCandidate): Promise
   const reasons: string[] = [];
   const bytecode = await getArcBytecode(candidate.assetId).catch(() => undefined);
   const contractCodePresent = Boolean(bytecode && bytecode !== '0x');
-  if (!contractCodePresent) reasons.push('NO_CONTRACT_CODE');
 
-  // ARC production currently has a small RPC provider set guarded against
-  // concurrent stampedes. Read the tiny ERC-20 metadata set sequentially so
-  // valid tokens are not misclassified merely because another eth_call is in flight.
+  // Fail closed before any ERC-20 eth_call. A transfer/log can contain an
+  // address that is not a token contract (system/precompile/sentinel/EOA).
+  // Calling symbol/decimals/totalSupply/name on those addresses returns empty
+  // data and used to count as RPC-provider failures, eventually cooling down a
+  // healthy provider and starving unrelated ARC candidates/burn verification.
+  if (!contractCodePresent) {
+    reasons.push('NO_CONTRACT_CODE');
+    return {
+      ...candidate,
+      contractCodePresent: false,
+      metadataReadable: false,
+      name: null,
+      symbol: null,
+      decimals: null,
+      totalSupplyRaw: null,
+      eligibleForScoring: false,
+      safetyReasons: reasons,
+    };
+  }
+
+  // Only proven contracts reach the ERC-20 metadata calls. Keep these reads
+  // sequential because ARC production has a deliberately small RPC provider set.
   const symbol = await safeRead<string>(candidate.assetId, 'symbol');
   const decimalsRaw = await safeRead<number>(candidate.assetId, 'decimals');
   const totalSupplyRaw = await safeRead<bigint>(candidate.assetId, 'totalSupply');
