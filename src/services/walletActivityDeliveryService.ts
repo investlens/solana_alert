@@ -262,13 +262,14 @@ export async function deliverTrackedWalletActivity(
 ): Promise<{ failedWallets: Set<string> }> {
   const failedWallets = new Set<string>();
   for (const event of events) {
+    const walletKey = event.wallet.toLowerCase();
     try {
       const subscribers = await getTrackedWalletSubscribersForAddress({
         walletAddress: event.wallet,
         chain: event.chain ?? 'solana',
       });
       const legacyAdminWatch = event.chain !== 'robinhood' && (config.watchedWallets ?? []).some(
-        wallet => String(wallet).toLowerCase() === String(event.wallet).toLowerCase(),
+        wallet => String(wallet).toLowerCase() === walletKey,
       );
       if (legacyAdminWatch && config.adminTelegramId && !subscribers.some(
         subscriber => subscriber.telegram_id === config.adminTelegramId,
@@ -302,7 +303,7 @@ export async function deliverTrackedWalletActivity(
             .maybeSingle();
           if (existingError) throw existingError;
           const existingState = (existing?.metadata as Record<string, unknown> | null)?.state;
-          if (existingState !== 'DELIVERED' || !existing?.delivered_at) failedWallets.add(event.wallet);
+          if (existingState !== 'DELIVERED' || !existing?.delivered_at) failedWallets.add(walletKey);
           continue;
         }
         const text = buildWalletActivityMessage({ event, label: subscriber.label });
@@ -326,10 +327,10 @@ export async function deliverTrackedWalletActivity(
           },
           release: () => releaseDelivery({ telegramId: subscriber.telegram_id, event, leaseToken }),
         });
-        if (!delivery.sent || !delivery.recorded) failedWallets.add(event.wallet);
+        if (!delivery.sent || !delivery.recorded) failedWallets.add(walletKey);
       }
     } catch (error) {
-      failedWallets.add(event.wallet);
+      failedWallets.add(walletKey);
       console.warn('[WalletActivity] Delivery failed', {
         wallet: event.wallet,
         reason: error instanceof Error ? error.message : String(error),
