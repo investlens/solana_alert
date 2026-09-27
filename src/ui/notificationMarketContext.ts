@@ -131,8 +131,6 @@ export function isEconomicallyMeaningfulDexValuation(args: {
   liquidityUsd: number | null;
 }): boolean {
   if (args.valuationUsd == null || !Number.isFinite(args.valuationUsd) || args.valuationUsd <= 0) return false;
-  // Do not downgrade producers that genuinely have no liquidity observation. The
-  // credibility guard activates only when a measured pool-liquidity value exists.
   if (args.liquidityUsd == null) return true;
   if (!Number.isFinite(args.liquidityUsd) || args.liquidityUsd <= 0) return false;
   if (args.liquidityUsd >= STRONG_DEX_LIQUIDITY_USD) return true;
@@ -173,27 +171,27 @@ export function normalizeNotificationMarketContext(
   let valuationState: MarketValuationState = 'UNAVAILABLE';
   let valuationSource: NotificationMarketContext['valuationSource'] = null;
 
-  if (preIndexValuation) {
-    const comparableDex = preIndexValuation.type === 'MARKET_CAP' ? dexMarketCap : dexFdv;
-    if (comparableDex != null && dexValuationCredible && materiallyDisagrees(preIndexValuation.valueUsd, comparableDex)) {
-      valuationState = 'DISPUTED';
-    } else {
-      valuationState = 'VERIFIED_PONS_CURVE';
-      valuationSource = 'PONS_V2_CURVE_RESERVE_SPOT';
-      if (preIndexValuation.type === 'MARKET_CAP') marketCap = preIndexValuation.valueUsd;
-      else fdv = preIndexValuation.valueUsd;
+  // Once a credible indexed DEX valuation exists it is the current market state and
+  // must replace the earlier launch-curve estimate. The curve remains attached as
+  // provenance/history via preIndexValuation, but it must never mask current market cap.
+  if (dexComparable != null && dexValuationCredible) {
+    valuationState = 'VERIFIED_DEX';
+    valuationSource = 'DEX_MARKET';
+    marketCap = dexMarketCap;
+    fdv = dexFdv;
+    if (preIndexValuation) {
+      const comparableDex = preIndexValuation.type === 'MARKET_CAP' ? dexMarketCap : dexFdv;
+      if (comparableDex != null && materiallyDisagrees(preIndexValuation.valueUsd, comparableDex)) {
+        valuationState = 'DISPUTED';
+      }
     }
+  } else if (preIndexValuation) {
+    valuationState = 'VERIFIED_PONS_CURVE';
+    valuationSource = 'PONS_V2_CURVE_RESERVE_SPOT';
+    if (preIndexValuation.type === 'MARKET_CAP') marketCap = preIndexValuation.valueUsd;
+    else fdv = preIndexValuation.valueUsd;
   } else if (dexComparable != null) {
-    if (dexValuationCredible) {
-      valuationState = 'VERIFIED_DEX';
-      valuationSource = 'DEX_MARKET';
-      marketCap = dexMarketCap;
-      fdv = dexFdv;
-    } else {
-      // Keep the opportunity signal alive but do not present a thin/dust-pool
-      // valuation as an actionable market cap.
-      valuationState = 'VERIFYING';
-    }
+    valuationState = 'VERIFYING';
   }
 
   return {
@@ -222,7 +220,8 @@ export function marketContextMetrics(
     if (value >= 1_000 && value < 10_000) return `$${(value / 1_000).toFixed(2)}K`;
     return formatUsd(value);
   };
-  const valuationFormatter = context.preIndexValuation ? preIndexUsd : formatUsd;
+  const useCurvePrecision = context.valuationState === 'VERIFIED_PONS_CURVE';
+  const valuationFormatter = useCurvePrecision ? preIndexUsd : formatUsd;
   const valuationStatus = context.valuationState === 'DISPUTED'
     ? [{ label: 'Valuation', value: 'DISPUTED' }]
     : context.valuationState === 'VERIFYING'
