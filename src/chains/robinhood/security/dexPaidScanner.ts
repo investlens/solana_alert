@@ -38,13 +38,9 @@ export async function scanRobinhoodDexPaid(tokenAddress: string): Promise<Robinh
     const url = `https://api.dexscreener.com/orders/v1/${DEXSCREENER_CHAIN_ID}/${tokenAddress}`;
     const payload = (await governedDexScreenerJson<unknown>({
       url,
-      caller: 'robinhood_dex_paid',
-      priority: 'HIGH',
+      caller: 'robinhood_dex_paid', priority: 'NORMAL',
       endpoint: 'ORDERS',
       cacheKey: `orders:robinhood:${tokenAddress.trim().toLowerCase()}`,
-      // DEX-paid is a time-critical event. The old 120s cache could make an otherwise
-      // healthy detector structurally late. Ten seconds keeps request volume bounded
-      // while allowing the fast lane to react within one polling cycle.
       cacheTtlMs: 10_000,
       queueWaitTimeoutMs: 1_500,
       httpTimeoutMs: 2_500,
