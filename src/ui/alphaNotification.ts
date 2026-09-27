@@ -38,7 +38,7 @@ export function renderAlphaNotification(alert:AlphaNotification):string {
   // Specialist evidence (developer holding/burn/transfer) is time-sensitive. EXIT
   // notifications must not present a prior lifecycle observation as current risk evidence.
   // Keep EXIT rendering fail-closed when specialist evidence is stale.
-  // Production rebuild marker: exit-specialist-evidence-v1.
+  // Production rebuild marker: exit-specialist-evidence-v2.
   const specialistMetrics=alert.displayIntent==='EXIT'?[]:(alert.specialistMetrics??[]);
   const metrics=[...(alert.age?[{label:'Age',value:alert.age}]:[]),...(alert.metrics??[]),...specialistMetrics].filter(validMetric).slice(0,12);
   const take=(...labels:string[])=>metrics.find(m=>labels.includes(m.label.toLowerCase())); const p=take('price'),mc=take('market cap','fdv'),liq=take('liquidity'),vol=take('5m volume');
