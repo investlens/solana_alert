@@ -30,7 +30,7 @@ test('an accepted normal admin delivery suppresses fallback even if ledger compl
   resetRobinhoodBoostFallbackForTests();
   recordAcceptedAdminBoostNotification(token, 500);
   let sends = 0;
-  assert.equal(await deliverAdminBoostFallback({ tokenAddress: token, totalBoostAmount: 500, message: 'MAJOR_BOOST' }, {
+  assert.equal(await deliverAdminBoostFallback({ tokenAddress: token, totalBoostAmount: 500, message: 'MAX_BOOST_500_PLUS' }, {
     send: async () => { sends += 1; return 1; }, adminTelegramId: 'admin', log: () => {},
   }), false);
   assert.equal(sends, 0);
@@ -49,24 +49,29 @@ test('Telegram failure is not marked delivered and remains retryable', async () 
     send: async () => { attempts += 1; return 1; }, adminTelegramId: 'admin', log: event => logs.push(event),
   }), true);
   assert.equal(attempts, 2);
-  assert.deepEqual(logs, ['BOOST_FALLBACK_FAILED', 'BOOST_FALLBACK_SENT']);
+  assert.deepEqual(logs, ['BOOST_DELIVERY_FAILED', 'BOOST_DELIVERED']);
 });
 
-test('observer keeps the critical BOOST path independent from Supabase and market-quality gates', async () => {
+test('observer keeps BOOST security gating ahead of optional enrichment and delivery', async () => {
   const source = await readFile(new URL('../src/chains/robinhood/robinhoodBoostObserver.ts', import.meta.url), 'utf8');
   const compact = source.replace(/\s+/g, '');
 
   assert.doesNotMatch(source, /services\/supabase/);
-  assert.doesNotMatch(source, /getRobinhoodMarketSnapshot/);
-  assert.doesNotMatch(source, /persistOrLoadAlphaSemanticEventRecord/);
-  assert.doesNotMatch(source, /deliverAlphaSemanticEvent/);
   assert.match(source, /BOOST_SECURITY_DECISION/);
-  assert.match(compact, /security\.status==='SCAM'/);
   assert.match(source, /BOOST_BLOCKED_SECURITY/);
-  assert.match(compact, /securityStatus:security\.status/);
+  assert.match(source, /getRobinhoodMarketSnapshot/);
+  assert.match(source, /buildPremiumTokenNotification/);
   assert.match(source, /deliverAdminBoostFallback/);
   assert.match(source, /BOOST_ALERT_VERIFIED/);
   assert.match(compact, /supabase:'bypassed'/);
   assert.match(compact, /for\(constboostofboosts\)\{try\{if\(awaitprocessBoost\(boost\)\)/);
   assert.match(compact, /if\(!awaitensureBoostBaseline\(\)\)return;/);
+
+  const processStart = source.indexOf('async function processBoost');
+  const processSource = processStart >= 0 ? source.slice(processStart) : source;
+  const securityIndex = processSource.indexOf('routeBoostSecurity');
+  const enrichmentIndex = processSource.indexOf('getRobinhoodMarketSnapshot');
+  const deliveryIndex = processSource.indexOf('deliverAdminBoostFallback');
+  assert.ok(securityIndex >= 0 && enrichmentIndex > securityIndex && deliveryIndex > enrichmentIndex,
+    'BOOST security must run before optional market enrichment and Telegram delivery');
 });
