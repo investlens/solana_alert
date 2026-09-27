@@ -1,6 +1,7 @@
 import { Markup, Telegraf } from 'telegraf';
 import { config } from '../config.js';
 import { accessProfileForTier } from '../product/capabilities.js';
+import { ALPHAOS_SUBSCRIPTION_PLAN, subscriptionsEnabled } from '../product/subscriptionPlan.js';
 import { rememberRuntimeSubscriber } from '../services/runtimeSubscriberRegistry.js';
 import { intelligenceMenu, mainAlphaMenu, tradingMenu } from './menus.js';
 import { registerBotCommands } from './commands.js';
@@ -36,6 +37,18 @@ async function renderFast(ctx: any, text: string, replyMarkup: any) {
   }
 }
 
+function dormantMembershipText(): string {
+  return [
+    '✦ <b>ALPHAOS ACCESS</b>',
+    '',
+    '<b>Free</b> · Current testing access while production validation is completed.',
+    '',
+    `<b>Pro launch plan</b> · $${ALPHAOS_SUBSCRIPTION_PLAN.intro.priceUsdEquivalent} equivalent for the first ${ALPHAOS_SUBSCRIPTION_PLAN.intro.accessDays} days, then $${ALPHAOS_SUBSCRIPTION_PLAN.renewal.priceUsdEquivalent} equivalent every ${ALPHAOS_SUBSCRIPTION_PLAN.renewal.accessDays} days.`,
+    '',
+    'Payments are <b>not open yet</b>. AlphaOS will enable Pro only after the core alert set passes production validation.',
+  ].join('\n');
+}
+
 export function createBot() {
   const bot = new Telegraf(config.botToken);
 
@@ -58,6 +71,29 @@ export function createBot() {
       });
     }
     return next();
+  });
+
+  // Keep the legacy payment flow unreachable until AlphaOS explicitly enables
+  // subscriptions after the production release gate. This prevents users from
+  // seeing or acting on the old SOL-denominated plan while the new Robinhood
+  // Chain native-equivalent billing rail is still dormant.
+  bot.use(async (ctx, next) => {
+    if (subscriptionsEnabled()) return next();
+
+    const callback = String((ctx.callbackQuery as any)?.data ?? '');
+    const text = String((ctx.message as any)?.text ?? '').trim();
+    const blockedCallback = /^(?:PREMIUM_PLANS|MEMBERSHIP_PLANS|PLAN_15|PLAN_30|SUBMIT_PLAN_15|SUBMIT_PLAN_30|PAYMENT_STATUS)$/.test(callback);
+    const blockedCommand = /^(?:\/plans|\/upgrade)(?:@\S+)?(?:\s|$)/i.test(text);
+    if (!blockedCallback && !blockedCommand) return next();
+
+    if (callback) await ctx.answerCbQuery?.('Pro payments are not open yet').catch(() => {});
+    await ctx.reply(dormantMembershipText(), {
+      parse_mode: 'HTML',
+      reply_markup: Markup.inlineKeyboard([
+        [Markup.button.callback('⌂ Home', 'MAIN_MENU')],
+      ]).reply_markup,
+    });
+    return;
   });
 
   // Critical navigation must never wait on Supabase. These handlers intentionally
@@ -159,13 +195,15 @@ export function createBot() {
     if (data === 'MEMBERSHIP_HOME') {
       await renderFast(
         ctx,
-        [
-          '✦ <b>ALPHAOS ACCESS</b>',
-          '',
-          'Realtime testing access is currently enabled for active users.',
-          'Premium packaging will be re-enabled after the production reliability pass.',
-        ].join('\n'),
+        subscriptionsEnabled()
+          ? [
+              '✦ <b>ALPHAOS ACCESS</b>',
+              '',
+              'Free and Pro membership controls.',
+            ].join('\n')
+          : dormantMembershipText(),
         Markup.inlineKeyboard([
+          ...(subscriptionsEnabled() ? [[Markup.button.callback('⭐ Compare Plans', 'MEMBERSHIP_PLANS')]] : []),
           [Markup.button.callback('⌂ Home', 'MAIN_MENU')],
         ]).reply_markup,
       );
