@@ -62,7 +62,6 @@ export function recordDatabaseSuccess(workClass: DatabaseWorkClass) {
 
 export function recordDatabaseFailure(error: unknown, workClass: DatabaseWorkClass, now = Date.now()) {
   if (workClass !== 'BACKGROUND') return;
-
   if (!isTransientDatabaseError(error)) {
     if (state === 'HALF_OPEN') {
       consecutiveFailures = 0;
@@ -71,7 +70,6 @@ export function recordDatabaseFailure(error: unknown, workClass: DatabaseWorkCla
     }
     return;
   }
-
   consecutiveFailures += 1;
   if (consecutiveFailures < FAILURE_THRESHOLD && state !== 'HALF_OPEN') return;
   const exponent = Math.max(0, consecutiveFailures - FAILURE_THRESHOLD);
@@ -81,7 +79,9 @@ export function recordDatabaseFailure(error: unknown, workClass: DatabaseWorkCla
   openUntil = now + cooldown + jitter;
 }
 
-export async function runDatabaseWork<T>(workClass: DatabaseWorkClass, fn: () => Promise<T>): Promise<T | null> {
+// Supabase/PostgREST builders are PromiseLike rather than native Promise objects.
+// Await accepts both, so the governor should too; this preserves inferred result types.
+export async function runDatabaseWork<T>(workClass: DatabaseWorkClass, fn: () => PromiseLike<T>): Promise<T | null> {
   if (!canStartDatabaseWork(workClass)) return null;
   if (workClass === 'BACKGROUND') activeBackground += 1;
   try {
