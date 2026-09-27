@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/startup.ts",
-    "start": "tsx src/startup.ts",
+    "start": "tsx src/productionStartup.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/**/*.test.ts",
     "release:check": "tsx scripts/releaseSafetyCheck.ts",
