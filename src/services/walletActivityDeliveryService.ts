@@ -305,25 +305,27 @@ export async function deliverTrackedWalletActivity(
           continue;
         }
         const text = buildWalletActivityMessage({ event, label: subscriber.label });
-        try {
-          await deliverReservedTelegram({
-            operation: 'wallet_activity',
-            telegramId: subscriber.telegram_id,
-            send: () => sendTelegram(subscriber.telegram_id, text, buttons),
-            onAccepted: () => markDelivered({ telegramId: subscriber.telegram_id, event, leaseToken }),
-            onAcceptedPersistenceFailure: () => markSentUnconfirmed({ telegramId: subscriber.telegram_id, event, leaseToken }),
-          });
-        } catch (error) {
-          try { await releaseDelivery({ telegramId: subscriber.telegram_id, event, leaseToken }); }
-          catch (releaseError) {
-            console.warn('[WalletActivity] Failed to release retry reservation', {
-              telegramId: subscriber.telegram_id,
-              wallet: event.wallet,
-              reason: releaseError instanceof Error ? releaseError.message : String(releaseError),
-            });
-          }
-          throw error;
-        }
+        const delivery = await deliverReservedTelegram({
+          send: () => sendTelegram(subscriber.telegram_id, text, buttons),
+          complete: async () => {
+            try {
+              await markDelivered({ telegramId: subscriber.telegram_id, event, leaseToken });
+            } catch (error) {
+              try {
+                await markSentUnconfirmed({ telegramId: subscriber.telegram_id, event, leaseToken });
+              } catch (sentUnconfirmedError) {
+                console.warn('[WalletActivity] Failed to record sent-unconfirmed state', {
+                  telegramId: subscriber.telegram_id,
+                  wallet: event.wallet,
+                  reason: sentUnconfirmedError instanceof Error ? sentUnconfirmedError.message : String(sentUnconfirmedError),
+                });
+              }
+              throw error;
+            }
+          },
+          release: () => releaseDelivery({ telegramId: subscriber.telegram_id, event, leaseToken }),
+        });
+        if (!delivery.sent || !delivery.recorded) failedWallets.add(event.wallet);
       }
     } catch (error) {
       failedWallets.add(event.wallet);
