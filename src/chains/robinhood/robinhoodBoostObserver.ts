@@ -5,15 +5,17 @@ import { config } from '../../config.js';
 import { getDeliverableUsers } from '../../core/delivery.js';
 import { runtimeDeliverableUsers } from '../../services/runtimeSubscriberRegistry.js';
 import { isVerifiedPonsLaunch } from './ponsLaunchState.js';
-import { requestRobinhoodRpcResilient } from './rpc.js';
 import { getRobinhoodTokenSocials } from './tokenMetadata.js';
 import { getRobinhoodMarketSnapshot } from './market.js';
+import { classifyBoostCanonicalEvent, boostCanonicalTitle } from './boostCanonicalEvent.js';
+import { routeBoostSecurity } from './boostSecurityRouter.js';
 
 const BOOST_INTERVAL_MS = 15_000;
 export const BOOSTED_OPPORTUNITY_THRESHOLD = 200;
 export const MAJOR_BOOST_THRESHOLD = 500;
 
 type BoostAction = { text: string; callback_data?: string; url?: string };
+type BoostSecurityDisplay = 'SAFE' | 'UNKNOWN' | 'SCAM';
 
 export function boostNotificationState(totalBoostAmount: number) {
   return totalBoostAmount >= BOOSTED_OPPORTUNITY_THRESHOLD ? 'BOOSTED_OPPORTUNITY' as const : 'BUILDING' as const;
@@ -27,7 +29,6 @@ const acceptedAdminBoostNotifications = new Set<string>();
 let boostRecipientCacheAt = 0;
 let boostRecipientCache = new Set<string>();
 const BOOST_RECIPIENT_CACHE_MS = 5 * 60_000;
-const BOOST_RECOVERY_MAX = Math.max(1, Math.min(20, Number(process.env.BOOST_RECOVERY_MAX ?? 12)));
 let boostObserverStarted = false;
 let boostObserverRunning = false;
 let boostBaselineReady = false;
@@ -45,9 +46,7 @@ async function boostRecipients(): Promise<string[]> {
   if (now - boostRecipientCacheAt > BOOST_RECIPIENT_CACHE_MS) {
     const next = new Set<string>();
     if (config.adminTelegramId) next.add(String(config.adminTelegramId));
-    for (const user of runtimeDeliverableUsers({ allRealtime: true })) {
-      if (user.telegram_id && !user.is_blocked) next.add(String(user.telegram_id));
-    }
+    for (const user of runtimeDeliverableUsers({ allRealtime: true })) if (user.telegram_id && !user.is_blocked) next.add(String(user.telegram_id));
     try {
       const users = await Promise.race([
         getDeliverableUsers(),
@@ -55,193 +54,161 @@ async function boostRecipients(): Promise<string[]> {
       ]);
       for (const user of users) if (user.telegram_id && !user.is_blocked) next.add(String(user.telegram_id));
     } catch (error) {
-      console.warn('[RobinhoodBoostObserver] Recipient DB refresh unavailable; using runtime/admin cache', {
-        reason: error instanceof Error ? error.message : String(error),
-      });
+      console.warn('[RobinhoodBoostObserver] Recipient DB refresh unavailable; using runtime/admin cache', { reason: error instanceof Error ? error.message : String(error) });
     }
-    if (next.size) {
-      boostRecipientCache = next;
-      boostRecipientCacheAt = now;
-    }
+    if (next.size) { boostRecipientCache = next; boostRecipientCacheAt = now; }
   }
   if (!boostRecipientCache.size && config.adminTelegramId) boostRecipientCache.add(String(config.adminTelegramId));
   return [...boostRecipientCache];
 }
 
-export async function deliverAdminBoostFallback(args:{tokenAddress:string;totalBoostAmount:number;message:string;buttons?:BoostAction[][]},dependencies:{send?:typeof sendTelegramWithMessageId;adminTelegramId?:string;log?:(event:string,details:Record<string,unknown>)=>void}={}):Promise<boolean>{
- const identity=boostFallbackIdentity(args.tokenAddress,args.totalBoostAmount); if(acceptedAdminBoostNotifications.has(identity))return false;
- const log=dependencies.log??((event,details)=>console.log(`[RobinhoodBoostObserver] ${event}`,details));
- const send=dependencies.send??sendTelegramWithMessageId;
- const recipients=dependencies.adminTelegramId ? [dependencies.adminTelegramId] : await boostRecipients();
- if (!recipients.length) return false;
- const results=await Promise.allSettled(recipients.map(chatId=>send(chatId,args.message,args.buttons)));
- const delivered=results.filter(r=>r.status==='fulfilled').length;
- const failed=results.length-delivered;
- if(delivered>0){acceptedAdminBoostNotifications.add(identity);log('BOOST_DELIVERED',{token:normalize(args.tokenAddress),totalBoost:args.totalBoostAmount,delivered,failed});return true;}
- log('BOOST_DELIVERY_FAILED',{token:normalize(args.tokenAddress),totalBoost:args.totalBoostAmount,delivered,failed});
- return false;
+export async function deliverAdminBoostFallback(
+  args:{tokenAddress:string;totalBoostAmount:number;message:string;buttons?:BoostAction[][]},
+  dependencies:{send?:typeof sendTelegramWithMessageId;adminTelegramId?:string;log?:(event:string,details:Record<string,unknown>)=>void}={}
+):Promise<boolean>{
+  const identity=boostFallbackIdentity(args.tokenAddress,args.totalBoostAmount);
+  if(acceptedAdminBoostNotifications.has(identity))return false;
+  const log=dependencies.log??((event,details)=>console.log(`[RobinhoodBoostObserver] ${event}`,details));
+  const send=dependencies.send??sendTelegramWithMessageId;
+  const recipients=dependencies.adminTelegramId ? [dependencies.adminTelegramId] : await boostRecipients();
+  if (!recipients.length) return false;
+  const results=await Promise.allSettled(recipients.map(chatId=>send(chatId,args.message,args.buttons)));
+  const delivered=results.filter(r=>r.status==='fulfilled').length;
+  const failed=results.length-delivered;
+  if(delivered>0){acceptedAdminBoostNotifications.add(identity);log('BOOST_DELIVERED',{token:normalize(args.tokenAddress),totalBoost:args.totalBoostAmount,delivered,failed});return true;}
+  log('BOOST_DELIVERY_FAILED',{token:normalize(args.tokenAddress),totalBoost:args.totalBoostAmount,delivered,failed});
+  return false;
 }
 export function resetRobinhoodBoostFallbackForTests():void{acceptedAdminBoostNotifications.clear();}
 
-
-type CustomLiquidityDecision = {
-  allowed: boolean;
-  status: 'LOCKED' | 'BURNED' | 'UNLOCKED' | 'UNKNOWN';
-  reason: string;
-};
-
-function numericPercent(value: unknown): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+async function ensureBoostBaseline():Promise<boolean>{
+  if(boostBaselineReady)return true;
+  if(boostBaselinePromise)return boostBaselinePromise;
+  boostBaselinePromise=(async()=>{
+    try{
+      const boosts=await fetchRobinhoodBoosts();
+      for(const boost of boosts)boostTotals.set(normalize(boost.tokenAddress),boost.totalAmount);
+      boostBaselineReady=true;
+      console.log('[RobinhoodBoostObserver] LIVE_ONLY_BASELINE_READY',{tokens:boosts.length,supabase:'bypassed'});
+      console.log('[RobinhoodBoostObserver] BASELINE_ABSORBED_SILENTLY',{tokens:boosts.length,recoveryAlertsSuppressed:true});
+      return true;
+    }catch(error){
+      console.error('[RobinhoodBoostObserver] Baseline failed:',error instanceof Error?error.message:String(error));
+      return false;
+    }finally{boostBaselinePromise=null;}
+  })();
+  return boostBaselinePromise;
 }
 
-function burnLikeLpHolder(holder: Record<string, unknown>): boolean {
-  const address = String(holder.address ?? holder.token_account ?? '').toLowerCase();
-  const tag = String(holder.tag ?? '').toLowerCase();
-  return address === '0x0000000000000000000000000000000000000000'
-    || address === '0x000000000000000000000000000000000000dead'
-    || tag.includes('burn')
-    || tag.includes('dead')
-    || tag.includes('null address')
-    || tag.includes('black hole');
-}
-
-async function checkCustomLiquidityProtection(tokenAddress: string): Promise<CustomLiquidityDecision> {
-  const url = `https://api.gopluslabs.io/api/v1/token_security/4663?contract_addresses=${encodeURIComponent(tokenAddress)}`;
-  try {
-    const response = await fetch(url, {
-      headers: { accept: 'application/json' },
-      signal: AbortSignal.timeout(4_000),
-    });
-    if (!response.ok) {
-      return { allowed: false, status: 'UNKNOWN', reason: `GoPlus HTTP ${response.status}` };
-    }
-
-    const payload = await response.json() as {
-      result?: Record<string, Record<string, unknown>>;
-      code?: number;
-      message?: string;
-    };
-    const key = normalize(tokenAddress);
-    const security = payload.result?.[key]
-      ?? payload.result?.[Object.keys(payload.result ?? {}).find(value => normalize(value) === key) ?? ''];
-    if (!security) {
-      return { allowed: false, status: 'UNKNOWN', reason: 'LP security data unavailable' };
-    }
-
-    if (String(security.is_honeypot ?? '0') === '1') {
-      return { allowed: false, status: 'UNLOCKED', reason: 'GoPlus honeypot flag' };
-    }
-    if (String(security.cannot_sell_all ?? '0') === '1') {
-      return { allowed: false, status: 'UNLOCKED', reason: 'GoPlus sell restriction flag' };
-    }
-
-    const holders = Array.isArray(security.lp_holders)
-      ? security.lp_holders as Record<string, unknown>[]
-      : [];
-    if (!holders.length) {
-      return { allowed: false, status: 'UNKNOWN', reason: 'No independently verified LP-holder evidence' };
-    }
-
-    let protectedPct = 0;
-    let burnedPct = 0;
-    let unlockedPct = 0;
-    for (const holder of holders) {
-      const pct = numericPercent(holder.percent);
-      const locked = String(holder.is_locked ?? '0') === '1';
-      const burned = burnLikeLpHolder(holder);
-      if (locked || burned) protectedPct += pct;
-      if (burned) burnedPct += pct;
-      if (!locked && !burned) unlockedPct += pct;
-    }
-
-    if (protectedPct >= 0.95) {
-      return {
-        allowed: true,
-        status: burnedPct >= 0.95 ? 'BURNED' : 'LOCKED',
-        reason: `${(protectedPct * 100).toFixed(1)}% of observed LP protected`,
-      };
-    }
-
-    return {
-      allowed: false,
-      status: 'UNLOCKED',
-      reason: `only ${(protectedPct * 100).toFixed(1)}% LP protected; ${(unlockedPct * 100).toFixed(1)}% remains removable`,
-    };
-  } catch (error) {
-    return {
-      allowed: false,
-      status: 'UNKNOWN',
-      reason: error instanceof Error ? error.message.slice(0, 180) : String(error).slice(0, 180),
-    };
-  }
-}
-
-type BoostSecurityDecision={status:'SAFE'|'UNKNOWN'|'SCAM';reason:string;devHoldingPercent?:number|null};
-async function checkBoostContractSecurity(tokenAddress:string):Promise<BoostSecurityDecision>{
- try{
-  const code=String(await requestRobinhoodRpcResilient({method:'eth_getCode',params:[tokenAddress,'latest']})).toLowerCase();
-  if(!code||code==='0x')return{status:'SCAM',reason:'token address has no deployed contract code'};
-  const ascii=Buffer.from(code.slice(2),'hex').toString('latin1').toLowerCase();
-  const marker=['honeypot','blacklisted','blacklist: blocked','trading disabled'].find(v=>ascii.includes(v));
-  if(marker)return{status:'SCAM',reason:`malicious contract marker: ${marker}`};
-  return{status:'SAFE',reason:'deployed contract code verified; no explicit malicious marker found'};
- }catch(error){return{status:'UNKNOWN',reason:error instanceof Error?error.message.slice(0,180):String(error).slice(0,180)}}
-}
-
-async function recoverBaselineBoost(boost:{tokenAddress:string;amount:number;totalAmount:number}):Promise<boolean>{
- const token=normalize(boost.tokenAddress);
- const verifiedPons=await isVerifiedPonsLaunch(boost.tokenAddress);
- const security=await checkBoostContractSecurity(boost.tokenAddress);
- if(security.status==='SCAM'){
-   console.warn('[RobinhoodBoostObserver] BASELINE_RECOVERY_BLOCKED',{token,totalBoost:boost.totalAmount,reason:security.reason});
-   return false;
- }
- const metadata=await resolveBoostMetadata(boost.tokenAddress,null,500).catch(()=>boostMetadataFallback(boost.tokenAddress));
- const fallback=boostMetadataFallback(boost.tokenAddress);
- const market=await getRobinhoodMarketSnapshot(boost.tokenAddress,{priority:'HIGH',caller:'robinhood_boost_observer',queueWaitTimeoutMs:1200}).catch(()=>null);
- const symbol=market?.symbol??metadata.symbol??fallback.symbol??shortAddress(boost.tokenAddress);
- const name=market?.name??metadata.name;
- const socials=await getRobinhoodTokenSocials(boost.tokenAddress).catch(()=>({website:null,twitter:null,telegram:null}));
- const message=buildBoostMessage({symbol,name,tokenAddress:boost.tokenAddress,boostAmount:boost.amount,totalBoostAmount:boost.totalAmount,marketCap:market?.marketCapUsd??null,fdv:market?.fdvUsd??null,liquidity:market?.liquidityUsd??null,volume5m:market?.volume5mUsd??null,buys5m:market?.buys5m??null,sells5m:market?.sells5m??null,devHoldingPercent:security.devHoldingPercent??null,holderTop1Percent:null,eventType:'NEW',securityStatus:security.status,securityReason:verifiedPons?'Verified PONS launch; BOOST alerted immediately after contract/honeypot screen.':`${security.reason}; LP check intentionally skipped for BOOST`});
- const sent=await deliverAdminBoostFallback({tokenAddress:boost.tokenAddress,totalBoostAmount:boost.totalAmount,message,buttons:buildBoostActions({tokenAddress:boost.tokenAddress,chartUrl:market?.chartUrl??null,socials})});
- if(sent)console.log('[RobinhoodBoostObserver] BASELINE_RECOVERY_ALERT_SENT',{token,totalBoost:boost.totalAmount,verifiedPons,security:security.status});
- return sent;
-}
-async function ensureBoostBaseline():Promise<boolean>{if(boostBaselineReady)return true;if(boostBaselinePromise)return boostBaselinePromise;boostBaselinePromise=(async()=>{try{const boosts=await fetchRobinhoodBoosts();for(const boost of boosts)boostTotals.set(normalize(boost.tokenAddress),boost.totalAmount);boostBaselineReady=true;console.log('[RobinhoodBoostObserver] LIVE_ONLY_BASELINE_READY',{tokens:boosts.length,baseline:boosts.map(boost=>({token:normalize(boost.tokenAddress),amount:boost.amount,totalBoost:boost.totalAmount})),supabase:'bypassed'});console.log('[RobinhoodBoostObserver] BASELINE_ABSORBED_SILENTLY',{tokens:boosts.length,recoveryAlertsSuppressed:true});return true;}catch(error){console.error('[RobinhoodBoostObserver] Baseline failed:',error instanceof Error?error.message:String(error));return false;}finally{boostBaselinePromise=null;}})();return boostBaselinePromise;}
-
-export function buildBoostMessage(args:{symbol:string;name?:string|null;tokenAddress:string;boostAmount:number;totalBoostAmount:number;price?:number|null;marketCap?:number|null;fdv?:number|null;liquidity?:number|null;volume5m?:number|null;buys5m?:number|null;sells5m?:number|null;age?:string|null;move?:number|null;momentum?:number|null;confidence?:number|null;risk?:string|null;rawData?:Record<string,unknown>|null;marketContext?:Record<string,unknown>|null;devHoldingPercent:number|null;burnedPercent?:number|null;holderTop1Percent:number|null;eventType:'NEW'|'INCREASE';securityStatus?:'SAFE'|'UNKNOWN'|'SCAM';securityReason?:string}):string{
- const ctx=args.marketContext??{};const mc=typeof ctx.marketCap==='number'?ctx.marketCap:args.marketCap;const fdv=typeof ctx.fdv==='number'?ctx.fdv:args.fdv;const liq=typeof ctx.liquidity==='number'?ctx.liquidity:args.liquidity;const vol=typeof ctx.volume5m==='number'?ctx.volume5m:args.volume5m;const raw=args.rawData??{};const pre=(raw.preIndexValuation&&typeof raw.preIndexValuation==='object'?raw.preIndexValuation:null) as Record<string,unknown>|null;const preValue=pre&&typeof pre.valueUsd==='number'?pre.valueUsd:null;const move=args.move??args.momentum;const security=args.securityStatus??'UNKNOWN';const presentation=boostPresentationState(args.totalBoostAmount);const title=presentation==='MAJOR_BOOST'?`🔥🔥 <b>MAX BOOST 500+ — ${args.eventType}</b>`:`🚀 <b>BOOST DETECTED — ${args.eventType}</b>`;const action=presentation==='MAJOR_BOOST'?'🚨 <b>ACTION: HIGH PRIORITY WATCH</b>':'👀 <b>ACTION: WATCH</b>';const boostLabel=presentation==='MAJOR_BOOST'?'🔥 MAX Boost':'🔥 Boost';const lines=[title,'',`<b>${args.symbol}</b>${args.name?` · ${args.name}`:''}`,action,`${boostLabel}  <b>${args.totalBoostAmount} total (+${args.boostAmount})</b>`];if(mc!=null)lines.push(`Market cap  <b>${money(mc)}</b>`);else if(fdv!=null)lines.push(`FDV  <b>${money(fdv)}</b>`);else if(preValue!=null)lines.push(`FDV  <b>${money(preValue)}</b>`);if(liq!=null)lines.push(`Liquidity  <b>${money(liq)}</b>`);if(vol!=null)lines.push(`5m volume  <b>${money(vol)}</b>`);if(move!=null)lines.push(`Move  <b>${move>=0?'+':''}${move.toFixed(1)}%</b>`);if(args.devHoldingPercent!=null)lines.push(`Dev holding  <b>${args.devHoldingPercent}%</b>`);lines.push(security==='SAFE'?'🛡️ Security: contract check passed':security==='SCAM'?'⛔ Security: malicious contract evidence detected':'⚠️ Security: check incomplete — not classified as scam');if(security==='UNKNOWN')lines.push('<i>Honeypot check unavailable — verify before trading.</i>');lines.push('',`<code>${args.tokenAddress}</code>`,'','⚠️ <b>Do your own diligence.</b>');return lines.join('\n');
+export function buildBoostMessage(args:{
+  symbol:string;name?:string|null;tokenAddress:string;boostAmount:number;totalBoostAmount:number;
+  canonicalTitle?:string|null;price?:number|null;marketCap?:number|null;fdv?:number|null;liquidity?:number|null;
+  volume5m?:number|null;buys5m?:number|null;sells5m?:number|null;age?:string|null;move?:number|null;momentum?:number|null;
+  confidence?:number|null;risk?:string|null;rawData?:Record<string,unknown>|null;marketContext?:Record<string,unknown>|null;
+  devHoldingPercent:number|null;burnedPercent?:number|null;holderTop1Percent:number|null;eventType:'NEW'|'INCREASE';
+  securityStatus?:BoostSecurityDisplay;securityReason?:string;launchSource?:'PONS'|'CUSTOM';
+}):string{
+  const ctx=args.marketContext??{};
+  const mc=typeof ctx.marketCap==='number'?ctx.marketCap:args.marketCap;
+  const fdv=typeof ctx.fdv==='number'?ctx.fdv:args.fdv;
+  const liq=typeof ctx.liquidity==='number'?ctx.liquidity:args.liquidity;
+  const vol=typeof ctx.volume5m==='number'?ctx.volume5m:args.volume5m;
+  const raw=args.rawData??{};
+  const pre=(raw.preIndexValuation&&typeof raw.preIndexValuation==='object'?raw.preIndexValuation:null) as Record<string,unknown>|null;
+  const preValue=pre&&typeof pre.valueUsd==='number'?pre.valueUsd:null;
+  const move=args.move??args.momentum;
+  const security=args.securityStatus??'UNKNOWN';
+  const title=args.canonicalTitle??(args.eventType==='INCREASE'?'🔥 BOOST INCREASED':'🚀 BOOST DETECTED');
+  const lines=[`<b>${title}</b>`,'',`<b>${args.symbol}</b>${args.name?` · ${args.name}`:''}`,args.launchSource?`Source  <b>${args.launchSource==='PONS'?'Verified PONS launchpad':'Direct / custom token'}</b>`:'',`🔥 Boost  <b>${args.totalBoostAmount} total (+${args.boostAmount})</b>`].filter(Boolean);
+  if(mc!=null)lines.push(`Market cap  <b>${money(mc)}</b>`);else if(fdv!=null)lines.push(`FDV  <b>${money(fdv)}</b>`);else if(preValue!=null)lines.push(`FDV  <b>${money(preValue)}</b>`);
+  if(liq!=null)lines.push(`Liquidity  <b>${money(liq)}</b>`);
+  if(vol!=null)lines.push(`5m volume  <b>${money(vol)}</b>`);
+  if(args.buys5m!=null||args.sells5m!=null)lines.push(`5m buys / sells  <b>${args.buys5m??'—'} / ${args.sells5m??'—'}</b>`);
+  if(move!=null)lines.push(`Move  <b>${move>=0?'+':''}${move.toFixed(1)}%</b>`);
+  if(args.devHoldingPercent!=null)lines.push(`Dev holding  <b>${args.devHoldingPercent}%</b>`);
+  lines.push(security==='SAFE'?`🛡️ Security  <b>VERIFIED</b>${args.securityReason?` · ${args.securityReason}`:''}`:security==='SCAM'?`⛔ Security  <b>BLOCKED</b>${args.securityReason?` · ${args.securityReason}`:''}`:`⚠️ Security  <b>UNVERIFIED</b>${args.securityReason?` · ${args.securityReason}`:''}`);
+  lines.push('',`<code>${args.tokenAddress}</code>`,'','⚠️ <b>Do your own diligence.</b>');
+  return lines.join('\n');
 }
 
 export function buildBoostActions(args:{tokenAddress:string;chartUrl?:string|null;socials?:{website?:string|null;twitter?:string|null;telegram?:string|null}}):BoostAction[][]{
- const token=args.tokenAddress;
- const explorer=`https://robinhoodchain.blockscout.com/token/${encodeURIComponent(token)}`;
- const socials=args.socials;
- return [
-   [
-     ...(args.chartUrl ? [{text:'📈 Chart',url:args.chartUrl}] : []),
-     {text:'🔎 Explorer',url:explorer},
-   ],
-   [
-     ...(socials?.website ? [{text:'🌐 Project',url:socials.website}] : []),
-     ...(socials?.twitter ? [{text:'𝕏 X',url:socials.twitter}] : []),
-     ...(socials?.telegram ? [{text:'✈️ TG',url:socials.telegram}] : []),
-   ],
-   [
-     {text:'🔬 Full Intel',callback_data:`FI_RH_${token}`},
-     {text:'⭐ Track',callback_data:`BOOST_TRACK_${token}`},
-   ],
- ].filter(row=>row.length>0);
+  const token=args.tokenAddress;
+  const explorer=`https://robinhoodchain.blockscout.com/token/${encodeURIComponent(token)}`;
+  const socials=args.socials;
+  return [
+    [...(args.chartUrl ? [{text:'📈 Chart',url:args.chartUrl}] : []),{text:'🔎 Explorer',url:explorer}],
+    [...(socials?.website ? [{text:'🌐 Project',url:socials.website}] : []),...(socials?.twitter ? [{text:'𝕏 X',url:socials.twitter}] : []),...(socials?.telegram ? [{text:'✈️ TG',url:socials.telegram}] : [])],
+    [{text:'🔬 Full Intel',callback_data:`FI_RH_${token}`},{text:'⭐ Track',callback_data:`BOOST_TRACK_${token}`}],
+  ].filter(row=>row.length>0);
 }
 
 export async function enrichDeliveredBoostAlert():Promise<number>{return 0;}
 export function isMaterialVolumeSurge(args:{previousVolume5m:number|null;currentVolume5m:number|null;previousPrice:number|null;currentPrice:number|null}){return args.previousVolume5m!=null&&args.previousVolume5m>0&&args.currentVolume5m!=null&&args.currentVolume5m>=args.previousVolume5m*1.5&&args.previousPrice!=null&&args.previousPrice>0&&args.currentPrice!=null&&args.currentPrice>=args.previousPrice*0.5;}
 export function volumeIgnitionDecision(args:{previousVolume5m:number|null;currentVolume5m:number|null;previousPrice:number|null;currentPrice:number|null;previousLiquidity?:number|null;currentLiquidity?:number|null;buys5m?:number|null;sells5m?:number|null}){const multiple=args.previousVolume5m!=null&&args.previousVolume5m>0&&args.currentVolume5m!=null?args.currentVolume5m/args.previousVolume5m:null;const priceConstructive=args.previousPrice!=null&&args.previousPrice>0&&args.currentPrice!=null&&args.currentPrice>=args.previousPrice*0.5;const liquidityStable=args.previousLiquidity==null||args.currentLiquidity==null||args.previousLiquidity<=0||args.currentLiquidity>=args.previousLiquidity*0.85;const flowConstructive=args.buys5m==null||args.sells5m==null||args.buys5m>=args.sells5m;return{eligible:multiple!=null&&multiple>=1.5&&priceConstructive&&liquidityStable&&flowConstructive,volumeMultiple:multiple};}
 
-async function processBoost(boost:{tokenAddress:string;amount:number;totalAmount:number}):Promise<boolean>{const tokenKey=normalize(boost.tokenAddress);const previousTotal=boostTotals.get(tokenKey);if(previousTotal!=null&&boost.totalAmount<=previousTotal)return false;const eventType:'NEW'|'INCREASE'=previousTotal==null?'NEW':'INCREASE';const boostAdded=previousTotal==null?boost.amount:Math.max(boost.totalAmount-previousTotal,0);const security=await checkBoostContractSecurity(boost.tokenAddress);console.log('[RobinhoodBoostObserver] BOOST_SECURITY_DECISION',{token:tokenKey,status:security.status,reason:security.reason});if(security.status==='SCAM'){boostTotals.set(tokenKey,boost.totalAmount);console.warn('[RobinhoodBoostObserver] BOOST_BLOCKED_SECURITY',{token:tokenKey,totalBoost:boost.totalAmount,reason:security.reason});return false;}const verifiedPons=await isVerifiedPonsLaunch(boost.tokenAddress);const metadata=await resolveBoostMetadata(boost.tokenAddress,null,500).catch(()=>boostMetadataFallback(boost.tokenAddress));const fallback=boostMetadataFallback(boost.tokenAddress);const market=await getRobinhoodMarketSnapshot(boost.tokenAddress,{priority:'HIGH',caller:'robinhood_boost_observer',queueWaitTimeoutMs:1200}).catch(()=>null);const symbol=market?.symbol??metadata.symbol??fallback.symbol??shortAddress(boost.tokenAddress);const name=market?.name??metadata.name;const message=buildBoostMessage({symbol,name,tokenAddress:boost.tokenAddress,boostAmount:boostAdded,totalBoostAmount:boost.totalAmount,marketCap:market?.marketCapUsd??null,fdv:market?.fdvUsd??null,liquidity:market?.liquidityUsd??null,volume5m:market?.volume5mUsd??null,buys5m:market?.buys5m??null,sells5m:market?.sells5m??null,devHoldingPercent:security.devHoldingPercent??null,holderTop1Percent:null,eventType,securityStatus:security.status,securityReason:`${security.reason}; LP check intentionally skipped for BOOST`});const socials=await getRobinhoodTokenSocials(boost.tokenAddress).catch(()=>({website:null,twitter:null,telegram:null}));const chartUrl=market?.chartUrl??null;const sent=await deliverAdminBoostFallback({tokenAddress:boost.tokenAddress,totalBoostAmount:boost.totalAmount,message,buttons:buildBoostActions({tokenAddress:boost.tokenAddress,chartUrl,socials})});if(sent||acceptedAdminBoostNotifications.has(boostFallbackIdentity(boost.tokenAddress,boost.totalAmount))){boostTotals.set(tokenKey,boost.totalAmount);console.log('[RobinhoodBoostObserver] BOOST_ALERT_VERIFIED',{token:tokenKey,eventType,boostAdded,totalBoost:boost.totalAmount,presentation:boostPresentationState(boost.totalAmount),security:security.status,supabase:'bypassed'});return true;}return false;}
+async function processBoost(boost:{tokenAddress:string;amount:number;totalAmount:number}):Promise<boolean>{
+  const tokenKey=normalize(boost.tokenAddress);
+  const previousTotal=boostTotals.get(tokenKey);
+  const canonical=classifyBoostCanonicalEvent({previousTotal,currentTotal:boost.totalAmount,feedAmount:boost.amount});
+  if(!canonical)return false;
 
-export async function runRobinhoodBoostObserverCycle():Promise<void>{if(boostObserverRunning)return;boostObserverRunning=true;try{if(!await ensureBoostBaseline())return;const boosts=await fetchRobinhoodBoosts();console.log('[RobinhoodBoostObserver] Feed:',{boosts:boosts.length,mode:'LIVE_ONLY'});let alertsSent=0;for(const boost of boosts){try{if(await processBoost(boost))alertsSent+=1;}catch(error){console.error('[RobinhoodBoostObserver] Token processing failed:',{token:boost.tokenAddress,error:error instanceof Error?error.message:String(error)});}}console.log('[RobinhoodBoostObserver] Cycle complete:',{alertsSent,supabase:'bypassed'});}catch(error){console.error('[RobinhoodBoostObserver] Cycle failed:',error instanceof Error?error.message:String(error));}finally{boostObserverRunning=false;}}
-export function startRobinhoodBoostObserver():ReturnType<typeof setInterval>|null{if(boostObserverStarted)return boostObserverInterval;boostObserverStarted=true;console.log('[RobinhoodBoostObserver] Starting LIVE_ONLY security-only path...');void ensureBoostBaseline();boostObserverInterval=setInterval(()=>void runRobinhoodBoostObserverCycle(),BOOST_INTERVAL_MS);return boostObserverInterval;}
+  // Source verification is done once. Only a verified launchpad receives the fast path.
+  const verifiedPons=await isVerifiedPonsLaunch(boost.tokenAddress);
+  const security=await routeBoostSecurity({tokenAddress:boost.tokenAddress,verifiedTrustedLaunchpad:verifiedPons});
+  console.log('[RobinhoodBoostObserver] BOOST_SECURITY_DECISION',{token:tokenKey,eventType:canonical.type,route:security.route,allowed:security.allowed,reason:security.reason,cached:security.cached});
+  if(!security.allowed){
+    // Absorb this exact total so a blocked custom token is not rechecked every 15 seconds.
+    // A later genuine BOOST increase becomes a new event and can be re-evaluated after cache expiry.
+    boostTotals.set(tokenKey,boost.totalAmount);
+    console.warn('[RobinhoodBoostObserver] BOOST_BLOCKED_SECURITY',{token:tokenKey,eventType:canonical.type,totalBoost:boost.totalAmount,reason:security.reason});
+    return false;
+  }
 
-// Railway deploy sync: BOOST/PONS LP routing fix active.
+  // Candidate has passed the hard gate. Only now spend provider budget on optional enrichment.
+  const [metadata,market,socials]=await Promise.all([
+    resolveBoostMetadata(boost.tokenAddress,null,500).catch(()=>boostMetadataFallback(boost.tokenAddress)),
+    getRobinhoodMarketSnapshot(boost.tokenAddress,{priority:'HIGH',caller:'robinhood_boost_observer',queueWaitTimeoutMs:1200}).catch(()=>null),
+    getRobinhoodTokenSocials(boost.tokenAddress).catch(()=>({website:null,twitter:null,telegram:null})),
+  ]);
+  const fallback=boostMetadataFallback(boost.tokenAddress);
+  const symbol=market?.symbol??metadata.symbol??fallback.symbol??shortAddress(boost.tokenAddress);
+  const name=market?.name??metadata.name;
+  const securityReason=verifiedPons?'Verified PONS origin; trusted launchpad fast path.':security.reason;
+  const message=buildBoostMessage({
+    symbol,name,tokenAddress:boost.tokenAddress,boostAmount:canonical.boostAdded,totalBoostAmount:canonical.currentTotal,
+    canonicalTitle:boostCanonicalTitle(canonical),marketCap:market?.marketCapUsd??null,fdv:market?.fdvUsd??null,
+    liquidity:market?.liquidityUsd??null,volume5m:market?.volume5mUsd??null,buys5m:market?.buys5m??null,sells5m:market?.sells5m??null,
+    devHoldingPercent:null,holderTop1Percent:null,eventType:canonical.type==='BOOST_DETECTED'?'NEW':'INCREASE',securityStatus:'SAFE',securityReason,
+    launchSource:verifiedPons?'PONS':'CUSTOM',
+  });
+  const sent=await deliverAdminBoostFallback({tokenAddress:boost.tokenAddress,totalBoostAmount:boost.totalAmount,message,buttons:buildBoostActions({tokenAddress:boost.tokenAddress,chartUrl:market?.chartUrl??null,socials})});
+  if(sent||acceptedAdminBoostNotifications.has(boostFallbackIdentity(boost.tokenAddress,boost.totalAmount))){
+    boostTotals.set(tokenKey,boost.totalAmount);
+    console.log('[RobinhoodBoostObserver] BOOST_ALERT_VERIFIED',{token:tokenKey,eventType:canonical.type,boostAdded:canonical.boostAdded,totalBoost:canonical.currentTotal,verifiedPons,securityRoute:security.route,supabase:'bypassed'});
+    return true;
+  }
+  return false;
+}
+
+export async function runRobinhoodBoostObserverCycle():Promise<void>{
+  if(boostObserverRunning)return;
+  boostObserverRunning=true;
+  try{
+    if(!await ensureBoostBaseline())return;
+    const boosts=await fetchRobinhoodBoosts();
+    console.log('[RobinhoodBoostObserver] Feed:',{boosts:boosts.length,mode:'LIVE_ONLY'});
+    let alertsSent=0;
+    for(const boost of boosts){try{if(await processBoost(boost))alertsSent+=1;}catch(error){console.error('[RobinhoodBoostObserver] Token processing failed:',{token:boost.tokenAddress,error:error instanceof Error?error.message:String(error)});}}
+    console.log('[RobinhoodBoostObserver] Cycle complete:',{alertsSent,supabase:'bypassed'});
+  }catch(error){console.error('[RobinhoodBoostObserver] Cycle failed:',error instanceof Error?error.message:String(error));}
+  finally{boostObserverRunning=false;}
+}
+
+export function startRobinhoodBoostObserver():ReturnType<typeof setInterval>|null{
+  if(boostObserverStarted)return boostObserverInterval;
+  boostObserverStarted=true;
+  console.log('[RobinhoodBoostObserver] Starting LIVE_ONLY canonical security-routed path...');
+  void ensureBoostBaseline();
+  boostObserverInterval=setInterval(()=>void runRobinhoodBoostObserverCycle(),BOOST_INTERVAL_MS);
+  return boostObserverInterval;
+}
