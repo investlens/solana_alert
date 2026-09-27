@@ -46,7 +46,7 @@ test('boost 500 is major, verified burn starts at 1%, and transfer remains inter
   assert.equal(boostPresentationState(499), 'BOOST'); assert.equal(boostPresentationState(500), 'MAJOR_BOOST');
   assert.match(buildBoostMessage({ symbol: 'AAA', tokenAddress: '0x257012345678901234567890123456789008444e',
     boostAmount: 100, totalBoostAmount: 500, devHoldingPercent: null, holderTop1Percent: null,
-    eventType: 'INCREASE' }), /MAJOR BOOST/);
+    eventType: 'INCREASE', canonicalTitle: '🚨 MAX BOOST 500+' }), /MAX BOOST 500\+/);
   assert.equal(developerEvent({ burnedPercent: 0.99, evidence: 'VERIFIED' }).notify, false);
   assert.equal(developerEvent({ burnedPercent: 1, evidence: 'VERIFIED' }).notify, true);
   assert.equal(developerEvent({ transferredPercent: 10, evidence: 'VERIFIED' }).notify, false);
