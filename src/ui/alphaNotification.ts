@@ -13,7 +13,7 @@ export type AlphaNotification = {
 export type AlphaNotificationAction = { text: string; url?: string; callback_data?: string; };
 
 const STATE_LABELS: Record<AlphaNotificationState, string> = {
-  ENTRY_READY:'🔥 ALPHA ENTRY', OPPORTUNITY:'🔥 ALPHA OPPORTUNITY', VOLUME_IGNITION:'🚀 VOLUME IGNITION', DEX_PAID:'💎 DEX PAID EARLY', BOOST:'🚀 BOOST DETECTED', MAJOR_BOOST:'🚨 MAX BOOST 500+', DEV_BURN:'🔥 VERIFIED BURN', DEV_SOLD:'🚨 DEV SELL', CRITICAL_RISK:'🚨 LIQUIDITY / CRITICAL RISK', BUILDING:'📈 MOMENTUM BUILDING', RUNNER:'🚀 RUNNER', WATCHING:'👀 WATCHING', BOOSTED_OPPORTUNITY:'🔥 BOOSTED OPPORTUNITY', EXIT_AVOID:'🚪 RISK EXIT ALERT', WALLET_BUY:'🐋 SMART MONEY ENTRY', WALLET_SELL:'🐋 SMART MONEY EXIT', WALLET_LAUNCH:'🐋 SMART MONEY LAUNCH', WALLET_MOVE:'🐋 SMART MONEY MOVEMENT', CREATOR_EVENT:'👨‍💻 DEV MOVEMENT', RISK:'⚠️ RISK ALERT', EXECUTED:'✅ EXECUTED', FAILED:'⚠️ EXECUTION FAILED', PAUSED:'⏸ AUTO TRADE PAUSED', RESUMED:'▶ AUTO TRADE RESUMED', POSITION_UPDATE:'📈 POSITION UPDATE'
+  ENTRY_READY:'🔥 ALPHA ENTRY', OPPORTUNITY:'🔥 ALPHA OPPORTUNITY', VOLUME_IGNITION:'🚀 VOLUME IGNITION', DEX_PAID:'💎 DEX PAID', BOOST:'🚀 BOOST DETECTED', MAJOR_BOOST:'🚨 MAX BOOST 500+', DEV_BURN:'🔥 VERIFIED BURN', DEV_SOLD:'🚨 DEV SELL', CRITICAL_RISK:'🚨 LIQUIDITY / CRITICAL RISK', BUILDING:'📈 MOMENTUM BUILDING', RUNNER:'🚀 RUNNER', WATCHING:'👀 WATCHING', BOOSTED_OPPORTUNITY:'🔥 BOOSTED OPPORTUNITY', EXIT_AVOID:'🚪 RISK EXIT ALERT', WALLET_BUY:'🐋 SMART MONEY ENTRY', WALLET_SELL:'🐋 SMART MONEY EXIT', WALLET_LAUNCH:'🐋 SMART MONEY LAUNCH', WALLET_MOVE:'🐋 SMART MONEY MOVEMENT', CREATOR_EVENT:'👨‍💻 DEV MOVEMENT', RISK:'⚠️ RISK ALERT', EXECUTED:'✅ EXECUTED', FAILED:'⚠️ EXECUTION FAILED', PAUSED:'⏸ AUTO TRADE PAUSED', RESUMED:'▶ AUTO TRADE RESUMED', POSITION_UPDATE:'📈 POSITION UPDATE'
 };
 export function escapeAlphaHtml(value: unknown): string { return String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 export const TELEGRAM_MESSAGE_LIMIT = 4096;
@@ -47,9 +47,10 @@ export function renderAlphaNotification(alert:AlphaNotification):string {
   const risk=String(alert.risk??'UNKNOWN').toUpperCase(), riskIcon=risk==='LOW'?'✅':risk==='MEDIUM'||risk==='REVIEW'?'⚠️':risk==='HIGH'?'🚨':'⚪'; const confidence=validConfidence(alert.confidence);
   lines.push('',`🎯 <b>ACTION: ${escapeAlphaHtml(actionLabel(alert))}</b>`);
   if(alert.displayIntent==='WATCH') lines.push('<i>Information only — entry not confirmed.</i>');
-  lines.push(`🧠 <b>ALPHAOS VERDICT: ${escapeAlphaHtml(verdict(alert))}${confidence==null?'':` — ${confidence.toFixed(0)}/100`}</b>`,`${riskIcon} <b>Risk:</b> ${escapeAlphaHtml(risk==='MEASURED'?'UNKNOWN':risk)}`);
+  lines.push(`🧠 <b>ALPHAOS VERDICT: ${escapeAlphaHtml(verdict(alert))}${confidence==null?'':` — ${confidence.toFixed(0)}/100`}</b>`);
   if(confidence!=null)lines.push(`<b>Confidence:</b> ${confidence>=85?'HIGH':confidence>=70?'MEDIUM':'LOW'} (${confidence.toFixed(0)}/100)`);
-  lines.push(`<i>${escapeAlphaHtml(observedLabel(alert.observedAt))}</i>`);
+  lines.push(`${riskIcon} <b>Risk:</b> ${escapeAlphaHtml(risk==='MEASURED'?'UNKNOWN':risk)}`);
+  if(alert.observedAt!=null)lines.push(`<i>${escapeAlphaHtml(observedLabel(alert.observedAt))}</i>`);
   if(alert.displayIntent==='WATCH')lines.push('<i>AlphaOS is monitoring for entry confirmation.</i>');
   if(alert.access==='FREE')lines.push('','<i>Free intelligence may be delayed.</i>');
   const rendered=lines.join('\n'); if(rendered.length>TELEGRAM_MESSAGE_LIMIT)throw new Error('Alpha notification exceeds Telegram message limit after bounded rendering'); return rendered;
