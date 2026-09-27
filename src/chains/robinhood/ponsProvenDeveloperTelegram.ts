@@ -11,9 +11,7 @@ const safeText = (value: unknown) => String(value ?? '')
   .replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180);
 
 export function describePonsTelegramError(error: unknown): string {
-  if (error instanceof Error && /^code=[^ ]+ description=/.test(error.message)) {
-    return safeText(error.message);
-  }
+  if (error instanceof Error && /^code=[^ ]+ description=/.test(error.message)) return safeText(error.message);
   const row = error && typeof error === 'object' ? error as Record<string, unknown> : null;
   const code = row?.code ?? row?.status ?? row?.error_code;
   const description = safeText(row?.description ?? row?.message ?? row?.details ?? row?.hint
@@ -34,7 +32,6 @@ export async function deliverPonsProvenDeveloperTelegram(
     type: 'PONS_PROVEN_DEV_LAUNCH',
     assetId: alert.tokenAddress,
     chain: 'robinhood',
-    // Must stay inside the deployed alpha_alert_events intelligence-state constraint.
     intelligenceState: 'CONFIRMED',
     strategyKey: null,
     rawSnapshot: {
@@ -46,9 +43,21 @@ export async function deliverPonsProvenDeveloperTelegram(
       autoBuyEnabled: false,
     },
   });
+
   const failures: unknown[] = [];
-  const { getRobinhoodTokenSocials } = await import('./tokenMetadata.js');
-  const socials = await getRobinhoodTokenSocials(alert.tokenAddress);
+  let socials: { website: string | null; twitter: string | null; telegram: string | null } = {
+    website: null, twitter: null, telegram: null,
+  };
+  try {
+    const { getRobinhoodTokenSocials } = await import('./tokenMetadata.js');
+    socials = await getRobinhoodTokenSocials(alert.tokenAddress);
+  } catch (error) {
+    console.warn('[PonsProvenDeveloperTelegram] Optional socials unavailable', {
+      token: alert.tokenAddress,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   const result = await deps.deliver({
     event: { id: event.id, eventIdentity: event.event_identity,
       type: 'PONS_PROVEN_DEV_LAUNCH', assetId: alert.tokenAddress,
@@ -68,8 +77,6 @@ export async function deliverPonsProvenDeveloperTelegram(
     preserveMessage: true,
     onFailure: error => { failures.push(error); },
   });
-  if (result.failed > 0) {
-    throw new Error(describePonsTelegramError(failures[0] ?? { message: `delivery failed for ${result.failed} recipient(s)` }));
-  }
+  if (result.failed > 0) throw new Error(describePonsTelegramError(failures[0] ?? { message: `delivery failed for ${result.failed} recipient(s)` }));
   return result;
 }
