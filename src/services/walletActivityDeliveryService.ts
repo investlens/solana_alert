@@ -186,11 +186,12 @@ async function enrichWalletEvent(event: WalletWatchEvent) {
     { marketIndexState: target.marketIndexState },
     { address: event.tokenMint },
   );
+  const preserveCurveValuation = market.valuationState === 'VERIFIED_PONS_CURVE';
   Object.assign(event, {
     tokenSymbol: market.symbol ?? event.tokenSymbol,
     tokenName: market.name ?? event.tokenName,
-    marketCap: market.marketCap ?? current.marketCap,
-    fdv: market.fdv ?? current.fdv,
+    marketCap: preserveCurveValuation ? current.marketCap : market.marketCap ?? current.marketCap,
+    fdv: preserveCurveValuation ? current.fdv : market.fdv ?? current.fdv,
     preIndexValuation: opportunityRaw?.preIndexValuation ?? current.preIndexValuation,
     liquidity: market.liquidity ?? current.liquidity,
     volume5m: market.volume5m ?? current.volume5m,
