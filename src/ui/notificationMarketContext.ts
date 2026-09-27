@@ -76,6 +76,7 @@ export function normalizeNotificationMarketContext(...sources: MarketContextSour
   const preIndexValuation = sources.map(source => verifiedPonsPreIndexValuation(source, address)).find(Boolean) ?? null;
   const dexComparable = dexMarketCap ?? dexFdv;
   const dexValuationCredible = isEconomicallyMeaningfulDexValuation({ valuationUsd: dexComparable, liquidityUsd: liquidity });
+  const explicitlyIndexed = sources.some(source => String(source?.marketIndexState ?? source?.market_index_state ?? '').toUpperCase() === 'VERIFIED');
 
   let marketCap: number | null = null;
   let fdv: number | null = null;
@@ -84,7 +85,7 @@ export function normalizeNotificationMarketContext(...sources: MarketContextSour
 
   if (dexComparable != null && dexValuationCredible) {
     valuationState = 'VERIFIED_DEX'; valuationSource = 'DEX_MARKET'; marketCap = dexMarketCap; fdv = dexFdv;
-    if (preIndexValuation) {
+    if (preIndexValuation && !explicitlyIndexed) {
       const comparableDex = preIndexValuation.type === 'MARKET_CAP' ? dexMarketCap : dexFdv;
       if (comparableDex != null && materiallyDisagrees(preIndexValuation.valueUsd, comparableDex)) {
         valuationState = 'DISPUTED'; valuationSource = null; marketCap = null; fdv = null;
@@ -118,4 +119,4 @@ export function normalizeCoreDecisionMetrics(...sources: MarketContextSource[]):
   return { devHoldingPercent, devHoldingEvidence: devHoldingPercent == null ? 'UNAVAILABLE' : evidenceState(sources, ['devHoldingEvidence', 'devHoldingStatus', 'devFlowEvidenceStatus'], ['KNOWN', 'ZERO', 'COMPLETE', 'BALANCES_ONLY']), burnedPercent, burnEvidence: burnedPercent == null ? 'UNAVAILABLE' : evidenceState(sources, ['burnEvidence', 'devFlowEvidenceStatus'], ['COMPLETE', 'BALANCES_ONLY']) };
 }
 function percent(value: number): string { return `${Number(value.toFixed(2)).toString()}%`; }
-export function coreDecisionEvidenceMetrics(context: CoreDecisionMetricContext): AlphaNotificationMetric[] { return [...(context.devHoldingEvidence === 'VERIFIED' && context.devHoldingPercent != null ? [{ label: 'Dev holding', value: percent(context.devHoldingPercent) }] : []), ...(context.burnEvidence === 'VERIFIED' && context.burnedPercent != null && context.burnedPercent > 0 ? [{ label: 'Burned', value: percent(context.burnedPercent) }] : [])]; }
+export function coreDecisionEvidenceMetrics(context: CoreDecisionMetricContext): AlphaNotificationMetric[] { return [...(context.devHoldingEvidence === 'VERIFIED' && context.devHoldingPercent != null ? [{ label: 'Dev holding', value: percent(context.devHoldingPercent) }] : []), ...(context.burnEvidence === 'VERIFIED' && context.burnedPercent != null ? [{ label: 'Burned', value: percent(context.burnedPercent) }] : [])]; }
