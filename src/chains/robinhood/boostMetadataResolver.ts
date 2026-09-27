@@ -8,10 +8,19 @@ function meaningful(value: unknown): string | null {
   const result = typeof value === 'string' ? value.trim() : '';
   return result && !/^unknown(?: token)?$/i.test(result) ? result : null;
 }
+
+function meaningfulSymbol(value: unknown): string | null {
+  const result = meaningful(value);
+  if (!result) return null;
+  // Token tickers are case-insensitive in AlphaOS presentation. Normalizing here keeps
+  // every BOOST producer/cache path consistent without mutating token names.
+  return result.toUpperCase();
+}
+
 export function mergeBoostMetadata(...candidates: Array<Partial<ResolvedBoostMetadata> | null | undefined>): ResolvedBoostMetadata {
   let name: string | null = null, symbol: string | null = null, source: string | null = null;
   for (const candidate of candidates) {
-    name ??= meaningful(candidate?.name); symbol ??= meaningful(candidate?.symbol);
+    name ??= meaningful(candidate?.name); symbol ??= meaningfulSymbol(candidate?.symbol);
     if ((name || symbol) && !source) source = meaningful(candidate?.source);
     if (name && symbol) break;
   }
