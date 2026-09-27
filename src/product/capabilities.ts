@@ -1,3 +1,5 @@
+import { paidAccessIsCurrent, subscriptionsEnabled } from './subscriptionPlan.js';
+
 export type CommercialTier = 'free' | 'pro' | 'admin';
 
 export type Capability =
@@ -30,7 +32,14 @@ const TESTER = new Set<Capability>([
   'membership.manage',
 ]);
 
-const FREE = TESTER;
+const COMMERCIAL_FREE = new Set<Capability>([
+  'opportunities.view',
+  'intelligence.investigations',
+  'trading.external',
+  'strategies.manage',
+  'membership.manage',
+]);
+
 const PRO = TESTER;
 
 const ADMIN = new Set<Capability>([
@@ -46,11 +55,13 @@ export type AccessProfile = {
 
 export function commercialTierForUser(user: any): CommercialTier {
   if (String(user?.tier ?? '').toLowerCase() === 'admin') return 'admin';
-  if (
-    String(user?.tier ?? '').toLowerCase() === 'paid' &&
-    String(user?.subscription_status ?? '').toLowerCase() === 'active'
-  ) return 'pro';
-  return 'free';
+
+  // Before public subscriptions are launched, all non-admin users remain full
+  // production testers. This keeps validation broad while the commercial gate
+  // is deliberately closed.
+  if (!subscriptionsEnabled()) return 'free';
+
+  return paidAccessIsCurrent(user) ? 'pro' : 'free';
 }
 
 export function accessProfileForTier(tier: CommercialTier): AccessProfile {
@@ -60,7 +71,11 @@ export function accessProfileForTier(tier: CommercialTier): AccessProfile {
   if (tier === 'pro') {
     return { tier, label: '⭐ Pro', capabilities: PRO };
   }
-  return { tier, label: '⚪ Free', capabilities: FREE };
+  return {
+    tier,
+    label: '⚪ Free',
+    capabilities: subscriptionsEnabled() ? COMMERCIAL_FREE : TESTER,
+  };
 }
 
 export function accessProfileForUser(user: any): AccessProfile {
