@@ -18,6 +18,28 @@ Rules:
 - Creator-supplied social links are metadata, not ownership verification.
 - Derived classifications must remain distinguishable from directly verified on-chain facts.
 
+## Resource-efficiency contract
+
+This is a hard architectural requirement for every AlphaOS feature, scanner, enrichment path, subscription feature and future signal.
+
+Default pattern:
+- event-driven before polling-driven
+- reuse an existing discovery event before adding another scanner
+- fetch once, normalize once, cache once, then derive/classify multiple signals locally
+- parallelize independent enrichment only after a meaningful candidate exists
+- use launchpad guarantees only after factory/origin verification; do not repeat expensive checks already guaranteed by that exact trusted launch contract/version
+- direct/custom/unknown launches still require the hard security gate
+- persist meaningful state changes/events rather than every observation
+- deduplicate before expensive enrichment and before Telegram delivery
+- reuse normalized snapshots across security, formatting, entitlement and outcome tracking
+- never create separate scanners for FREE/PRO/ADMIN; entitlement controls delivery of the same canonical event
+- use bounded retries/backoff for provider/RPC failures; no hot retry loops
+- prefer cached/fresh-enough market and metadata values when a new remote call would not change the decision
+- outcome checkpoints should be scheduled from persisted signals, not continuous per-token polling
+- optional/social enrichment must not delay a security-cleared time-sensitive alert; it may update the same message later when worthwhile
+
+A new worker, recurring poll, external API call, RPC call or database write must have a clear reason that cannot be satisfied by an existing event/snapshot/cache. Server/provider cost is part of the release gate.
+
 ## Common opportunity snapshot
 
 All opportunity engines should capture the same normalized snapshot where available.
@@ -234,3 +256,5 @@ Each feature has two states:
 - PROVEN: a genuine production event has traversed detection -> enrichment/security -> decision -> Telegram delivery with correct data.
 
 Paid subscriptions remain disabled until the promised core feature set is proven and the displayed data matches this contract.
+
+A feature is not release-ready if it creates avoidable polling, duplicate enrichment, hot retry loops, duplicate scanners, unnecessary database writes, or materially increases provider/server load without a justified decision-quality benefit.
