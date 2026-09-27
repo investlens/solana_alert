@@ -15,7 +15,7 @@ test('DEX Paid and BOOST render only verified lightweight context with truthful 
   const evidence = normalizeCoreDecisionMetrics({ devHoldingPercent: 3.7, devHoldingEvidence: 'VERIFIED' });
   const paid = buildPremiumTokenNotification({ ...base, age: '17m', evidence,
     market: normalizeNotificationMarketContext({ marketCap: 84_200, fdv: 99_000, liquidity: 18_400, volume5m: 12_100 }) });
-  assert.match(paid, /💵 Market cap <b>\$84\.2K<\/b>/);
+  assert.match(paid, /Market cap <b>\$84\.2K<\/b>/);
   assert.doesNotMatch(paid, /<b>FDV:<\/b>/);
   assert.match(paid, /👨‍💻 Dev holding <b>3\.7%<\/b>/);
   assert.match(paid, /💧 Liquidity <b>\$18\.4K<\/b>/);
@@ -24,8 +24,8 @@ test('DEX Paid and BOOST render only verified lightweight context with truthful 
 
   const boost = buildPremiumTokenNotification({ ...base, state: 'BOOST', boostTotal: 200, boostIncrement: 100,
     market: normalizeNotificationMarketContext({ fdv: 126_000 }) });
-  assert.match(boost, /💵 FDV <b>\$126\.0K<\/b>/); assert.doesNotMatch(boost, /Market cap/);
-  assert.match(boost, /⚡ Boost <b>200 total \(\+100\)<\/b>/);
+  assert.match(boost, /FDV <b>\$126\.0K<\/b>/); assert.doesNotMatch(boost, /Market cap/);
+  assert.match(boost, /Boost <b>200 total \(\+100\)<\/b>/);
 });
 
 test('missing or failed optional context remains clean and cannot block base informational rendering', () => {
