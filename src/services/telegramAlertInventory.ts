@@ -13,7 +13,8 @@ export const ACTIVE_TELEGRAM_ALERT_INVENTORY: TelegramAlertInventoryEntry[] = [
   { producer: 'opportunityDeliveryService', category: 'opportunity/risk', classification: 'normal', renderer: 'renderAlphaNotification', buttonGrammar: 'Trade; Chart|Token; Track|Mute', sharedAlphaNotification: true },
   { producer: 'walletActivityDeliveryService', category: 'wallet', classification: 'normal', renderer: 'renderAlphaNotification', buttonGrammar: 'Chart|Token; Wallet Activity', sharedAlphaNotification: true },
   { producer: 'robinhoodObserver Dex Paid', category: 'dex paid', classification: 'normal', renderer: 'buildPremiumTokenNotification → renderAlphaNotification', buttonGrammar: 'Chart|Token; Copy CA; Track|Mute', sharedAlphaNotification: true },
-  { producer: 'robinhoodBoostObserver', category: 'boost/volume ignition', classification: 'normal', renderer: 'buildPremiumTokenNotification → renderAlphaNotification', buttonGrammar: 'Chart|Token; Copy CA; Track|Mute', sharedAlphaNotification: true },
+  { producer: 'robinhoodBoostObserver', category: 'boost/volume ignition', classification: 'normal', renderer: 'buildPremiumTokenNotification → renderAlphaNotification', buttonGrammar: 'Full Intel|Chart; Track|Copy CA; Mute', sharedAlphaNotification: true },
+  { producer: 'ponsNormalAlertFastLane', category: 'PONS trend reversal', classification: 'specialized', renderer: 'PONS fast-lane renderer', buttonGrammar: 'PONS opportunity controls', sharedAlphaNotification: false, reason: 'Maturity/curve/dev-safety fast lane has dedicated eligibility and delivery semantics.' },
   { producer: 'devPostAlertWatcher', category: 'creator/risk', classification: 'normal', renderer: 'buildCreatorNotification → renderAlphaNotification', buttonGrammar: 'Chart|Token', sharedAlphaNotification: true },
   { producer: 'dexPaidEngine', category: 'opportunity', classification: 'normal', renderer: 'renderTelegramInvestigation → renderAlphaNotification', buttonGrammar: 'Trade; Chart|Token; optional Analyze/social/admin controls', sharedAlphaNotification: true },
   { producer: 'whaleClusterEngine', category: 'smart money', classification: 'normal', renderer: 'renderAlphaNotification', buttonGrammar: 'Trade|Chart (owner-only legacy engine)', sharedAlphaNotification: true },
@@ -24,6 +25,7 @@ export const ACTIVE_TELEGRAM_ALERT_INVENTORY: TelegramAlertInventoryEntry[] = [
 export const DOCUMENTED_ACTIVE_TELEGRAM_SEND_SOURCES = [
   'main.ts',
   'bot/commands.ts',
+  'chains/robinhood/ponsNormalAlertFastLane.ts',
   'core/autoTradeManager.ts',
   'engines/dexPaidEngine.ts',
   'engines/whaleClusterEngine.ts',
