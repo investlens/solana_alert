@@ -24,6 +24,10 @@ export function hasVerifiedOpportunityIdentity(raw: RawContext): boolean {
  * Verified symbol/name are durable token identity and may cross strategies.
  * Market values are time-sensitive observations: their provenance is kept for
  * audit, but they are not copied into a later lifecycle payload as current.
+ *
+ * Developer holding/burn evidence is also time-sensitive. If a newer lifecycle
+ * observation explicitly reports the metric as unavailable (null), do not carry
+ * a previously verified percentage forward and present it as current evidence.
  */
 export function mergePonsLifecycleContext(
   existing: RawContext,
@@ -35,12 +39,23 @@ export function mergePonsLifecycleContext(
   const name = incomingIdentity.name ?? priorIdentity.name;
   const priorEvidence = normalizeCoreDecisionMetrics(existing);
   const incomingEvidence = normalizeCoreDecisionMetrics(incoming);
+
+  const incomingExplicitlyClearsHolding =
+    Object.prototype.hasOwnProperty.call(incoming, 'devHoldingPercent') && incoming.devHoldingPercent == null;
+  const incomingExplicitlyClearsBurn =
+    ((Object.prototype.hasOwnProperty.call(incoming, 'totalBurnPercent') && incoming.totalBurnPercent == null) ||
+      (Object.prototype.hasOwnProperty.call(incoming, 'burnedPercent') && incoming.burnedPercent == null));
+
   const devHoldingVerified = incomingEvidence.devHoldingEvidence === 'VERIFIED'
     ? incomingEvidence
-    : priorEvidence.devHoldingEvidence === 'VERIFIED' ? priorEvidence : null;
+    : !incomingExplicitlyClearsHolding && priorEvidence.devHoldingEvidence === 'VERIFIED'
+      ? priorEvidence
+      : null;
   const burnVerified = incomingEvidence.burnEvidence === 'VERIFIED'
     ? incomingEvidence
-    : priorEvidence.burnEvidence === 'VERIFIED' ? priorEvidence : null;
+    : !incomingExplicitlyClearsBurn && priorEvidence.burnEvidence === 'VERIFIED'
+      ? priorEvidence
+      : null;
   const incomingValuation = incoming.preIndexValuation && typeof incoming.preIndexValuation === 'object'
     ? incoming.preIndexValuation
     : null;
