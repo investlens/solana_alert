@@ -52,26 +52,39 @@ test('Telegram failure is not marked delivered and remains retryable', async () 
   assert.deepEqual(logs, ['BOOST_DELIVERY_FAILED', 'BOOST_DELIVERED']);
 });
 
-test('observer keeps BOOST security gating ahead of optional enrichment and delivery', async () => {
+test('observer keeps BOOST security gating ahead of durable delivery and late optional enrichment', async () => {
   const source = await readFile(new URL('../src/chains/robinhood/robinhoodBoostObserver.ts', import.meta.url), 'utf8');
   const compact = source.replace(/\s+/g, '');
 
-  assert.doesNotMatch(source, /services\/supabase/);
   assert.match(source, /BOOST_SECURITY_DECISION/);
   assert.match(source, /BOOST_BLOCKED_SECURITY/);
-  assert.match(source, /getRobinhoodMarketSnapshot/);
-  assert.match(source, /buildPremiumTokenNotification/);
+  assert.match(source, /persistOrLoadAlphaSemanticEventRecord/);
+  assert.match(source, /deliverAlphaSemanticEvent/);
   assert.match(source, /deliverAdminBoostFallback/);
+  assert.match(source, /enrichDeliveredBoostAlert/);
+  assert.match(source, /editTelegramMessage/);
   assert.match(source, /BOOST_ALERT_VERIFIED/);
-  assert.match(compact, /supabase:'bypassed'/);
   assert.match(compact, /for\(constboostofboosts\)\{try\{if\(awaitprocessBoost\(boost\)\)/);
   assert.match(compact, /if\(!awaitensureBoostBaseline\(\)\)return;/);
 
   const processStart = source.indexOf('async function processBoost');
   const processSource = processStart >= 0 ? source.slice(processStart) : source;
   const securityIndex = processSource.indexOf('routeBoostSecurity');
-  const enrichmentIndex = processSource.indexOf('getRobinhoodMarketSnapshot');
-  const deliveryIndex = processSource.indexOf('deliverAdminBoostFallback');
-  assert.ok(securityIndex >= 0 && enrichmentIndex > securityIndex && deliveryIndex > enrichmentIndex,
-    'BOOST security must run before optional market enrichment and Telegram delivery');
+  const persistIndex = processSource.indexOf('persistOrLoadAlphaSemanticEventRecord');
+  const deliveryIndex = processSource.indexOf('deliverAlphaSemanticEvent');
+  const lateEnrichmentIndex = processSource.indexOf('enrichDeliveredBoostAlert');
+  assert.ok(
+    securityIndex >= 0 &&
+    persistIndex > securityIndex &&
+    deliveryIndex > persistIndex &&
+    lateEnrichmentIndex > deliveryIndex,
+    'BOOST security must run before durable persistence/delivery, with enrichment scheduled only after delivery',
+  );
+
+  const enrichStart = source.indexOf('export async function enrichDeliveredBoostAlert');
+  const enrichEnd = source.indexOf('export function isMaterialVolumeSurge');
+  const enrichSource = enrichStart >= 0 ? source.slice(enrichStart, enrichEnd > enrichStart ? enrichEnd : undefined) : '';
+  assert.match(enrichSource, /getRobinhoodMarketSnapshot/);
+  assert.match(enrichSource, /queueWaitTimeoutMs: 750/);
+  assert.doesNotMatch(processSource.slice(0, deliveryIndex), /getRobinhoodMarketSnapshot/);
 });
