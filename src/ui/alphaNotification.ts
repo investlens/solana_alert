@@ -15,7 +15,7 @@ export type AlphaNotificationAction = { text: string; url?: string; callback_dat
 const STATE_LABELS: Record<AlphaNotificationState, string> = {
   ENTRY_READY:'🔥 ALPHA ENTRY', OPPORTUNITY:'🔥 ALPHA OPPORTUNITY', VOLUME_IGNITION:'🚀 VOLUME IGNITION', DEX_PAID:'💎 DEX PAID', BOOST:'🚀 BOOST DETECTED', MAJOR_BOOST:'🚨 MAX BOOST 500+', DEV_BURN:'🔥 VERIFIED BURN', DEV_SOLD:'🚨 DEV SELL', CRITICAL_RISK:'🚨 LIQUIDITY / CRITICAL RISK', BUILDING:'📈 MOMENTUM BUILDING', RUNNER:'🚀 RUNNER', WATCHING:'👀 WATCHING', BOOSTED_OPPORTUNITY:'🔥 BOOSTED OPPORTUNITY', EXIT_AVOID:'🚪 RISK EXIT ALERT', WALLET_BUY:'🐋 SMART MONEY ENTRY', WALLET_SELL:'🐋 SMART MONEY EXIT', WALLET_LAUNCH:'🐋 SMART MONEY LAUNCH', WALLET_MOVE:'🐋 SMART MONEY MOVEMENT', CREATOR_EVENT:'👨‍💻 DEV MOVEMENT', RISK:'⚠️ RISK ALERT', EXECUTED:'✅ EXECUTED', FAILED:'⚠️ EXECUTION FAILED', PAUSED:'⏸ AUTO TRADE PAUSED', RESUMED:'▶ AUTO TRADE RESUMED', POSITION_UPDATE:'📈 POSITION UPDATE'
 };
-export function escapeAlphaHtml(value: unknown): string { return String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+export function escapeAlphaHtml(value: unknown): string { return String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;'); }
 export const TELEGRAM_MESSAGE_LIMIT = 4096;
 export function boundedAlphaText(value: unknown,max:number):string { const text=String(value??'').trim(); return text.length<=max?text:`${text.slice(0,Math.max(0,max-1))}…`; }
 export function compactAlphaAddress(value?:string|null,start=6,end=5):string { const clean=String(value??'').trim(); if(!clean)return''; return clean.length<=start+end+1?clean:`${clean.slice(0,start)}…${clean.slice(-end)}`; }
@@ -37,6 +37,7 @@ export function renderAlphaNotification(alert:AlphaNotification):string {
   if(alert.address)lines.push(symbol?`<b>${escapeAlphaHtml(symbol)}</b> · <code>${escapeAlphaHtml(compactAddress)}</code>`:`<code>${escapeAlphaHtml(compactAddress)}</code>`);
   // Specialist evidence (developer holding/burn/transfer) is time-sensitive. EXIT
   // notifications must not present a prior lifecycle observation as current risk evidence.
+  // Keep EXIT rendering fail-closed when specialist evidence is stale.
   const specialistMetrics=alert.displayIntent==='EXIT'?[]:(alert.specialistMetrics??[]);
   const metrics=[...(alert.age?[{label:'Age',value:alert.age}]:[]),...(alert.metrics??[]),...specialistMetrics].filter(validMetric).slice(0,12);
   const take=(...labels:string[])=>metrics.find(m=>labels.includes(m.label.toLowerCase())); const p=take('price'),mc=take('market cap','fdv'),liq=take('liquidity'),vol=take('5m volume');
