@@ -44,7 +44,7 @@ test('only cumulative boost totals at or above 200 receive the high-attention st
   assert.equal(boostNotificationState(200), 'BOOSTED_OPPORTUNITY');
 });
 
-test('>=200 indexed boost renders high-attention state and verified current market context', () => {
+test('>=200 indexed boost increment renders canonical increase and verified current market context', () => {
   const message = buildBoostMessage({
     ...base,
     marketContext: {
@@ -54,8 +54,7 @@ test('>=200 indexed boost renders high-attention state and verified current mark
     },
     rawData: { preIndexValuation: preIndexValuation(), marketIndexState: 'VERIFIED' },
   });
-  assert.match(message, /🚀 <b>BOOST DETECTED/);
-  assert.match(message, /👀 <b>ACTION: WATCH/);
+  assert.match(message, /🔥 BOOST INCREASED/);
   assert.doesNotMatch(message, /CHECK ENTRY|ACTION: BUY/);
   assert.match(message, /Boost\s+<b>200 total \(\+50\)<\/b>/);
   assert.match(message, /Market cap\s+<b>\$25\.5K<\/b>/);
@@ -67,7 +66,7 @@ test('>=200 indexed boost renders high-attention state and verified current mark
   assert.doesNotMatch(message, /FDV|INDEXING/);
 });
 
-test('>=200 pre-index PONS V2 boost renders verified FDV without fabricated market fields', () => {
+test('>=200 pre-index PONS V2 boost increment renders verified FDV without fabricated market fields', () => {
   const message = buildBoostMessage({
     ...base,
     rawData: {
@@ -75,7 +74,7 @@ test('>=200 pre-index PONS V2 boost renders verified FDV without fabricated mark
       preIndexValuation: preIndexValuation(),
     },
   });
-  assert.match(message, /🚀 <b>BOOST DETECTED/);
+  assert.match(message, /🔥 BOOST INCREASED/);
   assert.match(message, /FDV\s+<b>\$4\.6K<\/b>/);
   assert.doesNotMatch(message, /Market cap|Liquidity|5m volume|INDEXING/);
 });
@@ -113,6 +112,6 @@ test('unverified Chart and genuinely missing metrics are omitted', () => {
     confidence: null, risk: null, devHoldingPercent: null, burnedPercent: null,
     buys5m: null, sells5m: null,
   });
-  assert.match(message, /🚀 <b>BOOST DETECTED/);
+  assert.match(message, /🔥 BOOST INCREASED/);
   assert.doesNotMatch(message, /Market cap|FDV|Liquidity|5m volume|Momentum|Dev holding|Burned|\$0/);
 });
