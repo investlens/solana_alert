@@ -56,9 +56,9 @@ test('malformed provider identity is bounded before HTML rendering and actions s
   assert.doesNotThrow(() => assertAlphaActions([[{ text: 'Full Intel', callback_data: 'ti:robinhood:123' }]]));
 });
 
-test('same process can claim Telegram polling ownership only once', () => {
+test('same process can claim Telegram polling ownership only once', async () => {
   resetTelegramPollingOwnerForTests();
-  assert.equal(claimTelegramPollingOwner(), true);
-  assert.equal(claimTelegramPollingOwner(), false);
+  assert.equal(await claimTelegramPollingOwner(), true);
+  assert.equal(await claimTelegramPollingOwner(), false);
   resetTelegramPollingOwnerForTests();
 });
