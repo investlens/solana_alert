@@ -35,7 +35,7 @@ function safeCachedSettings(): AlphaSettings { return { ...cachedSettings, admin
 
 export async function getAlphaSettings(forceRefresh=false): Promise<AlphaSettings> {
   const now=Date.now();
-  if(!forceRefresh && now-lastLoadedAt<CACHE_MS) return cachedSettings;
+  if(!forceRefresh && now-lastLoadedAt<CACHE_MS) return safeCachedSettings();
   if(!forceRefresh && lastAttemptAt>lastLoadedAt && now-lastAttemptAt<FAILURE_BACKOFF_MS) return safeCachedSettings();
   if(inFlightLoad) return inFlightLoad;
 
@@ -52,8 +52,8 @@ export async function getAlphaSettings(forceRefresh=false): Promise<AlphaSetting
       alertsPaused:asBoolean(map.get("alerts_paused"),DEFAULT_SETTINGS.alertsPaused),terminalEnabled:asBoolean(map.get("terminal_enabled"),DEFAULT_SETTINGS.terminalEnabled),
       telegramPremiumEnabled:asBoolean(map.get("telegram_premium_enabled"),DEFAULT_SETTINGS.telegramPremiumEnabled),scannerEnabled:asBoolean(map.get("scanner_enabled"),DEFAULT_SETTINGS.scannerEnabled),
       aiDecisionEnabled:asBoolean(map.get("ai_decision_enabled"),DEFAULT_SETTINGS.aiDecisionEnabled),restartRequested:asBoolean(map.get("restart_requested"),DEFAULT_SETTINGS.restartRequested),
-      executionMode:AUTO_TRADING_PERMANENTLY_DISABLED?"paper":asExecutionMode(map.get("execution_mode"),DEFAULT_SETTINGS.executionMode),
-      adminAutoBuyEnabled:AUTO_TRADING_PERMANENTLY_DISABLED?false:asBoolean(map.get("admin_auto_buy_enabled"),DEFAULT_SETTINGS.adminAutoBuyEnabled),
+      executionMode: AUTO_TRADING_PERMANENTLY_DISABLED ? "paper" : asExecutionMode(map.get("execution_mode"),DEFAULT_SETTINGS.executionMode),
+      adminAutoBuyEnabled: AUTO_TRADING_PERMANENTLY_DISABLED ? false : asBoolean(map.get("admin_auto_buy_enabled"),DEFAULT_SETTINGS.adminAutoBuyEnabled),
       adminTradeAmountSol:asNumber(map.get("admin_trade_amount_sol"),DEFAULT_SETTINGS.adminTradeAmountSol),entryConfirmationSeconds:asNumber(map.get("entry_confirmation_seconds"),DEFAULT_SETTINGS.entryConfirmationSeconds),
       maxEntryDipPercent:asNumber(map.get("max_entry_dip_percent"),DEFAULT_SETTINGS.maxEntryDipPercent),maxEntryPumpPercent:asNumber(map.get("max_entry_pump_percent"),DEFAULT_SETTINGS.maxEntryPumpPercent),
       maxOpenPositions:asNumber(map.get("max_open_positions"),DEFAULT_SETTINGS.maxOpenPositions),initialStopLossPercent:asNumber(map.get("initial_stop_loss_percent"),DEFAULT_SETTINGS.initialStopLossPercent),
@@ -62,7 +62,7 @@ export async function getAlphaSettings(forceRefresh=false): Promise<AlphaSetting
       creatorSellExitEnabled:asBoolean(map.get("creator_sell_exit_enabled"),DEFAULT_SETTINGS.creatorSellExitEnabled),bundleSellExitEnabled:asBoolean(map.get("bundle_sell_exit_enabled"),DEFAULT_SETTINGS.bundleSellExitEnabled),
       liquidityDropExitEnabled:asBoolean(map.get("liquidity_drop_exit_enabled"),DEFAULT_SETTINGS.liquidityDropExitEnabled),
     };
-    lastLoadedAt=Date.now(); return cachedSettings;
+    lastLoadedAt=Date.now(); return safeCachedSettings();
   })().finally(()=>{inFlightLoad=null;});
   return inFlightLoad;
 }
