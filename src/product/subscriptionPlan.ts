@@ -1,3 +1,5 @@
+export type AlphaCommercialTier = 'free' | 'pro' | 'admin';
+
 export const ALPHAOS_SUBSCRIPTION_PLAN = Object.freeze({
   publicTiers: ['free', 'pro'] as const,
   intro: Object.freeze({
@@ -9,6 +11,7 @@ export const ALPHAOS_SUBSCRIPTION_PLAN = Object.freeze({
     accessDays: 30,
   }),
   deliveryDelaySeconds: Object.freeze({
+    admin: 0,
     pro: 5,
     free: 30,
   }),
@@ -23,6 +26,29 @@ export function assertSubscriptionsEnabled(): void {
   if (!subscriptionsEnabled()) {
     throw new Error('AlphaOS paid subscriptions are not enabled yet. Core production validation is still in progress.');
   }
+}
+
+export function paidAccessIsCurrent(user: any, nowMs = Date.now()): boolean {
+  if (String(user?.tier ?? '').toLowerCase() !== 'paid') return false;
+  if (String(user?.subscription_status ?? '').toLowerCase() !== 'active') return false;
+
+  const activeUntil = Date.parse(String(user?.paid_active_until ?? ''));
+  return Number.isFinite(activeUntil) && activeUntil > nowMs;
+}
+
+export function deliveryDelayMsForTier(
+  tier: AlphaCommercialTier,
+  options: { safetyCritical?: boolean } = {},
+): number {
+  // During pre-subscription production validation every tester receives the
+  // canonical event immediately. We only introduce tier delays once the
+  // commercial gate is explicitly opened.
+  if (!subscriptionsEnabled()) return 0;
+
+  // Safety/risk warnings are never monetization-delayed.
+  if (options.safetyCritical) return 0;
+
+  return ALPHAOS_SUBSCRIPTION_PLAN.deliveryDelaySeconds[tier] * 1_000;
 }
 
 export function publicSubscriptionStatusText(): string {
