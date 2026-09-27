@@ -35,7 +35,10 @@ export function renderAlphaNotification(alert:AlphaNotification):string {
   const rawLabel=alphaStateLabel(alert.state); const firstSpace=rawLabel.indexOf(' '); const icon=firstSpace>0?rawLabel.slice(0,firstSpace):'ℹ️'; const label=firstSpace>0?rawLabel.slice(firstSpace+1):rawLabel;
   const lines:string[]=[`${icon} <b>${escapeAlphaHtml(label)}${identity?` — ${escapeAlphaHtml(identity)}`:''}</b>`, ...(chainLabel(alert.chain)?[`<b>${escapeAlphaHtml(chainLabel(alert.chain))}</b>`]:[])];
   if(alert.address)lines.push(symbol?`<b>${escapeAlphaHtml(symbol)}</b> · <code>${escapeAlphaHtml(compactAddress)}</code>`:`<code>${escapeAlphaHtml(compactAddress)}</code>`);
-  const metrics=[...(alert.age?[{label:'Age',value:alert.age}]:[]),...(alert.metrics??[]),...(alert.specialistMetrics??[])].filter(validMetric).slice(0,12);
+  // Specialist evidence (developer holding/burn/transfer) is time-sensitive. EXIT
+  // notifications must not present a prior lifecycle observation as current risk evidence.
+  const specialistMetrics=alert.displayIntent==='EXIT'?[]:(alert.specialistMetrics??[]);
+  const metrics=[...(alert.age?[{label:'Age',value:alert.age}]:[]),...(alert.metrics??[]),...specialistMetrics].filter(validMetric).slice(0,12);
   const take=(...labels:string[])=>metrics.find(m=>labels.includes(m.label.toLowerCase())); const p=take('price'),mc=take('market cap','fdv'),liq=take('liquidity'),vol=take('5m volume');
   if(p||mc)lines.push('',`${p?`💰 Price <b>${escapeAlphaHtml(boundedAlphaText(p.value,80))}</b>`:''}${p&&mc?'  •  ':''}${mc?`${mc.label} <b>${escapeAlphaHtml(boundedAlphaText(mc.value,80))}</b>`:''}`);
   if(liq||vol)lines.push(`${liq?`💧 Liquidity <b>${escapeAlphaHtml(boundedAlphaText(liq.value,80))}</b>`:''}${liq&&vol?'  •  ':''}${vol?`📊 5m volume <b>${escapeAlphaHtml(boundedAlphaText(vol.value,80))}</b>`:''}`);
