@@ -21,20 +21,20 @@ function render(state: AlphaNotification['state'], extra: Partial<AlphaNotificat
 }
 
 test('representative Opportunity Entry, Building, and Risk snapshots', () => {
-  assert.match(render('ENTRY_READY'), /🔥 <b>ENTRY READY/);
-  assert.match(render('BUILDING'), /📈 <b>BUILDING/);
-  assert.match(render('EXIT_AVOID', { category: 'risk', severity: 'critical' }), /🔴 <b>EXIT \/ AVOID/);
+  assert.match(render('ENTRY_READY'), /🔥 <b>ALPHA ENTRY/);
+  assert.match(render('BUILDING'), /📈 <b>MOMENTUM BUILDING/);
+  assert.match(render('EXIT_AVOID', { category: 'risk', severity: 'critical' }), /🚪 <b>RISK EXIT ALERT/);
 });
 
-test('representative Wallet Buy, Sell, and Launch snapshots', () => {
+test('representative Smart Money entry, exit, and launch snapshots', () => {
   const common = { wallet: '7KsN4<&>111111111111111111111', tokenMint: 'TokenMint11111111111111111111111111111', signature: 'sig', type: 'SWAP' };
   const buy = buildWalletActivityMessage({ event: { ...common, kind: 'buy', amountSol: 3.2 }, label: 'A&B <Whale>' });
   const sell = buildWalletActivityMessage({ event: { ...common, kind: 'sell', amountSol: 1.1 }, label: null });
   const launch = buildWalletActivityMessage({ event: { ...common, kind: 'launch' }, label: null });
-  assert.match(buy, /🐋 <b>WALLET BUY/);
+  assert.match(buy, /🐋 <b>SMART MONEY ENTRY/);
   assert.match(buy, /3\.20 SOL/);
-  assert.match(sell, /🔴 <b>WALLET EXIT/);
-  assert.match(launch, /🚀 <b>WALLET LAUNCH/);
+  assert.match(sell, /🐋 <b>SMART MONEY EXIT/);
+  assert.match(launch, /🐋 <b>SMART MONEY LAUNCH/);
   assert.match(buy, /A&amp;B &lt;WHALE&gt;/);
 });
 
@@ -63,9 +63,9 @@ test('wallet buy reuses verified market enrichment without fabricating absent va
 test('Creator positive and developer risk snapshots', () => {
   const positive = buildCreatorNotification({ symbol: 'GOOD', address: '0x123', reputation: 'Trusted', reason: 'Creator history improved.' });
   const risk = buildCreatorNotification({ symbol: 'RISK', address: '0x456', risk: true, transferredAmount: 2, reason: 'Developer moved tokens.' });
-  assert.match(positive, /CREATOR EVENT/);
+  assert.match(positive, /DEV MOVEMENT/);
   assert.match(positive, /Reputation/);
-  assert.match(risk, /⚠️ <b>RISK/);
+  assert.match(risk, /⚠️ <b>RISK ALERT/);
   assert.match(risk, /Risk:<\/b> HIGH/);
 });
 
