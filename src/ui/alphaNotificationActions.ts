@@ -37,21 +37,41 @@ export function extractAutomaticSocials(raw: Record<string, unknown> | null | un
   return { xUrl, telegramUrl };
 }
 
-// Keep normal opportunity alerts deliberately small. Deep links, socials, CA copy and
-// mute controls belong inside Full Intel rather than competing with the decision.
+// Shared action grammar for all normal token alerts. Full Intel owns deep context;
+// without Full Intel we keep a direct Token link available as its own row.
 export function buildAlphaMarketActions(input: AlphaMarketActionInput): AlphaNotificationAction[][] {
   const rows: AlphaNotificationAction[][] = [];
   const primary: AlphaNotificationAction[] = [];
+
   if (input.fullIntelCallback) primary.push({ text: '🔬 Full Intel', callback_data: input.fullIntelCallback });
   if (input.chartUrl && input.chartUrl !== input.tokenUrl) primary.push({ text: '📊 Chart', url: input.chartUrl });
-  if (!primary.length) primary.push({ text: '🔎 Token', url: input.tokenUrl });
-  rows.push(primary.slice(0, 2));
+  if (primary.length) rows.push(primary.slice(0, 2));
 
   const decision: AlphaNotificationAction[] = [];
   if (input.trackCallback) decision.push({ text: '⭐ Track', callback_data: input.trackCallback });
-  if (input.tradeUrl) decision.push({ text: '⚡ Trade', url: input.tradeUrl });
-  if (input.walletActivityCallback && !input.trackCallback) decision.push({ text: '🐋 Wallet Activity', callback_data: input.walletActivityCallback });
+  if (input.copyContractCallback) decision.push({ text: '📋 Copy CA', callback_data: input.copyContractCallback });
   if (decision.length) rows.push(decision.slice(0, 2));
 
+  if (input.muteCallback) rows.push([{ text: '🔕 Mute', callback_data: input.muteCallback }]);
+
+  // Full Intel already exposes token/deep links. Otherwise preserve the direct explorer path.
+  if (!input.fullIntelCallback && input.tokenUrl) rows.push([{ text: '🔎 Token', url: input.tokenUrl }]);
+
+  if (input.walletActivityCallback && !input.trackCallback) {
+    rows.push([{ text: '🐋 Wallet Activity', callback_data: input.walletActivityCallback }]);
+  }
+
+  // Execution is intentionally isolated from information/navigation actions.
+  if (input.tradeUrl) rows.push([{ text: '⚡ Trade', url: input.tradeUrl }]);
+
+  // Socials remain optional and allowlisted.
+  const socialRow: AlphaNotificationAction[] = [];
+  const xUrl = safeSocialUrl(input.xUrl, 'x');
+  const telegramUrl = safeSocialUrl(input.telegramUrl, 'telegram');
+  if (xUrl) socialRow.push({ text: '𝕏 X', url: xUrl });
+  if (telegramUrl) socialRow.push({ text: '✈️ TG', url: telegramUrl });
+  if (socialRow.length) rows.push(socialRow);
+
+  if (!rows.length) rows.push([{ text: '🔎 Token', url: input.tokenUrl }]);
   return assertAlphaActions(rows);
 }
