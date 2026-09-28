@@ -54,32 +54,17 @@ export function extractAutomaticSocials(raw: Record<string, unknown> | null | un
   return { xUrl, telegramUrl };
 }
 
-// One consistent Telegram action grammar across AlphaOS alerts:
-// 1) act on the market, 2) manage the token, 3) inspect/share, 4) optional socials.
 export function buildAlphaMarketActions(input: AlphaMarketActionInput): AlphaNotificationAction[][] {
   const rows: AlphaNotificationAction[][] = [];
   const chartUrl = directChartUrl(input);
 
-  const primary: AlphaNotificationAction[] = [];
-  if (chartUrl && chartUrl !== input.tokenUrl) primary.push({ text: '📈 Chart', url: chartUrl });
-  if (input.fullIntelCallback) primary.push({ text: '🧠 Full Intel', callback_data: input.fullIntelCallback });
-  if (primary.length) rows.push(primary.slice(0, 2));
-
-  const manage: AlphaNotificationAction[] = [];
-  if (input.trackCallback) manage.push({ text: '⭐ Track', callback_data: input.trackCallback });
-  if (input.copyContractCallback) manage.push({ text: '📋 Copy CA', callback_data: input.copyContractCallback });
-  if (manage.length) rows.push(manage.slice(0, 2));
-
-  const inspect: AlphaNotificationAction[] = [];
-  if (input.tokenUrl) inspect.push({ text: '🔎 Explorer', url: input.tokenUrl });
-  if (input.muteCallback) inspect.push({ text: '🔕 Mute', callback_data: input.muteCallback });
-  if (inspect.length) rows.push(inspect.slice(0, 2));
-
-  if (input.walletActivityCallback && !input.trackCallback) {
-    rows.push([{ text: '🐋 Wallet Activity', callback_data: input.walletActivityCallback }]);
-  }
-
-  // Execution stays visually isolated from research/navigation actions.
+  if (chartUrl && chartUrl !== input.tokenUrl) rows.push([{ text: '📊 Chart', url: chartUrl }]);
+  if (input.fullIntelCallback) rows.push([{ text: '🧠 Full Intel', callback_data: input.fullIntelCallback }]);
+  if (input.trackCallback) rows.push([{ text: '⭐ Track', callback_data: input.trackCallback }]);
+  if (input.copyContractCallback) rows.push([{ text: '📋 Copy CA', callback_data: input.copyContractCallback }]);
+  if (input.muteCallback) rows.push([{ text: '🔕 Mute', callback_data: input.muteCallback }]);
+  if (input.tokenUrl) rows.push([{ text: '🔎 Token', url: input.tokenUrl }]);
+  if (input.walletActivityCallback && !input.trackCallback) rows.push([{ text: '🐋 Wallet Activity', callback_data: input.walletActivityCallback }]);
   if (input.tradeUrl) rows.push([{ text: '⚡ Trade', url: input.tradeUrl }]);
 
   const socialRow: AlphaNotificationAction[] = [];
@@ -89,6 +74,6 @@ export function buildAlphaMarketActions(input: AlphaMarketActionInput): AlphaNot
   if (telegramUrl) socialRow.push({ text: '✈️ Telegram', url: telegramUrl });
   if (socialRow.length) rows.push(socialRow);
 
-  if (!rows.length) rows.push([{ text: '🔎 Explorer', url: input.tokenUrl }]);
+  if (!rows.length) rows.push([{ text: '🔎 Token', url: input.tokenUrl }]);
   return assertAlphaActions(rows);
 }
