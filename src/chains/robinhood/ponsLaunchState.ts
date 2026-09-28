@@ -2,7 +2,10 @@ import {
   decodeFunctionResult,
   encodeFunctionData,
   getAddress,
+  keccak256,
+  padHex,
   parseAbi,
+  toHex,
   type Address,
   type Hex,
 } from 'viem';
@@ -10,7 +13,7 @@ import {
 import { PONS_CONTRACTS, getPonsFactoryDeployments } from './ponsContracts.js';
 import { requestRobinhoodRpcResilient } from './rpc.js';
 import { supabase } from '../../services/supabase.js';
-import { getSharedJson } from '../../services/sharedJsonCache.js';
+import { getSharedJson, setSharedJson } from '../../services/sharedJsonCache.js';
 
 const FACTORY_ABI = parseAbi([
   'function getLaunchedToken(address token) view returns ((address token,address deployer,address pairedToken,address positionManager,uint256 positionId,uint256 dexId,uint256 launchConfigId,uint256 restrictionsEndBlock,uint256 supply,bool isToken0,uint24 poolFee,bool exists,uint256 initialBuyAmount) launched)',
@@ -84,6 +87,68 @@ async function indexedPonsLaunchExists(token: Address): Promise<boolean> {
   }
 }
 
+const eventVerificationCache = new Map<string, { value: boolean; expiresAt: number }>();
+const PONS_TRUE_CACHE_MS = 30 * 24 * 60 * 60 * 1000;
+const PONS_FALSE_CACHE_MS = 60 * 60 * 1000;
+
+function eventSignature(eventDeclaration: string): string {
+  const match = eventDeclaration.match(/^event\s+([^(]+)\((.*)\)$/);
+  if (!match) throw new Error(`Invalid event declaration: ${eventDeclaration}`);
+  const name = match[1].trim();
+  const params = match[2]
+    .split(',')
+    .map(part => part.trim().split(/\s+/)[0])
+    .join(',');
+  return `${name}(${params})`;
+}
+
+async function verifyPonsLaunchEvent(token: Address): Promise<boolean> {
+  const key = token.toLowerCase();
+  const cached = eventVerificationCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  const tokenTopic = padHex(token, { size: 32 });
+  for (const deployment of getPonsFactoryDeployments()) {
+    if (deployment.startBlock == null) continue;
+    try {
+      const topic0 = keccak256(toHex(eventSignature(deployment.tokenLaunchedEvent)));
+      const logs = await requestRobinhoodRpcResilient<unknown[]>({
+        method: 'eth_getLogs',
+        params: [{
+          address: deployment.address,
+          fromBlock: `0x${deployment.startBlock.toString(16)}`,
+          toBlock: 'latest',
+          topics: [topic0, tokenTopic],
+        }],
+      });
+      if (Array.isArray(logs) && logs.length > 0) {
+        eventVerificationCache.set(key, { value: true, expiresAt: Date.now() + PONS_TRUE_CACHE_MS });
+        void setSharedJson(
+          `alphaos:pons:verified:${key}`,
+          { factory: deployment.address, protocolVersion: deployment.generation, provenance: 'TOKEN_LAUNCHED_EVENT' },
+          new Date().toISOString(),
+          PONS_TRUE_CACHE_MS,
+        );
+        console.log('[PonsLaunchState] PONS provenance verified from TokenLaunched event.', {
+          token: key,
+          factory: deployment.address,
+          generation: deployment.generation,
+        });
+        return true;
+      }
+    } catch (error) {
+      console.warn('[PonsLaunchState] event provenance verification unavailable for factory', {
+        token: key,
+        factory: deployment.address,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  eventVerificationCache.set(key, { value: false, expiresAt: Date.now() + PONS_FALSE_CACHE_MS });
+  return false;
+}
+
 export async function isVerifiedPonsLaunch(tokenAddress: string): Promise<boolean> {
   const token = getAddress(tokenAddress);
   const shared = await getSharedJson<{ factory?: string; protocolVersion?: string }>(
@@ -92,10 +157,12 @@ export async function isVerifiedPonsLaunch(tokenAddress: string): Promise<boolea
   if (shared) return true;
   if (await indexedPonsLaunchExists(token)) return true;
   try {
-    return Boolean((await getPonsLaunchState(tokenAddress)).exists);
+    if ((await getPonsLaunchState(tokenAddress)).exists) return true;
   } catch {
-    return false;
+    // V2 factories do not expose the V1 getLaunchedToken() view; continue to
+    // authoritative TokenLaunched event verification below.
   }
+  return verifyPonsLaunchEvent(token);
 }
 
 async function readLaunchFromFactory(token: Address, factory: Address): Promise<PonsLaunchState> {
@@ -136,7 +203,7 @@ export async function getPonsLaunchState(
   const factories = [...new Set([
     indexedFactory,
     activeFactory,
-    ...getPonsFactoryDeployments().filter(factory => factory.enabled).map(factory => getAddress(factory.address)),
+    ...getPonsFactoryDeployments().map(factory => getAddress(factory.address)),
   ].filter((value): value is Address => Boolean(value)).map(value => value.toLowerCase()))].map(value => getAddress(value));
 
   let fallback: PonsLaunchState | null = null;
