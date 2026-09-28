@@ -54,32 +54,32 @@ export function extractAutomaticSocials(raw: Record<string, unknown> | null | un
   return { xUrl, telegramUrl };
 }
 
-// Premium action grammar: price discovery first, intelligence second, then the
-// actions a trader is most likely to take. Keep the same order across alert types.
+// One consistent Telegram action grammar across AlphaOS alerts:
+// 1) act on the market, 2) manage the token, 3) inspect/share, 4) optional socials.
 export function buildAlphaMarketActions(input: AlphaMarketActionInput): AlphaNotificationAction[][] {
   const rows: AlphaNotificationAction[][] = [];
   const chartUrl = directChartUrl(input);
 
   const primary: AlphaNotificationAction[] = [];
-  if (chartUrl && chartUrl !== input.tokenUrl) primary.push({ text: '📈 Live Chart', url: chartUrl });
+  if (chartUrl && chartUrl !== input.tokenUrl) primary.push({ text: '📈 Chart', url: chartUrl });
   if (input.fullIntelCallback) primary.push({ text: '🧠 Full Intel', callback_data: input.fullIntelCallback });
   if (primary.length) rows.push(primary.slice(0, 2));
 
-  const actionRow: AlphaNotificationAction[] = [];
-  if (input.trackCallback) actionRow.push({ text: '⭐ Watch', callback_data: input.trackCallback });
-  if (input.tokenUrl) actionRow.push({ text: '🔎 Explorer', url: input.tokenUrl });
-  if (actionRow.length) rows.push(actionRow.slice(0, 2));
+  const manage: AlphaNotificationAction[] = [];
+  if (input.trackCallback) manage.push({ text: '⭐ Track', callback_data: input.trackCallback });
+  if (input.copyContractCallback) manage.push({ text: '📋 Copy CA', callback_data: input.copyContractCallback });
+  if (manage.length) rows.push(manage.slice(0, 2));
 
-  const utilityRow: AlphaNotificationAction[] = [];
-  if (input.copyContractCallback) utilityRow.push({ text: '📋 Copy CA', callback_data: input.copyContractCallback });
-  if (input.muteCallback) utilityRow.push({ text: '🔕 Mute', callback_data: input.muteCallback });
-  if (utilityRow.length) rows.push(utilityRow.slice(0, 2));
+  const inspect: AlphaNotificationAction[] = [];
+  if (input.tokenUrl) inspect.push({ text: '🔎 Explorer', url: input.tokenUrl });
+  if (input.muteCallback) inspect.push({ text: '🔕 Mute', callback_data: input.muteCallback });
+  if (inspect.length) rows.push(inspect.slice(0, 2));
 
   if (input.walletActivityCallback && !input.trackCallback) {
     rows.push([{ text: '🐋 Wallet Activity', callback_data: input.walletActivityCallback }]);
   }
 
-  // Execution is intentionally isolated from information/navigation actions.
+  // Execution stays visually isolated from research/navigation actions.
   if (input.tradeUrl) rows.push([{ text: '⚡ Trade', url: input.tradeUrl }]);
 
   const socialRow: AlphaNotificationAction[] = [];
