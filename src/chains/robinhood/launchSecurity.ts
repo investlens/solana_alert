@@ -46,9 +46,6 @@ async function refreshRecentPonsCache(): Promise<void> {
         lookbackHours: RECENT_PONS_CACHE_HOURS,
       });
     } catch (error) {
-      // Back off after a failed refresh so a Supabase outage cannot force every
-      // candidate back through the same census query. Authoritative live PONS
-      // tokens already remembered in memory remain usable.
       recentPonsCacheAt = Date.now();
       console.warn('[RobinhoodLaunchSecurity] Recent PONS cache refresh failed; retaining last-good census.', {
         cachedTokens: recentPonsTokens.size,
@@ -61,20 +58,20 @@ async function refreshRecentPonsCache(): Promise<void> {
   return recentPonsRefresh;
 }
 
-async function verifyPonsOnChainDuringDatabaseOutage(tokenAddress: string): Promise<boolean> {
+async function verifyPonsAcrossKnownFactories(tokenAddress: string): Promise<boolean> {
   try {
     const { getPonsLaunchState } = await import('./ponsLaunchState.js');
-    const state = await getPonsLaunchState(tokenAddress, { skipIndexedLookup: true });
+    const state = await getPonsLaunchState(tokenAddress);
     if (!state.exists || normalize(state.token) !== normalize(tokenAddress)) return false;
     rememberAuthoritativePonsToken(tokenAddress);
-    console.log('[RobinhoodLaunchSecurity] PONS identity verified directly by current factory during census outage.', {
+    console.log('[RobinhoodLaunchSecurity] PONS identity verified across known factories.', {
       token: normalize(tokenAddress),
       deployer: state.deployer,
       launchConfigId: state.launchConfigId.toString(),
     });
     return true;
   } catch (error) {
-    console.warn('[RobinhoodLaunchSecurity] Direct factory PONS fallback could not verify token.', {
+    console.warn('[RobinhoodLaunchSecurity] Known-factory PONS verification unavailable.', {
       token: normalize(tokenAddress),
       reason: error instanceof Error ? error.message : String(error),
     });
@@ -91,11 +88,8 @@ export async function classifyRobinhoodLaunch(tokenAddress: string): Promise<Lau
   }
   if (recentPonsTokens.has(token)) return 'PONS';
 
+  let databaseAvailable = true;
   try {
-    // EVM addresses are exact identifiers. Avoid ILIKE here: it prevents the
-    // existing btree index from serving this very hot lookup efficiently.
-    // Live PONS detections are normalized and remembered above, while the DB
-    // lookup remains a durable fallback for normalized historical rows.
     const { data, error } = await supabase
       .from('pons_launches')
       .select('id')
@@ -108,17 +102,22 @@ export async function classifyRobinhoodLaunch(tokenAddress: string): Promise<Lau
       rememberAuthoritativePonsToken(token);
       return 'PONS';
     }
-    return 'CUSTOM';
   } catch (error) {
-    if (recentPonsTokens.has(token)) return 'PONS';
-    if (await verifyPonsOnChainDuringDatabaseOutage(tokenAddress)) return 'PONS';
-    console.warn('[RobinhoodLaunchSecurity] PONS census unavailable and current factory did not verify token; remaining fail-closed CUSTOM.', {
+    databaseAvailable = false;
+    console.warn('[RobinhoodLaunchSecurity] Exact PONS provenance lookup unavailable.', {
       token,
-      cachedPonsTokens: recentPonsTokens.size,
       reason: error instanceof Error ? error.message : String(error),
     });
-    return 'CUSTOM';
   }
+
+  // A DB miss is not enough to call a token CUSTOM: older PONS launches may not
+  // be present in the current index. Verify against every known PONS factory first.
+  if (await verifyPonsAcrossKnownFactories(tokenAddress)) return 'PONS';
+
+  // Only call a token CUSTOM when the durable provenance lookup was available and
+  // every known PONS factory returned a definitive non-match. During provider/DB
+  // uncertainty we label it VERIFYING while retaining conservative custom security.
+  return databaseAvailable ? 'CUSTOM' : 'UNKNOWN';
 }
 
 export async function evaluateRobinhoodPositiveAlertSecurity(args: {
