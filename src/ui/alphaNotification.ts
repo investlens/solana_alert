@@ -32,12 +32,14 @@ function alphaSummary(alert:AlphaNotification):string { const explicit=alert.rea
 
 export function renderAlphaNotification(alert:AlphaNotification):string {
   const compactAddress=compactAlphaAddress(alert.address), symbol=normalizeAlphaSymbol(alert.symbol), name=boundedAlphaText(alert.subtitle||alert.token||alert.title,80);
-  const identity=name&&symbol?`${name} · $${symbol}`:symbol?`$${symbol}`:name||compactAddress;
   const specialistMetrics=alert.displayIntent==='EXIT'?[]:(alert.specialistMetrics??[]);
   const metrics=[...(alert.age?[{label:'Age',value:alert.age}]:[]),...(alert.metrics??[]),...specialistMetrics].filter(validMetric).slice(0,24);
   const source=sourceLabel(alert,metrics), chain=String(alert.chain??'').trim().toUpperCase();
   const lines:string[]=[`🚀 <b>ALPHAOS · ${escapeAlphaHtml(alphaStateLabel(alert.state))}</b>`];
-  if(identity)lines.push('',`<b>${escapeAlphaHtml(identity)}</b>`);
+  if(symbol&&compactAddress) lines.push('',`<b>${escapeAlphaHtml(symbol)}</b> · <code>${escapeAlphaHtml(compactAddress)}</code>`);
+  else if(symbol) lines.push('',`<b>${escapeAlphaHtml(symbol)}</b>`);
+  else if(name||compactAddress) lines.push('',`<b>${escapeAlphaHtml(name||compactAddress)}</b>`);
+  if(name&&symbol&&name.toUpperCase()!==symbol) lines.push(escapeAlphaHtml(name));
   if(chain||source)lines.push(`<code>${escapeAlphaHtml([chain,source].filter(Boolean).join('  ·  '))}</code>`);
 
   const boostTotal=metricBy(metrics,'boost','boost total','total boost','boosts'), boostDelta=metricBy(metrics,'boost increase','boost delta','new boost','boost added','boost change');
@@ -51,7 +53,9 @@ export function renderAlphaNotification(alert:AlphaNotification):string {
   const buys=metricBy(metrics,'buys','5m buys','buys 5m'), sells=metricBy(metrics,'sells','5m sells','sells 5m'), buySell=metricBy(metrics,'buys/sells','buys sells','buy/sell'), pressure=metricBy(metrics,'buy pressure','buy ratio','buy/sell ratio');
   if(mc||liq||vol||age||buys||sells||buySell||pressure){
     lines.push('','<b>MARKET</b>');
-    const r1=sectionPair('MC',mc,'Liq',liq), r2=sectionPair('5m Vol',vol,'Age',age); if(r1)lines.push(r1); if(r2)lines.push(r2);
+    if(mc){ const label=normLabel(mc.label)==='fdv'?'FDV':'Market cap'; lines.push(`${label}  <b>${fmt(mc)}</b>`); }
+    if(liq) lines.push(`Liquidity  <b>${fmt(liq)}</b>`);
+    if(vol||age){ const r=sectionPair('5m volume',vol,'Age',age); if(r)lines.push(r); }
     const bs=buySell?fmt(buySell):(buys||sells)?`${buys?fmt(buys):'—'}/${sells?fmt(sells):'—'}`:'';
     if(bs||pressure)lines.push(`${bs?`Buys/Sells  <b>${bs}</b>`:''}${bs&&pressure?'   |   ':''}${pressure?`Buy pressure  <b>${fmt(pressure)}</b>`:''}`);
   }
@@ -59,18 +63,17 @@ export function renderAlphaNotification(alert:AlphaNotification):string {
   const dev=metricBy(metrics,'dev','dev holding','developer holding','deployer holding'), devMove=metricBy(metrics,'dev movement','developer movement'), lp=metricBy(metrics,'lp','lp protected','liquidity lock','liquidity locked'), sellTest=metricBy(metrics,'sell test','sell simulation'), holders=metricBy(metrics,'holders','top 10','top 10 holders','holder concentration'), honey=metricBy(metrics,'honeypot');
   if(dev||devMove||lp||sellTest||holders||honey||alert.developerContext||alert.structureContext){
     lines.push('','<b>DEV &amp; SAFETY</b>');
-    if(dev)lines.push(`Dev  <b>${fmt(dev)}</b>`);
+    if(dev)lines.push(`<b>Dev:</b> ${fmt(dev)}`);
     if(devMove)lines.push(`Dev movement  <b>${fmt(devMove)}</b>`);
     if(lp)lines.push(`LP  <b>${fmt(lp)}</b>`);
     if(sellTest)lines.push(`Sell test  <b>${fmt(sellTest)}</b>`);
     if(holders)lines.push(`Holders  <b>${fmt(holders)}</b>`);
     if(honey)lines.push(`Honeypot  <b>${fmt(honey)}</b>`);
-    if(alert.developerContext&&!dev)lines.push(`Dev  <b>${escapeAlphaHtml(boundedAlphaText(alert.developerContext,120))}</b>`);
+    if(alert.developerContext&&!dev)lines.push(`<b>Dev:</b> ${escapeAlphaHtml(boundedAlphaText(alert.developerContext,120))}`);
     if(alert.structureContext&&!lp)lines.push(`Structure  <b>${escapeAlphaHtml(boundedAlphaText(alert.structureContext,140))}</b>`);
   }
 
   lines.push('','<b>ALPHAOS</b>',`🧠 <b>${escapeAlphaHtml(alphaSummary(alert))}</b>`);
-  if(alert.address)lines.push('',`<code>${escapeAlphaHtml(compactAddress)}</code>`);
   lines.push('','<i>Information only · DYOR</i>');
   const rendered=lines.join('\n'); if(rendered.length>TELEGRAM_MESSAGE_LIMIT)throw new Error('Alpha notification exceeds Telegram message limit after bounded rendering'); return rendered;
 }
