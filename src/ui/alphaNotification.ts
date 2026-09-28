@@ -4,7 +4,7 @@ export type AlphaNotificationState = 'ENTRY_READY' | 'OPPORTUNITY' | 'VOLUME_IGN
 export type AlphaNotificationMetric = { label: string; value: string | number | null | undefined; icon?: string; };
 export type AlphaNotification = {
   category: AlphaNotificationCategory; severity: AlphaNotificationSeverity; state: AlphaNotificationState;
-  title?: string | null; subtitle?: string | null; token?: string | null; chain?: string | null; symbol?: string | null; address?: string | null; age?: string | null;
+  title?: string | null; subtitle?: string | null; token?: string | null; chain?: string | null; source?: string | null; symbol?: string | null; address?: string | null; age?: string | null;
   confidence?: number | null; risk?: string | null; metrics?: AlphaNotificationMetric[]; specialistMetrics?: AlphaNotificationMetric[]; evidence?: string[]; reason?: string | null;
   recommendedAction?: string | null; insightTitle?: string | null; insight?: string[]; statusTitle?: string | null; status?: string | null; access?: 'FREE' | 'PRO' | 'ADMIN';
   displayIntent?: 'ENTRY' | 'MOMENTUM_UPDATE' | 'RECOVERY_WATCH' | 'WATCH' | 'AVOID' | 'EXIT'; comparison?: { previous: number; current: number; changePct: number };
@@ -35,10 +35,6 @@ export function renderAlphaNotification(alert:AlphaNotification):string {
   const rawLabel=alphaStateLabel(alert.state); const firstSpace=rawLabel.indexOf(' '); const icon=firstSpace>0?rawLabel.slice(0,firstSpace):'ℹ️'; const label=firstSpace>0?rawLabel.slice(firstSpace+1):rawLabel;
   const lines:string[]=[`${icon} <b>${escapeAlphaHtml(label)}${identity?` — ${escapeAlphaHtml(identity)}`:''}</b>`, ...(chainLabel(alert.chain)?[`<b>${escapeAlphaHtml(chainLabel(alert.chain))}</b>`]:[])];
   if(alert.address)lines.push(symbol?`<b>${escapeAlphaHtml(symbol)}</b> · <code>${escapeAlphaHtml(compactAddress)}</code>`:`<code>${escapeAlphaHtml(compactAddress)}</code>`);
-  // Specialist evidence (developer holding/burn/transfer) is time-sensitive. EXIT
-  // notifications must not present a prior lifecycle observation as current risk evidence.
-  // Keep EXIT rendering fail-closed when specialist evidence is stale.
-  // Production rebuild marker: exit-specialist-evidence-v2.
   const specialistMetrics=alert.displayIntent==='EXIT'?[]:(alert.specialistMetrics??[]);
   const metrics=[...(alert.age?[{label:'Age',value:alert.age}]:[]),...(alert.metrics??[]),...specialistMetrics].filter(validMetric).slice(0,12);
   const take=(...labels:string[])=>metrics.find(m=>labels.includes(m.label.toLowerCase())); const p=take('price'),mc=take('market cap','fdv'),liq=take('liquidity'),vol=take('5m volume');
