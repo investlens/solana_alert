@@ -5,6 +5,7 @@ import type { CoreDecisionMetricContext, NotificationMarketContext } from './not
 type PremiumState = Extract<AlphaNotificationState, 'OPPORTUNITY' | 'VOLUME_IGNITION' | 'DEX_PAID' | 'BOOST' | 'MAJOR_BOOST' | 'DEV_BURN' | 'DEV_SOLD' | 'CRITICAL_RISK' | 'BUILDING' | 'RUNNER'>;
 const percent=(value:number)=>`${Number(value.toFixed(2))}%`;
 const price=(value:number)=>value>=1?`$${value.toLocaleString('en-US',{maximumFractionDigits:4})}`:`$${value.toPrecision(5).replace(/0+$/,'').replace(/\.$/,'')}`;
+const escapeHtml=(value:unknown)=>String(value??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 export function verifiedPairAge(pairCreatedAt:number|null|undefined,now=Date.now()):string|null { const created=Number(pairCreatedAt); if(!Number.isFinite(created)||created<=0||created>now)return null; const minutes=Math.floor((now-created)/60_000); if(minutes<60)return`${minutes}m`; const hours=Math.floor(minutes/60); return hours<48?`${hours}h`:`${Math.floor(hours/24)}d`; }
 
 export function buildPremiumTokenNotification(args:{
@@ -20,7 +21,7 @@ export function buildPremiumTokenNotification(args:{
   const effectiveStatusTitle = unlockedLpWarning ? 'Liquidity Safety' : args.statusTitle;
   const effectiveStatus = unlockedLpWarning ? '⚠️ UNLOCKED LP — HIGH RUG RISK' : args.status;
   const effectiveStructureContext = unlockedLpWarning
-    ? `⚠️ Liquidity is not protected. LP holders can remove liquidity. Sellability/honeypot checks passed, but rug risk remains high.${args.structureContext ? ` · ${args.structureContext}` : ''}`
+    ? `⚠️ Liquidity is not protected. LP holders can remove liquidity.${args.structureContext ? ` · ${args.structureContext}` : ''}`
     : args.structureContext;
   const metrics=[
     ...(args.market.price==null?[]:[{icon:'💰',label:'Price',value:price(args.market.price)}]), ...(args.age?[{icon:'⏱',label:'Age',value:args.age}]:[]),
@@ -31,6 +32,36 @@ export function buildPremiumTokenNotification(args:{
     ...(args.move==null?[]:[{icon:'📊',label:'Move',value:`${args.move>=0?'+':''}${args.move.toFixed(1)}%`}]), ...(args.peakMove==null?[]:[{icon:'🏔',label:'Peak',value:`${args.peakMove>=0?'+':''}${args.peakMove.toFixed(1)}%`}]),
     ...(args.retainedPeakPercent==null?[]:[{icon:'🛡',label:'Retained',value:`${args.retainedPeakPercent}%`}])
   ];
+
+  // BOOST cards are intentionally compact. The first delivery is time-critical and
+  // late enrichment edits the same Telegram message with verified market metrics.
+  if (args.state === 'BOOST' || args.state === 'MAJOR_BOOST') {
+    const title = args.state === 'MAJOR_BOOST' ? '🚨🔥 MAX BOOST 500+' : '🚀 BOOST DETECTED';
+    const symbol = String(args.symbol ?? '').trim().toUpperCase() || 'TOKEN';
+    const chain = String(args.chain ?? '').trim().toUpperCase();
+    const lines = [
+      `<b>${title}</b>`,
+      `<b>$${escapeHtml(symbol)}</b>${args.name ? ` · ${escapeHtml(args.name)}` : ''}`,
+      chain ? `<b>${escapeHtml(chain)}</b>` : '',
+      '',
+      ...(args.boostTotal==null?[]:[`⚡ Boost  <b>${args.boostTotal} total${args.boostIncrement==null?'':` (+${args.boostIncrement})`}</b>`]),
+      ...(marketCap==null?(fdv==null?[]:[`💰 FDV  <b>${formatUsd(fdv)}</b>`]):[`💵 Market cap  <b>${formatUsd(marketCap)}</b>`]),
+      ...(args.market.liquidity==null?[]:[`💧 Liquidity  <b>${formatUsd(args.market.liquidity)}</b>`]),
+      ...(args.market.volume5m==null?[]:[`📊 5m volume  <b>${formatUsd(args.market.volume5m)}</b>`]),
+      ...(args.evidence?.devHoldingEvidence==='VERIFIED'&&args.evidence.devHoldingPercent!=null?[`👨‍💻 Dev holding  <b>${percent(args.evidence.devHoldingPercent)}</b>`]:[]),
+      ...(args.move==null?[]:[`📈 Move  <b>${args.move>=0?'+':''}${args.move.toFixed(1)}%</b>`]),
+      '',
+      unlockedLpWarning
+        ? '⚠️ LP  <b>UNLOCKED — HIGH RUG RISK</b>'
+        : `🛡 Security  <b>${escapeHtml(args.status)}</b>`,
+      unlockedLpWarning ? '🛡 Honeypot / sell restriction  <b>NOT DETECTED</b>' : '',
+      '',
+      `<code>${escapeHtml(args.address)}</code>`,
+      '⚠️ DYOR',
+    ].filter(Boolean);
+    return lines.join('\n');
+  }
+
   const developerParts=[...(!lightweight&&args.evidence?.devHoldingEvidence==='VERIFIED'&&args.evidence.devHoldingPercent!=null?[`Dev holds ${percent(args.evidence.devHoldingPercent)}`]:[]), ...(args.devBurnPercent!=null&&Number.isFinite(args.devBurnPercent)?[`Dev burned ${percent(args.devBurnPercent)}`]:[]), ...(args.devLaunches!=null&&args.devLaunches>0?[`${args.devLaunches} observed creator launches`]:[])];
   return renderAlphaNotification({
     category:['DEV_SOLD','CRITICAL_RISK'].includes(args.state)?'risk':'market', severity:['DEV_SOLD','CRITICAL_RISK'].includes(args.state)?'critical':['OPPORTUNITY','VOLUME_IGNITION','DEX_PAID','DEV_BURN'].includes(args.state)?'positive':'watch',
