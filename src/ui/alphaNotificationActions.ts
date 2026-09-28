@@ -25,6 +25,23 @@ function safeSocialUrl(value: string | null | undefined, platform: 'x' | 'telegr
   } catch { return null; }
 }
 
+function directChartUrl(input: AlphaMarketActionInput): string | null {
+  if (input.chartUrl && /^https:\/\//i.test(input.chartUrl)) return input.chartUrl;
+  try {
+    const tokenUrl = new URL(input.tokenUrl);
+    const host = tokenUrl.hostname.toLowerCase();
+    const parts = tokenUrl.pathname.split('/').filter(Boolean);
+    const tokenIndex = parts.findIndex(part => part.toLowerCase() === 'token');
+    const tokenAddress = tokenIndex >= 0 ? parts[tokenIndex + 1] : null;
+    if (host === 'robinhoodchain.blockscout.com' && tokenAddress && /^0x[0-9a-fA-F]{40}$/.test(tokenAddress)) {
+      return `https://dexscreener.com/robinhood/${tokenAddress}`;
+    }
+  } catch {
+    // Fall through: explorer remains available below.
+  }
+  return null;
+}
+
 export function extractAutomaticSocials(raw: Record<string, unknown> | null | undefined) {
   const data = raw ?? {}; const urls: unknown[] = [data.xUrl, data.twitterUrl, data.telegramUrl];
   for (const list of [data.socials, (data.market as Record<string, unknown> | undefined)?.socials]) {
@@ -37,14 +54,15 @@ export function extractAutomaticSocials(raw: Record<string, unknown> | null | un
   return { xUrl, telegramUrl };
 }
 
-// Shared action grammar for all normal token alerts. Full Intel owns deep context;
-// without Full Intel we keep a direct Token link available as its own row.
+// Shared action grammar for all normal token alerts. Market navigation must be
+// one tap from the alert: Full Intel is useful context, never a prerequisite for a chart.
 export function buildAlphaMarketActions(input: AlphaMarketActionInput): AlphaNotificationAction[][] {
   const rows: AlphaNotificationAction[][] = [];
   const primary: AlphaNotificationAction[] = [];
+  const chartUrl = directChartUrl(input);
 
   if (input.fullIntelCallback) primary.push({ text: '🔬 Full Intel', callback_data: input.fullIntelCallback });
-  if (input.chartUrl && input.chartUrl !== input.tokenUrl) primary.push({ text: '📊 Chart', url: input.chartUrl });
+  if (chartUrl && chartUrl !== input.tokenUrl) primary.push({ text: '📈 DEX / Chart', url: chartUrl });
   if (primary.length) rows.push(primary.slice(0, 2));
 
   const decision: AlphaNotificationAction[] = [];
@@ -54,7 +72,7 @@ export function buildAlphaMarketActions(input: AlphaMarketActionInput): AlphaNot
 
   if (input.muteCallback) rows.push([{ text: '🔕 Mute', callback_data: input.muteCallback }]);
 
-  // Full Intel already exposes token/deep links. Otherwise preserve the direct explorer path.
+  // Preserve a direct explorer path when no deep-intel callback exists.
   if (!input.fullIntelCallback && input.tokenUrl) rows.push([{ text: '🔎 Token', url: input.tokenUrl }]);
 
   if (input.walletActivityCallback && !input.trackCallback) {
