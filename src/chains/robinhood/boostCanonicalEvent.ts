@@ -25,6 +25,15 @@ export function classifyBoostCanonicalEvent(args: {
   if (previousTotal != null && currentTotal <= previousTotal) return null;
 
   const feedAmount = Number(args.feedAmount);
+
+  // Recovery/redeploy safety: when the observer has no local prior total but the
+  // provider says only part of currentTotal was newly added, this is an accumulated
+  // historical BOOST state rather than a trustworthy fresh detection. Absorb it
+  // silently; the next genuine increase will have previousTotal and alert normally.
+  if (previousTotal == null && Number.isFinite(feedAmount) && feedAmount > 0 && feedAmount < currentTotal) {
+    return null;
+  }
+
   const boostAdded = previousTotal == null
     ? (Number.isFinite(feedAmount) && feedAmount > 0 ? feedAmount : currentTotal)
     : currentTotal - previousTotal;
