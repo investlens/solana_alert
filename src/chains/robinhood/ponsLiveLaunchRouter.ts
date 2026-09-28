@@ -6,6 +6,7 @@ import { describePonsTelegramError } from './ponsProvenDeveloperTelegram.js';
 import { createPonsProvenDeveloperAlert, type PonsProvenDeveloperAlert } from './ponsProvenDeveloperAlert.js';
 import { decidePonsShadowLaunch, evaluatePonsProvenDeveloperLaunch, toPonsLiveMarketEvidence, type PonsShadowDecision } from './ponsProvenDeveloperLaunch.js';
 import { queuePonsNormalAlertFastLane } from './ponsNormalAlertFastLane.js';
+import { queuePonsSocialMafiaScreen } from './ponsSocialMafiaAlert.js';
 import { setSharedJson } from '../../services/sharedJsonCache.js';
 
 export type PonsLiveRouteResult = {
@@ -64,6 +65,11 @@ export function createPonsLiveLaunchRouter(overrides: Partial<PonsLiveRouterDepe
       new Date().toISOString(),
       30 * 24 * 60 * 60 * 1000,
     );
+
+    // Social Mafia is an independent, bounded side lane for every verified PONS
+    // launch. It never blocks the normal launch path. It only emits when a linked
+    // X account is >= 6 months old and the honeypot/sellability gate passes.
+    queuePonsSocialMafiaScreen(launch);
 
     // Developer intelligence is enrichment only. Registry failure never grants a
     // proven-developer bonus; the token enters the same strict market fast lane.
