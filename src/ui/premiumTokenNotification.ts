@@ -15,6 +15,13 @@ export function buildPremiumTokenNotification(args:{
   comparison?:{previous:number;current:number;changePct:number}; entryAction?:'BUY'|'CHECK_ENTRY'; structureContext?:string|null;
 }) {
   const marketCap=args.market.marketCap, fdv=marketCap==null?args.market.fdv:null, lightweight=['DEX_PAID','BOOST','MAJOR_BOOST'].includes(args.state);
+  const unlockedLpWarning = lightweight && args.insight.some(line => /LP\s+UNLOCKED|remains removable|liquidity can be pulled/i.test(line));
+  const effectiveRisk = unlockedLpWarning ? 'HIGH — UNLOCKED LP' : args.risk;
+  const effectiveStatusTitle = unlockedLpWarning ? 'Liquidity Safety' : args.statusTitle;
+  const effectiveStatus = unlockedLpWarning ? '⚠️ UNLOCKED LP — HIGH RUG RISK' : args.status;
+  const effectiveStructureContext = unlockedLpWarning
+    ? `⚠️ Liquidity is not protected. LP holders can remove liquidity. Sellability/honeypot checks passed, but rug risk remains high.${args.structureContext ? ` · ${args.structureContext}` : ''}`
+    : args.structureContext;
   const metrics=[
     ...(args.market.price==null?[]:[{icon:'💰',label:'Price',value:price(args.market.price)}]), ...(args.age?[{icon:'⏱',label:'Age',value:args.age}]:[]),
     ...(marketCap==null?[]:[{icon:'💵',label:'Market cap',value:formatUsd(marketCap)}]), ...(fdv==null?[]:[{icon:'💰',label:'FDV',value:formatUsd(fdv)}]),
@@ -27,8 +34,8 @@ export function buildPremiumTokenNotification(args:{
   const developerParts=[...(!lightweight&&args.evidence?.devHoldingEvidence==='VERIFIED'&&args.evidence.devHoldingPercent!=null?[`Dev holds ${percent(args.evidence.devHoldingPercent)}`]:[]), ...(args.devBurnPercent!=null&&Number.isFinite(args.devBurnPercent)?[`Dev burned ${percent(args.devBurnPercent)}`]:[]), ...(args.devLaunches!=null&&args.devLaunches>0?[`${args.devLaunches} observed creator launches`]:[])];
   return renderAlphaNotification({
     category:['DEV_SOLD','CRITICAL_RISK'].includes(args.state)?'risk':'market', severity:['DEV_SOLD','CRITICAL_RISK'].includes(args.state)?'critical':['OPPORTUNITY','VOLUME_IGNITION','DEX_PAID','DEV_BURN'].includes(args.state)?'positive':'watch',
-    state:args.state,symbol:args.symbol,subtitle:args.name,address:args.address,chain:args.chain,observedAt:args.observedAt,confidence:args.confidence,risk:args.risk,metrics,
-    insightTitle:args.insightTitle,insight:args.insight,statusTitle:args.statusTitle,status:args.status,displayIntent:args.displayIntent??(args.state==='OPPORTUNITY'?'ENTRY':args.state==='DEV_SOLD'||args.state==='CRITICAL_RISK'?'AVOID':'WATCH'),
-    comparison:args.comparison,entryAction:args.entryAction,developerContext:developerParts.length?developerParts.join(' · '):null,structureContext:args.structureContext
+    state:args.state,symbol:args.symbol,subtitle:args.name,address:args.address,chain:args.chain,observedAt:args.observedAt,confidence:args.confidence,risk:effectiveRisk,metrics,
+    insightTitle:args.insightTitle,insight:args.insight,statusTitle:effectiveStatusTitle,status:effectiveStatus,displayIntent:args.displayIntent??(args.state==='OPPORTUNITY'?'ENTRY':args.state==='DEV_SOLD'||args.state==='CRITICAL_RISK'?'AVOID':'WATCH'),
+    comparison:args.comparison,entryAction:args.entryAction,developerContext:developerParts.length?developerParts.join(' · '):null,structureContext:effectiveStructureContext
   });
 }
