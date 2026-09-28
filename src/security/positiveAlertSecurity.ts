@@ -60,6 +60,15 @@ export function readVerifiedLiquidityEvidence(raw: Record<string, unknown> | nul
   return { state, verified };
 }
 
+function isSecurityRoutedBoost(raw: Record<string, unknown> | null | undefined): boolean {
+  const data = raw ?? {};
+  const canonical = String(data.canonicalEventType ?? '').trim().toUpperCase();
+  const total = Number(data.boostTotal);
+  return /^BOOST_(?:DETECTED|INCREASED)$/.test(canonical) || canonical === 'MAX_BOOST_500_PLUS'
+    ? Number.isFinite(total) && total > 0
+    : false;
+}
+
 export function evaluatePositiveAlertSecurity(args: {
   launchType: LaunchClassification;
   raw?: Record<string, unknown> | null;
@@ -75,17 +84,26 @@ export function evaluatePositiveAlertSecurity(args: {
   }
 
   const evidence = readVerifiedLiquidityEvidence(args.raw);
-  const allowed = evidence.verified && (evidence.state === 'LOCKED' || evidence.state === 'BURNED');
+  const routedBoost = isSecurityRoutedBoost(args.raw);
+  const lockedOrBurned = evidence.verified && (evidence.state === 'LOCKED' || evidence.state === 'BURNED');
+  // BOOST candidates reach this layer only after the dedicated BOOST security router.
+  // For that event family, a known UNLOCKED LP is warning-level evidence rather than
+  // a second hard block. Unknown LP evidence remains fail-closed, and all non-BOOST
+  // positive semantic events keep the strict locked/burned requirement.
+  const warnedUnlockedBoost = routedBoost && evidence.state === 'UNLOCKED';
+  const allowed = lockedOrBurned || warnedUnlockedBoost;
   return {
     allowed,
     launchType: 'CUSTOM',
     liquidityState: evidence.state,
     liquidityVerified: evidence.verified,
-    reason: allowed
+    reason: lockedOrBurned
       ? `CUSTOM_LP_${evidence.state}_VERIFIED`
-      : evidence.verified
-        ? `CUSTOM_LP_${evidence.state}_BLOCKED`
-        : 'CUSTOM_LP_UNVERIFIED_FAIL_CLOSED',
+      : warnedUnlockedBoost
+        ? 'CUSTOM_BOOST_LP_UNLOCKED_WARN_ALLOWED'
+        : evidence.verified
+          ? `CUSTOM_LP_${evidence.state}_BLOCKED`
+          : 'CUSTOM_LP_UNVERIFIED_FAIL_CLOSED',
   };
 }
 
