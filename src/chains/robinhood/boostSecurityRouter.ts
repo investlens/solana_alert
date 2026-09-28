@@ -39,11 +39,22 @@ async function fetchCustomLiquidityProtection(tokenAddress: string): Promise<Boo
     const result = payload.result ?? {};
     const security = result[key] ?? result[Object.keys(result).find(v => normalize(v) === key) ?? ''];
     if (!security) return { allowed: false, status: 'UNKNOWN', reason: 'security/LP data unavailable' };
-    if (String(security.is_honeypot ?? '0') === '1') return { allowed: false, status: 'UNLOCKED', reason: 'honeypot flag' };
-    if (String(security.cannot_sell_all ?? '0') === '1') return { allowed: false, status: 'UNLOCKED', reason: 'sell restriction flag' };
+
+    // Hard safety failures remain non-negotiable. A BOOST never overrides
+    // honeypot or sell-restriction evidence.
+    if (String(security.is_honeypot ?? '0') === '1') return {
+      allowed: false,
+      status: 'UNLOCKED',
+      reason: 'HARD BLOCK: honeypot flag; token may be buyable but not safely sellable',
+    };
+    if (String(security.cannot_sell_all ?? '0') === '1') return {
+      allowed: false,
+      status: 'UNLOCKED',
+      reason: 'HARD BLOCK: sell restriction flag; holders may be unable to exit',
+    };
 
     const holders = Array.isArray(security.lp_holders) ? security.lp_holders as Record<string, unknown>[] : [];
-    if (!holders.length) return { allowed: false, status: 'UNKNOWN', reason: 'no independently verified LP-holder evidence' };
+    if (!holders.length) return { allowed: false, status: 'UNKNOWN', reason: 'security/LP data unavailable: no independently verified LP-holder evidence' };
 
     let protectedPct = 0, burnedPct = 0, unlockedPct = 0;
     for (const holder of holders) {
@@ -57,20 +68,29 @@ async function fetchCustomLiquidityProtection(tokenAddress: string): Promise<Boo
     if (protectedPct >= 0.95) return {
       allowed: true,
       status: burnedPct >= 0.95 ? 'BURNED' : 'LOCKED',
-      reason: `${(protectedPct * 100).toFixed(1)}% of observed LP protected`,
+      reason: `LP PROTECTED: ${(protectedPct * 100).toFixed(1)}% of observed LP locked/burned`,
     };
+
+    // Unlocked liquidity is a disclosed market risk, not automatically a
+    // malicious contract. Allow the BOOST to surface with an explicit warning
+    // after the hard honeypot/sellability checks above have passed.
     return {
-      allowed: false,
+      allowed: true,
       status: 'UNLOCKED',
-      reason: `only ${(protectedPct * 100).toFixed(1)}% LP protected; ${(unlockedPct * 100).toFixed(1)}% remains removable`,
+      reason: `⚠️ HIGH RISK — LP UNLOCKED: only ${(protectedPct * 100).toFixed(1)}% protected; ${(unlockedPct * 100).toFixed(1)}% remains removable by LP holders. Sellability checks passed, but liquidity can be pulled. DYOR.`,
     };
   } catch (error) {
+    // Unknown security is still fail-closed. We only warn-and-allow when we
+    // positively know the token passed hard sellability/honeypot checks and
+    // the remaining issue is unlocked LP.
     return { allowed: false, status: 'UNKNOWN', reason: error instanceof Error ? error.message.slice(0, 180) : String(error).slice(0, 180) };
   }
 }
 
 /**
  * Fast route for a factory-verified trusted launchpad; hard security route otherwise.
+ * Custom tokens are blocked for honeypot/sellability/unknown-security failures.
+ * Unlocked LP is allowed only as a prominently disclosed high-risk BOOST.
  * The custom check is cached so repeated BOOST increments do not repeatedly hit providers.
  */
 export async function routeBoostSecurity(args: {
@@ -91,11 +111,16 @@ export async function routeBoostSecurity(args: {
   if (prior && prior.expiresAt > now) return { ...prior.value, cached: true };
 
   const liquidity = await fetchCustomLiquidityProtection(args.tokenAddress);
+  const warning = liquidity.allowed && liquidity.status === 'UNLOCKED';
   const value: BoostSecurityGateDecision = {
     allowed: liquidity.allowed,
     route: 'CUSTOM_SECURITY_REQUIRED',
     liquidity,
-    reason: liquidity.allowed ? `custom security passed: ${liquidity.reason}` : `custom security blocked: ${liquidity.reason}`,
+    reason: liquidity.allowed
+      ? warning
+        ? `custom security warning: ${liquidity.reason}`
+        : `custom security passed: ${liquidity.reason}`
+      : `custom security blocked: ${liquidity.reason}`,
     cached: false,
   };
   cache.set(key, { expiresAt: now + (value.allowed ? SAFE_TTL_MS : BLOCKED_TTL_MS), value });
