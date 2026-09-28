@@ -37,7 +37,7 @@ function directChartUrl(input: AlphaMarketActionInput): string | null {
       return `https://dexscreener.com/robinhood/${tokenAddress}`;
     }
   } catch {
-    // Fall through: explorer remains available below.
+    // Explorer remains available even when a chart URL cannot be derived.
   }
   return null;
 }
@@ -54,26 +54,26 @@ export function extractAutomaticSocials(raw: Record<string, unknown> | null | un
   return { xUrl, telegramUrl };
 }
 
-// Shared action grammar for all normal token alerts. Market navigation must be
-// one tap from the alert: Full Intel is useful context, never a prerequisite for a chart.
+// Premium action grammar: price discovery first, intelligence second, then the
+// actions a trader is most likely to take. Keep the same order across alert types.
 export function buildAlphaMarketActions(input: AlphaMarketActionInput): AlphaNotificationAction[][] {
   const rows: AlphaNotificationAction[][] = [];
-  const primary: AlphaNotificationAction[] = [];
   const chartUrl = directChartUrl(input);
 
-  if (input.fullIntelCallback) primary.push({ text: '🔬 Full Intel', callback_data: input.fullIntelCallback });
-  if (chartUrl && chartUrl !== input.tokenUrl) primary.push({ text: '📈 DEX / Chart', url: chartUrl });
+  const primary: AlphaNotificationAction[] = [];
+  if (chartUrl && chartUrl !== input.tokenUrl) primary.push({ text: '📈 Live Chart', url: chartUrl });
+  if (input.fullIntelCallback) primary.push({ text: '🧠 Full Intel', callback_data: input.fullIntelCallback });
   if (primary.length) rows.push(primary.slice(0, 2));
 
-  const decision: AlphaNotificationAction[] = [];
-  if (input.trackCallback) decision.push({ text: '⭐ Track', callback_data: input.trackCallback });
-  if (input.copyContractCallback) decision.push({ text: '📋 Copy CA', callback_data: input.copyContractCallback });
-  if (decision.length) rows.push(decision.slice(0, 2));
+  const actionRow: AlphaNotificationAction[] = [];
+  if (input.trackCallback) actionRow.push({ text: '⭐ Watch', callback_data: input.trackCallback });
+  if (input.tokenUrl) actionRow.push({ text: '🔎 Explorer', url: input.tokenUrl });
+  if (actionRow.length) rows.push(actionRow.slice(0, 2));
 
-  if (input.muteCallback) rows.push([{ text: '🔕 Mute', callback_data: input.muteCallback }]);
-
-  // Preserve a direct explorer path when no deep-intel callback exists.
-  if (!input.fullIntelCallback && input.tokenUrl) rows.push([{ text: '🔎 Token', url: input.tokenUrl }]);
+  const utilityRow: AlphaNotificationAction[] = [];
+  if (input.copyContractCallback) utilityRow.push({ text: '📋 Copy CA', callback_data: input.copyContractCallback });
+  if (input.muteCallback) utilityRow.push({ text: '🔕 Mute', callback_data: input.muteCallback });
+  if (utilityRow.length) rows.push(utilityRow.slice(0, 2));
 
   if (input.walletActivityCallback && !input.trackCallback) {
     rows.push([{ text: '🐋 Wallet Activity', callback_data: input.walletActivityCallback }]);
@@ -82,14 +82,13 @@ export function buildAlphaMarketActions(input: AlphaMarketActionInput): AlphaNot
   // Execution is intentionally isolated from information/navigation actions.
   if (input.tradeUrl) rows.push([{ text: '⚡ Trade', url: input.tradeUrl }]);
 
-  // Socials remain optional and allowlisted.
   const socialRow: AlphaNotificationAction[] = [];
   const xUrl = safeSocialUrl(input.xUrl, 'x');
   const telegramUrl = safeSocialUrl(input.telegramUrl, 'telegram');
   if (xUrl) socialRow.push({ text: '𝕏 X', url: xUrl });
-  if (telegramUrl) socialRow.push({ text: '✈️ TG', url: telegramUrl });
+  if (telegramUrl) socialRow.push({ text: '✈️ Telegram', url: telegramUrl });
   if (socialRow.length) rows.push(socialRow);
 
-  if (!rows.length) rows.push([{ text: '🔎 Token', url: input.tokenUrl }]);
+  if (!rows.length) rows.push([{ text: '🔎 Explorer', url: input.tokenUrl }]);
   return assertAlphaActions(rows);
 }
