@@ -4,7 +4,7 @@ export type AlphaNotificationState = 'ENTRY_READY' | 'OPPORTUNITY' | 'VOLUME_IGN
 export type AlphaNotificationMetric = { label: string; value: string | number | null | undefined; icon?: string; };
 export type AlphaNotification = {
   category: AlphaNotificationCategory; severity: AlphaNotificationSeverity; state: AlphaNotificationState;
-  title?: string | null; subtitle?: string | null; token?: string | null; chain?: string | null; symbol?: string | null; address?: string | null; age?: string | null;
+  title?: string | null; subtitle?: string | null; token?: string | null; chain?: string | null; source?: string | null; symbol?: string | null; address?: string | null; age?: string | null;
   confidence?: number | null; risk?: string | null; metrics?: AlphaNotificationMetric[]; specialistMetrics?: AlphaNotificationMetric[]; evidence?: string[]; reason?: string | null;
   recommendedAction?: string | null; insightTitle?: string | null; insight?: string[]; statusTitle?: string | null; status?: string | null; access?: 'FREE' | 'PRO' | 'ADMIN';
   displayIntent?: 'ENTRY' | 'MOMENTUM_UPDATE' | 'RECOVERY_WATCH' | 'WATCH' | 'AVOID' | 'EXIT'; comparison?: { previous: number; current: number; changePct: number };
@@ -13,7 +13,7 @@ export type AlphaNotification = {
 export type AlphaNotificationAction = { text: string; url?: string; callback_data?: string; };
 
 const STATE_LABELS: Record<AlphaNotificationState, string> = {
-  ENTRY_READY:'🔥 ALPHA ENTRY', OPPORTUNITY:'🔥 ALPHA OPPORTUNITY', VOLUME_IGNITION:'🚀 VOLUME IGNITION', DEX_PAID:'💎 DEX PAID', BOOST:'🚀 BOOST DETECTED', MAJOR_BOOST:'🚨 MAX BOOST 500+', DEV_BURN:'🔥 VERIFIED BURN', DEV_SOLD:'🚨 DEV SELL', CRITICAL_RISK:'🚨 LIQUIDITY / CRITICAL RISK', BUILDING:'📈 MOMENTUM BUILDING', RUNNER:'🚀 RUNNER', WATCHING:'👀 WATCHING', BOOSTED_OPPORTUNITY:'🔥 BOOSTED OPPORTUNITY', EXIT_AVOID:'🚪 RISK EXIT ALERT', WALLET_BUY:'🐋 SMART MONEY ENTRY', WALLET_SELL:'🐋 SMART MONEY EXIT', WALLET_LAUNCH:'🐋 SMART MONEY LAUNCH', WALLET_MOVE:'🐋 SMART MONEY MOVEMENT', CREATOR_EVENT:'👨‍💻 DEV MOVEMENT', RISK:'⚠️ RISK ALERT', EXECUTED:'✅ EXECUTED', FAILED:'⚠️ EXECUTION FAILED', PAUSED:'⏸ AUTO TRADE PAUSED', RESUMED:'▶ AUTO TRADE RESUMED', POSITION_UPDATE:'📈 POSITION UPDATE'
+  ENTRY_READY:'ALPHA ENTRY', OPPORTUNITY:'ALPHA OPPORTUNITY', VOLUME_IGNITION:'VOLUME IGNITION', DEX_PAID:'DEX PAID', BOOST:'BOOST', MAJOR_BOOST:'MAX BOOST 500+', DEV_BURN:'VERIFIED BURN', DEV_SOLD:'DEV SELL', CRITICAL_RISK:'CRITICAL RISK', BUILDING:'MOMENTUM', RUNNER:'RUNNER', WATCHING:'WATCHING', BOOSTED_OPPORTUNITY:'BOOSTED OPPORTUNITY', EXIT_AVOID:'RISK EXIT', WALLET_BUY:'SMART MONEY ENTRY', WALLET_SELL:'SMART MONEY EXIT', WALLET_LAUNCH:'SMART MONEY LAUNCH', WALLET_MOVE:'SMART MONEY MOVEMENT', CREATOR_EVENT:'DEV MOVEMENT', RISK:'RISK ALERT', EXECUTED:'EXECUTED', FAILED:'EXECUTION FAILED', PAUSED:'AUTO TRADE PAUSED', RESUMED:'AUTO TRADE RESUMED', POSITION_UPDATE:'POSITION UPDATE'
 };
 export function escapeAlphaHtml(value: unknown): string { return String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;'); }
 export const TELEGRAM_MESSAGE_LIMIT = 4096;
@@ -23,41 +23,55 @@ export function normalizeAlphaSymbol(value?:string|null):string { return bounded
 export function alphaStateLabel(state:AlphaNotificationState):string { return STATE_LABELS[state]; }
 export function assertAlphaActions(actions:AlphaNotificationAction[][]):AlphaNotificationAction[][] { for(const row of actions)for(const action of row){ if(action.callback_data&&Buffer.byteLength(action.callback_data,'utf8')>64)throw new Error(`Telegram callback_data exceeds 64 bytes: ${action.callback_data}`); if(action.url&&!/^https:\/\//i.test(action.url))throw new Error(`Telegram action URL must use HTTPS: ${action.url}`);} return actions; }
 function validMetric(metric:AlphaNotificationMetric):boolean { return metric.value!==null&&metric.value!==undefined&&String(metric.value).trim()!==''; }
-function validConfidence(value:number|null|undefined):number|null { return typeof value==='number'&&Number.isFinite(value)&&value>=0&&value<=100?value:null; }
-function chainLabel(value:string|null|undefined):string|null { const v=String(value??'').trim().toUpperCase(); if(!v)return null; if(v==='ROBINHOOD')return 'ROBINHOOD · PONS'; return v; }
-function verdict(alert:AlphaNotification):string { const intent=alert.displayIntent; if(intent==='EXIT')return 'EXIT'; if(intent==='AVOID')return 'AVOID'; if(intent==='ENTRY')return alert.entryAction==='BUY'?'BUY SETUP':'CHECK ENTRY'; if(alert.state==='DEX_PAID')return 'EARLY WATCH'; if(['BOOST','MAJOR_BOOST','VOLUME_IGNITION','BUILDING','RUNNER'].includes(alert.state))return 'MOMENTUM WATCH'; if(alert.category==='wallet'||alert.category==='smart-money')return 'SMART MONEY WATCH'; if(alert.category==='creator')return 'CREATOR WATCH'; return 'WATCH'; }
-function actionLabel(alert:AlphaNotification):string { if(alert.displayIntent==='ENTRY')return alert.entryAction==='BUY'?'BUY':'CHECK ENTRY'; if(alert.displayIntent==='MOMENTUM_UPDATE')return 'MOMENTUM UPDATE'; if(alert.displayIntent==='AVOID')return 'AVOID'; if(alert.displayIntent==='EXIT')return 'EXIT'; return 'WATCH'; }
-function observedLabel(value:string|number|Date|null|undefined):string { if(value==null)return 'Observed just now'; const t=value instanceof Date?value.getTime():typeof value==='number'?value:Date.parse(value); if(!Number.isFinite(t))return 'Observed just now'; const sec=Math.max(0,Math.floor((Date.now()-t)/1000)); return sec<10?'Observed just now':sec<60?`Observed ${sec}s ago`:`Observed ${Math.floor(sec/60)}m ago`; }
+function normLabel(value:string):string { return value.trim().toLowerCase().replace(/[_-]+/g,' '); }
+function metricBy(metrics:AlphaNotificationMetric[],...labels:string[]):AlphaNotificationMetric|undefined { const wanted=labels.map(normLabel); return metrics.find(m=>wanted.includes(normLabel(m.label))); }
+function fmt(metric?:AlphaNotificationMetric):string { return metric?escapeAlphaHtml(boundedAlphaText(metric.value,80)):''; }
+function sourceLabel(alert:AlphaNotification, metrics:AlphaNotificationMetric[]):string|null { const explicit=String(alert.source??'').trim().toUpperCase(); if(explicit)return explicit; const m=metricBy(metrics,'source','launch','launch source','protocol'); return m?String(m.value).trim().toUpperCase():null; }
+function sectionPair(leftLabel:string,left?:AlphaNotificationMetric,rightLabel?:string,right?:AlphaNotificationMetric):string|null { if(!left&&!right)return null; const a=left?`${leftLabel}  <b>${fmt(left)}</b>`:''; const b=right&&rightLabel?`${rightLabel}  <b>${fmt(right)}</b>`:''; return a&&b?`${a}   |   ${b}`:a||b; }
+function alphaSummary(alert:AlphaNotification):string { const explicit=alert.reason||alert.recommendedAction||alert.insight?.[0]||alert.evidence?.[0]; if(explicit)return boundedAlphaText(explicit,180); const risk=String(alert.risk??'').toUpperCase(); if(risk==='HIGH')return 'High risk — verify liquidity, developer activity and holder structure.'; if(alert.state==='BOOST'||alert.state==='MAJOR_BOOST')return 'Boost detected — monitor market structure and developer behaviour.'; return 'Signal detected — review the verified market and safety data above.'; }
 
 export function renderAlphaNotification(alert:AlphaNotification):string {
   const compactAddress=compactAlphaAddress(alert.address), symbol=normalizeAlphaSymbol(alert.symbol), name=boundedAlphaText(alert.subtitle||alert.token||alert.title,80);
-  const identity=name&&symbol?`${name} ($${symbol})`:symbol?`$${symbol}`:name||compactAddress;
-  const rawLabel=alphaStateLabel(alert.state); const firstSpace=rawLabel.indexOf(' '); const icon=firstSpace>0?rawLabel.slice(0,firstSpace):'ℹ️'; const label=firstSpace>0?rawLabel.slice(firstSpace+1):rawLabel;
-  const lines:string[]=[`${icon} <b>${escapeAlphaHtml(label)}${identity?` — ${escapeAlphaHtml(identity)}`:''}</b>`, ...(chainLabel(alert.chain)?[`<b>${escapeAlphaHtml(chainLabel(alert.chain))}</b>`]:[])];
-  if(alert.address)lines.push(symbol?`<b>${escapeAlphaHtml(symbol)}</b> · <code>${escapeAlphaHtml(compactAddress)}</code>`:`<code>${escapeAlphaHtml(compactAddress)}</code>`);
-  // Specialist evidence (developer holding/burn/transfer) is time-sensitive. EXIT
-  // notifications must not present a prior lifecycle observation as current risk evidence.
-  // Keep EXIT rendering fail-closed when specialist evidence is stale.
-  // Production rebuild marker: exit-specialist-evidence-v2.
+  const identity=name&&symbol?`${name} · $${symbol}`:symbol?`$${symbol}`:name||compactAddress;
   const specialistMetrics=alert.displayIntent==='EXIT'?[]:(alert.specialistMetrics??[]);
-  const metrics=[...(alert.age?[{label:'Age',value:alert.age}]:[]),...(alert.metrics??[]),...specialistMetrics].filter(validMetric).slice(0,12);
-  const take=(...labels:string[])=>metrics.find(m=>labels.includes(m.label.toLowerCase())); const p=take('price'),mc=take('market cap','fdv'),liq=take('liquidity'),vol=take('5m volume');
-  if(p||mc)lines.push('',`${p?`💰 Price <b>${escapeAlphaHtml(boundedAlphaText(p.value,80))}</b>`:''}${p&&mc?'  •  ':''}${mc?`${mc.label} <b>${escapeAlphaHtml(boundedAlphaText(mc.value,80))}</b>`:''}`);
-  if(liq||vol)lines.push(`${liq?`💧 Liquidity <b>${escapeAlphaHtml(boundedAlphaText(liq.value,80))}</b>`:''}${liq&&vol?'  •  ':''}${vol?`📊 5m volume <b>${escapeAlphaHtml(boundedAlphaText(vol.value,80))}</b>`:''}`);
-  for(const m of metrics.filter(x=>![p,mc,liq,vol].includes(x)).slice(0,4))lines.push(`${m.icon?`${escapeAlphaHtml(m.icon)} `:''}${escapeAlphaHtml(boundedAlphaText(m.label,24))} <b>${escapeAlphaHtml(boundedAlphaText(m.value,80))}</b>`);
-  const source=alert.insight?.length?alert.insight:alert.evidence?.length?alert.evidence:alert.reason?[alert.reason]:[];
-  const insight=source.flatMap(v=>String(v??'').split(/(?<=[.!?])\s+/)).map(v=>boundedAlphaText(v.replace(/[.!?]+$/,''),140)).filter(Boolean).slice(0,3);
-  if(insight.length)lines.push('',`📈 <b>${escapeAlphaHtml(alert.insightTitle|| (alert.displayIntent==='ENTRY'?'WHY ALPHAOS LIKES IT':'WHAT CHANGED'))}</b>`,...insight.map(x=>`• ${escapeAlphaHtml(x)}`));
-  const warnings=[alert.structureContext,alert.developerContext].filter((x):x is string=>Boolean(x&&String(x).trim())); if(warnings.length)lines.push('','⚠️ <b>WATCH OUT</b>',...warnings.slice(0,2).map(x=>`• ${escapeAlphaHtml(boundedAlphaText(x,180))}`));
-  const risk=String(alert.risk??'UNKNOWN').toUpperCase(), riskIcon=risk==='LOW'?'✅':risk==='MEDIUM'||risk==='REVIEW'?'⚠️':risk==='HIGH'?'🚨':'⚪'; const confidence=validConfidence(alert.confidence);
-  lines.push('',`🎯 <b>ACTION: ${escapeAlphaHtml(actionLabel(alert))}</b>`);
-  if(alert.displayIntent==='WATCH') lines.push('<i>Information only — entry not confirmed.</i>');
-  lines.push(`🧠 <b>ALPHAOS VERDICT: ${escapeAlphaHtml(verdict(alert))}${confidence==null?'':` — ${confidence.toFixed(0)}/100`}</b>`);
-  if(confidence!=null)lines.push(`<b>Confidence:</b> ${confidence>=85?'HIGH':confidence>=70?'MEDIUM':'LOW'} (${confidence.toFixed(0)}/100)`);
-  lines.push(`${riskIcon} <b>Risk:</b> ${escapeAlphaHtml(risk==='MEASURED'?'UNKNOWN':risk)}`);
-  if(alert.observedAt!=null)lines.push(`<i>${escapeAlphaHtml(observedLabel(alert.observedAt))}</i>`);
-  if(alert.displayIntent==='WATCH')lines.push('<i>AlphaOS is monitoring for entry confirmation.</i>');
-  if(alert.access==='FREE')lines.push('','<i>Free intelligence may be delayed.</i>');
+  const metrics=[...(alert.age?[{label:'Age',value:alert.age}]:[]),...(alert.metrics??[]),...specialistMetrics].filter(validMetric).slice(0,24);
+  const source=sourceLabel(alert,metrics), chain=String(alert.chain??'').trim().toUpperCase();
+  const lines:string[]=[`🚀 <b>ALPHAOS · ${escapeAlphaHtml(alphaStateLabel(alert.state))}</b>`];
+  if(identity)lines.push('',`<b>${escapeAlphaHtml(identity)}</b>`);
+  if(chain||source)lines.push(`<code>${escapeAlphaHtml([chain,source].filter(Boolean).join('  ·  '))}</code>`);
+
+  const boostTotal=metricBy(metrics,'boost','boost total','total boost','boosts'), boostDelta=metricBy(metrics,'boost increase','boost delta','new boost','boost added','boost change');
+  if(alert.state==='BOOST'||alert.state==='MAJOR_BOOST'||alert.state==='BOOSTED_OPPORTUNITY'){
+    lines.push('','<b>BOOST</b>');
+    if(boostTotal||boostDelta) lines.push(`⚡ ${boostTotal?`<b>${fmt(boostTotal)}</b> total`:''}${boostTotal&&boostDelta?' · ':''}${boostDelta?`<b>${fmt(boostDelta)}</b> new`:''}`);
+    else lines.push('⚡ <b>Boost detected</b>');
+  }
+
+  const mc=metricBy(metrics,'market cap','mc','fdv'), liq=metricBy(metrics,'liquidity','liq'), vol=metricBy(metrics,'5m volume','volume 5m','vol 5m'), age=metricBy(metrics,'age');
+  const buys=metricBy(metrics,'buys','5m buys','buys 5m'), sells=metricBy(metrics,'sells','5m sells','sells 5m'), buySell=metricBy(metrics,'buys/sells','buys sells','buy/sell'), pressure=metricBy(metrics,'buy pressure','buy ratio','buy/sell ratio');
+  if(mc||liq||vol||age||buys||sells||buySell||pressure){
+    lines.push('','<b>MARKET</b>');
+    const r1=sectionPair('MC',mc,'Liq',liq), r2=sectionPair('5m Vol',vol,'Age',age); if(r1)lines.push(r1); if(r2)lines.push(r2);
+    const bs=buySell?fmt(buySell):(buys||sells)?`${buys?fmt(buys):'—'}/${sells?fmt(sells):'—'}`:'';
+    if(bs||pressure)lines.push(`${bs?`Buys/Sells  <b>${bs}</b>`:''}${bs&&pressure?'   |   ':''}${pressure?`Buy pressure  <b>${fmt(pressure)}</b>`:''}`);
+  }
+
+  const dev=metricBy(metrics,'dev','dev holding','developer holding','deployer holding'), devMove=metricBy(metrics,'dev movement','developer movement'), lp=metricBy(metrics,'lp','lp protected','liquidity lock','liquidity locked'), sellTest=metricBy(metrics,'sell test','sell simulation'), holders=metricBy(metrics,'holders','top 10','top 10 holders','holder concentration'), honey=metricBy(metrics,'honeypot');
+  if(dev||devMove||lp||sellTest||holders||honey||alert.developerContext||alert.structureContext){
+    lines.push('','<b>DEV &amp; SAFETY</b>');
+    if(dev)lines.push(`Dev  <b>${fmt(dev)}</b>`);
+    if(devMove)lines.push(`Dev movement  <b>${fmt(devMove)}</b>`);
+    if(lp)lines.push(`LP  <b>${fmt(lp)}</b>`);
+    if(sellTest)lines.push(`Sell test  <b>${fmt(sellTest)}</b>`);
+    if(holders)lines.push(`Holders  <b>${fmt(holders)}</b>`);
+    if(honey)lines.push(`Honeypot  <b>${fmt(honey)}</b>`);
+    if(alert.developerContext&&!dev)lines.push(`Dev  <b>${escapeAlphaHtml(boundedAlphaText(alert.developerContext,120))}</b>`);
+    if(alert.structureContext&&!lp)lines.push(`Structure  <b>${escapeAlphaHtml(boundedAlphaText(alert.structureContext,140))}</b>`);
+  }
+
+  lines.push('','<b>ALPHAOS</b>',`🧠 <b>${escapeAlphaHtml(alphaSummary(alert))}</b>`);
+  if(alert.address)lines.push('',`<code>${escapeAlphaHtml(compactAddress)}</code>`);
+  lines.push('','<i>Information only · DYOR</i>');
   const rendered=lines.join('\n'); if(rendered.length>TELEGRAM_MESSAGE_LIMIT)throw new Error('Alpha notification exceeds Telegram message limit after bounded rendering'); return rendered;
 }
 export function burnEvidenceMetric(burnedAmount:number|null|undefined):AlphaNotificationMetric { if(burnedAmount==null||!Number.isFinite(burnedAmount))return{label:'Burn',value:'Data unavailable'}; return{label:'Burn',value:burnedAmount===0?'0 confirmed':`${burnedAmount.toLocaleString()} confirmed`}; }
