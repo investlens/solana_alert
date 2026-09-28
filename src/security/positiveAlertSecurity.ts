@@ -1,4 +1,4 @@
-export type LaunchClassification = 'PONS' | 'CUSTOM';
+export type LaunchClassification = 'PONS' | 'CUSTOM' | 'UNKNOWN';
 export type VerifiedLiquidityState = 'LOCKED' | 'BURNED' | 'UNLOCKED' | 'UNKNOWN';
 
 export type PositiveAlertSecurityDecision = {
@@ -86,29 +86,30 @@ export function evaluatePositiveAlertSecurity(args: {
   const evidence = readVerifiedLiquidityEvidence(args.raw);
   const routedBoost = isSecurityRoutedBoost(args.raw);
   const lockedOrBurned = evidence.verified && (evidence.state === 'LOCKED' || evidence.state === 'BURNED');
-  // BOOST candidates reach this layer only after the dedicated BOOST security router.
-  // For that event family, a known UNLOCKED LP is warning-level evidence rather than
-  // a second hard block. Unknown LP evidence remains fail-closed, and all non-BOOST
-  // positive semantic events keep the strict locked/burned requirement.
+  // CUSTOM and UNKNOWN both use the conservative custom-token security path.
+  // UNKNOWN only means provenance could not be proven at this moment; it never
+  // weakens the liquidity/honeypot safety requirements.
   const warnedUnlockedBoost = routedBoost && evidence.state === 'UNLOCKED';
   const allowed = lockedOrBurned || warnedUnlockedBoost;
+  const prefix = args.launchType === 'UNKNOWN' ? 'UNKNOWN_PROVENANCE' : 'CUSTOM';
   return {
     allowed,
-    launchType: 'CUSTOM',
+    launchType: args.launchType,
     liquidityState: evidence.state,
     liquidityVerified: evidence.verified,
     reason: lockedOrBurned
-      ? `CUSTOM_LP_${evidence.state}_VERIFIED`
+      ? `${prefix}_LP_${evidence.state}_VERIFIED`
       : warnedUnlockedBoost
-        ? 'CUSTOM_BOOST_LP_UNLOCKED_WARN_ALLOWED'
+        ? `${prefix}_BOOST_LP_UNLOCKED_WARN_ALLOWED`
         : evidence.verified
-          ? `CUSTOM_LP_${evidence.state}_BLOCKED`
-          : 'CUSTOM_LP_UNVERIFIED_FAIL_CLOSED',
+          ? `${prefix}_LP_${evidence.state}_BLOCKED`
+          : `${prefix}_LP_UNVERIFIED_FAIL_CLOSED`,
   };
 }
 
 export function labelLaunchType(message: string, launchType: LaunchClassification): string {
-  const label = `🧭 Launch: <b>${launchType}</b>`;
+  const display = launchType === 'UNKNOWN' ? 'VERIFYING' : launchType;
+  const label = `🧭 Launch: <b>${display}</b>`;
   if (message.includes('🧭 Launch:')) return message;
   const firstBreak = message.indexOf('\n');
   return firstBreak < 0
