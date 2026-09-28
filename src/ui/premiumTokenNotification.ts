@@ -33,31 +33,35 @@ export function buildPremiumTokenNotification(args:{
     ...(args.retainedPeakPercent==null?[]:[{icon:'🛡',label:'Retained',value:`${args.retainedPeakPercent}%`}])
   ];
 
-  // BOOST cards are intentionally compact. The first delivery is time-critical and
-  // late enrichment edits the same Telegram message with verified market metrics.
   if (args.state === 'BOOST' || args.state === 'MAJOR_BOOST') {
     const title = args.state === 'MAJOR_BOOST' ? '🚨🔥 MAX BOOST 500+' : '🚀 BOOST DETECTED';
     const symbol = String(args.symbol ?? '').trim().toUpperCase() || 'TOKEN';
     const chain = String(args.chain ?? '').trim().toUpperCase();
+    const marketLines = [
+      ...(args.boostTotal==null?[]:[`⚡ <b>Boost</b>          ${args.boostTotal} total${args.boostIncrement==null?'':` (+${args.boostIncrement})`}`]),
+      ...(marketCap==null?(fdv==null?[]:[`💰 <b>FDV</b>            ${formatUsd(fdv)}`]):[`💵 <b>Market cap</b>     ${formatUsd(marketCap)}`]),
+      ...(args.market.liquidity==null?[]:[`💧 <b>Liquidity</b>      ${formatUsd(args.market.liquidity)}`]),
+      ...(args.market.volume5m==null?[]:[`📊 <b>5m volume</b>      ${formatUsd(args.market.volume5m)}`]),
+      ...(args.evidence?.devHoldingEvidence==='VERIFIED'&&args.evidence.devHoldingPercent!=null?[`👨‍💻 <b>Dev holding</b>    ${percent(args.evidence.devHoldingPercent)}`]:[]),
+      ...(args.move==null?[]:[`📈 <b>Move</b>           ${args.move>=0?'+':''}${args.move.toFixed(1)}%`]),
+    ];
     const lines = [
       `<b>${title}</b>`,
       `<b>$${escapeHtml(symbol)}</b>${args.name ? ` · ${escapeHtml(args.name)}` : ''}`,
-      chain ? `<b>${escapeHtml(chain)}</b>` : '',
+      chain ? `<i>${escapeHtml(chain)}</i>` : '',
       '',
-      ...(args.boostTotal==null?[]:[`⚡ Boost  <b>${args.boostTotal} total${args.boostIncrement==null?'':` (+${args.boostIncrement})`}</b>`]),
-      ...(marketCap==null?(fdv==null?[]:[`💰 FDV  <b>${formatUsd(fdv)}</b>`]):[`💵 Market cap  <b>${formatUsd(marketCap)}</b>`]),
-      ...(args.market.liquidity==null?[]:[`💧 Liquidity  <b>${formatUsd(args.market.liquidity)}</b>`]),
-      ...(args.market.volume5m==null?[]:[`📊 5m volume  <b>${formatUsd(args.market.volume5m)}</b>`]),
-      ...(args.evidence?.devHoldingEvidence==='VERIFIED'&&args.evidence.devHoldingPercent!=null?[`👨‍💻 Dev holding  <b>${percent(args.evidence.devHoldingPercent)}</b>`]:[]),
-      ...(args.move==null?[]:[`📈 Move  <b>${args.move>=0?'+':''}${args.move.toFixed(1)}%</b>`]),
-      '',
+      ...marketLines,
+      marketLines.length ? '' : '',
+      '<b>SAFETY</b>',
       unlockedLpWarning
-        ? '⚠️ LP  <b>UNLOCKED — HIGH RUG RISK</b>'
-        : `🛡 Security  <b>${escapeHtml(args.status)}</b>`,
-      unlockedLpWarning ? '🛡 Honeypot / sell restriction  <b>NOT DETECTED</b>' : '',
+        ? '⚠️ LP unlocked · <b>HIGH RUG RISK</b>'
+        : `🛡 ${escapeHtml(args.status)}`,
+      unlockedLpWarning ? '✅ No honeypot / sell-restriction flag detected' : '',
       '',
+      `<b>CONTRACT</b>`,
       `<code>${escapeHtml(args.address)}</code>`,
-      '⚠️ DYOR',
+      '',
+      '<i>Information only · DYOR</i>',
     ].filter(Boolean);
     return lines.join('\n');
   }
