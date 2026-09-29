@@ -188,7 +188,10 @@ async function readLaunchFromFactory(token: Address, factory: Address): Promise<
 
 export async function getPonsLaunchState(
   tokenAddress: string,
-  options: { skipIndexedLookup?: boolean } = {},
+  options: {
+    skipIndexedLookup?: boolean;
+    requireCompleteFactoryVerification?: boolean;
+  } = {},
 ): Promise<PonsLaunchState> {
   const token = getAddress(tokenAddress);
   const activeFactory = getAddress(PONS_CONTRACTS.factory);
@@ -207,12 +210,14 @@ export async function getPonsLaunchState(
   ].filter((value): value is Address => Boolean(value)).map(value => value.toLowerCase()))].map(value => getAddress(value));
 
   let fallback: PonsLaunchState | null = null;
+  let factoryVerificationFailed = false;
   for (const factory of factories) {
     try {
       const launch = await readLaunchFromFactory(token, factory);
       fallback ??= launch;
       if (launch.exists) return launch;
     } catch (error) {
+      factoryVerificationFailed = true;
       console.warn('[PonsLaunchState] factory verification failed; trying next known PONS factory', {
         token,
         factory,
@@ -221,6 +226,13 @@ export async function getPonsLaunchState(
     }
   }
 
-  if (fallback) return fallback;
+  if (fallback) {
+    if (options.requireCompleteFactoryVerification && factoryVerificationFailed) {
+      throw new Error(
+        `Unable to completely verify PONS launch state for ${token} across known factories`,
+      );
+    }
+    return fallback;
+  }
   throw new Error(`Unable to verify PONS launch state for ${token} across known factories`);
 }
