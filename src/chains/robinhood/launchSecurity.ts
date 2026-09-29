@@ -58,12 +58,23 @@ async function refreshRecentPonsCache(): Promise<void> {
   return recentPonsRefresh;
 }
 
-type PonsFactoryVerification = 'PONS' | 'NOT_PONS' | 'UNAVAILABLE';
+export type PonsFactoryVerification = 'PONS' | 'NOT_PONS' | 'UNAVAILABLE';
+
+export function resolvePonsLaunchClassification(
+  databaseAvailable: boolean,
+  factoryVerification: PonsFactoryVerification,
+): LaunchClassification {
+  if (factoryVerification === 'PONS') return 'PONS';
+  if (factoryVerification === 'UNAVAILABLE') return 'UNKNOWN';
+  return databaseAvailable ? 'CUSTOM' : 'UNKNOWN';
+}
 
 async function verifyPonsAcrossKnownFactories(tokenAddress: string): Promise<PonsFactoryVerification> {
   try {
     const { getPonsLaunchState } = await import('./ponsLaunchState.js');
-    const state = await getPonsLaunchState(tokenAddress);
+    const state = await getPonsLaunchState(tokenAddress, {
+      requireCompleteFactoryVerification: true,
+    });
     if (!state.exists || normalize(state.token) !== normalize(tokenAddress)) return 'NOT_PONS';
     rememberAuthoritativePonsToken(tokenAddress);
     console.log('[RobinhoodLaunchSecurity] PONS identity verified across known factories.', {
@@ -113,12 +124,10 @@ export async function classifyRobinhoodLaunch(tokenAddress: string): Promise<Lau
   }
 
   const factoryVerification = await verifyPonsAcrossKnownFactories(tokenAddress);
-  if (factoryVerification === 'PONS') return 'PONS';
-  if (factoryVerification === 'UNAVAILABLE') return 'UNKNOWN';
 
   // CUSTOM is safe only when the durable lookup was available and every known
   // PONS factory produced a definitive non-match. Provider uncertainty stays UNKNOWN.
-  return databaseAvailable ? 'CUSTOM' : 'UNKNOWN';
+  return resolvePonsLaunchClassification(databaseAvailable, factoryVerification);
 }
 
 export async function evaluateRobinhoodPositiveAlertSecurity(args: {
