@@ -1,4 +1,5 @@
 import { config } from '../config.js';
+import { polishArcTelegramPresentation } from '../chains/arc/telegramPresentation.js';
 
 export type InlineButton = {
   text: string;
@@ -50,6 +51,13 @@ export function buildAlphaReportUrl(tokenMint: string, context?: { engine?: stri
 async function sendTelegramRequest(chatId: string, text: string, buttons?: InlineButton[][]): Promise<number | null> {
   if (!chatId) return null;
 
+  // ARC has its own isolated Railway service/branch. Normalize only recognized ARC
+  // alert families here so all ARC opportunity/boost/burn cards share the same
+  // premium Telegram hierarchy without touching non-ARC messages.
+  const polished = polishArcTelegramPresentation(text, buttons);
+  text = polished.text;
+  buttons = polished.buttons;
+
   const body: Record<string, unknown> = {
     chat_id: chatId,
     text,
@@ -90,6 +98,9 @@ export async function sendTelegramWithMessageId(chatId: string, text: string,
 export async function editTelegramMessage(chatId: string, messageId: number, text: string,
   buttons?: InlineButton[][]): Promise<void> {
   if (!chatId || !Number.isFinite(messageId)) return;
+  const polished = polishArcTelegramPresentation(text, buttons);
+  text = polished.text;
+  buttons = polished.buttons;
   if (config.dryRun) {
     console.log(`\n--- EDIT MESSAGE ${messageId} TO ${chatId} ---\n${text}\nButtons: ${JSON.stringify(buttons ?? [])}\n---------------------------\n`);
     return;
