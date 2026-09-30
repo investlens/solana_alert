@@ -48,7 +48,7 @@ export function buildPremiumTokenNotification(args:{
       : args.launchSource === 'CUSTOM' ? 'CUSTOM'
       : 'UNVERIFIED';
     const marketLines = [
-      ...(args.boostTotal==null?[]:[`⚡ <b>Boost</b>          ${args.boostTotal} total${args.boostIncrement==null?'':` (+${args.boostIncrement})`}`]),
+      ...(args.boostTotal==null?[]:[`⚡ <b>Boost</b>          ${args.boostTotal} total${args.boostIncrement==null?'':` (+${args.boostIncrement})`}`}]),
       marketCap==null?(fdv==null?'💵 <b>Market cap</b>     Unavailable':`💰 <b>FDV</b>            ${formatUsd(fdv)}`):`💵 <b>Market cap</b>     ${formatUsd(marketCap)}`,
       args.market.liquidity==null?'💧 <b>Liquidity</b>      Unavailable':`💧 <b>Liquidity</b>      ${formatUsd(args.market.liquidity)}`,
       ...(args.market.volume5m==null?[]:[`📊 <b>5m volume</b>      ${formatUsd(args.market.volume5m)}`]),
@@ -62,7 +62,7 @@ export function buildPremiumTokenNotification(args:{
     ];
     const lines = [
       `<b>${title}</b>`,
-      `🧭 <b>Launch:</b> ${launchLabel}`,
+      `🧭 Launch: <b>${launchLabel}</b>`,
       identity,
       chain ? `<i>${escapeHtml(chain)}</i>` : '',
       '',
