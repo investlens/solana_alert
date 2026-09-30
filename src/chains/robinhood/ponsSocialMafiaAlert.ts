@@ -195,9 +195,9 @@ async function processLaunch(item: QueuedLaunch): Promise<void> {
   const socials = resolveSocialMafiaSocials(rawSocials);
   if (!socials) {
     console.log('[SocialMafia] skipped; both X and Telegram are required', {
-      token, launchpad: launchpad.id,
+      token,
+      launchpad: launchpad.id,
       hasX: Boolean(extractXUsername(rawSocials.twitter)),
-      hasTelegram: Boolean(extractTelegramLabel(rawSocials.telegram)),
     });
     return;
   }
