@@ -13,6 +13,7 @@ export function buildPremiumTokenNotification(args:{
   state:PremiumState; symbol?:string|null; name?:string|null; address:string; chain?:string|null; observedAt?:string|number|Date|null;
   age?:string|null; market:NotificationMarketContext; evidence?:CoreDecisionMetricContext|null; volumeMultiple?:number|null; move?:number|null; peakMove?:number|null;
   retainedPeakPercent?:number|null; boostTotal?:number|null; boostIncrement?:number|null; devLaunches?:number|null; devBurnPercent?:number|null; risk?:string|null; confidence?:number|null;
+  launchSource?:'PONS'|'CUSTOM'|'UNKNOWN'|null;
   insightTitle:string; insight:string[]; statusTitle:string; status:string; displayIntent?:'ENTRY'|'MOMENTUM_UPDATE'|'RECOVERY_WATCH'|'WATCH'|'AVOID'|'EXIT';
   comparison?:{previous:number;current:number;changePct:number}; entryAction?:'BUY'|'CHECK_ENTRY'; structureContext?:string|null;
 }) {
@@ -43,6 +44,9 @@ export function buildPremiumTokenNotification(args:{
       : args.name
         ? `<b>${escapeHtml(args.name)}</b> · Symbol unavailable`
         : '<b>Symbol unavailable</b>';
+    const launchLabel = args.launchSource === 'PONS' ? 'PONS'
+      : args.launchSource === 'CUSTOM' ? 'CUSTOM'
+      : 'UNVERIFIED';
     const marketLines = [
       ...(args.boostTotal==null?[]:[`⚡ <b>Boost</b>          ${args.boostTotal} total${args.boostIncrement==null?'':` (+${args.boostIncrement})`}`]),
       marketCap==null?(fdv==null?'💵 <b>Market cap</b>     Unavailable':`💰 <b>FDV</b>            ${formatUsd(fdv)}`):`💵 <b>Market cap</b>     ${formatUsd(marketCap)}`,
@@ -58,6 +62,7 @@ export function buildPremiumTokenNotification(args:{
     ];
     const lines = [
       `<b>${title}</b>`,
+      `🧭 <b>Launch:</b> ${launchLabel}`,
       identity,
       chain ? `<i>${escapeHtml(chain)}</i>` : '',
       '',
