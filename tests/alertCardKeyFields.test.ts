@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { boostMetadataFallback } from '../src/chains/robinhood/boostMetadataResolver.js';
+import { labelLaunchType } from '../src/security/positiveAlertSecurity.js';
 import { buildPremiumTokenNotification } from '../src/ui/premiumTokenNotification.js';
 
 const address = '0xA8936B7148EFDA48226DE8c06706c8f7b0f85C98';
@@ -41,7 +42,7 @@ test('boost cards keep required unknown fields visible and do not render CA as t
     displayIntent: 'WATCH',
   });
 
-  assert.match(message, /Launch:<\/b> UNVERIFIED/);
+  assert.match(message, /Launch: <b>UNVERIFIED<\/b>/);
   assert.match(message, /CloakSwap<\/b> · Symbol unavailable/);
   assert.doesNotMatch(message, /\$0xA8936B/i);
   assert.match(message, /Market cap<\/b>\s+Unavailable/);
@@ -49,6 +50,30 @@ test('boost cards keep required unknown fields visible and do not render CA as t
   assert.match(message, /Dev holding<\/b>\s+Unverified/);
   assert.match(message, /Burned<\/b>\s+Unverified/);
   assert.match(message, /10 total \(\+10\)/);
+});
+
+test('security delivery does not prepend a second launch label to boost cards', () => {
+  const message = buildPremiumTokenNotification({
+    state: 'BOOST',
+    symbol: 'ROBINPEPE',
+    name: 'Robin Pepe',
+    address,
+    chain: 'robinhood',
+    launchSource: 'UNKNOWN',
+    market: emptyMarket,
+    boostTotal: 100,
+    boostIncrement: 100,
+    insightTitle: 'WHY NOW',
+    insight: ['Boost verified after security gate'],
+    statusTitle: 'Security',
+    status: 'VERIFIED',
+    displayIntent: 'WATCH',
+  });
+
+  const labeled = labelLaunchType(message, 'CUSTOM');
+  assert.equal((labeled.match(/🧭 Launch:/g) ?? []).length, 1);
+  assert.match(labeled, /🧭 Launch: <b>UNVERIFIED<\/b>/);
+  assert.doesNotMatch(labeled, /🧭 Launch: <b>CUSTOM<\/b>/);
 });
 
 test('boost cards render verified market, dev holding and burn evidence when available', () => {
@@ -82,7 +107,7 @@ test('boost cards render verified market, dev holding and burn evidence when ava
     displayIntent: 'WATCH',
   });
 
-  assert.match(message, /Launch:<\/b> PONS/);
+  assert.match(message, /Launch: <b>PONS<\/b>/);
   assert.match(message, /\$AGI<\/b> · Artificial Gato Intelligence/);
   assert.match(message, /Market cap<\/b>\s+\$51\.8K/);
   assert.match(message, /Liquidity<\/b>\s+\$27\.9K/);

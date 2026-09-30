@@ -62,7 +62,7 @@ export function buildPremiumTokenNotification(args:{
     ];
     const lines = [
       `<b>${title}</b>`,
-      `🧭 <b>Launch:</b> ${launchLabel}`,
+      `🧭 Launch: <b>${launchLabel}</b>`,
       identity,
       chain ? `<i>${escapeHtml(chain)}</i>` : '',
       '',
