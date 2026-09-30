@@ -6,12 +6,14 @@ type PremiumState = Extract<AlphaNotificationState, 'OPPORTUNITY' | 'VOLUME_IGNI
 const percent=(value:number)=>`${Number(value.toFixed(2))}%`;
 const price=(value:number)=>value>=1?`$${value.toLocaleString('en-US',{maximumFractionDigits:4})}`:`$${value.toPrecision(5).replace(/0+$/,'').replace(/\.$/,'')}`;
 const escapeHtml=(value:unknown)=>String(value??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const displayTicker=(value:unknown)=>{ const symbol=String(value??'').trim().toUpperCase(); return symbol && !symbol.startsWith('0X') ? symbol : null; };
 export function verifiedPairAge(pairCreatedAt:number|null|undefined,now=Date.now()):string|null { const created=Number(pairCreatedAt); if(!Number.isFinite(created)||created<=0||created>now)return null; const minutes=Math.floor((now-created)/60_000); if(minutes<60)return`${minutes}m`; const hours=Math.floor(minutes/60); return hours<48?`${hours}h`:`${Math.floor(hours/24)}d`; }
 
 export function buildPremiumTokenNotification(args:{
   state:PremiumState; symbol?:string|null; name?:string|null; address:string; chain?:string|null; observedAt?:string|number|Date|null;
   age?:string|null; market:NotificationMarketContext; evidence?:CoreDecisionMetricContext|null; volumeMultiple?:number|null; move?:number|null; peakMove?:number|null;
   retainedPeakPercent?:number|null; boostTotal?:number|null; boostIncrement?:number|null; devLaunches?:number|null; devBurnPercent?:number|null; risk?:string|null; confidence?:number|null;
+  launchSource?:'PONS'|'CUSTOM'|'UNKNOWN'|null;
   insightTitle:string; insight:string[]; statusTitle:string; status:string; displayIntent?:'ENTRY'|'MOMENTUM_UPDATE'|'RECOVERY_WATCH'|'WATCH'|'AVOID'|'EXIT';
   comparison?:{previous:number;current:number;changePct:number}; entryAction?:'BUY'|'CHECK_ENTRY'; structureContext?:string|null;
 }) {
@@ -35,23 +37,37 @@ export function buildPremiumTokenNotification(args:{
 
   if (args.state === 'BOOST' || args.state === 'MAJOR_BOOST') {
     const title = args.state === 'MAJOR_BOOST' ? '🚨🔥 MAX BOOST 500+' : '🚀 BOOST DETECTED';
-    const symbol = String(args.symbol ?? '').trim().toUpperCase() || 'TOKEN';
+    const symbol = displayTicker(args.symbol);
     const chain = String(args.chain ?? '').trim().toUpperCase();
+    const identity = symbol
+      ? `<b>$${escapeHtml(symbol)}</b>${args.name ? ` · ${escapeHtml(args.name)}` : ''}`
+      : args.name
+        ? `<b>${escapeHtml(args.name)}</b> · Symbol unavailable`
+        : '<b>Symbol unavailable</b>';
+    const launchLabel = args.launchSource === 'PONS' ? 'PONS'
+      : args.launchSource === 'CUSTOM' ? 'CUSTOM'
+      : 'UNVERIFIED';
     const marketLines = [
       ...(args.boostTotal==null?[]:[`⚡ <b>Boost</b>          ${args.boostTotal} total${args.boostIncrement==null?'':` (+${args.boostIncrement})`}`]),
-      ...(marketCap==null?(fdv==null?[]:[`💰 <b>FDV</b>            ${formatUsd(fdv)}`]):[`💵 <b>Market cap</b>     ${formatUsd(marketCap)}`]),
-      ...(args.market.liquidity==null?[]:[`💧 <b>Liquidity</b>      ${formatUsd(args.market.liquidity)}`]),
+      marketCap==null?(fdv==null?'💵 <b>Market cap</b>     Unavailable':`💰 <b>FDV</b>            ${formatUsd(fdv)}`):`💵 <b>Market cap</b>     ${formatUsd(marketCap)}`,
+      args.market.liquidity==null?'💧 <b>Liquidity</b>      Unavailable':`💧 <b>Liquidity</b>      ${formatUsd(args.market.liquidity)}`,
       ...(args.market.volume5m==null?[]:[`📊 <b>5m volume</b>      ${formatUsd(args.market.volume5m)}`]),
-      ...(args.evidence?.devHoldingEvidence==='VERIFIED'&&args.evidence.devHoldingPercent!=null?[`👨‍💻 <b>Dev holding</b>    ${percent(args.evidence.devHoldingPercent)}`]:[]),
+      args.evidence?.devHoldingEvidence==='VERIFIED'&&args.evidence.devHoldingPercent!=null
+        ? `👨‍💻 <b>Dev holding</b>    ${percent(args.evidence.devHoldingPercent)}`
+        : '👨‍💻 <b>Dev holding</b>    Unverified',
+      args.evidence?.burnEvidence==='VERIFIED'&&args.evidence.burnedPercent!=null
+        ? `🔥 <b>Burned</b>         ${percent(args.evidence.burnedPercent)}`
+        : '🔥 <b>Burned</b>         Unverified',
       ...(args.move==null?[]:[`📈 <b>Move</b>           ${args.move>=0?'+':''}${args.move.toFixed(1)}%`]),
     ];
     const lines = [
       `<b>${title}</b>`,
-      `<b>$${escapeHtml(symbol)}</b>${args.name ? ` · ${escapeHtml(args.name)}` : ''}`,
+      `🧭 <b>Launch:</b> ${launchLabel}`,
+      identity,
       chain ? `<i>${escapeHtml(chain)}</i>` : '',
       '',
       ...marketLines,
-      marketLines.length ? '' : '',
+      '',
       '<b>SAFETY</b>',
       unlockedLpWarning
         ? '⚠️ LP unlocked · <b>HIGH RUG RISK</b>'

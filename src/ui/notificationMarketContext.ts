@@ -119,4 +119,19 @@ export function normalizeCoreDecisionMetrics(...sources: MarketContextSource[]):
   return { devHoldingPercent, devHoldingEvidence: devHoldingPercent == null ? 'UNAVAILABLE' : evidenceState(sources, ['devHoldingEvidence', 'devHoldingStatus', 'devFlowEvidenceStatus'], ['KNOWN', 'ZERO', 'COMPLETE', 'BALANCES_ONLY']), burnedPercent, burnEvidence: burnedPercent == null ? 'UNAVAILABLE' : evidenceState(sources, ['burnEvidence', 'devFlowEvidenceStatus'], ['COMPLETE', 'BALANCES_ONLY']) };
 }
 function percent(value: number): string { return `${Number(value.toFixed(2)).toString()}%`; }
-export function coreDecisionEvidenceMetrics(context: CoreDecisionMetricContext): AlphaNotificationMetric[] { return [...(context.devHoldingEvidence === 'VERIFIED' && context.devHoldingPercent != null ? [{ label: 'Dev holding', value: percent(context.devHoldingPercent) }] : []), ...(context.burnEvidence === 'VERIFIED' && context.burnedPercent != null ? [{ label: 'Burned', value: percent(context.burnedPercent) }] : [])]; }
+export function coreDecisionEvidenceMetrics(context: CoreDecisionMetricContext): AlphaNotificationMetric[] {
+  return [
+    {
+      label: 'Dev holding',
+      value: context.devHoldingEvidence === 'VERIFIED' && context.devHoldingPercent != null
+        ? percent(context.devHoldingPercent)
+        : 'UNVERIFIED',
+    },
+    {
+      label: 'Burned',
+      value: context.burnEvidence === 'VERIFIED' && context.burnedPercent != null
+        ? percent(context.burnedPercent)
+        : 'UNVERIFIED',
+    },
+  ];
+}

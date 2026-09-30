@@ -19,10 +19,12 @@ const BOOST_INTERVAL_MS = 15_000;
 export const BOOSTED_OPPORTUNITY_THRESHOLD = 200;
 export const MAJOR_BOOST_THRESHOLD = 500;
 const BOOST_PERSIST_BUDGET_MS = 350;
+const BOOST_INITIAL_ENRICH_BUDGET_MS = 700;
 
 type BoostAction = { text: string; callback_data?: string; url?: string };
 type BoostSecurityDisplay = 'SAFE' | 'UNKNOWN' | 'SCAM';
 type BoostMarket = Awaited<ReturnType<typeof getRobinhoodMarketSnapshot>>;
+type BoostSocials = Awaited<ReturnType<typeof getRobinhoodTokenSocials>>;
 type BoostMarketHistory = {
   volume5m: number | null;
   price: number | null;
@@ -218,10 +220,12 @@ function boostRawSecurityEvidence(args: {
   verifiedPons: boolean;
   liquidityStatus?: 'LOCKED' | 'BURNED' | 'UNLOCKED' | 'UNKNOWN' | null;
 }) {
-  return args.verifiedPons ? { launchSource: 'PONS' } : {
-    launchSource: 'CUSTOM',
-    liquiditySafetyStatus: args.liquidityStatus ?? 'UNKNOWN',
-    liquiditySafetyVerified: args.liquidityStatus === 'LOCKED' || args.liquidityStatus === 'BURNED',
+  return {
+    launchSource: args.verifiedPons ? 'PONS' : 'UNKNOWN',
+    ...(args.verifiedPons ? {} : {
+      liquiditySafetyStatus: args.liquidityStatus ?? 'UNKNOWN',
+      liquiditySafetyVerified: args.liquidityStatus === 'LOCKED' || args.liquidityStatus === 'BURNED',
+    }),
   };
 }
 
@@ -250,7 +254,7 @@ export async function enrichDeliveredBoostAlert(args: {
   boostAmount: number;
   verifiedPons: boolean;
   securityReason: string;
-  baseSymbol: string;
+  baseSymbol?: string | null;
   baseName?: string | null;
 }): Promise<number> {
   if (args.eventId < 0) return 0;
@@ -262,8 +266,8 @@ export async function enrichDeliveredBoostAlert(args: {
       .catch(() => boostMetadataFallback(args.tokenAddress)),
     getRobinhoodTokenSocials(args.tokenAddress).catch(() => ({ website: null, twitter: null, telegram: null })),
   ]);
-  if (!market && !metadata.name) return 0;
-  const symbol = market?.symbol ?? metadata.symbol ?? args.baseSymbol;
+  if (!market && !metadata.name && !metadata.symbol) return 0;
+  const symbol = market?.symbol ?? metadata.symbol ?? args.baseSymbol ?? null;
   const name = market?.name ?? metadata.name ?? args.baseName ?? null;
   const state = args.canonicalType === 'MAX_BOOST_500_PLUS' ? 'MAJOR_BOOST' as const : 'BOOST' as const;
   const marketContext = {
@@ -277,6 +281,7 @@ export async function enrichDeliveredBoostAlert(args: {
   };
   const message = buildPremiumTokenNotification({
     state, symbol, name, address: args.tokenAddress, chain: 'robinhood', market: marketContext,
+    launchSource: args.verifiedPons ? 'PONS' : 'UNKNOWN',
     boostTotal: args.totalBoostAmount, boostIncrement: args.boostAmount, risk: 'UNKNOWN',
     insightTitle: 'WHY NOW', insight: [`${args.canonicalTitle} verified after security gate`, args.securityReason],
     statusTitle: 'Security', status: 'VERIFIED', displayIntent: 'WATCH',
@@ -353,6 +358,21 @@ export function volumeIgnitionDecision(args: {
   return { eligible: multiple != null && multiple >= 1.5 && priceConstructive && liquidityStable && flowConstructive, volumeMultiple: multiple };
 }
 
+async function initialBoostEnrichment(tokenAddress: string): Promise<{ market: BoostMarket | null; socials: BoostSocials }> {
+  const emptySocials: BoostSocials = { website: null, twitter: null, telegram: null };
+  const work = Promise.all([
+    getRobinhoodMarketSnapshot(tokenAddress, {
+      priority: 'HIGH', caller: 'robinhood_boost_initial', queueWaitTimeoutMs: 500,
+    }).catch(() => null),
+    getRobinhoodTokenSocials(tokenAddress).catch(() => emptySocials),
+  ]).then(([market, socials]) => ({ market, socials }));
+  return Promise.race([
+    work,
+    new Promise<{ market: null; socials: BoostSocials }>(resolve =>
+      setTimeout(() => resolve({ market: null, socials: emptySocials }), BOOST_INITIAL_ENRICH_BUDGET_MS)),
+  ]);
+}
+
 async function processBoost(boost: { tokenAddress: string; amount: number; totalAmount: number }): Promise<boolean> {
   const tokenKey = normalize(boost.tokenAddress);
   const previousTotal = boostTotals.get(tokenKey);
@@ -373,11 +393,15 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
     return false;
   }
 
-  const metadata = await resolveBoostMetadata(boost.tokenAddress, null, 500)
-    .catch(() => boostMetadataFallback(boost.tokenAddress));
-  const fallback = boostMetadataFallback(boost.tokenAddress);
-  const symbol = metadata.symbol ?? fallback.symbol ?? shortAddress(boost.tokenAddress);
-  const name = metadata.name ?? null;
+  const [metadata, initialEnrichment] = await Promise.all([
+    resolveBoostMetadata(boost.tokenAddress, null, 500)
+      .catch(() => boostMetadataFallback(boost.tokenAddress)),
+    initialBoostEnrichment(boost.tokenAddress),
+  ]);
+  const market = initialEnrichment.market;
+  const socials = initialEnrichment.socials;
+  const symbol = market?.symbol ?? metadata.symbol ?? null;
+  const name = market?.name ?? metadata.name ?? null;
   const securityReason = verifiedPons ? 'Verified PONS origin; trusted launchpad fast path.' : security.reason;
   const eventId = `${tokenKey}:${canonical.type}:${canonical.currentTotal}`;
   const rawSnapshot = {
@@ -385,6 +409,13 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
     boostTotal: canonical.currentTotal,
     boostIncrement: canonical.boostAdded,
     canonicalEventType: canonical.type,
+    ...(market ? {
+      marketCap: market.marketCapUsd ?? null,
+      fdv: market.fdvUsd ?? null,
+      liquidity: market.liquidityUsd ?? null,
+      volume5m: market.volume5mUsd ?? null,
+      chartUrl: market.chartUrl ?? null,
+    } : {}),
     ...boostRawSecurityEvidence({ verifiedPons, liquidityStatus: security.liquidity?.status }),
   };
 
@@ -395,7 +426,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
     type: 'BOOST',
     assetId: boost.tokenAddress,
     chain: 'robinhood',
-    symbol,
+    symbol: symbol ?? undefined,
     rawSnapshot,
   });
   const persisted = await Promise.race([
@@ -421,20 +452,36 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
   };
 
   const state = canonical.type === 'MAX_BOOST_500_PLUS' ? 'MAJOR_BOOST' as const : 'BOOST' as const;
+  const marketContext = {
+    symbol, name, address: boost.tokenAddress,
+    price: market?.priceUsd ?? null,
+    marketCap: market?.marketCapUsd ?? null,
+    fdv: market?.fdvUsd ?? null,
+    liquidity: market?.liquidityUsd ?? null,
+    volume5m: market?.volume5mUsd ?? null,
+    chartUrl: market?.chartUrl ?? null,
+  };
   const baseMessage = buildPremiumTokenNotification({
-    state, symbol, name, address: boost.tokenAddress, chain: 'robinhood',
-    market: { symbol, name, address: boost.tokenAddress, price: null, marketCap: null, fdv: null, liquidity: null, volume5m: null, chartUrl: null },
+    state, symbol, name, address: boost.tokenAddress, chain: 'robinhood', market: marketContext,
+    launchSource: verifiedPons ? 'PONS' : 'UNKNOWN',
     boostTotal: canonical.currentTotal, boostIncrement: canonical.boostAdded, risk: 'UNKNOWN',
     insightTitle: 'WHY NOW', insight: [`${boostCanonicalTitle(canonical)} verified after security gate`, securityReason],
-    statusTitle: 'Security', status: 'VERIFIED', displayIntent: 'WATCH',
+    statusTitle: 'Security',
+    status: security.liquidity?.status && security.liquidity.status !== 'UNKNOWN'
+      ? `LP ${security.liquidity.status}`
+      : 'VERIFIED',
+    displayIntent: 'WATCH',
   });
   const tokenUrl = `https://robinhoodchain.blockscout.com/token/${encodeURIComponent(boost.tokenAddress)}`;
   const baseButtons = buildAlphaMarketActions({
+    chartUrl: market?.chartUrl ?? null,
     tokenUrl,
     fullIntelCallback: `FI_RH_${boost.tokenAddress}`,
     trackCallback: `BOOST_TRACK_${boost.tokenAddress}`,
     copyContractCallback: `COPY_CA_${boost.tokenAddress}`,
     muteCallback: `BOOST_MUTE_${boost.tokenAddress}`,
+    xUrl: socials.twitter,
+    telegramUrl: socials.telegram,
   });
 
   let delivered = 0;

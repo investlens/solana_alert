@@ -26,11 +26,15 @@ test('core decision metrics render verified values including measured zero', () 
   ]);
 });
 
-test('unknown and default-zero decision metrics are omitted', () => {
+test('unknown and absent decision metrics stay visible as unverified', () => {
+  const expected = [
+    { label: 'Dev holding', value: 'UNVERIFIED' },
+    { label: 'Burned', value: 'UNVERIFIED' },
+  ];
   const unknown = normalizeCoreDecisionMetrics({ devHoldingPercent: 0, totalBurnPercent: 0 });
-  assert.deepEqual(coreDecisionEvidenceMetrics(unknown), []);
+  assert.deepEqual(coreDecisionEvidenceMetrics(unknown), expected);
   const absent = normalizeCoreDecisionMetrics({ devHoldingPercent: null, totalBurnPercent: null });
-  assert.deepEqual(coreDecisionEvidenceMetrics(absent), []);
+  assert.deepEqual(coreDecisionEvidenceMetrics(absent), expected);
 });
 
 test('burn destinations recognize only supported zero and dead addresses', async () => {

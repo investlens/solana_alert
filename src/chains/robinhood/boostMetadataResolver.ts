@@ -59,7 +59,8 @@ export async function resolveBoostMetadata(tokenAddress: string, seed?: Partial<
   } finally { clearTimeout(timeout); controller.abort(); }
 }
 
-export function boostMetadataFallback(tokenAddress: string): ResolvedBoostMetadata {
-  const short = tokenAddress.length > 14 ? `${tokenAddress.slice(0, 8)}…${tokenAddress.slice(-6)}` : tokenAddress;
-  return { name: null, symbol: short, source: 'SHORTENED_TOKEN_ADDRESS' };
+export function boostMetadataFallback(_tokenAddress: string): ResolvedBoostMetadata {
+  // Never present a shortened contract address as a ticker. The contract address already
+  // has its own field in the card; missing token identity should stay explicitly unknown.
+  return { name: null, symbol: null, source: 'TOKEN_IDENTITY_UNAVAILABLE' };
 }
