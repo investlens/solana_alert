@@ -1,3 +1,4 @@
+import { getPonsPublicContext, getCreatorHoldingPercent, getTelegramPreviewType, type TelegramPreviewType } from './ponsPublicContext.js';
 import type { PonsLaunch } from './ponsHistoricalLaunchScanner.js';
 import { getRobinhoodTokenMetadata, getRobinhoodTokenSocials } from './tokenMetadata.js';
 import { getRobinhoodMarketSnapshot } from './market.js';
@@ -43,7 +44,7 @@ function escapeHtml(value: unknown): string {
   return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 function money(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return 'Pending index';
+  if (value == null || !Number.isFinite(value)) return 'Data unavailable';
   if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
   if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
   return `$${value.toFixed(0)}`;
@@ -165,8 +166,11 @@ export function buildSocialMafiaAlertText(args: {
   marketCap?: number | null;
   fdv?: number | null;
   devHoldingPercent?: number | null;
+  creatorAddress?: string | null;
+  telegramType?: TelegramPreviewType;
+  valuationSource?: string | null;
 }): string {
-  const symbol = String(args.symbol ?? '').trim().toUpperCase() || 'Symbol unavailable';
+  const symbol = String(args.symbol ?? '').trim().replace(/^\$+/, '').toUpperCase() || 'Symbol unavailable';
   const name = String(args.name ?? '').trim();
   return [
     '<b>🕶 SOCIAL MAFIA ALERT</b>',
@@ -176,15 +180,17 @@ export function buildSocialMafiaAlertText(args: {
     args.marketCap == null && args.fdv != null
       ? `💰 FDV  <b>${escapeHtml(money(args.fdv))}</b>`
       : `💵 Market cap  <b>${escapeHtml(money(args.marketCap))}</b>`,
+    ...(args.valuationSource ? [`Valuation source  ${escapeHtml(args.valuationSource)}`] : []),
     `👨‍💻 Dev holding  <b>${escapeHtml(percent(args.devHoldingPercent))}</b>`,
+    ...(args.creatorAddress ? [`👤 Creator  <a href="https://robinhoodchain.blockscout.com/address/${encodeURIComponent(args.creatorAddress)}">${escapeHtml(args.creatorAddress.slice(0, 6))}…${escapeHtml(args.creatorAddress.slice(-4))}</a>`] : []),
     '',
     '<b>SOCIAL LINKS</b>',
     `𝕏 X  <a href="${escapeHtml(args.socials.xUrl).replace(/"/g, '&quot;')}">@${escapeHtml(args.socials.xHandle)}</a>`,
-    `✈️ TG  <a href="${escapeHtml(args.socials.telegramUrl).replace(/"/g, '&quot;')}">${escapeHtml(args.socials.telegramLabel)}</a> · Type unverified`,
+    `✈️ TG  <a href="${escapeHtml(args.socials.telegramUrl).replace(/"/g, '&quot;')}">${escapeHtml(args.socials.telegramLabel)}</a> · ${escapeHtml(args.telegramType ?? 'Type unverified')}`,
     '',
     `<a href="https://robinhoodchain.blockscout.com/token/${encodeURIComponent(args.tokenAddress)}">${escapeHtml(args.tokenAddress)}</a>`,
     '',
-    '<i>Verified launchpad + X + Telegram links · Social ownership/type unverified · DYOR</i>',
+    '<i>Verified launchpad + X + Telegram links · Social ownership unverified · DYOR</i>',
   ].join('\n');
 }
 
@@ -194,8 +200,10 @@ async function processLaunch(item: QueuedLaunch): Promise<void> {
 
   // Social Mafia is intentionally launchpad-only. Callers must supply a verified
   // launchpad context; custom/unknown contracts never enter this queue.
-  const rawSocials = await getRobinhoodTokenSocials(token)
+  const pons = await getPonsPublicContext(token, launch.factory_address, launch.deployer_address);
+  const onchainSocials = await getRobinhoodTokenSocials(token)
     .catch(() => ({ twitter: null, telegram: null, website: null }));
+  const rawSocials = { twitter: onchainSocials.twitter || pons?.twitter, telegram: onchainSocials.telegram || pons?.telegram };
   const socials = resolveSocialMafiaSocials(rawSocials);
   if (!socials) {
     console.log('[SocialMafia] skipped; both X and Telegram are required', {
@@ -213,6 +221,12 @@ async function processLaunch(item: QueuedLaunch): Promise<void> {
     dev: Awaited<ReturnType<typeof scanRobinhoodDevTokenFlow>> | null;
     curve: Awaited<ReturnType<typeof resolvePonsV2PreIndexValuation>> | null;
   } = { market: null, metadata: null, dev: null, curve: null };
+  let creatorHolding: number | null = null;
+  let telegramType: TelegramPreviewType = 'Type unverified';
+  const supplemental = Promise.all([
+    getCreatorHoldingPercent(token, launch.deployer_address).then(value => creatorHolding = value),
+    getTelegramPreviewType(socials.telegramUrl).then(value => telegramType = value),
+  ]);
   const work = Promise.all([
     getRobinhoodMarketSnapshot(token, { priority: 'HIGH', caller: 'pons_social_mafia', queueWaitTimeoutMs: 750 }).catch(() => null).then(value => partial.market = value),
     getRobinhoodTokenMetadata(token, { signal: AbortSignal.timeout(8_000) }).catch(() => null).then(value => partial.metadata = value),
@@ -221,15 +235,17 @@ async function processLaunch(item: QueuedLaunch): Promise<void> {
       ? getPonsV2CurveState(launch.curve_address).then(state => state.tokenAddress.toLowerCase() === token
         ? resolvePonsV2PreIndexValuation(state) : null).catch(() => null).then(value => partial.curve = value)
       : Promise.resolve(null),
-  ]);
+  ]).then(async values => { await supplemental; return values; });
   const render = (values: Awaited<typeof work> | null) => {
     const [market, metadata, dev, curve] = values ?? [partial.market, partial.metadata, partial.dev, partial.curve];
     return buildSocialMafiaAlertText({
       tokenAddress: token, launchpadLabel: launchpad.label, socials,
-      symbol: market?.symbol ?? metadata?.symbol, name: market?.name ?? metadata?.name,
+      symbol: market?.symbol || metadata?.symbol || pons?.symbol, name: market?.name || metadata?.name || pons?.name,
       marketCap: market?.marketCapUsd ?? (curve?.valuationType === 'MARKET_CAP' ? curve.valueUsd : null),
-      fdv: market?.fdvUsd ?? (curve?.valuationType === 'FDV' ? curve.valueUsd : null),
-      devHoldingPercent: dev && dev.evidenceStatus !== 'UNAVAILABLE' ? dev.devHoldingPercent : null,
+      fdv: market?.fdvUsd ?? (curve?.valuationType === 'FDV' ? curve.valueUsd : pons?.fdvUsd),
+      devHoldingPercent: dev && dev.evidenceStatus !== 'UNAVAILABLE' && dev.devHoldingPercent != null ? dev.devHoldingPercent : creatorHolding,
+      creatorAddress: launch.deployer_address, telegramType,
+      valuationSource: market?.marketCapUsd == null && market?.fdvUsd == null && curve?.valueUsd == null && pons?.fdvUsd != null ? 'PONS snapshot' : null,
     });
   };
   const initial = await boundedSocialMafiaContext(work, 1_500);

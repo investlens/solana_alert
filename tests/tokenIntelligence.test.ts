@@ -234,3 +234,12 @@ test('Full Intel access remains available to Free/Pro/Admin while trading.admin 
   assert.equal(hasCapability(accessProfileForTier('pro'), 'trading.admin'), false);
   assert.equal(hasCapability(accessProfileForTier('admin'), 'trading.admin'), true);
 });
+
+test('Full Intel PONS fallback presents FDV with its source without fabricating market cap', () => {
+  const text = renderTokenIntelligence(fixture({ marketCap: null, price: null, liquidity: null, volume5m: null,
+    fdv: 3800.24, valuationSource: 'PONS public launchpad', developer: { wallet: '0x3333333333333333333333333333333333333333', holdingPct: 0, sold: null, transferredPct: null, burnedPct: null } }));
+  assert.match(text, /FDV\s+<b>\$3\.8K<\/b>/);
+  assert.match(text, /PONS public launchpad/);
+  assert.match(text, /Holding\s+<b>0\.0%<\/b>/);
+  assert.doesNotMatch(text, /Market Cap\s+<b>\$3\.8K/);
+});
