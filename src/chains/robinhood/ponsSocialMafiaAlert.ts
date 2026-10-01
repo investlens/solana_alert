@@ -1,3 +1,5 @@
+import { buildAlphaosAlertCard } from '../../ui/alphaosAlertCard.js';
+import { sendAlphaosPhotoAlert, alphaosEnrichmentEdit, type AlphaosDelivery } from '../../ui/alphaosPhotoDelivery.js';
 import { verifySocialContract } from './socialContractConfirmation.js';
 import { getPonsPublicContext, getCreatorHoldingPercent, getTelegramPreviewType, type TelegramPreviewType } from './ponsPublicContext.js';
 import type { PonsLaunch } from './ponsHistoricalLaunchScanner.js';
@@ -133,29 +135,13 @@ async function recipients(): Promise<string[]> {
 }
 
 async function sendTelegram(args: {
-  chatId: string;
-  text: string;
-  tokenAddress: string;
-  launchpad: VerifiedLaunchpadContext;
-  socials: SocialMafiaSocials;
-}): Promise<number | null> {
+  chatId: string; text: string; tokenAddress: string; launchpad: VerifiedLaunchpadContext;
+  socials: SocialMafiaSocials; image: Buffer | null;
+}): Promise<AlphaosDelivery> {
   const botToken = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
   if (!botToken) throw new Error('missing Telegram bot token');
-  const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(5_000),
-    body: JSON.stringify({
-      chat_id: args.chatId,
-      text: args.text,
-      parse_mode: 'HTML',
-      disable_web_page_preview: true,
-      reply_markup: { inline_keyboard: buildSocialMafiaActions(args.tokenAddress, args.launchpad, args.socials) },
-    }),
-  });
-  if (!response.ok) throw new Error(`Telegram ${response.status}`);
-  const result = await response.json() as { ok?: boolean; result?: { message_id?: number } };
-  if (!result.ok) throw new Error('Telegram delivery rejected');
-  return result.result?.message_id ?? null;
+  return sendAlphaosPhotoAlert({ botToken, chatId: args.chatId, text: args.text, image: args.image,
+    keyboard: buildSocialMafiaActions(args.tokenAddress, args.launchpad, args.socials) });
 }
 
 export function buildSocialMafiaAlertText(args: {
@@ -172,13 +158,15 @@ export function buildSocialMafiaAlertText(args: {
   valuationSource?: string | null;
   socialContractConfirmed?: boolean;
 }): string {
-  const symbol = String(args.symbol ?? '').trim().replace(/^\$+/, '').toUpperCase() || 'Symbol unavailable';
-  const name = String(args.name ?? '').trim();
+  const symbol = String(args.symbol ?? '').trim().replace(/^\$+/, '').toUpperCase().slice(0, 24) || 'Symbol unavailable';
+  const name = String(args.name ?? '').trim().slice(0, 64);
   return [
     '<b>🕶 SOCIAL MAFIA ALERT</b>',
     '',
     `<b>${escapeHtml(symbol)}</b>${name ? ` · ${escapeHtml(name)}` : ''}`,
-    `🚀 Launchpad  <b>${escapeHtml(args.launchpadLabel)}</b>`,
+    `🚀 Launchpad  <b>${escapeHtml(args.launchpadLabel.slice(0, 16))}</b>`,
+    '',
+    '<b>📊 TOKEN STATS</b>',
     args.marketCap == null && args.fdv != null
       ? `💰 FDV  <b>${escapeHtml(money(args.fdv))}</b>`
       : `💵 Market cap  <b>${escapeHtml(money(args.marketCap))}</b>`,
@@ -191,6 +179,7 @@ export function buildSocialMafiaAlertText(args: {
     `𝕏 X  <a href="${escapeHtml(args.socials.xUrl).replace(/"/g, '&quot;')}">@${escapeHtml(args.socials.xHandle)}</a>`,
     `✈️ TG  <a href="${escapeHtml(args.socials.telegramUrl).replace(/"/g, '&quot;')}">${escapeHtml(args.socials.telegramLabel)}</a> · ${escapeHtml(args.telegramType ?? 'Type unverified')}`,
     '',
+    '<b>CONTRACT</b>',
     `<a href="https://robinhoodchain.blockscout.com/token/${encodeURIComponent(args.tokenAddress)}">${escapeHtml(args.tokenAddress)}</a>`,
     '',
     '<i>Verified launchpad + X + Telegram links · Social ownership unverified · DYOR</i>',
@@ -260,9 +249,14 @@ async function processLaunch(item: QueuedLaunch): Promise<void> {
   const initial = await boundedSocialMafiaContext(work, 1_500);
   const text = render(initial);
 
+  // Render once per eligible token, reuse the in-memory buffer across recipients.
+  const image = await buildAlphaosAlertCard({ symbol: partial.metadata?.symbol || pons?.symbol,
+    name: partial.metadata?.name || pons?.name, logo: pons?.logo }).catch(() => {
+      console.warn('[AlphaosCard] rendering unavailable; using text alert'); return null;
+    });
   const chats = await recipients();
   const results = await Promise.allSettled(chats.map(chatId => sendTelegram({
-    chatId, text, tokenAddress: token, launchpad, socials,
+    chatId, text, tokenAddress: token, launchpad, socials, image,
   })));
   if (initial == null) void boundedSocialMafiaContext(work, 12_000).then(async values => {
     const enriched = render(values);
@@ -270,10 +264,10 @@ async function processLaunch(item: QueuedLaunch): Promise<void> {
     const botToken = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
     await Promise.allSettled(results.map(async (result, index) => {
       if (result.status !== 'fulfilled' || result.value == null) return;
-      await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
+      const edit = alphaosEnrichmentEdit(result.value, chats[index], enriched, buildSocialMafiaActions(token, launchpad, socials));
+      await fetch(`https://api.telegram.org/bot${botToken}/${edit.method}`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(5_000),
-        body: JSON.stringify({ chat_id: chats[index], message_id: result.value, text: enriched, parse_mode: 'HTML',
-          disable_web_page_preview: true, reply_markup: { inline_keyboard: buildSocialMafiaActions(token, launchpad, socials) } }),
+        body: JSON.stringify(edit.body),
       });
     }));
   }).catch(error => console.warn('[SocialMafia] late enrichment unavailable', String(error)));
@@ -345,7 +339,8 @@ export function resetPonsSocialMafiaForTests(): void {
 
 export function buildSocialMafiaActions(token: string, launchpad: VerifiedLaunchpadContext, socials: SocialMafiaSocials) {
   return [
-    [{ text: '🚀 PONS', url: launchpad.tokenUrl(token) }, { text: '📋 Copy CA', callback_data: `COPY_CA_${token}` }],
+    [{ text: '🚀 PONS', url: launchpad.tokenUrl(token) }, { text: '🧠 Full Intel', callback_data: `FI_RH_${token}` }],
+    [{ text: '⭐ Track', callback_data: `BOOST_TRACK_${token}` }, { text: '📋 Copy CA', callback_data: `COPY_CA_${token}` }],
     [{ text: '𝕏 X', url: socials.xUrl }, { text: '✈️ TG', url: socials.telegramUrl }],
   ];
 }

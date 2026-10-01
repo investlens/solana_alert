@@ -5,7 +5,7 @@ import { requestRobinhoodRpcResilient } from './rpc.js';
 export type TelegramPreviewType = 'Group' | 'Channel' | 'Personal account' | 'Type unverified';
 export type PonsPublicContext = {
   name: string; symbol: string; creator: string; decimals: number; totalSupplyRaw: bigint;
-  fdvUsd: number | null; twitter: string | null; telegram: string | null;
+  logo?: string | null; fdvUsd: number | null; twitter: string | null; telegram: string | null;
 };
 
 // Read server-rendered public metadata, never credentials or social-profile APIs.
@@ -27,7 +27,7 @@ export function parsePonsPublicContext(html: string, token: string, factory: str
       const fdv = typeof price === 'number' && price > 0 && typeof quoteUsd === 'number' && quoteUsd > 0
         ? price * quoteUsd * Number(supply) / 10 ** d.decimals : null;
       return { name: d.name, symbol: d.symbol.replace(/^\$+/, ''), creator: d.deployer,
-        decimals: d.decimals, totalSupplyRaw: supply, fdvUsd: fdv != null && Number.isFinite(fdv) ? fdv : null,
+        logo: typeof d.logo === 'string' ? d.logo : null, decimals: d.decimals, totalSupplyRaw: supply, fdvUsd: fdv != null && Number.isFinite(fdv) ? fdv : null,
         twitter: typeof d.socials?.twitter === 'string' ? d.socials.twitter : null,
         telegram: typeof d.socials?.telegram === 'string' ? d.socials.telegram : null };
     }
