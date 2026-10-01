@@ -121,9 +121,12 @@ test('Social Mafia alert shows verified launchpad plus both communities', () => 
   });
 
   assert.match(text, /SOCIAL MAFIA ALERT/);
+  assert.match(text, /Type unverified/);
+  assert.match(text, /Social ownership\/type unverified/);
+  assert.doesNotMatch(text, /<b>COMMUNITY<\/b>/);
   assert.match(text, /Launchpad\s+<b>PONS<\/b>/);
-  assert.match(text, /X\s+<b>@projectalpha<\/b>/);
-  assert.match(text, /Telegram\s+<b>@projectalpha<\/b>/);
+  assert.match(text, /X\s+<a href="https:\/\/x.com\/projectalpha">@projectalpha<\/a>/);
+  assert.match(text, /TG\s+<a href="https:\/\/t.me\/projectalpha">@projectalpha<\/a>/);
   assert.match(text, /Market cap\s+<b>\$51\.8K<\/b>/);
   assert.match(text, /Dev holding\s+<b>4\.25%<\/b>/);
   assert.match(text, /Verified launchpad \+ X \+ Telegram/);
