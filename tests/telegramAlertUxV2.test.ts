@@ -103,7 +103,7 @@ test('Internet Money Full Intel stays compact without hiding verified security e
 test('automatic action hierarchy remains callback-safe and does not add Trade', () => {
   const rows = buildAlphaMarketActions({ chartUrl: 'https://dexscreener.com/x', tokenUrl: 'https://explorer/x',
     fullIntelCallback: 'FI_RH_0x123', trackCallback: 'TRACK_1', copyContractCallback: 'COPY_CA_1', muteCallback: 'MUTE_1' });
-  assert.deepEqual(rows.map(row => row.map(button => button.text)), [['🔬 Full Intel', '📊 Chart'], ['⭐ Track', '📋 Copy CA'], ['🔕 Mute']]);
+  assert.deepEqual(rows.map(row => row.map(button => button.text)), [['📊 Chart', '🧠 Full Intel'], ['⭐ Track', '📋 Copy CA']]);
   assert.ok(rows.flat().every(button => !button.callback_data || Buffer.byteLength(button.callback_data) <= 64));
   assert.ok(rows.flat().every(button => !/Trade/i.test(button.text)));
 });
@@ -175,23 +175,23 @@ test('automatic social links are allowlisted, deduplicated and optional without 
     xUrl: 'https://twitter.com/hotdog', telegramUrl: 'https://t.me/hotdog', trackCallback: 'TRACK_1',
     copyContractCallback: 'COPY_CA_1', muteCallback: 'MUTE_1' });
   assert.deepEqual(rows.map(row => row.map(button => button.text)), [
-    ['🔬 Full Intel'], ['𝕏 X', '✈️ Telegram'], ['⭐ Track', '📋 Copy CA'], ['🔕 Mute'],
+    ['🔎 Token', '🧠 Full Intel'], ['⭐ Track', '📋 Copy CA'], ['𝕏 X', '✈️ TG'],
   ]);
   assert.equal(rows.flat().filter(button => button.text === '𝕏 X').length, 1);
-  assert.equal(rows.flat().filter(button => button.text === '✈️ Telegram').length, 1);
+  assert.equal(rows.flat().filter(button => button.text === '✈️ TG').length, 1);
   const one = buildAlphaMarketActions({ tokenUrl: 'https://example.com/token', fullIntelCallback: 'FI_RH_0x123',
     xUrl: 'https://x.com/hotdog', trackCallback: 'TRACK_1', copyContractCallback: 'COPY_CA_1', muteCallback: 'MUTE_1' });
   assert.deepEqual(one.map(row => row.map(button => button.text)), [
-    ['🔬 Full Intel'], ['𝕏 X'], ['⭐ Track', '📋 Copy CA'], ['🔕 Mute'],
+    ['🔎 Token', '🧠 Full Intel'], ['⭐ Track', '📋 Copy CA'], ['𝕏 X'],
   ]);
   const none = buildAlphaMarketActions({ tokenUrl: 'https://example.com/token', fullIntelCallback: 'FI_RH_0x123',
     trackCallback: 'TRACK_1', copyContractCallback: 'COPY_CA_1', muteCallback: 'MUTE_1' });
   assert.deepEqual(none.map(row => row.map(button => button.text)), [
-    ['🔬 Full Intel'], ['⭐ Track', '📋 Copy CA'], ['🔕 Mute'],
+    ['🔎 Token', '🧠 Full Intel'], ['⭐ Track', '📋 Copy CA'],
   ]);
   const noIntel = buildAlphaMarketActions({ tokenUrl: 'https://example.com/token', chartUrl: 'https://example.com/chart' });
-  assert.deepEqual(noIntel.map(row => row.map(button => button.text)), [['📊 Chart'], ['🔎 Token']]);
-  assert.equal(rows.flat().find(button => button.text === '🔬 Full Intel')?.callback_data, 'FI_RH_0x123');
+  assert.deepEqual(noIntel.map(row => row.map(button => button.text)), [['📊 Chart']]);
+  assert.equal(rows.flat().find(button => button.text === '🧠 Full Intel')?.callback_data, 'FI_RH_0x123');
   assert.equal(rows.flat().find(button => button.text === '📋 Copy CA')?.callback_data, 'COPY_CA_1');
 });
 
