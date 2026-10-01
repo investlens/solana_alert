@@ -3,10 +3,31 @@ import { requireCapability } from './accessControl.js';
 import { getRobinhoodTokenIntelligence } from '../services/tokenIntelligenceService.js';
 import { renderTokenIntelligence, tokenIntelligenceButtons } from '../ui/tokenIntelligenceView.js';
 import { trackRuntimeToken } from '../services/runtimeTokenTracking.js';
+import { getPositionCheck, type PositionSize } from '../services/positionCheckService.js';
+import { renderPositionCheck, positionCheckButtons } from '../ui/positionCheckView.js';
 
 const activeReplies = new Set<string>();
 
 export function registerTokenIntelligenceActions(bot: Telegraf<any>) {
+  console.log('[PositionCheck] READY sizes=0.001,0.01,0.05 mode=READ_ONLY source=PONS_NATIVE_CURVE_MODEL');
+  bot.action(/^PC_RH_(0\.001|0\.01|0\.05)_(0x[a-fA-F0-9]{40})$/, async ctx => {
+    if (!await requireCapability(ctx, 'intelligence.investigations', 'POSITION_CHECK')) return;
+    await ctx.answerCbQuery('Checking position evidence…').catch(() => {});
+    const key = `position:${String(ctx.from?.id ?? '')}`;
+    if (activeReplies.has(key)) return;
+    activeReplies.add(key);
+    try {
+      const check = await getPositionCheck(ctx.match[2], ctx.match[1] as PositionSize);
+      const options = { parse_mode: 'HTML' as const, link_preview_options: { is_disabled: true },
+        reply_markup: { inline_keyboard: positionCheckButtons(check.token) } };
+      const previous = ctx.callbackQuery?.message;
+      if (previous && 'text' in previous && previous.text.startsWith('🎯 POSITION CHECK')) {
+        await ctx.editMessageText(renderPositionCheck(check), options);
+      } else await ctx.reply(renderPositionCheck(check), options);
+    } catch {
+      await ctx.reply('Position Check is unavailable or busy. Please try again shortly.').catch(() => {});
+    } finally { activeReplies.delete(key); }
+  });
   bot.action(/^COPY_CA_(0x[a-fA-F0-9]{40})$/, async ctx => {
     const token = String(ctx.match[1]);
     await ctx.answerCbQuery('Contract address ready').catch(() => {});
