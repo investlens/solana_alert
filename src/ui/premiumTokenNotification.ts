@@ -14,7 +14,7 @@ export function buildPremiumTokenNotification(args:{
   state:PremiumState; symbol?:string|null; name?:string|null; address:string; chain?:string|null; observedAt?:string|number|Date|null;
   age?:string|null; market:NotificationMarketContext; evidence?:CoreDecisionMetricContext|null; volumeMultiple?:number|null; move?:number|null; peakMove?:number|null;
   retainedPeakPercent?:number|null; boostTotal?:number|null; boostIncrement?:number|null; devLaunches?:number|null; devBurnPercent?:number|null; risk?:string|null; confidence?:number|null;
-  launchSource?:'PONS'|'CUSTOM'|'UNKNOWN'|null; socials?:{twitter?:string|null;telegram?:string|null};
+  telegramType?:string; launchSource?:'PONS'|'CUSTOM'|'UNKNOWN'|null; socials?:{twitter?:string|null;telegram?:string|null};
   insightTitle:string; insight:string[]; statusTitle:string; status:string; displayIntent?:'ENTRY'|'MOMENTUM_UPDATE'|'RECOVERY_WATCH'|'WATCH'|'AVOID'|'EXIT';
   comparison?:{previous:number;current:number;changePct:number}; entryAction?:'BUY'|'CHECK_ENTRY'; structureContext?:string|null;
 }) {
@@ -76,9 +76,9 @@ export function buildPremiumTokenNotification(args:{
         : `🛡 ${escapeHtml(args.status)}`,
       unlockedLpWarning ? 'No sell-restriction flag reported' : '',
       '',
-      ...(args.socials ? ['<b>COMMUNITY</b>',
+      ...(args.socials ? ['<b>SOCIAL LINKS</b>',
         socialLinks.xUrl ? `𝕏 <a href="${escapeHtml(socialLinks.xUrl).replace(/"/g, '&quot;')}">X</a>` : '',
-        socialLinks.telegramUrl ? `✈️ <a href="${escapeHtml(socialLinks.telegramUrl).replace(/"/g, '&quot;')}">TG</a>` : ''] : []),
+        socialLinks.telegramUrl ? `✈️ <a href="${escapeHtml(socialLinks.telegramUrl).replace(/"/g, '&quot;')}">TG</a> · ${escapeHtml(args.telegramType ?? 'Type unverified')}` : ''] : []),
       `<b>CONTRACT</b>`,
       `<code>${escapeHtml(args.address)}</code>`,
       '',

@@ -1,3 +1,5 @@
+import { isVerifiedPonsLaunch } from '../chains/robinhood/ponsLaunchState.js';
+import { getVerifiedPonsPublicContext, getCreatorHoldingPercent } from '../chains/robinhood/ponsPublicContext.js';
 import { getAddress } from 'viem';
 import { config } from '../config.js';
 import { fetchRobinhoodPairs, chooseBestRobinhoodPair, robinhoodMarketSnapshotFromPairs } from '../chains/robinhood/market.js';
@@ -24,7 +26,7 @@ export type TokenIntel = {
   status: 'COMPLETE' | 'PARTIAL'; analyzedAt: string; chain: 'robinhood'; tokenAddress: string;
   name: string | null; symbol: string | null; decimals: number | null; supply: string | null;
   ageObservedAt: string | null; price: number | null; marketCap: number | null; liquidity: number | null;
-  volume5m: number | null; chartUrl: string | null; marketObservedAt?: string | null;
+  volume5m: number | null; chartUrl: string | null; fdv?: number | null; valuationSource?: string | null; marketObservedAt?: string | null;
   lastVerifiedMarket?: { price: number | null; marketCap: number | null; liquidity: number | null; volume5m: number | null;
     observedAt: string | null; source: string | null } | null;
   ath: TokenAth;
@@ -232,6 +234,7 @@ export async function analyzeRobinhoodToken(tokenAddress: string, previous?: Tok
   const timeout = setTimeout(() => controller.abort(), Math.max(100, budgetMs));
   try {
     const observedAt = new Date().toISOString();
+    const ponsWork = bounded(isVerifiedPonsLaunch(token).then(verified => verified ? getVerifiedPonsPublicContext(token) : null), controller.signal).catch(() => null);
     const [metadataResult, pairsResult] = await Promise.allSettled([
       getRobinhoodTokenMetadata(token, { signal: controller.signal }), fetchRobinhoodPairs(token, { signal: controller.signal })]);
     const metadata: RobinhoodTokenMetadata | null = metadataResult.status === 'fulfilled' ? metadataResult.value : null;
@@ -254,7 +257,7 @@ export async function analyzeRobinhoodToken(tokenAddress: string, previous?: Tok
       result.alpha.state = db.latest?.intelligence_state ?? null; result.alpha.risk = db.latest?.risk_label ?? null;
       const raw = (db.latest?.raw_snapshot ?? {}) as Record<string, unknown>;
       const lastPrice = positive(db.latest?.price ?? raw.price ?? raw.currentPrice);
-      const lastMarketCap = positive(db.latest?.market_cap ?? raw.marketCap ?? raw.fdv);
+      const lastMarketCap = positive(db.latest?.market_cap ?? raw.marketCap);
       const lastLiquidity = positive(db.latest?.liquidity ?? raw.liquidity);
       const lastVolume5m = positive(db.latest?.volume_5m ?? raw.volume5m ?? raw.currentVolume5m);
       if (lastPrice || lastMarketCap || lastLiquidity || lastVolume5m) result.lastVerifiedMarket = {
@@ -282,6 +285,19 @@ export async function analyzeRobinhoodToken(tokenAddress: string, previous?: Tok
         risks: launches > 3 ? ['More than 3 verified launches is negative history evidence, not a scam label.'] : [] };
       if (!result.developer.wallet && typeof db.creatorRows[0]?.creator_wallet === 'string') result.developer.wallet = db.creatorRows[0].creator_wallet;
       result.alpha.watch = [...result.holders.warnings, ...result.devHistory.risks].slice(0, 4);
+    }
+    const pons = await ponsWork;
+    if (pons) {
+      result.name ||= pons.name; result.symbol ||= pons.symbol;
+      result.decimals ??= pons.decimals; result.supply ??= pons.totalSupplyRaw.toString();
+      if (result.marketCap == null && pons.fdvUsd != null) { result.fdv = pons.fdvUsd; result.valuationSource = 'PONS public launchpad'; }
+      result.developer.wallet ||= pons.creator;
+      if (result.developer.wallet.toLowerCase() === pons.creator.toLowerCase() && result.developer.holdingPct == null)
+        result.developer.holdingPct = await bounded(getCreatorHoldingPercent(token, pons.creator), controller.signal).catch(() => null);
+      for (const [url, kind] of [[pons.twitter, 'twitter'], [pons.telegram, 'telegram']] as const) {
+        const social = validateProjectSocial(url, kind);
+        if (social && !result.socials.some(link => link.label === social.label)) result.socials.push(social);
+      }
     }
     if (freshWalletRiskBlocksPositive({ freshWallet1dPct: result.freshWallets.oneDayPct, freshWalletEvidence: result.freshWallets.evidence }))
       result.alpha.watch.unshift(`High fresh-wallet concentration (${result.freshWallets.oneDayPct!.toFixed(1)}% of classified wallets)`);

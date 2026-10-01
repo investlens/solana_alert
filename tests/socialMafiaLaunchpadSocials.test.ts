@@ -122,7 +122,7 @@ test('Social Mafia alert shows verified launchpad plus both communities', () => 
 
   assert.match(text, /SOCIAL MAFIA ALERT/);
   assert.match(text, /Type unverified/);
-  assert.match(text, /Social ownership\/type unverified/);
+  assert.match(text, /Social ownership unverified/);
   assert.doesNotMatch(text, /<b>COMMUNITY<\/b>/);
   assert.match(text, /Launchpad\s+<b>PONS<\/b>/);
   assert.match(text, /X\s+<a href="https:\/\/x.com\/projectalpha">@projectalpha<\/a>/);

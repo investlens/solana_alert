@@ -58,6 +58,7 @@ export function renderTokenIntelligence(intel: TokenIntel): string {
       ...(intel.lastVerifiedMarket?.volume5m != null ? [`Last verified vol 5m <b>${money(intel.lastVerifiedMarket.volume5m)}</b>`] : []),
       ...(intel.lastVerifiedMarket?.observedAt ? [`Last observed       <b>${formatIntelTime(intel.lastVerifiedMarket.observedAt)}</b>`] : []),
     ]),
+    ...(intel.fdv != null && intel.marketCap == null ? [`FDV               <b>${money(intel.fdv)}</b>`, `Valuation source  ${esc(intel.valuationSource ?? 'Unavailable')}`] : []),
     `From ATH          <b>${esc(athDistance)}</b>`,
     ...(intel.ath.priceUsd != null ? [`ATH Price         <b>${money(intel.ath.priceUsd)}</b>`] : []),
     ...(intel.ath.marketCapUsd != null ? [`ATH Market Cap    <b>${money(intel.ath.marketCapUsd)}</b>`] : []),

@@ -1,3 +1,4 @@
+import { getVerifiedPonsPublicContext, getCreatorHoldingPercent, getTelegramPreviewType } from './ponsPublicContext.js';
 import { reuseRobinhoodDevTokenFlow } from './security/devTokenFlowScanner.js';
 import { fetchRobinhoodBoosts } from './discovery.js';
 import { boostMetadataFallback, resolveBoostMetadata } from './boostMetadataResolver.js';
@@ -267,22 +268,24 @@ export async function enrichDeliveredBoostAlert(args: {
       .catch(() => boostMetadataFallback(args.tokenAddress)),
     getRobinhoodTokenSocials(args.tokenAddress).catch(() => ({ website: null, twitter: null, telegram: null })),
   ]);
-  if (!market && !metadata.name && !metadata.symbol) return 0;
-  const symbol = market?.symbol ?? metadata.symbol ?? args.baseSymbol ?? null;
-  const name = market?.name ?? metadata.name ?? args.baseName ?? null;
+  const pons = args.verifiedPons ? await getVerifiedPonsPublicContext(args.tokenAddress) : null;
+  if (!market && !metadata.name && !metadata.symbol && !pons) return 0;
+  const symbol = market?.symbol || metadata.symbol || pons?.symbol || args.baseSymbol || null;
+  const name = market?.name || metadata.name || pons?.name || args.baseName || null;
   const state = args.canonicalType === 'MAX_BOOST_500_PLUS' ? 'MAJOR_BOOST' as const : 'BOOST' as const;
   const marketContext = {
     symbol, name, address: args.tokenAddress,
     price: market?.priceUsd ?? null,
     marketCap: market?.marketCapUsd ?? null,
-    fdv: market?.fdvUsd ?? null,
+    fdv: market?.fdvUsd ?? pons?.fdvUsd ?? null,
     liquidity: market?.liquidityUsd ?? null,
     volume5m: market?.volume5mUsd ?? null,
     chartUrl: market?.chartUrl ?? null,
   };
   const message = buildPremiumTokenNotification({
     state, symbol, name, address: args.tokenAddress, chain: 'robinhood', market: marketContext,
-    evidence: await boostDeveloperEvidence(args.tokenAddress), socials,
+    evidence: await boostDeveloperEvidence(args.tokenAddress, pons?.creator), socials: { twitter: socials.twitter || pons?.twitter, telegram: socials.telegram || pons?.telegram },
+    telegramType: await getTelegramPreviewType(socials.telegram || pons?.telegram || ''),
     launchSource: args.verifiedPons ? 'PONS' : 'UNKNOWN',
     boostTotal: args.totalBoostAmount, boostIncrement: args.boostAmount, risk: 'UNKNOWN',
     insightTitle: 'WHY NOW', insight: [`${args.canonicalTitle} verified after security gate`, args.securityReason],
@@ -402,10 +405,11 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
       .catch(() => boostMetadataFallback(boost.tokenAddress)),
     initialBoostEnrichment(boost.tokenAddress),
   ]);
+  const pons = verifiedPons ? await getVerifiedPonsPublicContext(boost.tokenAddress) : null;
   const market = initialEnrichment.market;
   const socials = initialEnrichment.socials;
-  const symbol = market?.symbol ?? metadata.symbol ?? null;
-  const name = market?.name ?? metadata.name ?? null;
+  const symbol = market?.symbol || metadata.symbol || pons?.symbol || null;
+  const name = market?.name || metadata.name || pons?.name || null;
   const securityReason = verifiedPons ? 'Verified PONS origin; trusted launchpad fast path.' : security.reason;
   const eventId = `${tokenKey}:${canonical.type}:${canonical.currentTotal}`;
   const rawSnapshot = {
@@ -460,14 +464,15 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
     symbol, name, address: boost.tokenAddress,
     price: market?.priceUsd ?? null,
     marketCap: market?.marketCapUsd ?? null,
-    fdv: market?.fdvUsd ?? null,
+    fdv: market?.fdvUsd ?? pons?.fdvUsd ?? null,
     liquidity: market?.liquidityUsd ?? null,
     volume5m: market?.volume5mUsd ?? null,
     chartUrl: market?.chartUrl ?? null,
   };
   const baseMessage = buildPremiumTokenNotification({
     state, symbol, name, address: boost.tokenAddress, chain: 'robinhood', market: marketContext,
-    evidence: await boostDeveloperEvidence(boost.tokenAddress), socials,
+    evidence: await boostDeveloperEvidence(boost.tokenAddress, pons?.creator), socials: { twitter: socials.twitter || pons?.twitter, telegram: socials.telegram || pons?.telegram },
+    telegramType: await getTelegramPreviewType(socials.telegram || pons?.telegram || ''),
     launchSource: verifiedPons ? 'PONS' : 'UNKNOWN',
     boostTotal: canonical.currentTotal, boostIncrement: canonical.boostAdded, risk: 'UNKNOWN',
     insightTitle: 'WHY NOW', insight: [`${boostCanonicalTitle(canonical)} verified after security gate`, securityReason],
@@ -577,13 +582,15 @@ export function startRobinhoodBoostObserver(): ReturnType<typeof setInterval> | 
   boostObserverInterval = setInterval(() => void runRobinhoodBoostObserverCycle(), BOOST_INTERVAL_MS);
   return boostObserverInterval;
 }
-async function boostDeveloperEvidence(token: string) {
+async function boostDeveloperEvidence(token: string, creator?: string) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const dev = await Promise.race([reuseRobinhoodDevTokenFlow(token).catch(() => null),
       new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), 750); })]);
-    return { devHoldingEvidence: dev && dev.evidenceStatus !== 'UNAVAILABLE' && dev.devHoldingPercent != null ? 'VERIFIED' as const : 'UNAVAILABLE' as const,
-      devHoldingPercent: dev?.devHoldingPercent ?? null,
+    const direct = creator && (!dev || dev.evidenceStatus === 'UNAVAILABLE' || dev.devHoldingPercent == null)
+      ? await Promise.race([getCreatorHoldingPercent(token, creator), new Promise<null>(resolve => setTimeout(() => resolve(null), 750))]) : null;
+    return { devHoldingEvidence: direct != null ? 'VERIFIED' as const : dev && dev.evidenceStatus !== 'UNAVAILABLE' && dev.devHoldingPercent != null ? 'VERIFIED' as const : 'UNAVAILABLE' as const,
+      devHoldingPercent: direct ?? (dev && dev.evidenceStatus !== 'UNAVAILABLE' ? dev.devHoldingPercent : null),
       burnEvidence: dev?.evidenceStatus === 'COMPLETE' && dev.totalBurnPercent != null ? 'VERIFIED' as const : 'UNAVAILABLE' as const,
       burnedPercent: dev?.evidenceStatus === 'COMPLETE' ? dev.totalBurnPercent : null };
   } finally { if (timer) clearTimeout(timer); }
