@@ -1,3 +1,4 @@
+import { arcBoostSafetyFromEvidence, processArcBoostObservation } from '../src/chains/arc/boostSafety.js';
 import 'dotenv/config';
 import { verifyArcMainnet, getArcBlockNumber, getArcLogs, readArcContract } from '../src/chains/arc/rpc.js';
 import { discoverArcV4Pools } from '../src/chains/arc/uniswap.js';
@@ -256,7 +257,7 @@ async function deliverArcAlert(market: Awaited<ReturnType<typeof enrichArcMarket
     : market.assetId;
   const unavailable = warnings
     .filter(item => /UNKNOWN/i.test(item))
-    .map(item => item.replace(/_UNKNOWN$/i, '').replaceAll('_', ' ').toLowerCase())
+    .map(item => item.replace(/_UNKNOWN$/i, '').replace(/_/g, ' ').toLowerCase())
     .map(item => item.replace(/\b\w/g, char => char.toUpperCase()));
   const otherWarnings = warnings.filter(item => !/UNKNOWN/i.test(item));
   const ratioNumber = sells > 0 ? buys / sells : buys > 0 ? 99 : 0;
@@ -282,7 +283,7 @@ async function deliverArcAlert(market: Awaited<ReturnType<typeof enrichArcMarket
     '',
     '🛡️ <b>SAFETY</b>',
     '✅ Core ARC contract checks passed',
-    ...(otherWarnings.length ? otherWarnings.map(item => `⚠️ ${item.replaceAll('_', ' ')}`) : []),
+    ...(otherWarnings.length ? otherWarnings.map(item => `⚠️ ${item.replace(/_/g, ' ')}`) : []),
     ...(unavailable.length ? [`⚪ Additional checks unavailable: ${unavailable.join(', ')}`] : []),
     '',
     '⚠️ <b>Do your own diligence.</b>', '', '<i>AlphaOS · Find. Analyse. Trade Smarter.</i>',
@@ -415,18 +416,13 @@ async function checkArcBoostSecurity(tokenAddress: string): Promise<ArcBoostSecu
   try {
     const url = `https://api.gopluslabs.io/api/v1/token_security/5042?contract_addresses=${encodeURIComponent(tokenAddress)}`;
     const response = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(4_000) });
-    if (!response.ok) return { allowed: true, reason: `honeypot provider unavailable (HTTP ${response.status}); LP check intentionally skipped for BOOST`, devHoldingPercent: null };
+    if (!response.ok) return { allowed: false, reason: `honeypot provider unavailable (HTTP ${response.status}); LP check intentionally skipped for BOOST`, devHoldingPercent: null };
     const payload = await response.json() as { result?: Record<string, Record<string, unknown>> };
     const key = tokenAddress.toLowerCase();
     const security = payload.result?.[key] ?? payload.result?.[Object.keys(payload.result ?? {}).find(k => k.toLowerCase() === key) ?? ''];
-    if (!security) return { allowed: true, reason: 'honeypot evidence unavailable; LP check intentionally skipped for BOOST', devHoldingPercent: null };
-    if (String(security.is_honeypot ?? '0') === '1') return { allowed: false, reason: 'honeypot flag' };
-    if (String(security.cannot_sell_all ?? '0') === '1') return { allowed: false, reason: 'cannot-sell flag' };
-    const creatorPctRaw = Number(security.creator_percent ?? security.owner_percent ?? NaN);
-    const devHoldingPercent = Number.isFinite(creatorPctRaw) ? (creatorPctRaw <= 1 ? creatorPctRaw * 100 : creatorPctRaw) : null;
-    return { allowed: true, reason: 'no honeypot/cannot-sell flag detected; LP check intentionally skipped for BOOST', devHoldingPercent };
+    return arcBoostSafetyFromEvidence(security);
   } catch (error) {
-    return { allowed: true, reason: `honeypot check unavailable: ${error instanceof Error ? error.message : String(error)}; LP check intentionally skipped for BOOST`, devHoldingPercent: null };
+    return { allowed: false, reason: `honeypot check unavailable: ${error instanceof Error ? error.message : String(error)}; LP check intentionally skipped for BOOST`, devHoldingPercent: null };
   }
 }
 
@@ -540,11 +536,7 @@ async function processArcBoosts(): Promise<void> {
     return;
   }
   for (const boost of boosts) {
-    const key = boost.tokenAddress.toLowerCase();
-    const previous = arcBoostTotals.get(key);
-    arcBoostTotals.set(key, boost.totalAmount);
-    if (previous != null && boost.totalAmount <= previous) continue;
-    await deliverArcBoost(boost, previous == null ? 'NEW' : 'INCREASE');
+    await processArcBoostObservation(arcBoostTotals, boost, eventType => deliverArcBoost(boost, eventType));
   }
 }
 
