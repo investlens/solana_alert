@@ -28,7 +28,7 @@ test('Social Mafia keeps truthful FDV, verified zero holdings, linked explorer a
   assert.match(unavailable, /Symbol unavailable/);
   assert.match(unavailable, /Unverified/);
   const rows = buildSocialMafiaActions(token, { id: 'PONS', label: 'PONS', tokenUrl: () => 'https://www.ponsfamily.com/launchpad/token' }, socials);
-  assert.deepEqual(rows.map(row => row.map(button => button.text)), [['🚀 PONS', '📋 Copy CA'], ['𝕏 X', '✈️ TG']]);
+  assert.deepEqual(rows.map(row => row.map(button => button.text)), [['🚀 PONS', '🧠 Full Intel'], ['⭐ Track', '📋 Copy CA'], ['𝕏 X', '✈️ TG']]);
 });
 test('boost shows verified holdings, boost count and social links without implying unlocked LP safety', () => {
   const message = buildPremiumTokenNotification({ state: 'BOOST', symbol: 'READOUT', address: token,
