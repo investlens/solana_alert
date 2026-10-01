@@ -235,6 +235,8 @@ export async function analyzeRobinhoodToken(tokenAddress: string, previous?: Tok
   try {
     const observedAt = new Date().toISOString();
     const ponsWork = bounded(isVerifiedPonsLaunch(token).then(verified => verified ? getVerifiedPonsPublicContext(token) : null), controller.signal).catch(() => null);
+    const ponsHoldingWork = ponsWork.then(pons => pons
+      ? bounded(getCreatorHoldingPercent(token, pons.creator), controller.signal).catch(() => null) : null);
     const [metadataResult, pairsResult] = await Promise.allSettled([
       getRobinhoodTokenMetadata(token, { signal: controller.signal }), fetchRobinhoodPairs(token, { signal: controller.signal })]);
     const metadata: RobinhoodTokenMetadata | null = metadataResult.status === 'fulfilled' ? metadataResult.value : null;
@@ -293,7 +295,7 @@ export async function analyzeRobinhoodToken(tokenAddress: string, previous?: Tok
       if (result.marketCap == null && pons.fdvUsd != null) { result.fdv = pons.fdvUsd; result.valuationSource = 'PONS public launchpad'; }
       result.developer.wallet ||= pons.creator;
       if (result.developer.wallet.toLowerCase() === pons.creator.toLowerCase() && result.developer.holdingPct == null)
-        result.developer.holdingPct = await bounded(getCreatorHoldingPercent(token, pons.creator), controller.signal).catch(() => null);
+        result.developer.holdingPct = await ponsHoldingWork;
       for (const [url, kind] of [[pons.twitter, 'twitter'], [pons.telegram, 'telegram']] as const) {
         const social = validateProjectSocial(url, kind);
         if (social && !result.socials.some(link => link.label === social.label)) result.socials.push(social);
