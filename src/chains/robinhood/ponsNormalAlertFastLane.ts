@@ -1,3 +1,4 @@
+import { sendAlphaosPhotoAlert } from '../../ui/alphaosPhotoDelivery.js';
 import { decodeFunctionResult, encodeFunctionData, parseAbi } from 'viem';
 import type { PonsLaunch } from './ponsHistoricalLaunchScanner.js';
 import type { DexPair, DexProfile, RiskResult } from '../../types.js';
@@ -157,9 +158,16 @@ function refreshRecipientsInBackground(): void {
   })();
 }
 
-async function sendTelegram(chatId: string, text: string, tokenAddress: string, socials?: RobinhoodTokenSocials, preBond = false): Promise<void> {
+async function sendTelegram(chatId: string, text: string, tokenAddress: string, socials?: RobinhoodTokenSocials, preBond = false, setupControls = false): Promise<void> {
   const botToken = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
   if (!botToken || !chatId) throw new Error('missing Telegram configuration');
+  if (setupControls) {
+    await sendAlphaosPhotoAlert({ botToken, chatId, text, image: null, keyboard: [
+      [{ text: '🚀 PONS', url: `https://www.ponsfamily.com/launchpad/${tokenAddress}` }, { text: '🧠 Full Intel', callback_data: `FI_RH_${tokenAddress}` }],
+      [{ text: '⭐ Track', callback_data: `BOOST_TRACK_${tokenAddress}` }, { text: '📋 Copy CA', callback_data: `COPY_CA_${tokenAddress}` }],
+    ] });
+    return;
+  }
   const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -186,13 +194,16 @@ async function sendTelegram(chatId: string, text: string, tokenAddress: string, 
   if (!res.ok) throw new Error(`Telegram ${res.status}: ${await res.text().catch(() => '')}`);
 }
 
-async function directTelegramRecipients(text: string, tokenAddress: string, socials?: RobinhoodTokenSocials, preBond = false): Promise<{ delivered: number; failed: number }> {
+export async function directTelegramRecipients(text: string, tokenAddress: string, socials?: RobinhoodTokenSocials, preBond = false, setupControls = false): Promise<{ delivered: number; failed: number }> {
   ensureAdminRecipient();
   refreshRecipientsInBackground();
+  if (setupControls && recipientRefreshInFlight) {
+    await Promise.race([recipientRefreshInFlight, new Promise<void>(resolve => { const timer = setTimeout(resolve, 3_000); timer.unref(); })]);
+  }
   const recipients = [...recipientCache];
   if (!recipients.length) throw new Error('no Telegram recipients available');
 
-  const results = await Promise.allSettled(recipients.map(chatId => sendTelegram(chatId, text, tokenAddress, socials, preBond)));
+  const results = await Promise.allSettled(recipients.map(chatId => sendTelegram(chatId, text, tokenAddress, socials, preBond, setupControls)));
   let delivered = 0;
   let failed = 0;
   results.forEach((result, index) => {
@@ -208,7 +219,7 @@ async function directTelegramRecipients(text: string, tokenAddress: string, soci
 }
 
 
-async function readPonsV2Curve(launch: PonsLaunch): Promise<{ quoteReserve: bigint; tokenReserve: bigint; graduated: boolean } | null> {
+export async function readPonsV2Curve(launch: PonsLaunch): Promise<{ quoteReserve: bigint; tokenReserve: bigint; graduated: boolean } | null> {
   const token = tokenKey(launch);
   const curve = String(launch.curve_address ?? '').trim();
   if (!token || !/^0x[0-9a-fA-F]{40}$/.test(curve)) return null;
