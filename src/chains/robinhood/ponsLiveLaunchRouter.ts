@@ -7,6 +7,7 @@ import { createPonsProvenDeveloperAlert, type PonsProvenDeveloperAlert } from '.
 import { decidePonsShadowLaunch, evaluatePonsProvenDeveloperLaunch, toPonsLiveMarketEvidence, type PonsShadowDecision } from './ponsProvenDeveloperLaunch.js';
 import { queuePonsNormalAlertFastLane } from './ponsNormalAlertFastLane.js';
 import { queuePonsSocialMafiaScreen } from './ponsSocialMafiaAlert.js';
+import { queuePonsTradeSetup } from './ponsTradeSetupFeed.js';
 import { setSharedJson } from '../../services/sharedJsonCache.js';
 
 export type PonsLiveRouteResult = {
@@ -86,6 +87,7 @@ export function createPonsLiveLaunchRouter(overrides: Partial<PonsLiveRouterDepe
       dependencies.log(`[PonsLive] ignored deployer=${launch.deployer_address} tier=${ignore.tier} reason=${ignore.reason ?? 'blocked'}`);
       return { status: 'IGNORED', reason: ignore.reason ?? 'blocked developer', provenDeveloper: false, alert: null, decision: null, developerTier: ignore.tier, validation: 'NOT_RUN', alertDelivery: 'NOT_APPLICABLE' };
     }
+    if (!developer?.isBlocked && !developer?.riskTier) queuePonsTradeSetup(launch);
     const verifiedPeak = developer?.bestVerifiedPeakMarketCap;
     if (!developer || developer.isBlocked || developer.riskTier || verifiedPeak == null
       || !Number.isFinite(verifiedPeak) || verifiedPeak < dependencies.config.successfulDeveloperMinPeakMarketCap) {
