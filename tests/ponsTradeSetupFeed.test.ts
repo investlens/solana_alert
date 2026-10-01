@@ -1,7 +1,8 @@
+import { recordLaunchSocialEligibility } from '../src/chains/robinhood/alertEligibilityState.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { PonsLaunch } from '../src/chains/robinhood/ponsHistoricalLaunchScanner.js';
-import { buildTradeSetupText, isTradeSetupLaunchAdmissible } from '../src/chains/robinhood/ponsTradeSetupFeed.js';
+import { buildTradeSetupText, isTradeSetupLaunchAdmissible, queuePonsTradeSetup, tradeSetupSchedulingStateForTests, resetTradeSetupSchedulingForTests } from '../src/chains/robinhood/ponsTradeSetupFeed.js';
 import { PONS_CONTRACTS } from '../src/chains/robinhood/ponsContracts.js';
 
 const now = Date.parse('2026-10-01T07:00:00Z');
@@ -32,4 +33,19 @@ test('setup card escapes project text and distinguishes FDV, reserves and execut
   assert.match(text, /Reserve is not a size-specific sell quote/);
   assert.match(text, /Observed low \/ invalidation reference/);
   assert.match(text, /Research setup/);
+});
+
+test('failed social candidates release full watch slots and a deferred eligible launch can enter', () => {
+  resetTradeSetupSchedulingForTests();
+  const live = { ...launch, block_timestamp: new Date().toISOString() };
+  const tokens = Array.from({ length: 11 }, (_, i) => '0x' + (i + 100).toString(16).padStart(40, '0'));
+  for (const token of tokens) queuePonsTradeSetup({ ...live, token_address: token });
+  assert.equal(tradeSetupSchedulingStateForTests().candidates.length, 10);
+  assert.deepEqual(tradeSetupSchedulingStateForTests().deferred, [tokens[10]]);
+  for (const token of tokens.slice(0, 10)) recordLaunchSocialEligibility(token, false);
+  recordLaunchSocialEligibility(tokens[10], true);
+  queuePonsTradeSetup({ ...live, token_address: tokens[10] });
+  assert.deepEqual(tradeSetupSchedulingStateForTests().candidates, [tokens[10]]);
+  assert.equal(tradeSetupSchedulingStateForTests().deferred.length, 0);
+  resetTradeSetupSchedulingForTests();
 });
