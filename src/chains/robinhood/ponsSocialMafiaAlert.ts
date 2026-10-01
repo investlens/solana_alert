@@ -178,13 +178,13 @@ export function buildSocialMafiaAlertText(args: {
       : `💵 Market cap  <b>${escapeHtml(money(args.marketCap))}</b>`,
     `👨‍💻 Dev holding  <b>${escapeHtml(percent(args.devHoldingPercent))}</b>`,
     '',
-    '<b>COMMUNITY</b>',
-    `𝕏 X  <b>@${escapeHtml(args.socials.xHandle)}</b>`,
-    `✈️ Telegram  <b>${escapeHtml(args.socials.telegramLabel)}</b>`,
+    '<b>SOCIAL LINKS</b>',
+    `𝕏 X  <a href="${escapeHtml(args.socials.xUrl).replace(/"/g, '&quot;')}">@${escapeHtml(args.socials.xHandle)}</a>`,
+    `✈️ TG  <a href="${escapeHtml(args.socials.telegramUrl).replace(/"/g, '&quot;')}">${escapeHtml(args.socials.telegramLabel)}</a> · Type unverified`,
     '',
     `<a href="https://robinhoodchain.blockscout.com/token/${encodeURIComponent(args.tokenAddress)}">${escapeHtml(args.tokenAddress)}</a>`,
     '',
-    '<i>Verified launchpad + X + Telegram · Information only · DYOR</i>',
+    '<i>Verified launchpad + X + Telegram links · Social ownership/type unverified · DYOR</i>',
   ].join('\n');
 }
 
