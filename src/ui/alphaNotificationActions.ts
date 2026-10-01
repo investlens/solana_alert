@@ -27,18 +27,6 @@ function safeSocialUrl(value: string | null | undefined, platform: 'x' | 'telegr
 
 function directChartUrl(input: AlphaMarketActionInput): string | null {
   if (input.chartUrl && /^https:\/\//i.test(input.chartUrl)) return input.chartUrl;
-  try {
-    const tokenUrl = new URL(input.tokenUrl);
-    const host = tokenUrl.hostname.toLowerCase();
-    const parts = tokenUrl.pathname.split('/').filter(Boolean);
-    const tokenIndex = parts.findIndex(part => part.toLowerCase() === 'token');
-    const tokenAddress = tokenIndex >= 0 ? parts[tokenIndex + 1] : null;
-    if (host === 'robinhoodchain.blockscout.com' && tokenAddress && /^0x[0-9a-fA-F]{40}$/.test(tokenAddress)) {
-      return `https://dexscreener.com/robinhood/${tokenAddress}`;
-    }
-  } catch {
-    // Explorer remains available even when a chart URL cannot be derived.
-  }
   return null;
 }
 
@@ -58,20 +46,24 @@ export function buildAlphaMarketActions(input: AlphaMarketActionInput): AlphaNot
   const rows: AlphaNotificationAction[][] = [];
   const chartUrl = directChartUrl(input);
 
-  if (chartUrl && chartUrl !== input.tokenUrl) rows.push([{ text: '📊 Chart', url: chartUrl }]);
-  if (input.fullIntelCallback) rows.push([{ text: '🧠 Full Intel', callback_data: input.fullIntelCallback }]);
-  if (input.trackCallback) rows.push([{ text: '⭐ Track', callback_data: input.trackCallback }]);
-  if (input.copyContractCallback) rows.push([{ text: '📋 Copy CA', callback_data: input.copyContractCallback }]);
-  if (input.muteCallback) rows.push([{ text: '🔕 Mute', callback_data: input.muteCallback }]);
-  if (input.tokenUrl) rows.push([{ text: '🔎 Token', url: input.tokenUrl }]);
-  if (input.walletActivityCallback && !input.trackCallback) rows.push([{ text: '🐋 Wallet Activity', callback_data: input.walletActivityCallback }]);
+  const primary: AlphaNotificationAction[] = [];
+  const destination = chartUrl && chartUrl !== input.tokenUrl ? chartUrl : input.tokenUrl;
+  if (destination) primary.push({ text: /ponsfamily\.com/.test(destination) ? '🚀 PONS' : chartUrl ? '📊 Chart' : '🔎 Token', url: destination });
+  if (input.fullIntelCallback) primary.push({ text: '🧠 Full Intel', callback_data: input.fullIntelCallback });
+  if (primary.length) rows.push(primary);
+  const utility: AlphaNotificationAction[] = [];
+  if (input.trackCallback) utility.push({ text: '⭐ Track', callback_data: input.trackCallback });
+  else if (input.walletActivityCallback) utility.push({ text: '🐋 Wallet', callback_data: input.walletActivityCallback });
+  if (input.copyContractCallback) utility.push({ text: '📋 Copy CA', callback_data: input.copyContractCallback });
+  if (utility.length) rows.push(utility);
+  // Mute lives in tracking/settings; the token destination is already above.
   if (input.tradeUrl) rows.push([{ text: '⚡ Trade', url: input.tradeUrl }]);
 
   const socialRow: AlphaNotificationAction[] = [];
   const xUrl = safeSocialUrl(input.xUrl, 'x');
   const telegramUrl = safeSocialUrl(input.telegramUrl, 'telegram');
   if (xUrl) socialRow.push({ text: '𝕏 X', url: xUrl });
-  if (telegramUrl) socialRow.push({ text: '✈️ Telegram', url: telegramUrl });
+  if (telegramUrl) socialRow.push({ text: '✈️ TG', url: telegramUrl });
   if (socialRow.length) rows.push(socialRow);
 
   if (!rows.length) rows.push([{ text: '🔎 Token', url: input.tokenUrl }]);

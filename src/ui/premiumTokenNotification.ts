@@ -1,3 +1,4 @@
+import { extractAutomaticSocials } from './alphaNotificationActions.js';
 import { renderAlphaNotification, type AlphaNotificationState } from './alphaNotification.js';
 import { formatUsd } from './alphaAlert/index.js';
 import type { CoreDecisionMetricContext, NotificationMarketContext } from './notificationMarketContext.js';
@@ -13,10 +14,11 @@ export function buildPremiumTokenNotification(args:{
   state:PremiumState; symbol?:string|null; name?:string|null; address:string; chain?:string|null; observedAt?:string|number|Date|null;
   age?:string|null; market:NotificationMarketContext; evidence?:CoreDecisionMetricContext|null; volumeMultiple?:number|null; move?:number|null; peakMove?:number|null;
   retainedPeakPercent?:number|null; boostTotal?:number|null; boostIncrement?:number|null; devLaunches?:number|null; devBurnPercent?:number|null; risk?:string|null; confidence?:number|null;
-  launchSource?:'PONS'|'CUSTOM'|'UNKNOWN'|null;
+  launchSource?:'PONS'|'CUSTOM'|'UNKNOWN'|null; socials?:{twitter?:string|null;telegram?:string|null};
   insightTitle:string; insight:string[]; statusTitle:string; status:string; displayIntent?:'ENTRY'|'MOMENTUM_UPDATE'|'RECOVERY_WATCH'|'WATCH'|'AVOID'|'EXIT';
   comparison?:{previous:number;current:number;changePct:number}; entryAction?:'BUY'|'CHECK_ENTRY'; structureContext?:string|null;
 }) {
+  const socialLinks = extractAutomaticSocials({ xUrl: args.socials?.twitter, telegramUrl: args.socials?.telegram });
   const marketCap=args.market.marketCap, fdv=marketCap==null?args.market.fdv:null, lightweight=['DEX_PAID','BOOST','MAJOR_BOOST'].includes(args.state);
   const unlockedLpWarning = lightweight && args.insight.some(line => /LP\s+UNLOCKED|remains removable|liquidity can be pulled/i.test(line));
   const effectiveRisk = unlockedLpWarning ? 'HIGH — UNLOCKED LP' : args.risk;
@@ -48,17 +50,17 @@ export function buildPremiumTokenNotification(args:{
       : args.launchSource === 'CUSTOM' ? 'CUSTOM'
       : 'UNVERIFIED';
     const marketLines = [
-      ...(args.boostTotal==null?[]:[`⚡ <b>Boost</b>          ${args.boostTotal} total${args.boostIncrement==null?'':` (+${args.boostIncrement})`}`]),
-      marketCap==null?(fdv==null?'💵 <b>Market cap</b>     Unavailable':`💰 <b>FDV</b>            ${formatUsd(fdv)}`):`💵 <b>Market cap</b>     ${formatUsd(marketCap)}`,
-      args.market.liquidity==null?'💧 <b>Liquidity</b>      Unavailable':`💧 <b>Liquidity</b>      ${formatUsd(args.market.liquidity)}`,
-      ...(args.market.volume5m==null?[]:[`📊 <b>5m volume</b>      ${formatUsd(args.market.volume5m)}`]),
+      ...(args.boostTotal==null?[]:[`⚡ <b>Boost</b>  ${args.boostTotal} total${args.boostIncrement==null?'':` (+${args.boostIncrement})`}`]),
+      marketCap==null?(fdv==null?'💵 <b>Market cap</b>  Unavailable':`💰 <b>FDV</b>  ${formatUsd(fdv)}`):`💵 <b>Market cap</b>  ${formatUsd(marketCap)}`,
+      args.market.liquidity==null?'💧 <b>Liquidity</b>  Unavailable':`💧 <b>Liquidity</b>  ${formatUsd(args.market.liquidity)}`,
+      ...(args.market.volume5m==null?[]:[`📊 <b>5m volume</b>  ${formatUsd(args.market.volume5m)}`]),
       args.evidence?.devHoldingEvidence==='VERIFIED'&&args.evidence.devHoldingPercent!=null
-        ? `👨‍💻 <b>Dev holding</b>    ${percent(args.evidence.devHoldingPercent)}`
-        : '👨‍💻 <b>Dev holding</b>    Unverified',
+        ? `👨‍💻 <b>Dev holding</b>  ${percent(args.evidence.devHoldingPercent)}`
+        : '👨‍💻 <b>Dev holding</b>  Unverified',
       args.evidence?.burnEvidence==='VERIFIED'&&args.evidence.burnedPercent!=null
-        ? `🔥 <b>Burned</b>         ${percent(args.evidence.burnedPercent)}`
-        : '🔥 <b>Burned</b>         Unverified',
-      ...(args.move==null?[]:[`📈 <b>Move</b>           ${args.move>=0?'+':''}${args.move.toFixed(1)}%`]),
+        ? `🔥 <b>Burned</b>  ${percent(args.evidence.burnedPercent)}`
+        : '🔥 <b>Burned</b>  Unverified',
+      ...(args.move==null?[]:[`📈 <b>Move</b>  ${args.move>=0?'+':''}${args.move.toFixed(1)}%`]),
     ];
     const lines = [
       `<b>${title}</b>`,
@@ -72,8 +74,11 @@ export function buildPremiumTokenNotification(args:{
       unlockedLpWarning
         ? '⚠️ LP unlocked · <b>HIGH RUG RISK</b>'
         : `🛡 ${escapeHtml(args.status)}`,
-      unlockedLpWarning ? '✅ No honeypot / sell-restriction flag detected' : '',
+      unlockedLpWarning ? 'No sell-restriction flag reported' : '',
       '',
+      ...(args.socials ? ['<b>COMMUNITY</b>',
+        socialLinks.xUrl ? `𝕏 <a href="${escapeHtml(socialLinks.xUrl).replace(/"/g, '&quot;')}">X</a>` : '',
+        socialLinks.telegramUrl ? `✈️ <a href="${escapeHtml(socialLinks.telegramUrl).replace(/"/g, '&quot;')}">TG</a>` : ''] : []),
       `<b>CONTRACT</b>`,
       `<code>${escapeHtml(args.address)}</code>`,
       '',

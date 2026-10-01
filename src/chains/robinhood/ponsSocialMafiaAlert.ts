@@ -1,9 +1,11 @@
 import type { PonsLaunch } from './ponsHistoricalLaunchScanner.js';
-import { getRobinhoodTokenSocials } from './tokenMetadata.js';
+import { getRobinhoodTokenMetadata, getRobinhoodTokenSocials } from './tokenMetadata.js';
 import { getRobinhoodMarketSnapshot } from './market.js';
 import { scanRobinhoodDevTokenFlow } from './security/devTokenFlowScanner.js';
 import { getDeliverableUsers } from '../../core/delivery.js';
 import { getPonsFactoryDeployments } from './ponsContracts.js';
+import { getPonsV2CurveState } from './ponsV2CurveQuote.js';
+import { resolvePonsV2PreIndexValuation } from './ponsPreIndexValuation.js';
 
 const MAX_CONCURRENT = Math.max(1, Math.min(3, Number(process.env.PONS_SOCIAL_MAFIA_CONCURRENCY ?? 1)));
 const MAX_QUEUE = Math.max(10, Math.min(250, Number(process.env.PONS_SOCIAL_MAFIA_MAX_QUEUE ?? 80)));
@@ -47,7 +49,7 @@ function money(value: number | null | undefined): string {
   return `$${value.toFixed(0)}`;
 }
 function percent(value: number | null | undefined): string {
-  return value == null || !Number.isFinite(value) ? 'Unavailable' : `${value.toFixed(2)}%`;
+  return value == null || !Number.isFinite(value) ? 'Unverified' : `${value.toFixed(2)}%`;
 }
 
 function parsedHttpUrl(value: string | null | undefined): URL | null {
@@ -134,31 +136,24 @@ async function sendTelegram(args: {
   tokenAddress: string;
   launchpad: VerifiedLaunchpadContext;
   socials: SocialMafiaSocials;
-}): Promise<void> {
+}): Promise<number | null> {
   const botToken = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
   if (!botToken) throw new Error('missing Telegram bot token');
   const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(5_000),
     body: JSON.stringify({
       chat_id: args.chatId,
       text: args.text,
       parse_mode: 'HTML',
       disable_web_page_preview: true,
-      reply_markup: { inline_keyboard: [
-        [
-          { text: `🚀 ${args.launchpad.label}`, url: args.launchpad.tokenUrl(args.tokenAddress) },
-          { text: '𝕏 X', url: args.socials.xUrl },
-          { text: '✈️ Telegram', url: args.socials.telegramUrl },
-        ],
-        [
-          { text: '🔎 Explorer', url: `https://robinhoodchain.blockscout.com/token/${encodeURIComponent(args.tokenAddress)}` },
-          { text: '📋 Copy CA', callback_data: `COPY_CA_${args.tokenAddress}` },
-        ],
-      ] },
+      reply_markup: { inline_keyboard: buildSocialMafiaActions(args.tokenAddress, args.launchpad, args.socials) },
     }),
   });
   if (!response.ok) throw new Error(`Telegram ${response.status}`);
+  const result = await response.json() as { ok?: boolean; result?: { message_id?: number } };
+  if (!result.ok) throw new Error('Telegram delivery rejected');
+  return result.result?.message_id ?? null;
 }
 
 export function buildSocialMafiaAlertText(args: {
@@ -168,23 +163,26 @@ export function buildSocialMafiaAlertText(args: {
   symbol?: string | null;
   name?: string | null;
   marketCap?: number | null;
+  fdv?: number | null;
   devHoldingPercent?: number | null;
 }): string {
-  const symbol = String(args.symbol ?? '').trim().toUpperCase() || 'TOKEN';
+  const symbol = String(args.symbol ?? '').trim().toUpperCase() || 'Symbol unavailable';
   const name = String(args.name ?? '').trim();
   return [
     '<b>🕶 SOCIAL MAFIA ALERT</b>',
     '',
     `<b>${escapeHtml(symbol)}</b>${name ? ` · ${escapeHtml(name)}` : ''}`,
     `🚀 Launchpad  <b>${escapeHtml(args.launchpadLabel)}</b>`,
-    `💵 Market cap  <b>${escapeHtml(money(args.marketCap))}</b>`,
+    args.marketCap == null && args.fdv != null
+      ? `💰 FDV  <b>${escapeHtml(money(args.fdv))}</b>`
+      : `💵 Market cap  <b>${escapeHtml(money(args.marketCap))}</b>`,
     `👨‍💻 Dev holding  <b>${escapeHtml(percent(args.devHoldingPercent))}</b>`,
     '',
     '<b>COMMUNITY</b>',
     `𝕏 X  <b>@${escapeHtml(args.socials.xHandle)}</b>`,
     `✈️ Telegram  <b>${escapeHtml(args.socials.telegramLabel)}</b>`,
     '',
-    `<code>${escapeHtml(args.tokenAddress)}</code>`,
+    `<a href="https://robinhoodchain.blockscout.com/token/${encodeURIComponent(args.tokenAddress)}">${escapeHtml(args.tokenAddress)}</a>`,
     '',
     '<i>Verified launchpad + X + Telegram · Information only · DYOR</i>',
   ].join('\n');
@@ -208,25 +206,52 @@ async function processLaunch(item: QueuedLaunch): Promise<void> {
     return;
   }
 
-  // Market/dev context is best-effort enrichment only. It never gates the alert.
-  const [market, dev] = await Promise.all([
-    getRobinhoodMarketSnapshot(token, { priority: 'HIGH', caller: 'pons_social_mafia', queueWaitTimeoutMs: 750 }).catch(() => null),
-    scanRobinhoodDevTokenFlow(token, launch.deployer_address).catch(() => null),
+  // Independent on-chain identity and verified valuation; never require a DEX index.
+  const partial: {
+    market: Awaited<ReturnType<typeof getRobinhoodMarketSnapshot>> | null;
+    metadata: Awaited<ReturnType<typeof getRobinhoodTokenMetadata>> | null;
+    dev: Awaited<ReturnType<typeof scanRobinhoodDevTokenFlow>> | null;
+    curve: Awaited<ReturnType<typeof resolvePonsV2PreIndexValuation>> | null;
+  } = { market: null, metadata: null, dev: null, curve: null };
+  const work = Promise.all([
+    getRobinhoodMarketSnapshot(token, { priority: 'HIGH', caller: 'pons_social_mafia', queueWaitTimeoutMs: 750 }).catch(() => null).then(value => partial.market = value),
+    getRobinhoodTokenMetadata(token, { signal: AbortSignal.timeout(8_000) }).catch(() => null).then(value => partial.metadata = value),
+    scanRobinhoodDevTokenFlow(token, launch.deployer_address).catch(() => null).then(value => partial.dev = value),
+    launch.protocol_version.startsWith('v2') && launch.curve_address
+      ? getPonsV2CurveState(launch.curve_address).then(state => state.tokenAddress.toLowerCase() === token
+        ? resolvePonsV2PreIndexValuation(state) : null).catch(() => null).then(value => partial.curve = value)
+      : Promise.resolve(null),
   ]);
-  const text = buildSocialMafiaAlertText({
-    tokenAddress: token,
-    launchpadLabel: launchpad.label,
-    socials,
-    symbol: market?.symbol ?? null,
-    name: market?.name ?? null,
-    marketCap: market?.marketCapUsd ?? market?.fdvUsd ?? null,
-    devHoldingPercent: dev?.devHoldingPercent ?? null,
-  });
+  const render = (values: Awaited<typeof work> | null) => {
+    const [market, metadata, dev, curve] = values ?? [partial.market, partial.metadata, partial.dev, partial.curve];
+    return buildSocialMafiaAlertText({
+      tokenAddress: token, launchpadLabel: launchpad.label, socials,
+      symbol: market?.symbol ?? metadata?.symbol, name: market?.name ?? metadata?.name,
+      marketCap: market?.marketCapUsd ?? (curve?.valuationType === 'MARKET_CAP' ? curve.valueUsd : null),
+      fdv: market?.fdvUsd ?? (curve?.valuationType === 'FDV' ? curve.valueUsd : null),
+      devHoldingPercent: dev && dev.evidenceStatus !== 'UNAVAILABLE' ? dev.devHoldingPercent : null,
+    });
+  };
+  const initial = await boundedSocialMafiaContext(work, 1_500);
+  const text = render(initial);
 
   const chats = await recipients();
   const results = await Promise.allSettled(chats.map(chatId => sendTelegram({
     chatId, text, tokenAddress: token, launchpad, socials,
   })));
+  if (initial == null) void boundedSocialMafiaContext(work, 12_000).then(async values => {
+    const enriched = render(values);
+    if (enriched === text) return;
+    const botToken = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
+    await Promise.allSettled(results.map(async (result, index) => {
+      if (result.status !== 'fulfilled' || result.value == null) return;
+      await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(5_000),
+        body: JSON.stringify({ chat_id: chats[index], message_id: result.value, text: enriched, parse_mode: 'HTML',
+          disable_web_page_preview: true, reply_markup: { inline_keyboard: buildSocialMafiaActions(token, launchpad, socials) } }),
+      });
+    }));
+  }).catch(error => console.warn('[SocialMafia] late enrichment unavailable', String(error)));
   const delivered = results.filter(result => result.status === 'fulfilled').length;
   const failed = results.length - delivered;
   console.log('[SocialMafia] ALERT_RESULT', {
@@ -291,4 +316,18 @@ export function resetPonsSocialMafiaForTests(): void {
   recipientCache.clear();
   recipientCacheAt = 0;
   active = 0;
+}
+
+export function buildSocialMafiaActions(token: string, launchpad: VerifiedLaunchpadContext, socials: SocialMafiaSocials) {
+  return [
+    [{ text: '🚀 PONS', url: launchpad.tokenUrl(token) }, { text: '📋 Copy CA', callback_data: `COPY_CA_${token}` }],
+    [{ text: '𝕏 X', url: socials.xUrl }, { text: '✈️ TG', url: socials.telegramUrl }],
+  ];
+}
+
+async function boundedSocialMafiaContext<T>(work: Promise<T>, milliseconds: number): Promise<T | null> {
+  return new Promise(resolve => {
+    const timer = setTimeout(() => resolve(null), milliseconds);
+    work.then(value => { clearTimeout(timer); resolve(value); }, () => { clearTimeout(timer); resolve(null); });
+  });
 }

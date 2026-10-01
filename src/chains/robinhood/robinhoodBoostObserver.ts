@@ -1,3 +1,4 @@
+import { reuseRobinhoodDevTokenFlow } from './security/devTokenFlowScanner.js';
 import { fetchRobinhoodBoosts } from './discovery.js';
 import { boostMetadataFallback, resolveBoostMetadata } from './boostMetadataResolver.js';
 import { editTelegramMessage, sendTelegramWithMessageId } from '../../services/telegram.js';
@@ -281,6 +282,7 @@ export async function enrichDeliveredBoostAlert(args: {
   };
   const message = buildPremiumTokenNotification({
     state, symbol, name, address: args.tokenAddress, chain: 'robinhood', market: marketContext,
+    evidence: await boostDeveloperEvidence(args.tokenAddress), socials,
     launchSource: args.verifiedPons ? 'PONS' : 'UNKNOWN',
     boostTotal: args.totalBoostAmount, boostIncrement: args.boostAmount, risk: 'UNKNOWN',
     insightTitle: 'WHY NOW', insight: [`${args.canonicalTitle} verified after security gate`, args.securityReason],
@@ -463,6 +465,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
   };
   const baseMessage = buildPremiumTokenNotification({
     state, symbol, name, address: boost.tokenAddress, chain: 'robinhood', market: marketContext,
+    evidence: await boostDeveloperEvidence(boost.tokenAddress), socials,
     launchSource: verifiedPons ? 'PONS' : 'UNKNOWN',
     boostTotal: canonical.currentTotal, boostIncrement: canonical.boostAdded, risk: 'UNKNOWN',
     insightTitle: 'WHY NOW', insight: [`${boostCanonicalTitle(canonical)} verified after security gate`, securityReason],
@@ -569,4 +572,15 @@ export function startRobinhoodBoostObserver(): ReturnType<typeof setInterval> | 
   void ensureBoostBaseline();
   boostObserverInterval = setInterval(() => void runRobinhoodBoostObserverCycle(), BOOST_INTERVAL_MS);
   return boostObserverInterval;
+}
+async function boostDeveloperEvidence(token: string) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const dev = await Promise.race([reuseRobinhoodDevTokenFlow(token).catch(() => null),
+      new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), 750); })]);
+    return { devHoldingEvidence: dev && dev.evidenceStatus !== 'UNAVAILABLE' && dev.devHoldingPercent != null ? 'VERIFIED' as const : 'UNAVAILABLE' as const,
+      devHoldingPercent: dev?.devHoldingPercent ?? null,
+      burnEvidence: dev?.evidenceStatus === 'COMPLETE' && dev.totalBurnPercent != null ? 'VERIFIED' as const : 'UNAVAILABLE' as const,
+      burnedPercent: dev?.evidenceStatus === 'COMPLETE' ? dev.totalBurnPercent : null };
+  } finally { if (timer) clearTimeout(timer); }
 }
