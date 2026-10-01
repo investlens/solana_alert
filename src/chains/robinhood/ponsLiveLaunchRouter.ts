@@ -62,7 +62,7 @@ export function createPonsLiveLaunchRouter(overrides: Partial<PonsLiveRouterDepe
     // fail-open and lets BOOST routing recognize V2 launches without DB/RPC work.
     void setSharedJson(
       `alphaos:pons:verified:${launch.token_address.toLowerCase()}`,
-      { factory: launch.factory_address, protocolVersion: launch.protocol_version },
+      { factory: launch.factory_address, protocolVersion: launch.protocol_version, curveAddress: launch.curve_address, creator: launch.deployer_address, token: launch.token_address },
       new Date().toISOString(),
       30 * 24 * 60 * 60 * 1000,
     );

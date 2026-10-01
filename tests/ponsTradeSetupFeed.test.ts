@@ -13,6 +13,7 @@ const launch = { chain: 'robinhood', protocol: 'pons', protocol_version: 'v2-cur
 
 test('only live verified PONS WETH curves enter the setup watcher', () => {
   assert.equal(isTradeSetupLaunchAdmissible(launch, now), true);
+  assert.equal(isTradeSetupLaunchAdmissible({ ...launch, pair_token_address: '0x' + '0'.repeat(40) }, now), true);
   for (const change of [{ factory_address: address }, { protocol_version: 'CUSTOM' }, { protocol_version: 'UNKNOWN' },
     { curve_address: null }, { pair_token_address: address }, { token_address: 'invalid' },
     { block_timestamp: 'invalid' }, { block_timestamp: new Date(now - 6 * 60_000).toISOString() },

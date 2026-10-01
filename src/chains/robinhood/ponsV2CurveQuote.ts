@@ -11,6 +11,7 @@ import {
 
 import {
   robinhoodPublicClient,
+  requestRobinhoodRpcResilient,
 } from './rpc.js';
 
 
@@ -145,6 +146,7 @@ async function rawRead(args: {
 
   functionName:
     keyof typeof functionNames;
+  block?: `0x${string}`;
 }): Promise<unknown> {
   const data =
     encodeFunctionData({
@@ -156,6 +158,10 @@ async function rawRead(args: {
     } as never);
 
 
+  if (args.block) {
+    const raw = await requestRobinhoodRpcResilient<Hex>({ method: 'eth_call', params: [{ to: args.address, data }, args.block] });
+    return decodeFunctionResult({ abi: CURVE_ABI, functionName: args.functionName, data: raw } as never);
+  }
   const result =
     await robinhoodPublicClient
       .call({
@@ -397,6 +403,7 @@ export function getAmountInRaw(args: {
 export async function getPonsV2CurveState(
   curveAddress:
     string,
+  block?: `0x${string}`,
 ): Promise<PonsV2CurveState> {
   const curve =
     getAddress(
@@ -415,7 +422,7 @@ export async function getPonsV2CurveState(
     graduatedResult,
   ] =
     await Promise.all([
-      rawRead({
+      rawRead({ block,
         address:
           curve,
 
@@ -423,7 +430,7 @@ export async function getPonsV2CurveState(
           'token',
       }),
 
-      rawRead({
+      rawRead({ block,
         address:
           curve,
 
@@ -431,7 +438,7 @@ export async function getPonsV2CurveState(
           'pairToken',
       }),
 
-      rawRead({
+      rawRead({ block,
         address:
           curve,
 
@@ -439,7 +446,7 @@ export async function getPonsV2CurveState(
           'getReserves',
       }),
 
-      rawRead({
+      rawRead({ block,
         address:
           curve,
 
@@ -447,7 +454,7 @@ export async function getPonsV2CurveState(
           'reservedTokens',
       }),
 
-      rawRead({
+      rawRead({ block,
         address:
           curve,
 
@@ -455,7 +462,7 @@ export async function getPonsV2CurveState(
           'sellableTokens',
       }),
 
-      rawRead({
+      rawRead({ block,
         address:
           curve,
 
@@ -463,7 +470,7 @@ export async function getPonsV2CurveState(
           'feeBps',
       }),
 
-      rawRead({
+      rawRead({ block,
         address:
           curve,
 
@@ -471,7 +478,7 @@ export async function getPonsV2CurveState(
           'creatorTaxBps',
       }),
 
-      rawRead({
+      rawRead({ block,
         address:
           curve,
 

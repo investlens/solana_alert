@@ -1,3 +1,4 @@
+import { setSharedJson } from '../../services/sharedJsonCache.js';
 import { PONS_CONTRACTS } from './ponsContracts.js';
 import type { PonsLaunch } from './ponsHistoricalLaunchScanner.js';
 import { isVerifiedSocialMafiaLaunch, resolveSocialMafiaSocials } from './ponsSocialMafiaAlert.js';
@@ -93,6 +94,7 @@ async function tick(): Promise<void> {
         // Retire before sending: an ambiguous Telegram response must not resend
         // to recipients who may already have received the message.
         candidates.delete(token);
+        await setSharedJson(`alphaos:setup:evidence:${token}`, { creator: context.creator, holding, rawLow: item.trend.low, curve: item.launch.curve_address, at: Date.now() }, new Date().toISOString(), 2 * 60 * 60_000);
         const delivery = await directTelegramRecipients(text, token, { twitter: socials.xUrl, telegram: socials.telegramUrl, website: null }, true, true);
         if (outcomes.size >= 20) outcomes.delete(outcomes.keys().next().value!);
         outcomes.set(token, { launch: item.launch, price: finalPrice, at: Date.now(), checked: Date.now(), min: finalPrice, max: finalPrice });
@@ -138,7 +140,7 @@ export function isTradeSetupLaunchAdmissible(launch: PonsLaunch, now: number): b
   // Live-only admission prevents restart/backfill replay; only registered V2
   // factories with WETH curves have the reserve evidence this version supports.
   return isVerifiedSocialMafiaLaunch(launch, 'PONS') && launch.protocol_version.startsWith('v2')
-    && launch.pair_token_address?.toLowerCase() === PONS_CONTRACTS.weth.toLowerCase()
+    && [PONS_CONTRACTS.weth.toLowerCase(), '0x' + '0'.repeat(40)].includes(launch.pair_token_address?.toLowerCase() ?? '')
     && [launch.token_address, launch.curve_address, launch.deployer_address].every(address => typeof address === 'string' && /^0x[a-fA-F0-9]{40}$/.test(address))
     && Number.isFinite(age) && age >= 0 && age <= 5 * 60_000;
 }
