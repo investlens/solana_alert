@@ -288,7 +288,9 @@ export async function enrichDeliveredBoostAlert(args: {
     insightTitle: 'WHY NOW', insight: [`${args.canonicalTitle} verified after security gate`, args.securityReason],
     statusTitle: 'Security', status: 'VERIFIED', displayIntent: 'WATCH',
   });
-  const tokenUrl = `https://robinhoodchain.blockscout.com/token/${encodeURIComponent(args.tokenAddress)}`;
+  const tokenUrl = args.verifiedPons
+    ? `https://www.ponsfamily.com/launchpad/${encodeURIComponent(args.tokenAddress)}`
+    : `https://robinhoodchain.blockscout.com/token/${encodeURIComponent(args.tokenAddress)}`;
   const buttons = buildAlphaMarketActions({
     chartUrl: market?.chartUrl ?? null, tokenUrl,
     fullIntelCallback: `FI_RH_${args.tokenAddress}`,
@@ -475,7 +477,9 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
       : 'VERIFIED',
     displayIntent: 'WATCH',
   });
-  const tokenUrl = `https://robinhoodchain.blockscout.com/token/${encodeURIComponent(boost.tokenAddress)}`;
+  const tokenUrl = verifiedPons
+    ? `https://www.ponsfamily.com/launchpad/${encodeURIComponent(boost.tokenAddress)}`
+    : `https://robinhoodchain.blockscout.com/token/${encodeURIComponent(boost.tokenAddress)}`;
   const baseButtons = buildAlphaMarketActions({
     chartUrl: market?.chartUrl ?? null,
     tokenUrl,
