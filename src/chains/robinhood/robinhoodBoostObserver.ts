@@ -1,3 +1,4 @@
+import { boostVerificationDue, recordBoostSecurityBlock, type BoostVerificationRetry } from './alertEligibilityState.js';
 import { getVerifiedPonsPublicContext, getCreatorHoldingPercent, getTelegramPreviewType } from './ponsPublicContext.js';
 import { reuseRobinhoodDevTokenFlow } from './security/devTokenFlowScanner.js';
 import { fetchRobinhoodBoosts } from './discovery.js';
@@ -41,6 +42,7 @@ export function boostPresentationState(totalBoostAmount: number) {
 }
 
 const boostTotals = new Map<string, number>();
+const verificationRetries = new Map<string, BoostVerificationRetry>();
 const acceptedAdminBoostNotifications = new Set<string>();
 const boostMarketHistory = new Map<string, BoostMarketHistory>();
 let boostRecipientCacheAt = 0;
@@ -382,6 +384,7 @@ async function initialBoostEnrichment(tokenAddress: string): Promise<{ market: B
 
 async function processBoost(boost: { tokenAddress: string; amount: number; totalAmount: number }): Promise<boolean> {
   const tokenKey = normalize(boost.tokenAddress);
+  if (!boostVerificationDue(verificationRetries, tokenKey, boost.totalAmount, Date.now())) return false;
   const canonical = observeBoostCanonicalEvent(boostTotals, tokenKey, boost.totalAmount, boost.amount);
   if (!canonical) return false;
 
@@ -392,7 +395,8 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
     allowed: security.allowed, reason: security.reason, cached: security.cached,
   });
   if (!security.allowed) {
-    boostTotals.set(tokenKey, boost.totalAmount);
+    const disposition = recordBoostSecurityBlock(boostTotals, verificationRetries, tokenKey, boost.totalAmount, security.liquidity?.status === 'UNKNOWN', Date.now());
+    console.log('[RobinhoodBoostObserver] BOOST_VERIFICATION_DISPOSITION', { token: tokenKey, disposition });
     console.warn('[RobinhoodBoostObserver] BOOST_BLOCKED_SECURITY', {
       token: tokenKey, eventType: canonical.type, totalBoost: boost.totalAmount, reason: security.reason,
     });
@@ -517,6 +521,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
 
   if (delivered > 0 || acceptedAdminBoostNotifications.has(boostFallbackIdentity(boost.tokenAddress, boost.totalAmount))) {
     boostTotals.set(tokenKey, boost.totalAmount);
+    verificationRetries.delete(tokenKey);
     console.log('[RobinhoodBoostObserver] BOOST_ALERT_VERIFIED', {
       token: tokenKey, eventType: canonical.type, boostAdded: canonical.boostAdded,
       totalBoost: canonical.currentTotal, verifiedPons, securityRoute: security.route,

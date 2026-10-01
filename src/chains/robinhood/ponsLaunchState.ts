@@ -108,6 +108,7 @@ async function verifyPonsLaunchEvent(token: Address): Promise<boolean> {
   if (cached && cached.expiresAt > Date.now()) return cached.value;
 
   const tokenTopic = padHex(token, { size: 32 });
+  let providerUnavailable = false;
   for (const deployment of getPonsFactoryDeployments()) {
     if (deployment.startBlock == null) continue;
     try {
@@ -137,6 +138,7 @@ async function verifyPonsLaunchEvent(token: Address): Promise<boolean> {
         return true;
       }
     } catch (error) {
+      providerUnavailable = true;
       console.warn('[PonsLaunchState] event provenance verification unavailable for factory', {
         token: key,
         factory: deployment.address,
@@ -145,7 +147,7 @@ async function verifyPonsLaunchEvent(token: Address): Promise<boolean> {
     }
   }
 
-  eventVerificationCache.set(key, { value: false, expiresAt: Date.now() + PONS_FALSE_CACHE_MS });
+  eventVerificationCache.set(key, { value: false, expiresAt: Date.now() + (providerUnavailable ? 60_000 : PONS_FALSE_CACHE_MS) });
   return false;
 }
 

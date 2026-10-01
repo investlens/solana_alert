@@ -1,3 +1,4 @@
+import { recordLaunchSocialEligibility } from './alertEligibilityState.js';
 import { buildAlphaosAlertCard } from '../../ui/alphaosAlertCard.js';
 import { sendAlphaosPhotoAlert, alphaosEnrichmentEdit, type AlphaosDelivery } from '../../ui/alphaosPhotoDelivery.js';
 import { verifySocialContract } from './socialContractConfirmation.js';
@@ -198,6 +199,7 @@ async function processLaunch(item: QueuedLaunch): Promise<void> {
   const rawSocials = { twitter: onchainSocials.twitter || pons?.twitter, telegram: onchainSocials.telegram || pons?.telegram };
   const socials = resolveSocialMafiaSocials(rawSocials);
   if (!socials) {
+    recordLaunchSocialEligibility(token, false);
     console.log('[SocialMafia] skipped; both X and Telegram are required', {
       token,
       launchpad: launchpad.id,
@@ -208,9 +210,12 @@ async function processLaunch(item: QueuedLaunch): Promise<void> {
 
   const identity = await verifySocialContract({ token, xHandle: socials.xHandle, telegramUrl: socials.telegramUrl });
   if (!identity.confirmed) {
+    recordLaunchSocialEligibility(token, false);
     console.log('[SocialMafia] suppressed; social contract not confirmed', { token, reason: identity.reason });
     return;
   }
+
+  recordLaunchSocialEligibility(token, true);
 
   // Independent on-chain identity and verified valuation; never require a DEX index.
   const partial: {

@@ -1,3 +1,4 @@
+import { launchSocialEligibility } from './alertEligibilityState.js';
 import { setSharedJson } from '../../services/sharedJsonCache.js';
 import { PONS_CONTRACTS } from './ponsContracts.js';
 import type { PonsLaunch } from './ponsHistoricalLaunchScanner.js';
@@ -14,6 +15,7 @@ const INTERVAL = 60_000;
 const MAX_CANDIDATES = 10;
 type Candidate = { launch: PonsLaunch; launchedAt: number; trend: SetupTrend; screenAfter: number };
 const candidates = new Map<string, Candidate>();
+const deferredAdmissions = new Map<string, PonsLaunch>();
 // Forward observations include losses. They are reference-price research,
 // never fabricated fills or net trading returns. Nothing is written to DB.
 const outcomes = new Map<string, { launch: PonsLaunch; price: number; at: number; checked: number; min: number; max: number }>();
@@ -57,6 +59,7 @@ async function tick(): Promise<void> {
   try {
     for (const [token, item] of candidates) {
       const now = Date.now();
+      if (launchSocialEligibility(token, now) === false) { candidates.delete(token); console.log(`[TradeSetup] RELEASE token=${token} reason=SOCIAL_GATE_FAILED`); continue; }
       if (now - item.launchedAt > MAX_AGE) { candidates.delete(token); continue; }
       if (now - item.launchedAt < MIN_AGE) continue;
       try {
@@ -65,7 +68,9 @@ async function tick(): Promise<void> {
         if (curve.graduated) { candidates.delete(token); console.log(`[TradeSetup] STOP token=${token} reason=GRADUATED`); continue; }
         const price = Number(curve.quoteReserve) / Number(curve.tokenReserve);
         const depth = Number(curve.quoteReserve) / 1e18;
-        if (!advanceSetupTrend(item.trend, { at: Date.now(), price, quoteDepth: depth })) continue;
+        if (!advanceSetupTrend(item.trend, { at: Date.now(), price, quoteDepth: depth })) {
+          console.log(`[TradeSetup] WAIT token=${token} reason=${item.trend.dip ? 'RECOVERY_NOT_CONFIRMED' : 'NO_OBSERVED_PULLBACK'} confirmations=${item.trend.confirmations}`); continue;
+        }
         if (Date.now() < item.screenAfter) continue;
         item.screenAfter = Date.now() + 5 * 60_000;
         const context = await getPonsPublicContext(token, item.launch.factory_address, item.launch.deployer_address);
@@ -101,6 +106,11 @@ async function tick(): Promise<void> {
         console.log(`[TradeSetup] SENT token=${token} delivered=${delivery.delivered} failed=${delivery.failed}`);
       } catch { console.log(`[TradeSetup] CHECK_FAILED token=${token}`); }
     }
+    for (const [token, launch] of deferredAdmissions) {
+      if (launchSocialEligibility(token) === false || !isTradeSetupLaunchAdmissible(launch, Date.now())) { deferredAdmissions.delete(token); continue; }
+      if (candidates.size >= MAX_CANDIDATES) break;
+      deferredAdmissions.delete(token); queuePonsTradeSetup(launch);
+    }
     for (const [token, outcome] of outcomes) {
       const now = Date.now();
       if (now - outcome.checked < 5 * 60_000) continue;
@@ -120,7 +130,7 @@ async function tick(): Promise<void> {
       } catch { /* Keep the bounded observation pending, never fabricate a zero. */ }
     }
     console.log(`[TradeSetup] CYCLE candidates=${candidates.size} outcomes=${outcomes.size} max=${MAX_CANDIDATES} dbWrites=0`);
-    if (!candidates.size && !outcomes.size && timer) { clearInterval(timer); timer = null; }
+    if (!candidates.size && !outcomes.size && !deferredAdmissions.size && timer) { clearInterval(timer); timer = null; }
   } finally { running = false; }
 }
 
@@ -129,7 +139,13 @@ export function queuePonsTradeSetup(launch: PonsLaunch): void {
   const launchedAt = Date.parse(launch.block_timestamp);
   const token = launch.token_address.toLowerCase();
   if (!isTradeSetupLaunchAdmissible(launch, Date.now()) || candidates.has(token)) return;
-  if (candidates.size >= MAX_CANDIDATES) { console.log(`[TradeSetup] CAPACITY candidates=${candidates.size} token=${token}`); return; }
+  for (const key of candidates.keys()) if (launchSocialEligibility(key) === false) candidates.delete(key);
+  if (launchSocialEligibility(token) === false) return;
+  if (candidates.size >= MAX_CANDIDATES) {
+    if (deferredAdmissions.size < 50) deferredAdmissions.set(token, launch);
+    console.log(`[TradeSetup] DEFERRED candidates=${candidates.size} pending=${deferredAdmissions.size} token=${token}`); return;
+  }
+  deferredAdmissions.delete(token);
   candidates.set(token, { launch, launchedAt, trend: emptySetupTrend(), screenAfter: 0 });
   console.log(`[TradeSetup] WATCH token=${token} minAgeMin=30 maxAgeMin=120`);
   if (!timer) { timer = setInterval(() => { void tick(); }, INTERVAL); timer.unref(); }
@@ -144,3 +160,6 @@ export function isTradeSetupLaunchAdmissible(launch: PonsLaunch, now: number): b
     && [launch.token_address, launch.curve_address, launch.deployer_address].every(address => typeof address === 'string' && /^0x[a-fA-F0-9]{40}$/.test(address))
     && Number.isFinite(age) && age >= 0 && age <= 5 * 60_000;
 }
+
+export function tradeSetupSchedulingStateForTests() { return { candidates: [...candidates.keys()], deferred: [...deferredAdmissions.keys()] }; }
+export function resetTradeSetupSchedulingForTests() { if (timer) clearInterval(timer); timer = null; candidates.clear(); deferredAdmissions.clear(); outcomes.clear(); }
