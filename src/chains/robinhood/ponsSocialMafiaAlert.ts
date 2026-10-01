@@ -3,6 +3,7 @@ import { getRobinhoodTokenSocials } from './tokenMetadata.js';
 import { getRobinhoodMarketSnapshot } from './market.js';
 import { scanRobinhoodDevTokenFlow } from './security/devTokenFlowScanner.js';
 import { getDeliverableUsers } from '../../core/delivery.js';
+import { getPonsFactoryDeployments } from './ponsContracts.js';
 
 const MAX_CONCURRENT = Math.max(1, Math.min(3, Number(process.env.PONS_SOCIAL_MAFIA_CONCURRENCY ?? 1)));
 const MAX_QUEUE = Math.max(10, Math.min(250, Number(process.env.PONS_SOCIAL_MAFIA_MAX_QUEUE ?? 80)));
@@ -76,9 +77,14 @@ export function extractTelegramLabel(value: string | null | undefined): string |
   if (!url) return null;
   const host = url.hostname.toLowerCase().replace(/^www\./, '');
   if (!['t.me', 'telegram.me', 'telegram.dog'].includes(host)) return null;
-  const first = url.pathname.split('/').filter(Boolean)[0] ?? '';
-  if (!first || first === 'share' || first === 'joinchat') return null;
-  return first.startsWith('+') ? 'Telegram invite' : `@${first}`;
+  const parts = url.pathname.split('/').filter(Boolean);
+  const first = parts[0] ?? '';
+  if (parts.length === 2 && first === 'joinchat' && /^[A-Za-z0-9_-]+$/.test(parts[1])) return 'Telegram invite';
+  if (parts.length !== 1) return null;
+  if (/^\+[A-Za-z0-9_-]+$/.test(first)) return 'Telegram invite';
+  if (!/^[A-Za-z][A-Za-z0-9_]{4,31}$/.test(first)
+    || ['share', 'joinchat', 'proxy', 'socks', 'login', 'addstickers', 'addemoji', 'setlanguage', 'addtheme', 'addlist', 'boost', 'invoice', 'giftcode'].includes(first.toLowerCase())) return null;
+  return `@${first}`;
 }
 
 export function resolveSocialMafiaSocials(args: {
@@ -250,7 +256,7 @@ export function queueVerifiedLaunchpadSocialMafiaScreen(
   if (!enabled()) return;
   const token = normalize(launch.token_address);
   const launchpadId = String(launchpad.id ?? '').trim().toUpperCase();
-  if (!token || !launchpadId) return;
+  if (!token || !isVerifiedSocialMafiaLaunch(launch, launchpadId)) return;
   const identity = `${launchpadId}:${token}`;
   if (seen.has(identity)) return;
   seen.add(identity);
@@ -261,6 +267,16 @@ export function queueVerifiedLaunchpadSocialMafiaScreen(
   }
   queue.push({ launch, launchpad });
   drain();
+}
+
+export function isVerifiedSocialMafiaLaunch(launch: PonsLaunch, launchpadId: string): boolean {
+  // PONS is the only currently integrated verified Robinchain launchpad.
+  // Labels alone must never admit CUSTOM/UNKNOWN contracts to this side lane.
+  return launchpadId.trim().toUpperCase() === 'PONS'
+    && launch.chain === 'robinhood' && launch.protocol === 'pons'
+    && getPonsFactoryDeployments().some(factory => factory.enabled
+      && factory.id === launch.protocol_version
+      && normalize(factory.address) === normalize(launch.factory_address));
 }
 
 // Current live verified launchpad feed. Additional launchpads should call the
