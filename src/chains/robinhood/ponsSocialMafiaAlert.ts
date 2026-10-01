@@ -1,3 +1,4 @@
+import { verifySocialContract } from './socialContractConfirmation.js';
 import { getPonsPublicContext, getCreatorHoldingPercent, getTelegramPreviewType, type TelegramPreviewType } from './ponsPublicContext.js';
 import type { PonsLaunch } from './ponsHistoricalLaunchScanner.js';
 import { getRobinhoodTokenMetadata, getRobinhoodTokenSocials } from './tokenMetadata.js';
@@ -169,6 +170,7 @@ export function buildSocialMafiaAlertText(args: {
   creatorAddress?: string | null;
   telegramType?: TelegramPreviewType;
   valuationSource?: string | null;
+  socialContractConfirmed?: boolean;
 }): string {
   const symbol = String(args.symbol ?? '').trim().replace(/^\$+/, '').toUpperCase() || 'Symbol unavailable';
   const name = String(args.name ?? '').trim();
@@ -185,6 +187,7 @@ export function buildSocialMafiaAlertText(args: {
     ...(args.creatorAddress ? [`👤 Creator  <a href="https://robinhoodchain.blockscout.com/address/${encodeURIComponent(args.creatorAddress)}">${escapeHtml(args.creatorAddress.slice(0, 6))}…${escapeHtml(args.creatorAddress.slice(-4))}</a>`] : []),
     '',
     '<b>SOCIAL LINKS</b>',
+    ...(args.socialContractConfirmed ? ['✓ CA listed on X · Robinchain'] : []),
     `𝕏 X  <a href="${escapeHtml(args.socials.xUrl).replace(/"/g, '&quot;')}">@${escapeHtml(args.socials.xHandle)}</a>`,
     `✈️ TG  <a href="${escapeHtml(args.socials.telegramUrl).replace(/"/g, '&quot;')}">${escapeHtml(args.socials.telegramLabel)}</a> · ${escapeHtml(args.telegramType ?? 'Type unverified')}`,
     '',
@@ -211,6 +214,12 @@ async function processLaunch(item: QueuedLaunch): Promise<void> {
       launchpad: launchpad.id,
       hasX: Boolean(extractXUsername(rawSocials.twitter)),
     });
+    return;
+  }
+
+  const identity = await verifySocialContract({ token, xHandle: socials.xHandle, telegramUrl: socials.telegramUrl });
+  if (!identity.confirmed) {
+    console.log('[SocialMafia] suppressed; social contract not confirmed', { token, reason: identity.reason });
     return;
   }
 
@@ -244,7 +253,7 @@ async function processLaunch(item: QueuedLaunch): Promise<void> {
       marketCap: market?.marketCapUsd ?? (curve?.valuationType === 'MARKET_CAP' ? curve.valueUsd : null),
       fdv: market?.fdvUsd ?? (curve?.valuationType === 'FDV' ? curve.valueUsd : pons?.fdvUsd),
       devHoldingPercent: dev && dev.evidenceStatus !== 'UNAVAILABLE' && dev.devHoldingPercent != null ? dev.devHoldingPercent : creatorHolding,
-      creatorAddress: launch.deployer_address, telegramType,
+      creatorAddress: launch.deployer_address, telegramType, socialContractConfirmed: true,
       valuationSource: market?.marketCapUsd == null && market?.fdvUsd == null && curve?.valueUsd == null && pons?.fdvUsd != null ? 'PONS snapshot' : null,
     });
   };
