@@ -9,7 +9,7 @@ import { runtimeDeliverableUsers } from '../../services/runtimeSubscriberRegistr
 import { isVerifiedPonsLaunch } from './ponsLaunchState.js';
 import { getRobinhoodTokenSocials } from './tokenMetadata.js';
 import { getRobinhoodMarketSnapshot } from './market.js';
-import { classifyBoostCanonicalEvent, boostCanonicalTitle } from './boostCanonicalEvent.js';
+import { observeBoostCanonicalEvent, boostCanonicalTitle } from './boostCanonicalEvent.js';
 import { routeBoostSecurity } from './boostSecurityRouter.js';
 import { buildPremiumTokenNotification } from '../../ui/premiumTokenNotification.js';
 import { buildAlphaMarketActions } from '../../ui/alphaNotificationActions.js';
@@ -382,8 +382,7 @@ async function initialBoostEnrichment(tokenAddress: string): Promise<{ market: B
 
 async function processBoost(boost: { tokenAddress: string; amount: number; totalAmount: number }): Promise<boolean> {
   const tokenKey = normalize(boost.tokenAddress);
-  const previousTotal = boostTotals.get(tokenKey);
-  const canonical = classifyBoostCanonicalEvent({ previousTotal, currentTotal: boost.totalAmount, feedAmount: boost.amount });
+  const canonical = observeBoostCanonicalEvent(boostTotals, tokenKey, boost.totalAmount, boost.amount);
   if (!canonical) return false;
 
   const verifiedPons = await isVerifiedPonsLaunch(boost.tokenAddress);
@@ -558,6 +557,10 @@ export async function runRobinhoodBoostObserverCycle() {
     const boosts = await fetchRobinhoodBoosts();
     console.log('[RobinhoodBoostObserver] Feed:', { boosts: boosts.length, mode: 'LIVE_ONLY' });
     let alertsSent = 0;
+    const unchangedTotals = boosts.filter(boost => {
+      const prior = boostTotals.get(normalize(boost.tokenAddress));
+      return prior != null && boost.totalAmount <= prior;
+    }).length;
     for (const boost of boosts) {
       try { if (await processBoost(boost)) alertsSent += 1; }
       catch (error) {
@@ -566,7 +569,7 @@ export async function runRobinhoodBoostObserverCycle() {
         });
       }
     }
-    console.log('[RobinhoodBoostObserver] Cycle complete:', { alertsSent });
+    console.log('[RobinhoodBoostObserver] Cycle complete:', { alertsSent, unchangedTotals, observed: boosts.length });
   } catch (error) {
     console.error('[RobinhoodBoostObserver] Cycle failed:', error instanceof Error ? error.message : String(error));
   } finally {

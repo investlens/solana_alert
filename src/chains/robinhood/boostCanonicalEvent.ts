@@ -65,3 +65,17 @@ export function boostCanonicalTitle(event: BoostCanonicalEvent): string {
   if (event.type === 'BOOST_INCREASED') return '🔥 BOOST INCREASED';
   return '🚀 BOOST DETECTED';
 }
+
+/** Remember silently absorbed history so a later real increase can be classified. */
+export function observeBoostCanonicalEvent(totals: Map<string, number>, tokenAddress: string,
+  currentTotal: number, feedAmount: number): BoostCanonicalEvent | null {
+  const key = tokenAddress.trim().toLowerCase();
+  const previousTotal = totals.get(key);
+  const event = classifyBoostCanonicalEvent({ previousTotal, currentTotal, feedAmount });
+  if (!event && previousTotal == null && Number.isFinite(currentTotal) && currentTotal > 0
+    && Number.isFinite(feedAmount) && feedAmount > 0 && feedAmount < currentTotal) {
+    totals.set(key, currentTotal);
+  }
+  // Fresh events remain unacknowledged until security/delivery handles them.
+  return event;
+}
