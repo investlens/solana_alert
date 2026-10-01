@@ -197,6 +197,9 @@ async function sendTelegram(chatId: string, text: string, tokenAddress: string, 
 export async function directTelegramRecipients(text: string, tokenAddress: string, socials?: RobinhoodTokenSocials, preBond = false, setupControls = false): Promise<{ delivered: number; failed: number }> {
   ensureAdminRecipient();
   refreshRecipientsInBackground();
+  if (setupControls && recipientRefreshInFlight) {
+    await Promise.race([recipientRefreshInFlight, new Promise<void>(resolve => { const timer = setTimeout(resolve, 3_000); timer.unref(); })]);
+  }
   const recipients = [...recipientCache];
   if (!recipients.length) throw new Error('no Telegram recipients available');
 
