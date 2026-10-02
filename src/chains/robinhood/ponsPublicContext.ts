@@ -5,7 +5,7 @@ import { requestRobinhoodRpcResilient } from './rpc.js';
 export type TelegramPreviewType = 'Group' | 'Channel' | 'Personal account' | 'Type unverified';
 export type PonsPublicContext = {
   name: string; symbol: string; creator: string; decimals: number; totalSupplyRaw: bigint;
-  logo?: string | null; curveAddress?: string | null; fdvUsd: number | null; twitter: string | null; telegram: string | null;
+  logo?: string | null; curveAddress?: string | null; priceUsd?: number | null; fdvUsd: number | null; twitter: string | null; telegram: string | null;
 };
 
 // Read server-rendered public metadata, never credentials or social-profile APIs.
@@ -28,7 +28,9 @@ export function parsePonsPublicContext(html: string, token: string, factory: str
         ? price * quoteUsd * Number(supply) / 10 ** d.decimals : null;
       return { name: d.name, symbol: d.symbol.replace(/^\$+/, ''), creator: d.deployer,
         curveAddress: /^0x[a-fA-F0-9]{40}$/.test(d.curve ?? d.curveAddress ?? '') ? (d.curve ?? d.curveAddress) : null,
-        logo: typeof d.logo === 'string' ? d.logo : null, decimals: d.decimals, totalSupplyRaw: supply, fdvUsd: fdv != null && Number.isFinite(fdv) ? fdv : null,
+        logo: typeof d.logo === 'string' ? d.logo : null, decimals: d.decimals, totalSupplyRaw: supply,
+        priceUsd: typeof price === 'number' && price > 0 && typeof quoteUsd === 'number' && quoteUsd > 0 && Number.isFinite(price * quoteUsd) ? price * quoteUsd : null,
+        fdvUsd: fdv != null && Number.isFinite(fdv) ? fdv : null,
         twitter: typeof d.socials?.twitter === 'string' ? d.socials.twitter : null,
         telegram: typeof d.socials?.telegram === 'string' ? d.socials.telegram : null };
     }
@@ -110,11 +112,12 @@ export async function getCreatorHoldingPercent(token: string, creator: string): 
 }
 
 // Call only after independent PONS provenance verification; website data never establishes provenance.
-export async function getVerifiedPonsPublicContext(token: string): Promise<PonsPublicContext | null> {
+export async function getVerifiedPonsPublicContext(token: string, factoryAddress?: string): Promise<PonsPublicContext | null> {
   if (!/^0x[a-fA-F0-9]{40}$/.test(token)) return null;
   const html = await publicHtml(`https://www.ponsfamily.com/launchpad/${token}`);
   if (!html) return null;
   for (const factory of getPonsFactoryDeployments()) {
+    if (!factory.enabled || (factoryAddress && factory.address.toLowerCase() !== factoryAddress.toLowerCase())) continue;
     const context = parsePonsPublicContext(html, token, factory.address);
     if (context) return context;
   }

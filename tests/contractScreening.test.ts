@@ -23,3 +23,18 @@ test('unsupported market data yields one clear explanation, never a green safety
   assert.match(text, /could not be verified/);
   assert.doesNotMatch(text, /SAFE|VERIFIED|\$0|Unverified\n.*Unverified/);
 });
+test('pre-bond PONS snapshot supplies identity, price and supply without inventing market cap or liquidity', () => {
+  const text = renderContractScreen(token, null, { name: 'Launch', symbol: 'NEW', creator: token,
+    decimals: 18, totalSupplyRaw: 1_000_000n * 10n ** 18n, priceUsd: 1e-10, fdvUsd: 0.0001,
+    twitter: null, telegram: null });
+  assert.match(text, /PONS snapshot · DEX market not indexed/);
+  assert.match(text, /1\.0000e-10/); assert.match(text, /Total supply.*1,000,000/);
+  assert.doesNotMatch(text, /MC  |LP liquidity|ATH/); assert.ok(text.length <= 1024);
+});
+test('signed hourly change and genuine zero volume remain truthful in a bounded caption', () => {
+  const text = renderContractScreen(token, { baseToken: { name: '<'.repeat(60), symbol: '<'.repeat(24) },
+    priceUsd: '0.000001', marketCap: 50000, liquidity: { usd: 20000 }, volume: { m5: 0, h24: 12345 },
+    priceChange: { h1: -25.5 }, txns: { m5: { buys: 0, sells: 1 } } });
+  assert.match(text, /Move · 1h.*-25\.50%/); assert.match(text, /Vol · 24h/);
+  assert.match(text, /Vol · 5m.*0/); assert.ok(text.length <= 1024);
+});

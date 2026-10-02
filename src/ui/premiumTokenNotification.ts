@@ -5,7 +5,7 @@ import type { CoreDecisionMetricContext, NotificationMarketContext } from './not
 
 type PremiumState = Extract<AlphaNotificationState, 'OPPORTUNITY' | 'VOLUME_IGNITION' | 'DEX_PAID' | 'BOOST' | 'MAJOR_BOOST' | 'DEV_BURN' | 'DEV_SOLD' | 'CRITICAL_RISK' | 'BUILDING' | 'RUNNER'>;
 const percent=(value:number)=>`${Number(value.toFixed(2))}%`;
-const price=(value:number)=>value>=1?`$${value.toLocaleString('en-US',{maximumFractionDigits:4})}`:`$${value.toPrecision(5).replace(/0+$/,'').replace(/\.$/,'')}`;
+const price=(value:number)=>value>=1?`$${value.toLocaleString('en-US',{maximumFractionDigits:4})}`:`$${value.toPrecision(5).replace(/(\.\d*?[1-9])0+(?=e|$)/,'$1').replace(/\.0+(?=e|$)/,'')}`;
 const escapeHtml=(value:unknown)=>String(value??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 const displayTicker=(value:unknown)=>{ const symbol=String(value??'').trim().toUpperCase(); return symbol && !symbol.startsWith('0X') ? symbol : null; };
 export function verifiedPairAge(pairCreatedAt:number|null|undefined,now=Date.now()):string|null { const created=Number(pairCreatedAt); if(!Number.isFinite(created)||created<=0||created>now)return null; const minutes=Math.floor((now-created)/60_000); if(minutes<60)return`${minutes}m`; const hours=Math.floor(minutes/60); return hours<48?`${hours}h`:`${Math.floor(hours/24)}d`; }
@@ -51,6 +51,7 @@ export function buildPremiumTokenNotification(args:{
       : 'UNVERIFIED';
     const marketLines = [
       ...(args.boostTotal==null?[]:[`⚡ <b>Boost</b>  ${args.boostTotal} total${args.boostIncrement==null?'':` (+${args.boostIncrement})`}`]),
+      ...(args.market.price==null?[]:[`💰 <b>Price</b>  ${price(args.market.price)}`]),
       marketCap==null?(fdv==null?'💵 <b>Market cap</b>  Unavailable':`💰 <b>FDV</b>  ${formatUsd(fdv)}`):`💵 <b>Market cap</b>  ${formatUsd(marketCap)}`,
       args.market.liquidity==null?'💧 <b>Liquidity</b>  Unavailable':`💧 <b>Liquidity</b>  ${formatUsd(args.market.liquidity)}`,
       ...(args.market.volume5m==null?[]:[`📊 <b>5m volume</b>  ${formatUsd(args.market.volume5m)}`]),

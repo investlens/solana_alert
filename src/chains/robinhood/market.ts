@@ -32,7 +32,10 @@ export type DexScreenerPair = {
 
   volume?: {
     m5?: number;
+    h1?: number;
+    h24?: number;
   };
+  priceChange?: { h1?: number | null; h24?: number | null };
 
   liquidity?: {
     usd?: number;
