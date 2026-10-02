@@ -107,7 +107,11 @@ export function registerAddressScreening(bot: Telegraf<any>, lookup = getAddress
         await ctx.reply(result.reason, { reply_markup: { inline_keyboard: [result.choices.map(c => ({ text: researchChains[c].label, callback_data: `${wallet ? 'WS' : 'AS'}_${code(c)}_${address}` }))] } }); return;
       }
       const config = researchChains[result.chain]; const tag = code(result.chain);
-      const caption = creatorDeepLink(result.text, ctx.botInfo?.username ?? bot.botInfo?.username, result.wallet ? undefined : address);
+      const username = ctx.botInfo?.username ?? bot.botInfo?.username;
+      const groupInvite = ['group', 'supergroup'].includes(ctx.chat?.type) && /^[A-Za-z0-9_]{5,32}$/.test(username ?? '');
+      let caption = creatorDeepLink(result.text, username, result.wallet ? undefined : address);
+      const invitation = '\n\n🔔 Get filtered alerts in private — open AlphaOS below.';
+      if (groupInvite && caption.length + invitation.length <= 1024) caption += invitation;
       const explorer = { text: '🔎 Explorer', url: `${config.explorer}/${result.wallet ? 'address' : 'token'}/${address}` };
       const keyboard = { inline_keyboard: result.wallet || result.chain === 'arc' ? [
         [{ text: '↻ Refresh', callback_data: result.wallet && result.creatorToken ? `CR_${tag}_${encodeCreatorContext(address, result.creatorToken)}` : `${result.wallet ? 'CW' : 'AR'}_${tag}_${address}` }, explorer],
@@ -116,6 +120,7 @@ export function registerAddressScreening(bot: Telegraf<any>, lookup = getAddress
         [{ text: '↻ Refresh', callback_data: `AR_${tag}_${address}` }, { text: '🧠 Full Intel', callback_data: `FI_RH_${address}` }],
         [explorer, ...(result.chart ? [{ text: '📊 Chart', url: result.chart }] : [])],
       ] };
+      if (groupInvite) keyboard.inline_keyboard.push([{ text: '🔔 Get Private Alerts', url: `https://t.me/${username}` }]);
       if (refresh) await ctx.editMessageMedia({ type: 'photo', media: { source: result.image }, caption, parse_mode: 'HTML' }, { reply_markup: keyboard });
       else await ctx.replyWithPhoto({ source: result.image }, { caption, parse_mode: 'HTML', reply_markup: keyboard,
         reply_parameters: ctx.message ? { message_id: ctx.message.message_id } : undefined });

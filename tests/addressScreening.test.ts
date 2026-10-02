@@ -121,7 +121,11 @@ test('group bare-address scans require administrator opt-in and keep reports in 
   registerAddressScreening(bot as any, async () => { scans++; return { chain: 'robinhood', wallet: false, text: 'Research', image: Buffer.from('png') }; });
   const ctx = { chat: { id: -8401, type: 'supergroup' }, from: { id: 99 }, message: { text: address, message_id: 44 },
     telegram: { async getChatMember() { return { status: adminStatus }; } },
-    async reply() {}, async replyWithPhoto(_image: any, options: any) { assert.equal(options.reply_parameters.message_id, 44); } };
+    async reply() {}, async replyWithPhoto(_image: any, options: any) {
+      assert.equal(options.reply_parameters.message_id, 44);
+      assert.match(options.caption, /Get filtered alerts in private/);
+      assert.deepEqual(options.reply_markup.inline_keyboard.at(-1), [{ text: '🔔 Get Private Alerts', url: 'https://t.me/AlphaOS_bot' }]);
+    } };
   await textHandler(ctx, () => { passthrough++; });
   await commands.get('scan_on')(ctx); await textHandler(ctx, () => { passthrough++; });
   assert.equal(scans, 0); assert.equal(passthrough, 2);
