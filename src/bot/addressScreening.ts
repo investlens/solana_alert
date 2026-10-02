@@ -1,3 +1,4 @@
+import { requireCapability } from './accessControl.js';
 import { readResearchTokenSupply } from '../services/researchTokenSupply.js';
 import { createGroupResearchSettings } from '../services/groupResearchSettings.js';
 import type { Telegraf } from 'telegraf';
@@ -108,6 +109,7 @@ export function registerAddressScreening(bot: Telegraf<any>, lookup = getAddress
       if ('choices' in result) {
         await ctx.reply(result.reason, { reply_markup: { inline_keyboard: [result.choices.map(c => ({ text: researchChains[c].label, callback_data: `${wallet ? 'WS' : 'AS'}_${code(c)}_${address}` }))] } }); return;
       }
+      if (result.wallet && !await requireCapability(ctx,'intelligence.creators')) return;
       const config = researchChains[result.chain]; const tag = code(result.chain);
       const username = ctx.botInfo?.username ?? bot.botInfo?.username;
       const groupInvite = ['group', 'supergroup'].includes(ctx.chat?.type) && /^[A-Za-z0-9_]{5,32}$/.test(username ?? '');
@@ -122,6 +124,7 @@ export function registerAddressScreening(bot: Telegraf<any>, lookup = getAddress
         [{ text: '↻ Refresh', callback_data: `AR_${tag}_${address}` }, { text: '🧠 Full Intel', callback_data: `FI_RH_${address}` }],
         [explorer, ...(result.chart ? [{ text: '📊 Chart', url: result.chart }] : [])],
       ] };
+      if (result.wallet) keyboard.inline_keyboard.push([{text:'📊 Creator Outcomes',callback_data:`CO_${tag}_${address}`}]);
       if (groupInvite) keyboard.inline_keyboard.push([{ text: '🔔 Get Private Alerts', url: `https://t.me/${username}` }]);
       if (refresh) await ctx.editMessageMedia({ type: 'photo', media: { source: result.image }, caption, parse_mode: 'HTML' }, { reply_markup: keyboard });
       else await ctx.replyWithPhoto({ source: result.image }, { caption, parse_mode: 'HTML', reply_markup: keyboard,

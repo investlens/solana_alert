@@ -1,3 +1,4 @@
+import { getCompactTokenView, renderCompactTokenView } from '../services/compactOutcomeViews.js';
 import {
   type Telegraf,
 } from 'telegraf';
@@ -21,7 +22,7 @@ import {
 } from './walletInput.js';
 import { requireCapability } from './accessControl.js';
 import { strategyDisplay } from '../product/strategyPresentation.js';
-import { extendLiveTrack, startLiveTrack, stopLiveTrack } from '../services/liveTrackService.js';
+import { extendLiveTrack, stopLiveTrack } from '../services/liveTrackService.js';
 
 type OpportunityRow = {
   id: number;
@@ -127,7 +128,8 @@ registerOpportunityActions(
             userId,
         });
 
-        await startLiveTrack({ userId, chatId: String(ctx.chat?.id ?? userId), opportunity });
+        const chain = opportunity.chain ?? 'solana';
+        await ctx.reply(renderCompactTokenView(chain, opportunity.asset_id, await getCompactTokenView(chain, opportunity.asset_id)), {parse_mode:'HTML', link_preview_options:{is_disabled:true}, reply_markup:{inline_keyboard:[[{text:'↻ Refresh',callback_data:`OUT_${chain==='robinhood'?'RH':chain==='arc'?'ARC':'SOL'}_${opportunity.asset_id}`}]]}});
       } catch (error) {
         console.error(
           '[OpportunityActions] Track failed:',

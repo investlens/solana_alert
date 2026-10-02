@@ -1,16 +1,15 @@
+import { getCompactFeedView, renderCompactFeedView } from '../services/compactOutcomeViews.js';
 import { Markup, type Telegraf } from 'telegraf';
 import { escapeTelegramHtml } from '../ui/escapeHtml.js';
 import { strategyDisplay } from '../product/strategyPresentation.js';
 import {
   getPonsDeveloperLeaders,
-  getPerformanceLeaders,
   getRecentInvestigations,
   getSmartMoneyLeaders,
 } from '../services/intelligenceService.js';
 import { getContextAccess, requireCapability } from './accessControl.js';
 import { intelligenceMenu, backHome } from './menus.js';
 import {
-  formatPercentage,
   smartMoneyHistory,
   smartMoneySummary,
 } from '../product/intelligenceCredibility.js';
@@ -48,18 +47,7 @@ export async function renderIntelligenceHome(ctx: any) {
 }
 
 export async function renderPerformanceScreen(ctx: any) {
-  const performance = await getPerformanceLeaders();
-  const rows = performance.leaders;
-  const lines = ['📊 <b>PERFORMANCE</b>', '', 'Recorded peak and latest observed outcomes from tracked calls.', ''];
-  if (!rows.length) lines.push('No verified performance records are available yet.');
-  for (const row of rows as any[]) {
-    lines.push(`<b>${escapeTelegramHtml(row.symbol ?? compact(row.token))}</b>`,
-      `Peak ${formatPercentage(row.performance.peakRoi)} · Last observed ${formatPercentage(row.performance.currentRoi)}`,
-      row.performance.stale ? 'Observation is stale' : 'Observation is current', '');
-  }
-  if (performance.reviewCount > 0) lines.push(`${performance.reviewCount} historical record${performance.reviewCount === 1 ? '' : 's'} withheld pending source-data verification.`);
-  if (performance.unavailableCount > 0) lines.push(`${performance.unavailableCount} record${performance.unavailableCount === 1 ? '' : 's'} unavailable because required prices are missing or invalid.`);
-  await editOrReply(ctx, lines.join('\n'), backHome('Intelligence', 'INTELLIGENCE_CENTER').reply_markup);
+  await editOrReply(ctx, renderCompactFeedView(await getCompactFeedView()), backHome('Intelligence', 'INTELLIGENCE_CENTER').reply_markup);
 }
 
 export function registerIntelligenceCenter(bot: Telegraf<any>) {

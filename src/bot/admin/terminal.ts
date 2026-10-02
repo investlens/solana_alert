@@ -1,3 +1,4 @@
+import { getCompactFeedView, renderCompactFeedView, getCompactTrackingHealth } from '../../services/compactOutcomeViews.js';
 import type { Telegraf } from 'telegraf';
 
 import { config } from '../../config.js';
@@ -1165,47 +1166,10 @@ bot.action(
       await ctx.answerCbQuery();
 
       try {
-        const stats = await getTerminalStats();
-
-        const latestBuyMessage =
-          stats.latestBuy
-            ? [
-                '🚀 <b>Latest BUY Signal</b>',
-                `Token: <b>${stats.latestBuy.symbol}</b>`,
-                `Score: <b>${
-                  stats.latestBuy.score ??
-                  'Tracking'
-                }/100</b>`,
-                `Market Cap: <b>${
-                  stats.latestBuy.marketCap !=
-                  null
-                    ? `$${Math.round(
-                        stats.latestBuy
-                          .marketCap,
-                      ).toLocaleString()}`
-                    : 'Tracking'
-                }</b>`,
-              ].join('\n')
-            : 'No BUY signal recorded today.';
-
-        await ctx.reply(
-          [
-            '📊 <b>ALPHAOS PERFORMANCE</b>',
-            '━━━━━━━━━━━━━━━━━━',
-            '',
-            `Alerts Today: <b>${stats.alertsToday}</b>`,
-            `BUY Signals Today: <b>${stats.buysToday}</b>`,
-            '',
-            latestBuyMessage,
-            '',
-            'AlphaOS continues tracking outcomes and market behaviour.',
-          ].join('\n'),
-          {
-            parse_mode: 'HTML',
-            reply_markup:
-              backToTerminalKeyboard(),
-          },
-        );
+        const feed = await getCompactFeedView();
+        const health = await getCompactTrackingHealth();
+        const status = health.state === 'ready' ? `Active sessions ${health.value.active}/20 · Overdue >5m ${health.value.overdue}` : 'Tracking health temporarily unavailable';
+        await ctx.reply(renderCompactFeedView(feed) + '\n\n<b>TRACKING HEALTH</b>\n' + status, {parse_mode:'HTML', reply_markup:backToTerminalKeyboard()});
       } catch (error) {
         console.error(
           'terminal performance error:',
