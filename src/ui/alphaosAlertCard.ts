@@ -14,11 +14,11 @@ function text(value: string, x: number, y: number, size: number, color: string, 
   return `<g fill="${color}" transform="translate(${x},${y}) scale(${scale},${-scale})">${paths.join('')}</g>`;
 }
 
-export type AlphaosCardInput = { symbol?: string | null; name?: string | null; logo?: string | null;
+export type AlphaosCardInput = { title?: string; symbol?: string | null; name?: string | null; logo?: string | null;
   category?: string; chainLabel?: string; badge?: string; footer?: string };
 export function alphaosAlertCardSvg(args: AlphaosCardInput): string {
   const symbol = (args.symbol ?? '').replace(/^\$+/, '').trim();
-  const title = symbol ? `$${symbol.toUpperCase()}` : 'Launchpad discovery';
+  const title = args.title || (symbol ? `$${symbol.toUpperCase()}` : 'Launchpad discovery');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="540" viewBox="0 0 1200 540">
   <defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#0c1830"/><stop offset="1" stop-color="#080d1d"/></linearGradient>
   <radialGradient id="glow"><stop stop-color="#644bf2" stop-opacity=".32"/><stop offset="1" stop-color="#644bf2" stop-opacity="0"/></radialGradient></defs>
