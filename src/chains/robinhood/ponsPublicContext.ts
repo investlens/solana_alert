@@ -150,6 +150,6 @@ export async function getScreenCreatorBalance(token: string, creator: string): P
     const blockNumber = await client.getBlockNumber();
     const balance = await client.readContract({ address: token as Address, abi, functionName: 'balanceOf', args: [creator as Address], blockNumber, authorizationList: undefined });
     const supply = await client.readContract({ address: token as Address, abi, functionName: 'totalSupply', blockNumber, authorizationList: undefined });
-    return supply > 0n && balance <= supply ? Number(balance * 1_000_000n / supply) / 10_000 : null;
+    return supply > 0n && balance <= supply ? Number(balance) / Number(supply) * 100 : null;
   } catch { return null; }
 }

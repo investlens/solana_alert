@@ -4,7 +4,7 @@ import { getContextAccess } from './accessControl.js';
 import { ALPHAOS_SUBSCRIPTION_PLAN, subscriptionsEnabled } from '../product/subscriptionPlan.js';
 import { rememberRuntimeSubscriber } from '../services/runtimeSubscriberRegistry.js';
 import { intelligenceMenu, mainAlphaMenu, tradingMenu } from './menus.js';
-import { registerContractScreening } from './contractScreening.js';
+import { registerAddressScreening } from './addressScreening.js';
 import { registerBotCommands } from './commands.js';
 import { registerStrategyControls } from './strategyControls.js';
 import { registerOpportunityCenter } from './opportunityCenter.js';
@@ -212,7 +212,7 @@ export function createBot() {
   // /start also stays independent of Supabase.
   bot.use(async (ctx, next) => {
     const text = String((ctx.message as any)?.text ?? '').trim();
-    const isStart = text === '/start' || text.startsWith('/start@');
+    const isStart = /^\/start(?:@\S+)?$/.test(text);
     if (!isStart) return next();
 
     const access = await getContextAccess(ctx);
@@ -241,8 +241,8 @@ export function createBot() {
     return;
   });
 
+  registerAddressScreening(bot);
   registerBotCommands(bot);
-  registerContractScreening(bot);
   registerStrategyControls(bot);
   registerOpportunityCenter(bot);
   registerOpportunityActions(bot);

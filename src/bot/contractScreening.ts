@@ -20,7 +20,7 @@ export function extractScanContract(text: string): string | null {
   const addresses = text.match(/(?<![A-Za-z0-9])0x[a-fA-F0-9]{40}(?![A-Za-z0-9])/g) ?? [];
   return addresses.length === 1 ? addresses[0].toLowerCase() : null;
 }
-export function renderContractScreen(token: string, pair: DexScreenerPair | null, pons?: PonsPublicContext | null, creatorBalance?: number | null): string {
+export function renderContractScreen(token: string, pair: DexScreenerPair | null, pons?: PonsPublicContext | null, creatorBalance?: number | null, chainLabel = 'Robinchain'): string {
   const rows: string[] = [];
   for (const [label, value] of [['Price', pair ? pair.priceUsd : pons?.priceUsd], ['MC', pair?.marketCap], ['FDV', pair?.marketCap == null ? (pair ? pair.fdv : pons?.fdvUsd) : null],
     ['LP liquidity', pair?.liquidity?.usd], ['Vol · 5m', pair?.volume?.m5]] as const) {
@@ -47,12 +47,12 @@ export function renderContractScreen(token: string, pair: DexScreenerPair | null
     socials.telegramUrl ? `<a href="${escape(socials.telegramUrl).replace(/"/g, '&quot;')}">TG</a>` : ''].filter(Boolean);
   const symbol = pair?.baseToken?.symbol || pons?.symbol;
   const identity = `<b>${escape((pair?.baseToken?.name || pons?.name || 'Token report').slice(0, 32))}</b>${symbol ? ` ($${escape(symbol.slice(0, 16))})` : ''}`;
-  const fixed = [identity, 'Robinchain · Contract screen', '',
+  const fixed = [identity, `${chainLabel} · Contract screen`, '',
     ...(!pair && pons ? ['PONS snapshot · DEX market not indexed'] : []),
     ...(rows.length ? ['<b>📊 STATS</b>', ...rows] : ['Indexed market data could not be verified.']), '',
     '<b>SOCIALS</b>', links.length && links.join(' · ').length < 180 ? links.join(' · ') : 'Not listed', '',
     ...(pons ? [`Creator · PONS page  <a href="https://robinhoodchain.blockscout.com/address/${pons.creator}">${pons.creator.slice(0, 6)}…${pons.creator.slice(-4)}</a>`] : []),
-    ...(creatorBalance != null && Number.isFinite(creatorBalance) && creatorBalance >= 0 && creatorBalance <= 100 ? [`Creator balance  <b>${creatorBalance.toFixed(2)}%</b> · On-chain`] : []),
+    ...(creatorBalance != null && Number.isFinite(creatorBalance) && creatorBalance >= 0 && creatorBalance <= 100 ? [`Creator balance  <b>${(creatorBalance === 0 ? '0.00' : creatorBalance < 0.01 ? '&lt;0.01' : creatorBalance.toFixed(2))}%</b> · On-chain`] : []),
     '🔒 Sellability, creator and holder risks not assessed.', '',
     `<code>${token}</code>`, 'Research only · DYOR',
     `${pair ? (pons ? 'DEXScreener + PONS page' : 'DEXScreener') : pons ? 'PONS page' : 'Lookup'} · Checked ${new Date().toISOString().slice(11, 19)} UTC`,
@@ -68,7 +68,7 @@ function prune(now: number): void {
   for (const [k, v] of groups) if (v <= now) groups.delete(k);
   for (const [k, v] of cooldowns) if (v <= now) cooldowns.delete(k);
 }
-async function report(token: string, refresh = false) {
+export async function getRobinhoodContractReport(token: string, refresh = false) {
   const cached = reports.get(token); if (!refresh && cached && cached.expires > Date.now()) return cached;
   if (inflight.has(token)) return inflight.get(token)!;
   if (Date.now() - budgetStarted >= 60_000) { budgetStarted = Date.now(); budgetUsed = 0; }
@@ -94,7 +94,7 @@ async function report(token: string, refresh = false) {
     const pons = await (known ? getVerifiedPonsPublicContext(token, factory) : getReportedPonsPublicContext(token)).catch(() => null);
     const creatorBalance = pons ? await getScreenCreatorBalance(token, pons.creator) : null;
     const text = renderContractScreen(token, pair, pons, creatorBalance);
-    const image = await buildAlphaosAlertCard({ symbol: pair?.baseToken?.symbol || pons?.symbol, name: pair?.baseToken?.name || pons?.name, logo: pons?.logo,
+    const image = await buildAlphaosAlertCard({ title: pair?.baseToken?.symbol || pons?.symbol ? undefined : 'Contract research', symbol: pair?.baseToken?.symbol || pons?.symbol, name: pair?.baseToken?.name || pons?.name, logo: pons?.logo,
       category: 'CONTRACT SCREEN', chainLabel: 'ROBINCHAIN', badge: !pair && pons ? 'PONS SNAPSHOT' : 'MARKET SNAPSHOT', footer: 'Requested contract research · Live market snapshot' });
     const result = { text, image, chart: pair ? verifiedRobinhoodChartUrl(pair) : undefined };
     if (reports.size >= 50) reports.delete(reports.keys().next().value!);
@@ -103,7 +103,7 @@ async function report(token: string, refresh = false) {
   inflight.set(token, work);
   try { return await work; } finally { inflight.delete(token); }
 }
-export function registerContractScreening(bot: Telegraf<any>, lookup = report): void {
+export function registerContractScreening(bot: Telegraf<any>, lookup = getRobinhoodContractReport): void {
   const timer = setInterval(() => prune(Date.now()), TTL); timer.unref();
   async function admin(ctx: any): Promise<boolean> {
     if (!ctx.chat || ctx.chat.type === 'private' || !ctx.from) return false;
