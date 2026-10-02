@@ -13,7 +13,9 @@ import { getPonsV2CurveState } from './ponsV2CurveQuote.js';
 import { resolvePonsV2PreIndexValuation } from './ponsPreIndexValuation.js';
 
 const MAX_CONCURRENT = Math.max(1, Math.min(3, Number(process.env.PONS_SOCIAL_MAFIA_CONCURRENCY ?? 1)));
-const MAX_QUEUE = Math.max(10, Math.min(250, Number(process.env.PONS_SOCIAL_MAFIA_MAX_QUEUE ?? 80)));
+// Waiting records contain launch references only, never images or fetched HTML.
+// The existing 500-identity ceiling bounds memory; screening concurrency stays separate.
+const MAX_QUEUE = Math.max(10, Math.min(500, Number(process.env.PONS_SOCIAL_MAFIA_MAX_QUEUE ?? 500)));
 const RECIPIENT_CACHE_MS = 5 * 60_000;
 const enabled = () => String(process.env.PONS_SOCIAL_MAFIA_ENABLED ?? 'true').toLowerCase() === 'true';
 
@@ -364,6 +366,10 @@ export function isVerifiedSocialMafiaLaunch(launch: PonsLaunch, launchpadId: str
 // generic queue above only after their factory/source provenance is verified.
 export function queuePonsSocialMafiaScreen(launch: PonsLaunch): void {
   queueVerifiedLaunchpadSocialMafiaScreen(launch, PONS_LAUNCHPAD);
+}
+
+export function socialMafiaScreeningStatus() {
+  return { waiting: queue.length, active, capacity: MAX_QUEUE, identityCount: seen.size, concurrency: MAX_CONCURRENT };
 }
 
 export function drainPonsSocialMafiaForTests(): void { drain(); }
