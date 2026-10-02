@@ -1,3 +1,5 @@
+import { buildAlphaosAlertCard } from '../ui/alphaosAlertCard.js';
+import { alphaosWelcomeText, alphaosUsageGuide, alphaosScanGuide, alphaosGroupGuide, alphaosWelcomeKeyboard } from './welcome.js';
 import { Markup, Telegraf } from 'telegraf';
 import { config } from '../config.js';
 import { getTradeLearningSummary } from '../core/tradeLearning.js';
@@ -139,54 +141,15 @@ async function sendMainMenu(
 async function sendFirstRunWelcome(
   ctx: any,
 ) {
-  const firstName =
-    String(
-      ctx.from?.first_name ??
-      '',
-    ).trim();
-
-  await ctx.reply(
-    [
-      '🧠 <b>WELCOME TO ALPHAOS</b>',
-      '',
-      firstName
-        ? `Hi ${firstName} 👋`
-        : 'Welcome 👋',
-      '',
-      'AlphaOS watches the market continuously and surfaces what actually needs your attention.',
-      '',
-      '⚡ Opportunities',
-      '🐋 Smart-wallet activity',
-      '👨‍💻 Developer behaviour',
-      '📈 Momentum & market risk',
-      '',
-      '<b>You control what gets monitored.</b>',
-      '',
-      '<i>No noise. Evidence before execution.</i>',
-    ].join(
-      '\n',
-    ),
-    {
-      parse_mode:
-        'HTML',
-
-      reply_markup:
-        Markup.inlineKeyboard([
-          [
-            Markup.button.callback(
-              '🚀 Set Up AlphaOS',
-              'ONBOARD_START',
-            ),
-          ],
-          [
-            Markup.button.callback(
-              '👀 Explore First',
-              'MAIN_MENU',
-            ),
-          ],
-        ]).reply_markup,
-    },
-  );
+  const options = { parse_mode: 'HTML' as const, reply_markup: alphaosWelcomeKeyboard(ctx.botInfo?.username).reply_markup };
+  const image = await buildAlphaosAlertCard({ title: 'Welcome to AlphaOS', category: 'CRYPTO RESEARCH TERMINAL',
+    name: 'Discover. Research. Monitor.', badge: 'YOUR RESEARCH STARTS HERE',
+    footer: 'Screen tokens and wallets. Available data varies by chain.' }).catch(() => null);
+  if (image) {
+    try { await ctx.replyWithPhoto({ source: image }, { caption: alphaosWelcomeText, ...options }); return; }
+    catch { /* Keep the guide available when Telegram cannot accept the banner. */ }
+  }
+  await ctx.reply(alphaosWelcomeText, options);
 }
 
 async function sendQuickSetup(
@@ -306,6 +269,17 @@ async function beginPaymentSubmission(
 
 export function registerBotCommands(bot: Telegraf<any>) {
   registerAdminTerminal(bot);
+  bot.command('help', async ctx => {
+    await ctx.reply(alphaosUsageGuide, { parse_mode: 'HTML', reply_markup: alphaosWelcomeKeyboard(ctx.botInfo?.username).reply_markup });
+  });
+  const guide = (text: string) => async (ctx: any) => {
+    await ctx.answerCbQuery();
+    await renderScreen(ctx, text, { parse_mode: 'HTML', reply_markup: alphaosWelcomeKeyboard(ctx.botInfo?.username).reply_markup });
+  };
+  bot.action('WELCOME_SCAN', guide(alphaosScanGuide));
+  bot.action('WELCOME_HELP', guide(alphaosUsageGuide));
+  bot.action('WELCOME_GROUP', guide(alphaosGroupGuide));
+
   bot.start(async (ctx) => {
     const telegramId =
       String(
