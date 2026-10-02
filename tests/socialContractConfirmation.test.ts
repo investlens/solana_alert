@@ -30,12 +30,12 @@ test('positive X match allows alert; explicit Telegram mismatch suppresses it', 
   const result = await verifySocialContract(args, async url => url.includes('x.com') ? x : `<div class="tgme_page_description">CA: ${other}</div>`);
   assert.deepEqual(result, { confirmed: false, reason: 'TELEGRAM_CONTRACT_CONFLICT' });
 });
-test('identity gate runs before market, creator enrichment and all message delivery', async () => {
+test('feed eligibility gate runs before market, creator enrichment and all message delivery', async () => {
   const source = await readFile(new URL('../src/chains/robinhood/ponsSocialMafiaAlert.ts', import.meta.url), 'utf8');
   const process = source.slice(source.indexOf('async function processLaunch'));
-  assert.ok(process.indexOf('if (!identity.confirmed)') < process.indexOf('const partial:'));
-  assert.ok(process.indexOf('if (!identity.confirmed)') < process.indexOf('const chats = await recipients()'));
-  assert.match(process, /if \(!identity\.confirmed\) \{[\s\S]*?return;/);
+  assert.ok(process.indexOf('if (!route)') < process.indexOf('const partial:'));
+  assert.ok(process.indexOf('if (!route)') < process.indexOf('const chats = await recipients()'));
+  assert.match(process, /if \(!route\) \{[\s\S]*?return false;/);
 });
 
  test('public X shells are unavailable evidence, not a contract mismatch', async () => {

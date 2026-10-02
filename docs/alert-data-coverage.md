@@ -41,3 +41,11 @@ Social Mafia waiting capacity defaults to 500 compact in-memory launch records, 
 Robinchain wallet explorer HTTP 403 opens a shared five-minute provider cooldown. HTTP 429 waits at least the provider Retry-After duration (seconds or HTTP date, with a 30-second minimum); transient network/5xx failures pause for 30 seconds. During cooldown, the existing bounded live-block fallback runs without repeated explorer requests. This does not restore missing explorer history or guarantee zero-lag wallet coverage.
 
 Robinchain wallet, holder-risk and bundle analysis share one explorer reader per process. Identical in-flight reads coalesce; distinct simultaneous requests fail closed rather than building an unbounded queue. The eight latest valid JSON responses are cached for 30 seconds, at most 250 KB each (2 MB total payload). No HTML/challenge pages or snapshots are persisted. Cross-process coordination and authenticated provider access remain separate coverage requirements; this cannot guarantee every provider field or prevent every access restriction.
+
+### PONS Protocol Discovery
+
+The existing bounded Social Mafia worker also routes verified PONS launches whose project name contains the whole word `Protocol` or `Protocols` and whose metadata contains valid X and Telegram links. First check is 15 minutes after launch; missing eligibility retries at 30/45/60 minutes. Pending references expire after an hour and are never persisted as database rows. No new Railway service or polling worker is introduced.
+
+A confirmed social contract receives the stronger Social Mafia card; otherwise a matching name receives one explicitly unverified Protocol Discovery card. Discovery never grants strong social eligibility to Trade Setup. Nonmatching names retain the existing Social Mafia confirmation requirement. Supported market values are conditional; FDV is not represented as market cap. The banner is rendered once and reused in memory, with no image storage in the database.
+
+This is a research experiment, not protocol functionality or ownership verification. The worker's existing per-token admission deduplication covers its one-hour screening lifetime in one process; restarts clear pending state. Timed 15m/1h/6h performance evaluation and durable cross-restart delivery deduplication are not implemented by this release.
