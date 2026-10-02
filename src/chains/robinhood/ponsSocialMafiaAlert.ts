@@ -327,9 +327,13 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   }).catch(error => console.warn('[SocialMafia] late enrichment unavailable', String(error)));
   const delivered = results.filter(result => result.status === 'fulfilled' && result.value != null).length;
   const failed = results.length - delivered;
+  const admin = String(process.env.ADMIN_TELEGRAM_ID ?? process.env.OWNER_CHAT_ID ?? '').trim();
+  const adminResult = results[chats.indexOf(admin)];
+  const adminDelivery = adminResult?.status === 'fulfilled' ? adminResult.value : null;
   console.log('[SocialMafia] ALERT_RESULT', {
     token, feed: route, launchpad: launchpad.id, xHandle: socials.xHandle,
     telegram: socials.telegramLabel, delivered, failed,
+    adminAccepted: adminDelivery != null, adminMessageId: adminDelivery?.messageId ?? null,
   });
   // Never replay ambiguous Telegram sends to recipients who may have received it.
   return true;

@@ -2,7 +2,7 @@ import { recordLaunchSocialEligibility } from '../src/chains/robinhood/alertElig
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { PonsLaunch } from '../src/chains/robinhood/ponsHistoricalLaunchScanner.js';
-import { buildTradeSetupText, isTradeSetupLaunchAdmissible, queuePonsTradeSetup, tradeSetupSchedulingStateForTests, resetTradeSetupSchedulingForTests } from '../src/chains/robinhood/ponsTradeSetupFeed.js';
+import { buildTradeSetupText, isTradeSetupLaunchAdmissible, queuePonsTradeSetup, tradeSetupSchedulingStateForTests, resetTradeSetupSchedulingForTests, tickTradeSetupForTests } from '../src/chains/robinhood/ponsTradeSetupFeed.js';
 import { PONS_CONTRACTS } from '../src/chains/robinhood/ponsContracts.js';
 
 const now = Date.parse('2026-10-01T07:00:00Z');
@@ -48,4 +48,24 @@ test('failed social candidates release full watch slots and a deferred eligible 
   assert.deepEqual(tradeSetupSchedulingStateForTests().candidates, [tokens[10]]);
   assert.equal(tradeSetupSchedulingStateForTests().deferred.length, 0);
   resetTradeSetupSchedulingForTests();
+});
+
+
+test('already admitted deferred launches survive the five-minute ingress limit without allowing old replay', async () => {
+  resetTradeSetupSchedulingForTests();
+  const originalNow = Date.now; const start = originalNow();
+  let clock = start; Date.now = () => clock;
+  const live = { ...launch, block_timestamp: new Date(start).toISOString() };
+  const tokens = Array.from({ length: 11 }, (_, i) => '0x' + (i + 200).toString(16).padStart(40, '0'));
+  try {
+    for (const token of tokens) queuePonsTradeSetup({ ...live, token_address: token });
+    clock += 6 * 60_000;
+    assert.equal(isTradeSetupLaunchAdmissible(live, clock), false);
+    for (const token of tokens.slice(0, 10)) recordLaunchSocialEligibility(token, false);
+    await tickTradeSetupForTests();
+    assert.deepEqual(tradeSetupSchedulingStateForTests().candidates, [tokens[10]]);
+    assert.equal(tradeSetupSchedulingStateForTests().deferred.length, 0);
+    queuePonsTradeSetup({ ...live, token_address: '0x' + 'f'.repeat(40) });
+    assert.deepEqual(tradeSetupSchedulingStateForTests().candidates, [tokens[10]]);
+  } finally { Date.now = originalNow; resetTradeSetupSchedulingForTests(); }
 });
