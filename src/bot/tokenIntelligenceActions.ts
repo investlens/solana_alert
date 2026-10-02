@@ -1,3 +1,4 @@
+import { getCompactTokenView, getCompactCreatorView, renderCompactTokenView, renderCompactCreatorView } from '../services/compactOutcomeViews.js';
 import type { Telegraf } from 'telegraf';
 import { requireCapability } from './accessControl.js';
 import { getRobinhoodTokenIntelligence } from '../services/tokenIntelligenceService.js';
@@ -9,6 +10,7 @@ import { renderPositionCheck, positionCheckButtons } from '../ui/positionCheckVi
 const activeReplies = new Set<string>();
 
 export function registerTokenIntelligenceActions(bot: Telegraf<any>) {
+  console.log('[CompactViews] READY creatorOutcomes=true tokenCheckpoints=true cachedReads=true marketPolling=false');
   console.log('[PositionCheck] READY sizes=0.001,0.01,0.05 mode=READ_ONLY source=PONS_NATIVE_CURVE_MODEL');
   bot.action(/^PC_RH_(0\.001|0\.01|0\.05)_(0x[a-fA-F0-9]{40})$/, async ctx => {
     if (!await requireCapability(ctx, 'intelligence.investigations', 'POSITION_CHECK')) return;
@@ -34,17 +36,31 @@ export function registerTokenIntelligenceActions(bot: Telegraf<any>) {
     await ctx.reply(`<code>${token}</code>`, { parse_mode: 'HTML' }).catch(() => {});
   });
 
+  async function outcomes(ctx:any, chain:string, address:string, creator=false, refresh=false) {
+    if (!await requireCapability(ctx, creator?'intelligence.creators':'watchlist.use')) return;
+    await ctx.answerCbQuery('Loading recorded outcomes…').catch(()=>{});
+    const key=`outcome:${ctx.from?.id}`; if(activeReplies.has(key)) return; activeReplies.add(key);
+    try {
+      const result=creator ? renderCompactCreatorView(chain,address,await getCompactCreatorView(chain,address))
+        : renderCompactTokenView(chain,address,await getCompactTokenView(chain,address));
+      const tag=chain==='robinhood'?'RH':chain==='arc'?'ARC':'SOL';
+      const options={parse_mode:'HTML' as const,link_preview_options:{is_disabled:true},reply_markup:{inline_keyboard:[
+        [{text:'↻ Refresh',callback_data:`${creator?'CO':'OUT'}_${tag}_${address}`}],
+      ]}};
+      const previous=ctx.callbackQuery?.message;
+      if(refresh && previous && 'text' in previous && /^⭐ ALPHAOS · ALERT TRACKING|^👤 ALPHAOS · CREATOR OUTCOMES/.test(previous.text)) {
+        await ctx.editMessageText(result,options).catch(async(error:unknown)=>{if(!/message is not modified/i.test(String(error))) throw error;});
+      } else await ctx.reply(result,options);
+    } catch {await ctx.reply('Recorded outcomes are temporarily unavailable. Please try again shortly.').catch(()=>{});}
+    finally{activeReplies.delete(key);}
+  }
   bot.action(/^BOOST_TRACK_(0x[a-fA-F0-9]{40})$/, async ctx => {
-    const userId = String(ctx.from?.id ?? '');
-    const token = String(ctx.match[1]);
-    const added = trackRuntimeToken(userId, token);
-    await ctx.answerCbQuery(added ? 'Tracking enabled' : 'Already tracking').catch(() => {});
-    if (added) {
-      await ctx.reply(
-        `⭐ <b>TRACKING ENABLED</b>\n\nAlphaOS will keep this token in your active runtime watch list.\n<code>${token}</code>`,
-        { parse_mode: 'HTML' },
-      ).catch(() => {});
-    }
+    if (!await requireCapability(ctx,'watchlist.use')) return;
+    trackRuntimeToken(String(ctx.from?.id??''),String(ctx.match[1]));
+    await outcomes(ctx,'robinhood',ctx.match[1]);
+  });
+  bot.action(/^(OUT|CO)_(RH|ARC|SOL)_([1-9A-HJ-NP-Za-km-z]{32,44}|0x[a-fA-F0-9]{40})$/, async ctx => {
+    await outcomes(ctx,ctx.match[2]==='RH'?'robinhood':ctx.match[2]==='ARC'?'arc':'solana',ctx.match[3],ctx.match[1]==='CO',true);
   });
   bot.action(/^FI_RH_(0x[a-fA-F0-9]{40})$/, async ctx => {
     if (!await requireCapability(ctx, 'intelligence.investigations', 'TOKEN_INTELLIGENCE')) return;

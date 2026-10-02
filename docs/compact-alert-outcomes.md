@@ -15,3 +15,9 @@ Finalized detail expires after seven days; winner archives, compact creator coun
 Control: ALPHA_COMPACT_OUTCOMES_ENABLED defaults true. Setting false restores the legacy collector path; do not run both. Worker: existing pons-live-dev only. No new Railway service.
 
 Validation: main typecheck and 579 tests; ARC typecheck and 15 focused tests. SQL rollback fixtures exercised capacity, dedup, leases, winner archive, incomplete classification, exactly-once finalization, failed creator totals after retention and public RPC denial. Fixtures leave no stored rows or Telegram messages.
+
+## Bot views
+
+Creator research cards expose Creator Outcomes; Track opens recorded 15m/1h/6h samples, and the Intelligence Track Record menu uses seven UTC calendar days of compact feed counts. Admin Performance adds active/overdue tracking health. These reads do not register sessions or poll market providers. Main bot uses bounded 100-entry caches (30 seconds for tokens/creators, 60 seconds for feeds/health), coalesces concurrent reads, permits at most two in flight and 20 logical lookups/minute, and pauses a minute on provider errors. Token lookup falls back to the permanent winner archive after detail expiry. Feed retrieval is capped at 128 daily rows, eight visible feed groups, with explicit partial-report labeling.
+
+Creator and tracking views reuse intelligence.creators and watchlist.use capabilities respectively; performance uses its existing capability. Commercial billing remains closed, so current testers retain access. Future subscription activation will enforce those existing capability rules. None of these views claims a missing record means no launches or failure, or calls sampled high/low ATH or realized profits.
