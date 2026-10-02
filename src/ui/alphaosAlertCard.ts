@@ -14,7 +14,9 @@ function text(value: string, x: number, y: number, size: number, color: string, 
   return `<g fill="${color}" transform="translate(${x},${y}) scale(${scale},${-scale})">${paths.join('')}</g>`;
 }
 
-export function alphaosAlertCardSvg(args: { symbol?: string | null; name?: string | null }): string {
+export type AlphaosCardInput = { symbol?: string | null; name?: string | null; logo?: string | null;
+  category?: string; chainLabel?: string; badge?: string; footer?: string };
+export function alphaosAlertCardSvg(args: AlphaosCardInput): string {
   const symbol = (args.symbol ?? '').replace(/^\$+/, '').trim();
   const title = symbol ? `$${symbol.toUpperCase()}` : 'Launchpad discovery';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="540" viewBox="0 0 1200 540">
@@ -24,13 +26,13 @@ export function alphaosAlertCardSvg(args: { symbol?: string | null; name?: strin
   <g stroke="#243251" stroke-width="1" opacity=".6"><circle cx="990" cy="230" r="205" fill="none"/><circle cx="990" cy="230" r="260" fill="none"/><path d="M770 0v540M0 430h1200"/></g>
   <rect x="54" y="44" width="48" height="48" rx="14" fill="#55e0d0"/>
   <path d="M65 79L78 56L91 79M70 72h16" fill="none" stroke="#0c1830" stroke-width="5" stroke-linejoin="round"/>
-  ${text('ALPHAOS', 117, 78, 28, '#eef5ff')}${text('SOCIAL MAFIA', 58, 177, 24, '#55e0d0')}
-  ${text(title, 54, 270, 64, '#ffffff', 710)}${text(args.name || 'Verified PONS launchpad origin', 58, 323, 24, '#adbad1', 700)}
+  ${text('ALPHAOS', 117, 78, 28, '#eef5ff')}${text(args.category || 'SOCIAL MAFIA', 58, 177, 24, '#55e0d0')}
+  ${text(title, 54, 270, 64, '#ffffff', 710)}${text(args.name || (args.category ? 'Token research report' : 'Verified PONS launchpad origin'), 58, 323, 24, '#adbad1', 700)}
   <rect x="56" y="357" width="327" height="41" rx="20" fill="#183c40" stroke="#32615e"/>
-  ${text('CA LISTED ON X', 77, 384, 18, '#91eddf')}
+  ${text(args.badge || (args.category ? 'RESEARCH / NOT A BUY SIGNAL' : 'CA LISTED ON X'), 77, 384, 18, '#91eddf', 285)}
   <rect x="876" y="126" width="240" height="240" rx="42" fill="#131f39" stroke="#43506d"/>
   <path d="M932 302L996 179L1060 302M955 260h82" fill="none" stroke="#8d84ff" stroke-width="17" stroke-linejoin="round"/>
-  ${text('PONS / ROBINCHAIN', 58, 471, 21, '#d0dbee')}${text('Contract publication matched. Ownership and safety unverified.', 58, 507, 17, '#8391ab', 1060)}
+  ${text(args.chainLabel || 'PONS / ROBINCHAIN', 58, 471, 21, '#d0dbee')}${text(args.footer || (args.category ? 'Market data is conditional. This report does not verify token safety.' : 'Contract publication matched. Ownership and safety unverified.'), 58, 507, 17, '#8391ab', 1060)}
   </svg>`;
 }
 
@@ -55,7 +57,7 @@ async function tokenImage(logo?: string | null): Promise<Buffer | null> {
   } catch { return null; }
 }
 
-export async function buildAlphaosAlertCard(args: { symbol?: string | null; name?: string | null; logo?: string | null }): Promise<Buffer> {
+export async function buildAlphaosAlertCard(args: AlphaosCardInput): Promise<Buffer> {
   const image = await tokenImage(args.logo);
   return sharp(Buffer.from(alphaosAlertCardSvg(args))).composite(image ? [{ input: image, left: 884, top: 134 }] : []).png().toBuffer();
 }

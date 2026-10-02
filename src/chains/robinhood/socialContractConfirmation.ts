@@ -1,6 +1,6 @@
 export type SocialContractConfirmation = {
   confirmed: boolean;
-  reason: 'X_CONTRACT_MATCH' | 'X_UNAVAILABLE' | 'X_CONTRACT_NOT_CONFIRMED' | 'TELEGRAM_CONTRACT_CONFLICT';
+  reason: 'X_CONTRACT_MATCH' | 'X_UNAVAILABLE' | 'X_CONTENT_UNREADABLE' | 'X_CONTRACT_NOT_CONFIRMED' | 'TELEGRAM_CONTRACT_CONFLICT';
 };
 
 function plainText(html: string): string {
@@ -61,7 +61,9 @@ export async function verifySocialContract(args: {
     return { confirmed: false, reason: 'X_CONTRACT_NOT_CONFIRMED' };
   const x = await readHtml(`https://x.com/${args.xHandle}`).catch(() => null);
   if (!x) return { confirmed: false, reason: 'X_UNAVAILABLE' };
-  if (!xProjectStatements(x, args.xHandle).some(statement => confirmsRobinchainContract(statement, args.token)))
+  const statements = xProjectStatements(x, args.xHandle);
+  if (!statements.length) return { confirmed: false, reason: 'X_CONTENT_UNREADABLE' };
+  if (!statements.some(statement => confirmsRobinchainContract(statement, args.token)))
     return { confirmed: false, reason: 'X_CONTRACT_NOT_CONFIRMED' };
   try {
     const url = new URL(args.telegramUrl);

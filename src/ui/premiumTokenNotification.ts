@@ -56,10 +56,10 @@ export function buildPremiumTokenNotification(args:{
       ...(args.market.volume5m==null?[]:[`📊 <b>5m volume</b>  ${formatUsd(args.market.volume5m)}`]),
       args.evidence?.devHoldingEvidence==='VERIFIED'&&args.evidence.devHoldingPercent!=null
         ? `👨‍💻 <b>Dev holding</b>  ${percent(args.evidence.devHoldingPercent)}`
-        : '👨‍💻 <b>Dev holding</b>  Unverified',
+        : '',
       args.evidence?.burnEvidence==='VERIFIED'&&args.evidence.burnedPercent!=null
         ? `🔥 <b>Burned</b>  ${percent(args.evidence.burnedPercent)}`
-        : '🔥 <b>Burned</b>  Unverified',
+        : '',
       ...(args.move==null?[]:[`📈 <b>Move</b>  ${args.move>=0?'+':''}${args.move.toFixed(1)}%`]),
     ];
     const lines = [
@@ -70,6 +70,7 @@ export function buildPremiumTokenNotification(args:{
       '',
       ...marketLines,
       '',
+      ...(args.evidence?.devHoldingEvidence !== 'VERIFIED' ? ['Creator holding not verified.'] : []),
       '<b>SAFETY</b>',
       unlockedLpWarning
         ? '⚠️ LP unlocked · <b>HIGH RUG RISK</b>'

@@ -302,11 +302,11 @@ function safeProjectUrl(value: unknown): string | null {
   } catch { return null; }
 }
 
-export async function getRobinhoodTokenSocials(tokenAddress: string): Promise<RobinhoodTokenSocials> {
+export async function getRobinhoodTokenSocials(tokenAddress: string, options: { refresh?: boolean } = {}): Promise<RobinhoodTokenSocials> {
   const address = getAddress(tokenAddress);
   const key = address.toLowerCase();
   const cached = socialsCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  if (!options.refresh && cached && cached.expiresAt > Date.now()) return cached.value;
   let value: RobinhoodTokenSocials = { twitter: null, telegram: null, website: null };
   try {
     const data = encodeFunctionData({ abi: TOKEN_ABI, functionName: 'socials' });
