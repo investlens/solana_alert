@@ -1,3 +1,4 @@
+import { recordCompactAlert } from '../src/services/compactAlertOutcomes.js';
 import { arcBoostSafetyFromEvidence, processArcBoostObservation } from '../src/chains/arc/boostSafety.js';
 import 'dotenv/config';
 import { verifyArcMainnet, getArcBlockNumber, getArcLogs, readArcContract } from '../src/chains/arc/rpc.js';
@@ -131,6 +132,7 @@ async function processArcBurns(fromBlock: bigint, toBlock: bigint): Promise<void
       const from = String(args.from ?? '').toLowerCase();
       // Locked AlphaOS Burn card: keep detection lean; enrich only after >= threshold qualifies.
       let marketCap: number | null = null;
+      let outcomePrice: number | null = null; let outcomePair: string | null = null;
       let liquidity: number | null = null;
       let dexUrl: string | null = null;
       let website: string | null = null;
@@ -140,7 +142,8 @@ async function processArcBurns(fromBlock: bigint, toBlock: bigint): Promise<void
         const response = await fetch(`https://api.dexscreener.com/token-pairs/v1/arc/${encodeURIComponent(token)}`, { signal: AbortSignal.timeout(3_000) });
         if (response.ok) {
           const pairs = await response.json() as any[];
-          const pair = Array.isArray(pairs) ? pairs[0] : null;
+          const pair = Array.isArray(pairs) ? pairs.find(p => p?.chainId === 'arc' && String(p?.baseToken?.address ?? '').toLowerCase() === token.toLowerCase()) : null;
+          outcomePrice = Number(pair?.priceUsd) || null; outcomePair = pair?.pairAddress ?? null;
           marketCap = Number.isFinite(Number(pair?.marketCap)) ? Number(pair.marketCap) : Number.isFinite(Number(pair?.fdv)) ? Number(pair.fdv) : null;
           liquidity = Number.isFinite(Number(pair?.liquidity?.usd)) ? Number(pair.liquidity.usd) : null;
           dexUrl = pair?.url ? String(pair.url) : null;
@@ -184,6 +187,7 @@ async function processArcBurns(fromBlock: bigint, toBlock: bigint): Promise<void
         [ ...(twitter ? [{text:'𝕏 X',url:twitter}] : []), ...(telegram ? [{text:'✈️ TG',url:telegram}] : []) ],
       ].filter(row => row.length > 0);
       const delivery = await broadcastArcAlert(text, buttons);
+      void recordCompactAlert({chain:'arc', token, feed:'ARC_SUPPLY_BURN', price:outcomePrice, pair:outcomePair}, delivery.delivered);
       burnDelivered.add(identity);
       console.log('[ArcBurn] ALERT_SENT', { token, symbol, burnPercent, txHash, delivered:delivery.delivered });
     } catch (error) {
@@ -305,6 +309,7 @@ async function deliverArcAlert(market: Awaited<ReturnType<typeof enrichArcMarket
   ].filter(row => row.length > 0);
 
   const delivery = await broadcastArcAlert(text, buttons);
+  void recordCompactAlert({chain:'arc', token:market.assetId, feed:'ARC_OPPORTUNITY', price:market.priceUsd, pair:market.poolId, marketCap:market.marketCapUsd, liquidity:market.liquidityUsd}, delivery.delivered);
   delivered.add(key);
   console.log('[ArcLive] ALERT_SENT', { assetId: market.assetId, symbol: market.symbol, messageId: delivery.adminMessageId, delivered: delivery.delivered, failed: delivery.failed });
 }
@@ -476,6 +481,7 @@ async function deliverArcBoost(boost: {tokenAddress:string;amount:number;totalAm
   let symbol = 'ARC TOKEN';
   let name: string | null = null;
   let marketCap: number | null = null;
+      let outcomePrice: number | null = null; let outcomePair: string | null = null;
   let dexUrl: string | null = null;
   let website: string | null = null;
   let twitter: string | null = null;
@@ -484,10 +490,11 @@ async function deliverArcBoost(boost: {tokenAddress:string;amount:number;totalAm
     const response = await fetch(`https://api.dexscreener.com/token-pairs/v1/arc/${encodeURIComponent(boost.tokenAddress)}`, { signal: AbortSignal.timeout(3_000) });
     if (response.ok) {
       const pairs = await response.json() as any[];
-      const pair = Array.isArray(pairs) ? pairs[0] : null;
+      const pair = Array.isArray(pairs) ? pairs.find(p => p?.chainId === 'arc' && String(p?.baseToken?.address ?? '').toLowerCase() === boost.tokenAddress.toLowerCase()) : null;
       symbol = String(pair?.baseToken?.symbol || symbol);
       name = pair?.baseToken?.name ? String(pair.baseToken.name) : null;
-      marketCap = Number.isFinite(Number(pair?.marketCap)) ? Number(pair.marketCap) : Number.isFinite(Number(pair?.fdv)) ? Number(pair.fdv) : null;
+      outcomePrice = Number(pair?.priceUsd) || null; outcomePair = pair?.pairAddress ?? null;
+          marketCap = Number.isFinite(Number(pair?.marketCap)) ? Number(pair.marketCap) : Number.isFinite(Number(pair?.fdv)) ? Number(pair.fdv) : null;
       dexUrl = pair?.url ? String(pair.url) : null;
       const websites = Array.isArray(pair?.info?.websites) ? pair.info.websites : [];
       const socials = Array.isArray(pair?.info?.socials) ? pair.info.socials : [];
@@ -515,6 +522,7 @@ async function deliverArcBoost(boost: {tokenAddress:string;amount:number;totalAm
   ].filter(row => row.length > 0);
   try {
     const delivery = await broadcastArcAlert(text, buttons);
+    void recordCompactAlert({chain:'arc', token:boost.tokenAddress, feed:'BOOST', price:outcomePrice, pair:outcomePair}, delivery.delivered);
     arcBoostDelivered.add(identity);
     await persistArcBoostDelivery(boost).catch(error => console.warn('[ArcBoost] PERSIST_FAILED', { token:key, totalBoost:boost.totalAmount, reason:error instanceof Error ? error.message : String(error) }));
     console.log('[ArcBoost] ALERT_SENT', { token:key, totalBoost:boost.totalAmount, eventType, messageId:delivery.adminMessageId, delivered:delivery.delivered, failed:delivery.failed });
