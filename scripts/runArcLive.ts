@@ -186,7 +186,7 @@ async function processArcBurns(fromBlock: bigint, toBlock: bigint): Promise<void
         [ { text:'🔎 Explorer', url:`https://explorer.arc.io/address/${encodeURIComponent(token)}` }, ...(website ? [{text:'🌐 Project',url:website}] : []) ],
         [ ...(twitter ? [{text:'𝕏 X',url:twitter}] : []), ...(telegram ? [{text:'✈️ TG',url:telegram}] : []) ],
       ].filter(row => row.length > 0);
-      const delivery = await broadcastArcAlert(text, buttons);
+      const delivery = await broadcastArcAlert(text, buttons, token);
       void recordCompactAlert({chain:'arc', token, feed:'ARC_SUPPLY_BURN', price:outcomePrice, pair:outcomePair}, delivery.delivered);
       burnDelivered.add(identity);
       console.log('[ArcBurn] ALERT_SENT', { token, symbol, burnPercent, txHash, delivered:delivery.delivered });
@@ -221,7 +221,8 @@ async function getArcRecipients(): Promise<string[]> {
   return [...recipientCache];
 }
 
-async function broadcastArcAlert(text: string, buttons: any[][]): Promise<{delivered:number;failed:number;adminMessageId:number|null}> {
+async function broadcastArcAlert(text: string, buttons: any[][], outcomeToken?: string): Promise<{delivered:number;failed:number;adminMessageId:number|null}> {
+  if (outcomeToken && /^0x[a-fA-F0-9]{40}$/.test(outcomeToken)) buttons = [...buttons, [{text:'⭐ Track',callback_data:`OUT_ARC_${outcomeToken}`}]];
   const recipients = await getArcRecipients();
   if (!recipients.length) throw new Error('no ARC Telegram recipients available');
   const results = await Promise.allSettled(recipients.map(chatId => sendTelegramWithMessageId(chatId, text, buttons)));
@@ -308,7 +309,7 @@ async function deliverArcAlert(market: Awaited<ReturnType<typeof enrichArcMarket
     ],
   ].filter(row => row.length > 0);
 
-  const delivery = await broadcastArcAlert(text, buttons);
+  const delivery = await broadcastArcAlert(text, buttons, market.assetId);
   void recordCompactAlert({chain:'arc', token:market.assetId, feed:'ARC_OPPORTUNITY', price:market.priceUsd, pair:market.poolId, marketCap:market.marketCapUsd, liquidity:market.liquidityUsd}, delivery.delivered);
   delivered.add(key);
   console.log('[ArcLive] ALERT_SENT', { assetId: market.assetId, symbol: market.symbol, messageId: delivery.adminMessageId, delivered: delivery.delivered, failed: delivery.failed });
@@ -521,7 +522,7 @@ async function deliverArcBoost(boost: {tokenAddress:string;amount:number;totalAm
     [ ...(website ? [{text:'🌐 Project',url:website}] : []), ...(twitter ? [{text:'𝕏 X',url:twitter}] : []), ...(telegram ? [{text:'✈️ TG',url:telegram}] : []) ],
   ].filter(row => row.length > 0);
   try {
-    const delivery = await broadcastArcAlert(text, buttons);
+    const delivery = await broadcastArcAlert(text, buttons, boost.tokenAddress);
     void recordCompactAlert({chain:'arc', token:boost.tokenAddress, feed:'BOOST', price:outcomePrice, pair:outcomePair}, delivery.delivered);
     arcBoostDelivered.add(identity);
     await persistArcBoostDelivery(boost).catch(error => console.warn('[ArcBoost] PERSIST_FAILED', { token:key, totalBoost:boost.totalAmount, reason:error instanceof Error ? error.message : String(error) }));
