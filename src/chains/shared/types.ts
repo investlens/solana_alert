@@ -32,6 +32,8 @@ export type ChainMarketSnapshot = {
   pairAddress?: string;
   dexId?: string;
   pairCreatedAt?: number;
+  priceChange1h?: number;
+  trades5mReported?: boolean;
 
   chartUrl?: string;
 

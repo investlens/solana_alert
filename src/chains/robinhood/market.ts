@@ -284,6 +284,8 @@ export async function getRobinhoodMarketSnapshot(
     dexId:
       pair.dexId,
 
+    priceChange1h: pair.priceChange?.h1 != null && String(pair.priceChange.h1).trim() !== '' && Number.isFinite(Number(pair.priceChange.h1)) ? Number(pair.priceChange.h1) : undefined,
+    trades5mReported: typeof pair.txns?.m5?.buys === 'number' && typeof pair.txns?.m5?.sells === 'number',
     pairCreatedAt: Number.isFinite(Number(pair.pairCreatedAt)) && Number(pair.pairCreatedAt) > 0
       ? Number(pair.pairCreatedAt) : undefined,
 
@@ -307,6 +309,8 @@ export function robinhoodMarketSnapshotFromPairs(tokenAddress: string, pairs: De
     liquidityUsd: finiteNumber(pair.liquidity?.usd), volume5mUsd: finiteNumber(pair.volume?.m5),
     buys5m: finiteNumber(pair.txns?.m5?.buys), sells5m: finiteNumber(pair.txns?.m5?.sells),
     pairAddress: pair.pairAddress, dexId: pair.dexId,
+    priceChange1h: pair.priceChange?.h1 != null && String(pair.priceChange.h1).trim() !== '' && Number.isFinite(Number(pair.priceChange.h1)) ? Number(pair.priceChange.h1) : undefined,
+    trades5mReported: typeof pair.txns?.m5?.buys === 'number' && typeof pair.txns?.m5?.sells === 'number',
     pairCreatedAt: Number.isFinite(Number(pair.pairCreatedAt)) && Number(pair.pairCreatedAt) > 0
       ? Number(pair.pairCreatedAt) : undefined,
     chartUrl: verifiedRobinhoodChartUrl(pair),

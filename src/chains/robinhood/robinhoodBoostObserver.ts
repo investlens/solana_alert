@@ -12,7 +12,7 @@ import { getRobinhoodTokenSocials } from './tokenMetadata.js';
 import { getRobinhoodMarketSnapshot } from './market.js';
 import { observeBoostCanonicalEvent, boostCanonicalTitle } from './boostCanonicalEvent.js';
 import { routeBoostSecurity } from './boostSecurityRouter.js';
-import { buildPremiumTokenNotification } from '../../ui/premiumTokenNotification.js';
+import { buildPremiumTokenNotification, verifiedPairAge } from '../../ui/premiumTokenNotification.js';
 import { buildAlphaMarketActions } from '../../ui/alphaNotificationActions.js';
 import { persistOrLoadAlphaSemanticEventRecord } from '../../services/alphaSemanticEventService.js';
 import { deliverAlphaSemanticEvent } from '../../services/alphaSemanticDeliveryService.js';
@@ -285,6 +285,9 @@ export async function enrichDeliveredBoostAlert(args: {
     chartUrl: market?.chartUrl ?? null,
   };
   const message = buildPremiumTokenNotification({
+    age: verifiedPairAge(market?.pairCreatedAt), move1h: market?.priceChange1h,
+    buys5m: market?.trades5mReported ? market.buys5m : null, sells5m: market?.trades5mReported ? market.sells5m : null,
+    observedAt: market?.timestamp, source: market ? 'DEXScreener' : null,
     state, symbol, name, address: args.tokenAddress, chain: 'robinhood', market: marketContext,
     evidence: await boostDeveloperEvidence(args.tokenAddress, pons?.creator), socials: { twitter: socials.twitter || pons?.twitter, telegram: socials.telegram || pons?.telegram },
     telegramType: await getTelegramPreviewType(socials.telegram || pons?.telegram || ''),
@@ -473,6 +476,9 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
     chartUrl: market?.chartUrl ?? null,
   };
   const baseMessage = buildPremiumTokenNotification({
+    age: verifiedPairAge(market?.pairCreatedAt), move1h: market?.priceChange1h,
+    buys5m: market?.trades5mReported ? market.buys5m : null, sells5m: market?.trades5mReported ? market.sells5m : null,
+    observedAt: market?.timestamp, source: market ? 'DEXScreener' : null,
     state, symbol, name, address: boost.tokenAddress, chain: 'robinhood', market: marketContext,
     evidence: await boostDeveloperEvidence(boost.tokenAddress, pons?.creator), socials: { twitter: socials.twitter || pons?.twitter, telegram: socials.telegram || pons?.telegram },
     telegramType: await getTelegramPreviewType(socials.telegram || pons?.telegram || ''),
