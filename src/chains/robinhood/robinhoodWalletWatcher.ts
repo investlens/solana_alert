@@ -1,4 +1,4 @@
-import { createExplorerJsonReader } from '../../services/explorerProviderCooldown.js';
+import { robinhoodExplorerJson as explorerJson } from '../../services/robinhoodExplorerProvider.js';
 import {
   decodeEventLog,
   getAddress,
@@ -481,7 +481,6 @@ function blockscoutBigInt(value: unknown): bigint {
   }
 }
 
-const explorerJson = createExplorerJsonReader({ baseUrl: ROBINHOOD_EXPLORER_BASE_URL, timeoutMs: ROBINHOOD_EXPLORER_TIMEOUT_MS });
 async function blockscoutJson<T>(path: string): Promise<T> {
   return explorerJson.read<T>(path);
 }
