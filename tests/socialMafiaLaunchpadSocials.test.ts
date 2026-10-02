@@ -9,6 +9,7 @@ import {
   isVerifiedSocialMafiaLaunch,
   queueVerifiedLaunchpadSocialMafiaScreen,
   resetPonsSocialMafiaForTests,
+  socialMafiaScreeningStatus,
   drainPonsSocialMafiaForTests,
   resolveSocialMafiaSocials,
 } from '../src/chains/robinhood/ponsSocialMafiaAlert.js';
@@ -163,5 +164,31 @@ test('screening waits 15 minutes, retries four times and rejects expired launche
     now = start + 61 * 60_000;
     queueVerifiedLaunchpadSocialMafiaScreen(launch, context); drainPonsSocialMafiaForTests();
     assert.equal(requests, 4);
+  } finally { resetPonsSocialMafiaForTests(); }
+});
+
+
+test('waiting launch burst fits the bounded identity budget without starting early checks', t => {
+  resetPonsSocialMafiaForTests();
+  const now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  t.mock.method(console, 'log', () => {});
+  t.mock.method(console, 'warn', () => {});
+  const factory = getPonsFactoryDeployments().find(f => f.enabled)!;
+  const context = { id: 'PONS', label: 'PONS', tokenUrl: () => 'https://www.ponsfamily.com' };
+  const launch = { chain: 'robinhood', protocol: 'pons', protocol_version: factory.id,
+    factory_address: factory.address, block_timestamp: new Date(now).toISOString() } as PonsLaunch;
+  try {
+    for (let i = 1; i <= 501; i++) queueVerifiedLaunchpadSocialMafiaScreen({ ...launch,
+      token_address: `0x${i.toString(16).padStart(40, '0')}` }, context);
+    const state = socialMafiaScreeningStatus();
+    assert.equal(state.waiting, 500); assert.equal(state.identityCount, 500);
+    assert.equal(state.active, 0); assert.equal(state.concurrency, 1);
+    queueVerifiedLaunchpadSocialMafiaScreen({ ...launch, token_address: `0x${'1'.padStart(40, '0')}` }, context);
+    assert.equal(socialMafiaScreeningStatus().waiting, 500);
+    t.mock.method(Date, 'now', () => now + 60 * 60_000 + 30_001);
+    drainPonsSocialMafiaForTests();
+    assert.equal(socialMafiaScreeningStatus().waiting, 0);
+    assert.equal(socialMafiaScreeningStatus().identityCount, 0);
   } finally { resetPonsSocialMafiaForTests(); }
 });

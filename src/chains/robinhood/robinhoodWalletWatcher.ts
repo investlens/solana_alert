@@ -1,3 +1,4 @@
+import { createExplorerJsonReader } from '../../services/explorerProviderCooldown.js';
 import {
   decodeEventLog,
   getAddress,
@@ -480,13 +481,9 @@ function blockscoutBigInt(value: unknown): bigint {
   }
 }
 
+const explorerJson = createExplorerJsonReader({ baseUrl: ROBINHOOD_EXPLORER_BASE_URL, timeoutMs: ROBINHOOD_EXPLORER_TIMEOUT_MS });
 async function blockscoutJson<T>(path: string): Promise<T> {
-  const response = await fetch(
-    `${ROBINHOOD_EXPLORER_BASE_URL}${path}`,
-    { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(ROBINHOOD_EXPLORER_TIMEOUT_MS) },
-  );
-  if (!response.ok) throw new Error(`Blockscout HTTP ${response.status}`);
-  return await response.json() as T;
+  return explorerJson.read<T>(path);
 }
 
 async function explorerTransactions(wallet: Address): Promise<BlockscoutTransaction[]> {
@@ -881,6 +878,7 @@ export async function pollRobinhoodTrackedWalletsLean(
   processChunk: RobinhoodWalletChunkProcessor,
 ) {
   try {
+    explorerJson.assertAvailable();
     return await pollRobinhoodTrackedWalletsExplorer(processChunk);
   } catch (error) {
     console.warn('[RobinhoodWalletWatcher] explorer unavailable; using live block fallback', {
