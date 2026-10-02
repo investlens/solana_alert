@@ -192,6 +192,37 @@ export function buildSocialMafiaAlertText(args: {
   ].join('\n');
 }
 
+export function protocolDiscoveryRoute(name: string | null | undefined, confirmed: boolean): 'SOCIAL_MAFIA' | 'PROTOCOL_DISCOVERY' | null {
+  if (confirmed) return 'SOCIAL_MAFIA';
+  return /\bprotocols?\b/i.test(name ?? '') ? 'PROTOCOL_DISCOVERY' : null;
+}
+
+export function buildProtocolDiscoveryAlertText(args: {
+  token: string; name?: string | null; symbol?: string | null; socials: SocialMafiaSocials;
+  marketCap?: number | null; fdv?: number | null; price?: number | null;
+  liquidity?: number | null; volume5m?: number | null; holding?: number | null;
+  creator: string; ageMinutes: number; checkedAt: string;
+}): string {
+  const positive = (n: number | null | undefined): n is number => n != null && Number.isFinite(n) && n > 0;
+  return [
+    '<b>🔎 PROTOCOL DISCOVERY</b>',
+    `<b>${escapeHtml(args.name || 'Protocol project')}</b>${args.symbol ? ` ($${escapeHtml(args.symbol)})` : ''}`,
+    'PONS · Robinchain · Verified launchpad origin', '', '<b>MARKET SNAPSHOT</b>',
+    ...(positive(args.price) ? [`Price  <b>$${args.price.toPrecision(5)}</b>`] : []),
+    ...(positive(args.marketCap) ? [`MC  <b>${money(args.marketCap)}</b>`] : positive(args.fdv) ? [`FDV  <b>${money(args.fdv)}</b>`] : []),
+    ...(positive(args.liquidity) ? [`Liquidity  <b>${money(args.liquidity)}</b>`] : []),
+    ...(args.volume5m != null && Number.isFinite(args.volume5m) && args.volume5m >= 0 ? [`Volume · 5m  <b>${money(args.volume5m)}</b>`] : []),
+    `Launch age  <b>${Math.max(0, Math.floor(args.ageMinutes))}m</b>`,
+    ...(args.holding != null && Number.isFinite(args.holding) && args.holding >= 0 && args.holding <= 100 ? [`Creator holding  <b>${percent(args.holding)}</b>`] : []),
+    `Creator  <a href="https://robinhoodchain.blockscout.com/address/${encodeURIComponent(args.creator)}">${escapeHtml(args.creator.slice(0, 6))}…${escapeHtml(args.creator.slice(-4))}</a>`,
+    '', '<b>SOCIAL LINKS</b>',
+    `<a href="${escapeHtml(args.socials.xUrl).replace(/"/g, '&quot;')}">X</a> · <a href="${escapeHtml(args.socials.telegramUrl).replace(/"/g, '&quot;')}">Telegram</a>`,
+    '', `<code>${escapeHtml(args.token)}</code>`,
+    `<i>Protocol-name discovery · Social ownership unverified · Research only.</i>`,
+    `Checked ${escapeHtml(args.checkedAt)} · Available PONS / indexed market data`,
+  ].join('\n');
+}
+
 async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   const { launch, launchpad } = item;
   const token = normalize(launch.token_address);
@@ -214,13 +245,15 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   }
 
   const identity = await verifySocialContract({ token, xHandle: socials.xHandle, telegramUrl: socials.telegramUrl });
-  if (!identity.confirmed) {
+  const earlyMetadata = !pons?.name ? await getRobinhoodTokenMetadata(token, { signal: AbortSignal.timeout(8_000) }).catch(() => null) : null;
+  const route = protocolDiscoveryRoute(pons?.name || earlyMetadata?.name, identity.confirmed);
+  if (!route) {
     if (item.attempt >= 4) recordLaunchSocialEligibility(token, false);
     console.log('[SocialMafia] suppressed; social contract not confirmed', { token, reason: identity.reason });
     return false;
   }
 
-  recordLaunchSocialEligibility(token, true);
+  recordLaunchSocialEligibility(token, identity.confirmed);
 
   // Independent on-chain identity and verified valuation; never require a DEX index.
   const partial: {
@@ -228,7 +261,7 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
     metadata: Awaited<ReturnType<typeof getRobinhoodTokenMetadata>> | null;
     dev: Awaited<ReturnType<typeof scanRobinhoodDevTokenFlow>> | null;
     curve: Awaited<ReturnType<typeof resolvePonsV2PreIndexValuation>> | null;
-  } = { market: null, metadata: null, dev: null, curve: null };
+  } = { market: null, metadata: earlyMetadata, dev: null, curve: null };
   let creatorHolding: number | null = null;
   let telegramType: TelegramPreviewType = 'Type unverified';
   const supplemental = Promise.all([
@@ -237,7 +270,7 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   ]);
   const work = Promise.all([
     getRobinhoodMarketSnapshot(token, { priority: 'HIGH', caller: 'pons_social_mafia', queueWaitTimeoutMs: 750 }).catch(() => null).then(value => partial.market = value),
-    getRobinhoodTokenMetadata(token, { signal: AbortSignal.timeout(8_000) }).catch(() => null).then(value => partial.metadata = value),
+    (earlyMetadata ? Promise.resolve(earlyMetadata) : getRobinhoodTokenMetadata(token, { signal: AbortSignal.timeout(8_000) }).catch(() => null)).then(value => partial.metadata = value),
     scanRobinhoodDevTokenFlow(token, launch.deployer_address).catch(() => null).then(value => partial.dev = value),
     launch.protocol_version.startsWith('v2') && launch.curve_address
       ? getPonsV2CurveState(launch.curve_address).then(state => state.tokenAddress.toLowerCase() === token
@@ -247,6 +280,15 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   const render = (values: Awaited<typeof work> | null) => {
     const [market, metadata, dev, curve] = values ?? [partial.market, partial.metadata, partial.dev, partial.curve];
     const positive = (v: number | null | undefined) => v != null && Number.isFinite(v) && v > 0 ? v : null;
+    if (route === 'PROTOCOL_DISCOVERY') return buildProtocolDiscoveryAlertText({
+      token, name: pons?.name || metadata?.name, symbol: market?.symbol || metadata?.symbol || pons?.symbol,
+      socials, creator: launch.deployer_address, ageMinutes: (Date.now() - item.createdAt) / 60_000,
+      checkedAt: new Date().toISOString().slice(11, 19) + ' UTC', price: market?.priceUsd,
+      marketCap: positive(market?.marketCapUsd) ?? (curve?.valuationType === 'MARKET_CAP' ? curve.valueUsd : null),
+      fdv: positive(market?.fdvUsd) ?? (curve?.valuationType === 'FDV' ? curve.valueUsd : pons?.fdvUsd),
+      liquidity: market?.liquidityUsd, volume5m: market?.volume5mUsd,
+      holding: dev && dev.evidenceStatus !== 'UNAVAILABLE' ? dev.devHoldingPercent : creatorHolding,
+    });
     return buildSocialMafiaAlertText({
       tokenAddress: token, launchpadLabel: launchpad.label, socials,
       symbol: market?.symbol || metadata?.symbol || pons?.symbol, name: market?.name || metadata?.name || pons?.name,
@@ -262,7 +304,8 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
 
   // Render once per eligible token, reuse the in-memory buffer across recipients.
   const image = await buildAlphaosAlertCard({ symbol: partial.metadata?.symbol || pons?.symbol,
-    name: partial.metadata?.name || pons?.name, logo: pons?.logo }).catch(() => {
+    name: partial.metadata?.name || pons?.name, logo: pons?.logo,
+    ...(route === 'PROTOCOL_DISCOVERY' ? { category: 'PROTOCOL DISCOVERY', badge: 'SOCIAL OWNERSHIP UNVERIFIED', footer: 'Protocol-name discovery. Research only; no safety or trade endorsement.' } : {}) }).catch(() => {
       console.warn('[AlphaosCard] rendering unavailable; using text alert'); return null;
     });
   const chats = await recipients();
@@ -282,10 +325,10 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
       });
     }));
   }).catch(error => console.warn('[SocialMafia] late enrichment unavailable', String(error)));
-  const delivered = results.filter(result => result.status === 'fulfilled').length;
+  const delivered = results.filter(result => result.status === 'fulfilled' && result.value != null).length;
   const failed = results.length - delivered;
   console.log('[SocialMafia] ALERT_RESULT', {
-    token, launchpad: launchpad.id, xHandle: socials.xHandle,
+    token, feed: route, launchpad: launchpad.id, xHandle: socials.xHandle,
     telegram: socials.telegramLabel, delivered, failed,
   });
   // Never replay ambiguous Telegram sends to recipients who may have received it.
