@@ -13,3 +13,7 @@ test('ARC market screening does not claim contract security is verified', () => 
   assert.match(text, /Market checks passed · Contract risks unverified/);
   assert.doesNotMatch(text, /Core ARC checks passed/);
 });
+test('ARC FDV-only presentation never relabels FDV as market cap', () => {
+  const text = polishArcTelegramPresentation('AlphaOS · ARC OPPORTUNITY\n🚀 <b>NEW</b>\n💰 FDV <b>$45,498</b>\n💧 Liquidity <b>$18,767</b>\n📊 5m Volume <b>$8,225</b>').text;
+  assert.match(text, /<b>FDV<\/b>/); assert.doesNotMatch(text, /Market cap|n\/a/);
+});

@@ -1,17 +1,18 @@
 import { createPublicClient, http } from 'viem';
 import { arcChain } from './config.js';
+import { createArcRpcScheduler, isArcProviderFailure, isArcRateLimit } from './rpcScheduler.js';
 
 const urls = [...new Set([
   String(process.env.ARC_RPC_URL ?? '').trim(),
-  'https://rpc.mainnet.arc.io',
   String(process.env.ARC_RPC_FALLBACK_URL ?? '').trim(),
+  'https://rpc.mainnet.arc.io',
 ].filter(Boolean))];
 
 const clients = urls.map(url => ({
   url,
   client: createPublicClient({
     chain: arcChain,
-    transport: http(url, { timeout: 8_000, retryCount: 1, retryDelay: 250 }),
+    transport: http(url, { timeout: 8_000, retryCount: 0 }),
   }),
 }));
 
@@ -42,11 +43,12 @@ async function runProvider<T>(operation: string, provider: typeof clients[number
     s.cooldownUntil = 0;
     return result;
   } catch (error) {
+    if (!isArcProviderFailure(error)) throw error;
     s.failures += 1;
-    if (s.failures >= FAILURE_THRESHOLD) s.cooldownUntil = Date.now() + COOLDOWN_MS;
+    if (isArcRateLimit(error) || s.failures >= FAILURE_THRESHOLD) s.cooldownUntil = Date.now() + COOLDOWN_MS;
     console.warn('[ArcRpc] provider failed', {
       operation,
-      provider: provider.url,
+      provider: new URL(provider.url).hostname,
       failures: s.failures,
       coolingDown: s.cooldownUntil > Date.now(),
       reason: shortError(error),
@@ -57,7 +59,7 @@ async function runProvider<T>(operation: string, provider: typeof clients[number
   }
 }
 
-async function failover<T>(operation: string, fn: (client: typeof clients[number]['client']) => Promise<T>): Promise<T> {
+async function executeFailover<T>(operation: string, fn: (client: typeof clients[number]['client']) => Promise<T>): Promise<T> {
   let lastError: unknown;
 
   for (let pass = 0; pass < 2; pass += 1) {
@@ -71,6 +73,7 @@ async function failover<T>(operation: string, fn: (client: typeof clients[number
       try {
         return await runProvider(operation, provider, fn);
       } catch (error) {
+        if (!isArcProviderFailure(error)) throw error;
         lastError = error;
       }
     }
@@ -97,11 +100,10 @@ async function failover<T>(operation: string, fn: (client: typeof clients[number
     break;
   }
 
-  // If every provider is cooling down, probe only the provider whose cooldown
-  // expires first. This prevents the single-provider dead zone that previously
-  // crashed arc-live for the entire cooldown window.
+  // Never bypass a provider cooldown. The scanner can retry on its next cycle;
+  // repeated probes during a rate limit only extend the outage.
   const probe = clients
-    .filter(provider => state(provider.url).inFlight === 0)
+    .filter(provider => state(provider.url).inFlight === 0 && state(provider.url).cooldownUntil <= Date.now())
     .sort((a, b) => state(a.url).cooldownUntil - state(b.url).cooldownUntil)[0];
 
   if (probe) {
@@ -115,6 +117,11 @@ async function failover<T>(operation: string, fn: (client: typeof clients[number
   throw lastError ?? new Error(`No Arc RPC provider available for ${operation}`);
 }
 
+const schedule = createArcRpcScheduler();
+function failover<T>(operation: string, fn: (client: typeof clients[number]['client']) => Promise<T>): Promise<T> {
+  return schedule(() => executeFailover(operation, fn));
+}
+
 export const getArcBlockNumber = () => failover('blockNumber', client => client.getBlockNumber());
 export const getArcLogs = (args: any) => failover('getLogs', client => client.getLogs(args as any) as Promise<any[]>);
 export const getArcBlock = (args: any) => failover('getBlock', client => client.getBlock(args as any));
@@ -123,7 +130,8 @@ export const readArcContract = (args: any) => failover('readContract', client =>
 
 export async function verifyArcMainnet(): Promise<{ chainId: number; blockNumber: bigint }> {
   return failover('verify', async client => {
-    const [chainId, blockNumber] = await Promise.all([client.getChainId(), client.getBlockNumber()]);
+    const chainId = await client.getChainId();
+    const blockNumber = await client.getBlockNumber();
     if (chainId !== 5042) throw new Error(`Unexpected Arc chain id ${chainId}; expected 5042`);
     return { chainId, blockNumber };
   });

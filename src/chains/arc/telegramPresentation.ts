@@ -11,13 +11,14 @@ function compactArcOpportunity(text: string): string {
   const liquidity = firstMatch(text, /💧 Liquidity\s+<b>(.*?)<\/b>/) ?? 'n/a';
   const volume = firstMatch(text, /📊 5m Volume\s+<b>(.*?)<\/b>/) ?? 'n/a';
   const flow = firstMatch(text, /🟢 Buys \/ Sells\s+<b>(.*?)<\/b>\s+·\s+<b>(.*?)<\/b>/);
-  const marketCap = firstMatch(text, /💰 Market Cap\s+<b>(.*?)<\/b>/) ?? 'n/a';
+  const marketCap = firstMatch(text, /💰 Market Cap\s+<b>(.*?)<\/b>/);
+  const fdv = firstMatch(text, /💰 FDV\s+<b>(.*?)<\/b>/);
   const warnings = [...text.matchAll(/⚠️ ([^\n]+)/g)].map(match => match[1]).filter(Boolean);
   const lines = [
     '🟣 <b>ARC OPPORTUNITY</b>',
     `<b>$${symbol}</b>`,
     '',
-    `💰 <b>Market cap</b>   ${marketCap}`,
+    marketCap ? `💰 <b>Market cap</b>   ${marketCap}` : fdv ? `💰 <b>FDV</b>   ${fdv}` : '',
     `💧 <b>Liquidity</b>    ${liquidity}`,
     `📊 <b>5m volume</b>    ${volume}`,
     flow ? `🟢 <b>Buy / sell</b>    ${flow}` : '',
