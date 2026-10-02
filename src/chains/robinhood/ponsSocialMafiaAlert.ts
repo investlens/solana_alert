@@ -244,14 +244,15 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   ]).then(async values => { await supplemental; return values; });
   const render = (values: Awaited<typeof work> | null) => {
     const [market, metadata, dev, curve] = values ?? [partial.market, partial.metadata, partial.dev, partial.curve];
+    const positive = (v: number | null | undefined) => v != null && Number.isFinite(v) && v > 0 ? v : null;
     return buildSocialMafiaAlertText({
       tokenAddress: token, launchpadLabel: launchpad.label, socials,
       symbol: market?.symbol || metadata?.symbol || pons?.symbol, name: market?.name || metadata?.name || pons?.name,
-      marketCap: market?.marketCapUsd ?? (curve?.valuationType === 'MARKET_CAP' ? curve.valueUsd : null),
-      fdv: market?.fdvUsd ?? (curve?.valuationType === 'FDV' ? curve.valueUsd : pons?.fdvUsd),
+      marketCap: positive(market?.marketCapUsd) ?? (curve?.valuationType === 'MARKET_CAP' ? curve.valueUsd : null),
+      fdv: positive(market?.fdvUsd) ?? (curve?.valuationType === 'FDV' ? curve.valueUsd : pons?.fdvUsd),
       devHoldingPercent: dev && dev.evidenceStatus !== 'UNAVAILABLE' && dev.devHoldingPercent != null ? dev.devHoldingPercent : creatorHolding,
       creatorAddress: launch.deployer_address, telegramType, socialContractConfirmed: true,
-      valuationSource: market?.marketCapUsd == null && market?.fdvUsd == null && curve?.valueUsd == null && pons?.fdvUsd != null ? 'PONS snapshot' : null,
+      valuationSource: positive(market?.marketCapUsd) == null && positive(market?.fdvUsd) == null && curve?.valueUsd == null && pons?.fdvUsd != null ? 'PONS snapshot' : null,
     });
   };
   const initial = await boundedSocialMafiaContext(work, 1_500);
