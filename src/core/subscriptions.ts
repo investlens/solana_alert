@@ -1,6 +1,6 @@
 import { supabase } from '../services/supabase.js';
 import { config } from '../config.js';
-import { assertSubscriptionsEnabled } from '../product/subscriptionPlan.js';
+import { assertPaymentCollectionReady } from '../product/subscriptionPlan.js';
 
 export async function upsertUser(args: {
   telegramId: string;
@@ -91,7 +91,7 @@ export async function createPendingPayment(args: {
   // Legacy SOL payment collection stays fail-closed until the locked AlphaOS
   // subscription plan has passed its production release gate and the Robinhood
   // Chain payment rail is wired to the new $1 / $49-equivalent commercial terms.
-  assertSubscriptionsEnabled();
+  assertPaymentCollectionReady();
 
   const { error } = await supabase.from('payments').insert({
     telegram_id: args.telegramId,
@@ -112,7 +112,7 @@ export async function approveLatestPendingPayment(args: {
   approvedBy: string;
 }) {
   // Never activate paid access while subscriptions are intentionally dormant.
-  assertSubscriptionsEnabled();
+  assertPaymentCollectionReady();
 
   const { telegramId, planDays, approvedBy } = args;
 

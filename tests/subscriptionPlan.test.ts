@@ -4,8 +4,10 @@ import assert from 'node:assert/strict';
 import {
   ALPHAOS_SUBSCRIPTION_PLAN,
   assertSubscriptionsEnabled,
+  assertPaymentCollectionReady,
   deliveryDelayMsForTier,
   paidAccessIsCurrent,
+  publicSubscriptionStatusText,
   subscriptionsEnabled,
 } from '../src/product/subscriptionPlan.js';
 import {
@@ -108,5 +110,12 @@ test('Pro access requires an active unexpired paid subscription after launch', (
     } finally {
       Date.now = previousNow;
     }
+  });
+});
+
+test('legacy payment collection stays closed even when subscription access is enabled', () => {
+  withSubscriptionFlag('true', () => {
+    assert.throws(() => assertPaymentCollectionReady(), /payment rail has not been validated/i);
+    assert.match(publicSubscriptionStatusText(), /payment collection remains closed/i);
   });
 });

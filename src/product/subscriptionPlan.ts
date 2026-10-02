@@ -53,6 +53,12 @@ export function deliveryDelayMsForTier(
 
 export function publicSubscriptionStatusText(): string {
   return subscriptionsEnabled()
-    ? 'Pro membership is available.'
+    ? 'Pro access is enabled for existing members. New payment collection remains closed.'
     : 'Pro membership is being prepared while AlphaOS completes production validation.';
+}
+
+// The legacy SOL collector cannot activate the Robinchain commercial plan.
+export function assertPaymentCollectionReady(): never {
+  assertSubscriptionsEnabled();
+  throw new Error('Payment collection is closed: the AlphaOS payment rail has not been validated.');
 }
