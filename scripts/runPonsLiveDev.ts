@@ -6,6 +6,7 @@ import { createPonsLiveLaunchRouter } from '../src/chains/robinhood/ponsLiveLaun
 import { replayPonsLiveLaunch, supabasePonsLiveReplaySource } from '../src/chains/robinhood/ponsLiveReplay.js';
 import { parsePonsLiveDevMode, ponsLivePollInterval, runPonsLivePollingLoop } from '../src/chains/robinhood/ponsLivePollingLoop.js';
 import { collectPonsTokenOutcomes, createProductionPonsOutcomeSource, formatPonsOutcomeSummary } from '../src/chains/robinhood/ponsTokenOutcomeCollector.js';
+import { createBufferedPonsLiveStorage } from '../src/chains/robinhood/ponsBufferedLiveStorage.js';
 
 const mode = parsePonsLiveDevMode(process.argv.slice(2));
 const sendTelegramTest = process.argv.includes('--send-telegram');
@@ -38,13 +39,13 @@ async function runPonsOutcomeCollection(): Promise<void> {
 
   ponsOutcomeCollectionRunning = true;
   try {
-    const limitRaw = Number(process.env.PONS_OUTCOME_COLLECTION_LIMIT ?? 250);
-    const concurrencyRaw = Number(process.env.PONS_OUTCOME_COLLECTION_CONCURRENCY ?? 3);
-    const limit = Number.isInteger(limitRaw) ? Math.min(1_000, Math.max(1, limitRaw)) : 250;
-    const concurrency = Number.isInteger(concurrencyRaw) ? Math.min(20, Math.max(1, concurrencyRaw)) : 3;
+    const limitRaw = Number(process.env.PONS_OUTCOME_COLLECTION_LIMIT ?? 50);
+    const concurrencyRaw = Number(process.env.PONS_OUTCOME_COLLECTION_CONCURRENCY ?? 1);
+    const limit = Number.isInteger(limitRaw) ? Math.min(100, Math.max(1, limitRaw)) : 50;
+    const concurrency = Number.isInteger(concurrencyRaw) ? Math.min(3, Math.max(1, concurrencyRaw)) : 1;
     const source = await createProductionPonsOutcomeSource();
     const result = await collectPonsTokenOutcomes(source, {
-      filters: { limit, newestFirst: true },
+      filters: { limit, newestFirst: true, launchedSince: new Date(Date.now() - 24 * 60 * 60_000).toISOString(), rotate: true },
       concurrency,
       write: true,
       progressInterval: 50,
@@ -102,7 +103,7 @@ if (mode.kind === 'ONCE') {
   console.log(`[PonsLive] complete detected=${result.detected} handled=${result.handled} duplicates=${result.duplicates} liveStateWrites=0 realTrades=0`);
 } else {
   const dbWritesEnabled = String(process.env.PONS_LIVE_DB_ENABLED ?? 'true').toLowerCase() === 'true';
-  const storage = dbWritesEnabled ? supabasePonsLiveDetectorStorage : recoveryMemoryStorage;
+  const storage = dbWritesEnabled ? createBufferedPonsLiveStorage(supabasePonsLiveDetectorStorage) : recoveryMemoryStorage;
   console.log(`[PonsLive] mode=SHADOW dryRun=true realTrades=0 liveStateWrites=${dbWritesEnabled ? 'enabled' : 'disabled-memory-checkpoint'}`);
   startPonsOutcomeCollectionLoop();
   await runPonsLivePollingLoop({
