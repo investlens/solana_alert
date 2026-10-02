@@ -424,6 +424,8 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
     boostIncrement: canonical.boostAdded,
     canonicalEventType: canonical.type,
     ...(market ? {
+      price: market.priceUsd ?? null,
+      pairAddress: market.pairAddress ?? null,
       marketCap: market.marketCapUsd ?? null,
       fdv: market.fdvUsd ?? null,
       liquidity: market.liquidityUsd ?? null,

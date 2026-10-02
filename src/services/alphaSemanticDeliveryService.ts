@@ -1,3 +1,4 @@
+import { recordCompactAlert } from './compactAlertOutcomes.js';
 import { recordRecoveryAlertAudit } from './recoveryAlertAudit.js';
 import { getDeliverableUsers, markTelegramUserBlocked, type DeliverableUser } from '../core/delivery.js';
 import { accessProfileForUser, hasCapability } from '../product/capabilities.js';
@@ -186,7 +187,7 @@ export async function deliverAlphaSemanticEvent(args: {
   });
   const renderedCharacters = deliveryMessage.length;
   const renderedBytes = Buffer.byteLength(deliveryMessage, 'utf8');
-  let delivered = 0; let failed = 0;
+  let delivered = 0; let failed = 0; let accepted = 0;
   for (const user of users) {
     if (!hasCapability(accessProfileForUser(user), 'opportunities.realtime')) continue;
     try {
@@ -197,7 +198,7 @@ export async function deliverAlphaSemanticEvent(args: {
         if (!claimEphemeralDelivery(args.event, user)) continue;
         try {
           const sendResult = await dependencies.send(user.telegram_id, deliveryMessage, args.buttons);
-          delivered += 1;
+          delivered += 1; accepted += 1;
           args.onTelegramAccepted?.(user);
           console.log('[AlphaSemanticDelivery] Ephemeral Telegram accepted during DB outage.', {
             eventIdentity: args.event.eventIdentity,
@@ -230,7 +231,7 @@ export async function deliverAlphaSemanticEvent(args: {
           Number.isFinite(Number(sendResult)) ? Number(sendResult) : null),
         release: () => dependencies.release(args.event, user, leaseToken),
       });
-      if (result.sent) args.onTelegramAccepted?.(user);
+      if (result.sent) { accepted += 1; args.onTelegramAccepted?.(user); }
       if (result.recorded) { delivered += 1; continue; }
       failed += 1;
       args.onRecipientFailure?.(user, result.error, result.sent ? 'delivery_completion' : 'telegram_send');
@@ -253,5 +254,11 @@ export async function deliverAlphaSemanticEvent(args: {
     }
   }
   if (ephemeralMode && delivered > 0) void recordRecoveryAlertAudit(args.event, delivered);
+  if (dependencies === productionDependencies && isPositiveSemanticEvent(args.event.type)) {
+    const raw = args.event.rawSnapshot ?? getEphemeralSemanticEventEvidence(args.event.eventIdentity) ?? {};
+    void recordCompactAlert({chain:args.event.chain, token:args.event.assetId, feed:args.event.type,
+      price:raw.price as number | null, marketCap:raw.marketCap as number | null,
+      liquidity:raw.liquidity as number | null, pair:raw.pairAddress as string | null}, accepted);
+  }
   return { delivered, failed };
 }

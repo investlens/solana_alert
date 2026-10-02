@@ -1,3 +1,4 @@
+import { recordCompactAlert } from '../../services/compactAlertOutcomes.js';
 import { recordLaunchSocialEligibility } from './alertEligibilityState.js';
 import { buildAlphaosAlertCard } from '../../ui/alphaosAlertCard.js';
 import { sendAlphaosPhotoAlert, alphaosEnrichmentEdit, type AlphaosDelivery } from '../../ui/alphaosPhotoDelivery.js';
@@ -260,8 +261,9 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
     market: Awaited<ReturnType<typeof getRobinhoodMarketSnapshot>> | null;
     metadata: Awaited<ReturnType<typeof getRobinhoodTokenMetadata>> | null;
     dev: Awaited<ReturnType<typeof scanRobinhoodDevTokenFlow>> | null;
+    curveRatio: number | null;
     curve: Awaited<ReturnType<typeof resolvePonsV2PreIndexValuation>> | null;
-  } = { market: null, metadata: earlyMetadata, dev: null, curve: null };
+  } = { market: null, metadata: earlyMetadata, dev: null, curve: null, curveRatio: null };
   let creatorHolding: number | null = null;
   let telegramType: TelegramPreviewType = 'Type unverified';
   const supplemental = Promise.all([
@@ -273,8 +275,11 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
     (earlyMetadata ? Promise.resolve(earlyMetadata) : getRobinhoodTokenMetadata(token, { signal: AbortSignal.timeout(8_000) }).catch(() => null)).then(value => partial.metadata = value),
     scanRobinhoodDevTokenFlow(token, launch.deployer_address).catch(() => null).then(value => partial.dev = value),
     launch.protocol_version.startsWith('v2') && launch.curve_address
-      ? getPonsV2CurveState(launch.curve_address).then(state => state.tokenAddress.toLowerCase() === token
-        ? resolvePonsV2PreIndexValuation(state) : null).catch(() => null).then(value => partial.curve = value)
+      ? getPonsV2CurveState(launch.curve_address).then(state => {
+        if (state.tokenAddress.toLowerCase() !== token) return null;
+        if (state.nativeQuote && state.quoteReserve > 0n && state.tokenReserve > 0n) partial.curveRatio = Number(state.quoteReserve) / Number(state.tokenReserve);
+        return resolvePonsV2PreIndexValuation(state);
+      }).catch(() => null).then(value => partial.curve = value)
       : Promise.resolve(null),
   ]).then(async values => { await supplemental; return values; });
   const render = (values: Awaited<typeof work> | null) => {
@@ -309,6 +314,9 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
       console.warn('[AlphaosCard] rendering unavailable; using text alert'); return null;
     });
   const chats = await recipients();
+  const baseline = partial.market?.priceUsd && partial.market?.pairAddress
+    ? {price:partial.market.priceUsd, pair:partial.market.pairAddress, unit:'USD' as const, marketCap:partial.market.marketCapUsd, liquidity:partial.market.liquidityUsd}
+    : {price:partial.curveRatio, pair:launch.curve_address, unit:'ETH_RESERVE_RATIO' as const};
   const results = await Promise.allSettled(chats.map(chatId => sendTelegram({
     chatId, text, tokenAddress: token, launchpad, socials, image,
   })));
@@ -326,6 +334,7 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
     }));
   }).catch(error => console.warn('[SocialMafia] late enrichment unavailable', String(error)));
   const delivered = results.filter(result => result.status === 'fulfilled' && result.value != null).length;
+  void recordCompactAlert({chain:'robinhood', token, feed:route, ...baseline, creator:launch.deployer_address, creatorSource:'PONS_FACTORY_EVENT'}, delivered);
   const failed = results.length - delivered;
   const admin = String(process.env.ADMIN_TELEGRAM_ID ?? process.env.OWNER_CHAT_ID ?? '').trim();
   const adminResult = results[chats.indexOf(admin)];

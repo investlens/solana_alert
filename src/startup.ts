@@ -118,14 +118,14 @@ if (!enabled('ADMIN_TRADING_ENABLED', false)) {
   const tasks: Promise<unknown>[] = [];
 
   if (process.env.DB_BACKGROUND_WORK_ENABLED === 'true') {
-    startOutcomeTracker();
+    if (process.env.ALPHA_COMPACT_OUTCOMES_ENABLED === 'false') startOutcomeTracker();
     startAnalyticsSummary();
     startNotificationService();
     startOpportunityDeliveryService();
   } else console.log('[Recovery] DB background services disabled.');
 
   if (process.env.OPPORTUNITY_FRESHNESS_ENABLED === 'true') startOpportunityFreshnessService();
-  if (process.env.ALPHA_OUTCOME_CHECKPOINT_ENABLED === 'true') startAlphaOutcomeCheckpointService();
+  if (process.env.ALPHA_OUTCOME_CHECKPOINT_ENABLED === 'true' && process.env.ALPHA_COMPACT_OUTCOMES_ENABLED === 'false') startAlphaOutcomeCheckpointService();
   if (process.env.LIVE_TRACK_WORKER_ENABLED === 'true') startLiveTrackService();
   if (process.env.PONS_SHADOW_ENABLED === 'true') {
     startPonsShadowServices(config.ponsShadowEnabled, { startSniper: startPonsShadowSniper, startTracker: startPonsShadowOutcomeTracker });
@@ -137,12 +137,12 @@ if (!enabled('ADMIN_TRADING_ENABLED', false)) {
   if (process.env.WALLET_WATCH_ENABLED === 'true') tasks.push(startWalletWatch());
   if (process.env.PUMPFUN_WATCH_ENABLED === 'true') tasks.push(startPumpfunWatch());
   if (process.env.ROBINHOOD_ONCHAIN_DISCOVERY_ENABLED === 'true') tasks.push(startRobinhoodObserver());
-  if (process.env.ROBINHOOD_OUTCOME_TRACKER_ENABLED === 'true') tasks.push(startRobinhoodOutcomeTracker());
+  if (process.env.ROBINHOOD_OUTCOME_TRACKER_ENABLED === 'true' && process.env.ALPHA_COMPACT_OUTCOMES_ENABLED === 'false') tasks.push(startRobinhoodOutcomeTracker());
   if (process.env.EXISTING_TOKEN_SCANNER_ENABLED === 'true') tasks.push(startExistingTokenOpportunityScanner());
   if (process.env.ROBINHOOD_PONS_AGGREGATOR_ENABLED === 'true') tasks.push(startRobinhoodBoostObserver());
   if (process.env.ROBINHOOD_CREATOR_INTELLIGENCE_ENABLED === 'true') tasks.push(startRobinhoodCreatorIntelligenceLoop());
   if (process.env.MEMORY_TRACKER_ENABLED === 'true') tasks.push(startMemoryTracker());
-  if (process.env.OUTCOME_CHECKPOINT_ENABLED === 'true') tasks.push(startOutcomeCheckpointAgent());
+  if (process.env.OUTCOME_CHECKPOINT_ENABLED === 'true' && process.env.ALPHA_COMPACT_OUTCOMES_ENABLED === 'false') tasks.push(startOutcomeCheckpointAgent());
   if (process.env.ADMIN_TRADING_ENABLED === 'true') tasks.push(startPositionProtectionLoop());
 
   // Telegram polling is already supervised by startup.ts; do not start a duplicate here.

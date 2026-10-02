@@ -1,3 +1,4 @@
+import { recordCompactAlert, type CompactAlertBaseline } from '../../services/compactAlertOutcomes.js';
 import { sendAlphaosPhotoAlert } from '../../ui/alphaosPhotoDelivery.js';
 import { decodeFunctionResult, encodeFunctionData, parseAbi } from 'viem';
 import type { PonsLaunch } from './ponsHistoricalLaunchScanner.js';
@@ -158,7 +159,7 @@ function refreshRecipientsInBackground(): void {
   })();
 }
 
-async function sendTelegram(chatId: string, text: string, tokenAddress: string, socials?: RobinhoodTokenSocials, preBond = false, setupControls = false): Promise<void> {
+async function sendTelegram(chatId: string, text: string, tokenAddress: string, socials?: RobinhoodTokenSocials, preBond = false, setupControls = false, baseline?: CompactAlertBaseline): Promise<void> {
   const botToken = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
   if (!botToken || !chatId) throw new Error('missing Telegram configuration');
   if (setupControls) {
@@ -194,7 +195,7 @@ async function sendTelegram(chatId: string, text: string, tokenAddress: string, 
   if (!res.ok) throw new Error(`Telegram ${res.status}: ${await res.text().catch(() => '')}`);
 }
 
-export async function directTelegramRecipients(text: string, tokenAddress: string, socials?: RobinhoodTokenSocials, preBond = false, setupControls = false): Promise<{ delivered: number; failed: number }> {
+export async function directTelegramRecipients(text: string, tokenAddress: string, socials?: RobinhoodTokenSocials, preBond = false, setupControls = false, baseline?: CompactAlertBaseline): Promise<{ delivered: number; failed: number }> {
   ensureAdminRecipient();
   refreshRecipientsInBackground();
   if (setupControls && recipientRefreshInFlight) {
@@ -215,6 +216,7 @@ export async function directTelegramRecipients(text: string, tokenAddress: strin
     console.warn(`[PonsFastLane] TELEGRAM_FAILED token=${tokenAddress} recipient=${recipients[index]} reason=${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
   });
   if (delivered === 0) throw new Error(`Telegram delivery failed for all ${failed} recipients`);
+  if (baseline) void recordCompactAlert(baseline, delivered);
   return { delivered, failed };
 }
 
@@ -328,7 +330,7 @@ function schedulePreIndexRecheck(launch: PonsLaunch): void {
               '<i>Market/dump risk still applies · AlphaOS</i>',
             ].join('\n');
             const socials = await getRobinhoodTokenSocials(token);
-            const delivery = await directTelegramRecipients(text, token, socials, true);
+            const delivery = await directTelegramRecipients(text, token, socials, true, false, {chain:'robinhood', token, feed:'PONS_CURVE_MOMENTUM', price:Number(second.quoteReserve)/Number(second.tokenReserve), pair:launch.curve_address, unit:'ETH_RESERVE_RATIO', creator:launch.deployer_address, creatorSource:'PONS_FACTORY_EVENT'});
             preIndexAlerted.add(token);
             console.log(`[PonsFastLane] MATURE_CURVE_ALERT_SENT token=${token} ageMin=${ageMin} quoteGrowthPct=${quoteGrowthPct.toFixed(2)} delivered=${delivery.delivered} failed=${delivery.failed}`);
           } finally {
@@ -442,7 +444,7 @@ async function evaluate(launch: PonsLaunch): Promise<void> {
     '<i>AlphaOS · Find. Analyse. Trade Smarter.</i>',
   ].join('\n');
   const socials = await getRobinhoodTokenSocials(tokenAddress);
-  const delivery = await directTelegramRecipients(text, tokenAddress, socials);
+  const delivery = await directTelegramRecipients(text, tokenAddress, socials, false, false, {chain:'robinhood', token:tokenAddress, feed:'PONS_MOMENTUM', price:second.result.currentPrice, pair:second.pair.pairAddress, liquidity:second.result.liquidityUsd});
   console.log(`[PonsFastLane] ALERT_SENT token=${tokenAddress} bucket=${secondBucket} score=${second.result.score} delivered=${delivery.delivered} failed=${delivery.failed}`);
 }
 
@@ -531,7 +533,7 @@ async function sendLeanFollowupAlert(kind: 'OPPORTUNITY' | 'REVERSAL', item: Lea
     '<i>AlphaOS · Find. Analyse. Trade Smarter.</i>',
   ].join('\n');
   const socials = await getRobinhoodTokenSocials(item.token);
-  const delivery = await directTelegramRecipients(text, item.token, socials);
+  const delivery = await directTelegramRecipients(text, item.token, socials, false, false, {chain:'robinhood', token:item.token, feed:'PONS_'+kind, price:result.currentPrice, pair:pair.pairAddress, liquidity:result.liquidityUsd});
   console.log(`[PonsLeanFollowup] ${kind}_ALERT_SENT token=${item.token} bucket=${currentBucket} score=${result.score} delivered=${delivery.delivered} failed=${delivery.failed}`);
 }
 
