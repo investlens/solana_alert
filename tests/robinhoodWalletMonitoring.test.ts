@@ -156,9 +156,9 @@ test('Robinhood wallet alert preserves verified market/FDV context and safe acti
     chartSource: 'dexscreener', tokenSource: 'blockscout',
   });
   assert.deepEqual(actions.map(row => row.map(action => action.text)), [
-    ['🔬 Full Intel', '📊 Chart'], ['📋 Copy CA'], ['🐋 Wallet Activity'],
+    ['📊 Chart', '🧠 Full Intel'], ['🐋 Wallet', '📋 Copy CA'],
   ]);
-  assert.equal(actions[1][0].callback_data, `COPY_CA_${token}`);
+  assert.equal(actions[1][1].callback_data, `COPY_CA_${token}`);
   assert.equal(actions.flat().some(action => action.text.includes('Trade')), false);
   for (const action of actions.flat()) if (action.callback_data) {
     assert.ok(Buffer.byteLength(action.callback_data, 'utf8') <= 64);
@@ -173,12 +173,12 @@ test('pre-index wallet activity uses verified FDV and never fabricates Chart', (
     preIndexValuation: verifiedPreIndexFdv(),
   } as WalletWatchEvent;
   const message = buildWalletActivityMessage({ event, label: 'Watch <One>' });
-  assert.match(message, /FDV\s+<b>\$4\.58K<\/b>/);
+  assert.match(message, /FDV\s+<b>\$4\.6K<\/b>/);
   assert.doesNotMatch(message, /Market cap|Liquidity/);
   const actions = buildWalletActivityButtons(event, {
     tokenUrl: `https://robinhoodchain.blockscout.com/token/${token}`, tokenSource: 'blockscout',
   });
-  assert.deepEqual(actions[0].map(action => action.text), ['🔬 Full Intel']);
+  assert.deepEqual(actions[0].map(action => action.text), ['🔎 Token', '🧠 Full Intel']);
 });
 
 test('network model, selection UX, watcher isolation and durable per-network cursor are explicit', async () => {
@@ -219,7 +219,7 @@ test('saved generic EVM upgrade is explicit, confirmed, idempotent and narrowly 
 
   const watcher = await readFile(new URL('../src/chains/robinhood/robinhoodWalletWatcher.ts', import.meta.url), 'utf8');
   assert.match(watcher, /initializeRobinhoodWalletCursorAtCurrentBlock/);
-  assert.match(watcher, /getBlockNumber\(\)[\s\S]*ignoreDuplicates: true/);
+  assert.match(watcher, /getRobinhoodBlockNumberResilient\(\)[\s\S]*ignoreDuplicates: true/);
 });
 
 test('exact transaction diagnostic bypasses lookback without weakening the scan cap', async () => {

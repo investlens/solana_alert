@@ -24,8 +24,8 @@ test('DEX Paid and BOOST render only verified lightweight context with truthful 
 
   const boost = buildPremiumTokenNotification({ ...base, state: 'BOOST', boostTotal: 200, boostIncrement: 100,
     market: normalizeNotificationMarketContext({ fdv: 126_000 }) });
-  assert.match(boost, /FDV <b>\$126\.0K<\/b>/); assert.doesNotMatch(boost, /Market cap/);
-  assert.match(boost, /Boost <b>200 total \(\+100\)<\/b>/);
+  assert.match(boost, /<b>FDV<\/b>\s+\$126\.0K/); assert.doesNotMatch(boost, /Market cap/);
+  assert.match(boost, /<b>Boost<\/b>\s+200 total \(\+100\)/);
 });
 
 test('missing or failed optional context remains clean and cannot block base informational rendering', () => {

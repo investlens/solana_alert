@@ -1,3 +1,4 @@
+import { recordRecoveryAlertAudit } from './recoveryAlertAudit.js';
 import { getDeliverableUsers, markTelegramUserBlocked, type DeliverableUser } from '../core/delivery.js';
 import { accessProfileForUser, hasCapability } from '../product/capabilities.js';
 import { evaluateDexPaidAlertSafety } from '../chains/robinhood/security/dexPaidAlertSafetyGate.js';
@@ -251,5 +252,6 @@ export async function deliverAlphaSemanticEvent(args: {
         reason: error instanceof Error ? error.message : String(error) });
     }
   }
+  if (ephemeralMode && delivered > 0) void recordRecoveryAlertAudit(args.event, delivered);
   return { delivered, failed };
 }

@@ -26,6 +26,7 @@ export const DOCUMENTED_ACTIVE_TELEGRAM_SEND_SOURCES = [
   'main.ts',
   'bot/commands.ts',
   'chains/robinhood/ponsNormalAlertFastLane.ts',
+  'chains/robinhood/ponsSocialMafiaAlert.ts',
   'core/autoTradeManager.ts',
   'engines/dexPaidEngine.ts',
   'engines/whaleClusterEngine.ts',

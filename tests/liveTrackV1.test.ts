@@ -165,7 +165,7 @@ test('Stop, Extend, restart recovery and provider governance are wired without t
 test('BOOST metadata uses complete cached identity, truthful fallback and late safe edit', async () => {
   assert.deepEqual(mergeBoostMetadata({ symbol: 'AAA' }, { name: 'Alpha', symbol: 'OLD' }),
     { name: 'Alpha', symbol: 'AAA', source: null });
-  assert.match(boostMetadataFallback('0x1111111111111111111111111111111111111111').symbol!, /^0x111111…111111$/);
+  assert.equal(boostMetadataFallback('0x1111111111111111111111111111111111111111').symbol, null);
   const [boost, resolver, delivery] = await Promise.all([
     readFile(new URL('../src/chains/robinhood/robinhoodBoostObserver.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/chains/robinhood/boostMetadataResolver.ts', import.meta.url), 'utf8'),

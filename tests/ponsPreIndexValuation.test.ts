@@ -91,7 +91,7 @@ test('V2 verified curve price and quote/USD render FDV without relabeling it', a
   assert.match(message, /FDV\s+<b>\$60\.0K<\/b>/);
   assert.doesNotMatch(message, /Market cap/);
   assert.doesNotMatch(message, /Market\s+<b>INDEXING<\/b>/);
-  assert.match(message, /Dev:<\/b> Holds 2\.4%/);
+  assert.match(message, /Dev holds 2\.4%/);
   assert.doesNotMatch(message, /Dev:<\/b>[^\n]*Burned/);
 });
 

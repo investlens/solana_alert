@@ -198,7 +198,7 @@ test('opportunity specialist zeroes require explicit meaningful confirmation', a
     transferZeroConfirmedMeaningful: true,
   }));
   assert.doesNotMatch(confirmed, /Transferred/);
-  assert.match(confirmed, /Dev:<\/b> Holds 0%/);
+  assert.match(confirmed, /Dev holds 0%/);
   assert.doesNotMatch(confirmed, /Dev:<\/b>[^\n]*Burned/);
 });
 
@@ -267,7 +267,7 @@ test('metadata failure safely leaves Exit address-only', async () => {
   });
   assert.equal(resolved.rawData.symbol, undefined);
   const { buildOpportunityMessage } = await service();
-  assert.match(buildOpportunityMessage(exit), /RISK ACTION[\s\S]*0xa091…36e9d<\/b>[\s\S]*ACTION: EXIT/);
+  assert.match(buildOpportunityMessage(exit), /RISK EXIT ALERT[\s\S]*0xa091…36e9d<\/b>[\s\S]*ACTION: EXIT/);
 });
 
 test('persisted lifecycle identity prevents unnecessary metadata fallback', async () => {

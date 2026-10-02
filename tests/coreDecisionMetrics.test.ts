@@ -26,11 +26,8 @@ test('core decision metrics render verified values including measured zero', () 
   ]);
 });
 
-test('unknown and absent decision metrics stay visible as unverified', () => {
-  const expected = [
-    { label: 'Dev holding', value: 'UNVERIFIED' },
-    { label: 'Burned', value: 'UNVERIFIED' },
-  ];
+test('unknown and absent decision metrics are omitted without manufacturing zero', () => {
+  const expected: Array<{label:string;value:string}> = [];
   const unknown = normalizeCoreDecisionMetrics({ devHoldingPercent: 0, totalBurnPercent: 0 });
   assert.deepEqual(coreDecisionEvidenceMetrics(unknown), expected);
   const absent = normalizeCoreDecisionMetrics({ devHoldingPercent: null, totalBurnPercent: null });
