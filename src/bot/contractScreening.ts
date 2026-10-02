@@ -1,3 +1,4 @@
+import { readResearchTokenSupply, formatResearchSupply, type ResearchTokenSupply } from '../services/researchTokenSupply.js';
 import { extractAutomaticSocials } from '../ui/alphaNotificationActions.js';
 import type { Telegraf } from 'telegraf';
 import { fetchRobinhoodPairs, chooseBestRobinhoodPair, verifiedRobinhoodChartUrl, type DexScreenerPair } from '../chains/robinhood/market.js';
@@ -20,7 +21,7 @@ export function extractScanContract(text: string): string | null {
   const addresses = text.match(/(?<![A-Za-z0-9])0x[a-fA-F0-9]{40}(?![A-Za-z0-9])/g) ?? [];
   return addresses.length === 1 ? addresses[0].toLowerCase() : null;
 }
-export function renderContractScreen(token: string, pair: DexScreenerPair | null, pons?: PonsPublicContext | null, creatorBalance?: number | null, chainLabel = 'Robinchain'): string {
+export function renderContractScreen(token: string, pair: DexScreenerPair | null, pons?: PonsPublicContext | null, creatorBalance?: number | null, chainLabel = 'Robinchain', supply?: ResearchTokenSupply | null): string {
   const curveMarket = pons?.phase === 0 && pons.venue === 'curve';
   // A side pool is not the active launchpad market. Never mix its valuation,
   // liquidity, volume, trades or age into a pre-bond PONS report.
@@ -34,6 +35,7 @@ export function renderContractScreen(token: string, pair: DexScreenerPair | null
     const supply = Number(pons.totalSupplyRaw) / 10 ** pons.decimals;
     if (Number.isFinite(supply) && supply > 0) rows.push(`Total supply  <b>${supply.toLocaleString('en-US', { maximumFractionDigits: 2 })}</b>`);
   }
+  if (!pons && supply) rows.push(`Total supply  <b>${escape(formatResearchSupply(supply))}</b> · On-chain`);
   for (const [label, value] of [['Vol · 24h', pair?.volume?.h24]] as const) {
     const n = number(value); if (n != null) rows.push(`${label}  <b>${usd(n)}</b>`);
   }
@@ -100,7 +102,8 @@ export async function getRobinhoodContractReport(token: string, refresh = false)
     const curveMarket = pons?.phase === 0 && pons.venue === 'curve';
     const pair = curveMarket ? null : dexPair;
     const creatorBalance = pons ? await getScreenCreatorBalance(token, pons.creator) : null;
-    const text = renderContractScreen(token, pair, pons, creatorBalance);
+    const supply = !pons && pair ? await readResearchTokenSupply(token, 'robinhood') : null;
+    const text = renderContractScreen(token, pair, pons, creatorBalance, 'Robinchain', supply);
     const image = await buildAlphaosAlertCard({ title: pair?.baseToken?.symbol || pons?.symbol ? undefined : 'Contract research', symbol: pair?.baseToken?.symbol || pons?.symbol, name: pair?.baseToken?.name || pons?.name, logo: pons?.logo,
       category: 'CONTRACT SCREEN', chainLabel: 'ROBINCHAIN', badge: curveMarket ? 'PONS PRE-BOND' : !pair && pons ? 'PONS SNAPSHOT' : 'MARKET SNAPSHOT', footer: 'Requested contract research · Sourced market snapshot' });
     const result = { text, image, chart: curveMarket ? `https://www.ponsfamily.com/launchpad/${token}` : pair ? verifiedRobinhoodChartUrl(pair) : undefined };

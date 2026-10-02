@@ -84,3 +84,12 @@ test('refresh edits original photo and never sends another report even when edit
   await action(context(9001, false)); await action(context(9002, true));
   assert.equal(edits, 2); assert.equal(sends, 0); assert.deepEqual(refreshes, [true, true]);
 });
+
+test('requested non-PONS supply is on-chain labelled without inventing circulating market cap', () => {
+  const text = renderContractScreen(token, { baseToken: { name: 'Token', symbol: 'TEST' }, fdv: 10000 }, null, null, 'ARC', {
+    totalSupplyRaw: 1000000n * 10n ** 18n, decimals: 18, blockNumber: 123n, checkedAt: '2026-10-02T11:30:00Z',
+  });
+  assert.match(text, /Total supply.*1,000,000.*On-chain/);
+  assert.doesNotMatch(text, /MC  |ATH/);
+  assert.ok(text.length <= 1024);
+});

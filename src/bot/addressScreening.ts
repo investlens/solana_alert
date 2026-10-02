@@ -1,3 +1,4 @@
+import { readResearchTokenSupply } from '../services/researchTokenSupply.js';
 import { createGroupResearchSettings } from '../services/groupResearchSettings.js';
 import type { Telegraf } from 'telegraf';
 import { extractScanContract, getRobinhoodContractReport, renderContractScreen } from './contractScreening.js';
@@ -80,7 +81,8 @@ export async function getAddressScreen(address: string, chain?: ResearchChain | 
     }
     if (!pair && !pons && account?.kind === 'unknown') return { choices: [selected], reason: 'Live lookup is unavailable. Retry the selected chain shortly.' };
     if (selected === 'robinhood') return { ...await getRobinhoodContractReport(address, fresh), chain: selected, wallet: false };
-    const text = renderContractScreen(address, pair, null, null, config.label);
+    const supply = pair ? await readResearchTokenSupply(address, selected) : null;
+    const text = renderContractScreen(address, pair, null, null, config.label, supply);
     const chart = pair?.pairAddress && /^0x[a-fA-F0-9]{40}$/.test(pair.pairAddress) ? `https://dexscreener.com/arc/${pair.pairAddress}` : undefined;
     return { chain: selected, wallet: false, text, chart, image: await buildAlphaosAlertCard({ title: pair?.baseToken?.symbol ? undefined : 'Contract research', symbol: pair?.baseToken?.symbol,
       name: pair?.baseToken?.name, category: 'CONTRACT SCREEN', chainLabel: 'ARC', badge: 'MARKET SNAPSHOT', footer: 'Requested contract research · Safety not assessed' }) };
