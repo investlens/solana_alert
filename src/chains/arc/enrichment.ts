@@ -56,7 +56,8 @@ export async function enrichArcCandidate(candidate: ArcLaunchCandidate): Promise
 
 async function readArcCandidate(candidate: ArcLaunchCandidate): Promise<ArcTokenEnrichment> {
   const reasons: string[] = [];
-  const bytecode = await getArcBytecode(candidate.assetId).catch(() => undefined);
+  let codeReadFailed = false;
+  const bytecode = await getArcBytecode(candidate.assetId).catch(() => { codeReadFailed = true; return undefined; });
   const contractCodePresent = Boolean(bytecode && bytecode !== '0x');
 
   // Fail closed before any ERC-20 eth_call. A transfer/log can contain an
@@ -65,7 +66,9 @@ async function readArcCandidate(candidate: ArcLaunchCandidate): Promise<ArcToken
   // data and used to count as RPC-provider failures, eventually cooling down a
   // healthy provider and starving unrelated ARC candidates/burn verification.
   if (!contractCodePresent) {
-    reasons.push(bytecode === undefined ? 'CONTRACT_CODE_UNAVAILABLE' : 'NO_CONTRACT_CODE');
+    // viem also returns undefined for an actual empty-code account. Only a
+    // rejected RPC request warrants a temporary retry.
+    reasons.push(codeReadFailed ? 'CONTRACT_CODE_UNAVAILABLE' : 'NO_CONTRACT_CODE');
     return {
       ...candidate,
       contractCodePresent: false,
