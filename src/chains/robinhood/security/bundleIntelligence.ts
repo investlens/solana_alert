@@ -1,3 +1,4 @@
+import { robinhoodExplorerJson } from '../../../services/robinhoodExplorerProvider.js';
 import { getAddress, type Address } from 'viem';
 import { getPonsLaunchState } from '../ponsLaunchState.js';
 import { getRobinhoodTokenMetadata } from '../tokenMetadata.js';
@@ -84,10 +85,7 @@ async function fetchHolderShares(
   const timeout = setTimeout(() => controller.abort(), 2_750);
   let response: Response;
   try {
-    response = await fetch(`${BLOCKSCOUT_BASE}/api/v2/tokens/${tokenAddress}/holders`, {
-      headers: { Accept: 'application/json' },
-      signal: controller.signal,
-    });
+    response = await robinhoodExplorerJson.response(`/tokens/${tokenAddress}/holders`, controller.signal);
   } finally {
     clearTimeout(timeout);
   }

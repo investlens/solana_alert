@@ -1,3 +1,4 @@
+import { robinhoodExplorerJson } from '../../../services/robinhoodExplorerProvider.js';
 import {
   getAddress,
   type Address,
@@ -203,17 +204,7 @@ export async function scanRobinhoodHolderRisk(
     ? AbortSignal.any([options.signal, timeoutController.signal])
     : timeoutController.signal;
   try {
-    response =
-      await fetch(
-        url,
-        {
-          headers: {
-            Accept:
-              'application/json',
-          },
-          signal,
-        },
-      );
+    response = await robinhoodExplorerJson.response(`/tokens/${address}/holders`, signal);
   } catch (error) {
     return {
       tokenAddress:
