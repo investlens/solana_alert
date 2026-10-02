@@ -33,6 +33,8 @@ export function mainAlphaMenu(access: AccessProfile) {
     ],
   );
 
+  rows.push([Markup.button.callback('📖 How to Use', 'WELCOME_HELP'), Markup.button.callback('🔎 Scan', 'WELCOME_SCAN')]);
+
   if (hasCapability(access, 'trading.admin')) {
     rows.push([Markup.button.callback('👑 Admin', 'ADMIN_TERMINAL_REFRESH')]);
   }

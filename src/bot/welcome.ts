@@ -1,0 +1,59 @@
+import { Markup } from 'telegraf';
+
+export const alphaosWelcomeText = [
+  '<b>Welcome to AlphaOS 🔎</b>',
+  '<i>Crypto research, made easier.</i>', '',
+  'Screen tokens and wallets, explore creator information, and receive launch and market alerts.', '',
+  '<b>Get started</b>',
+  '🔎 Send /scan &lt;address&gt; — Robinchain or ARC.',
+  '👤 Use /scan wallet &lt;address&gt; for wallet research.',
+  '⚙️ Alert Preferences — choose available feeds.',
+  '👥 Add to Group — enable contract screening.', '',
+  'Open <b>How to Use</b> for alert meanings and group setup.',
+  '<i>Data varies by chain. Missing data is not a passed check. Research only; safety and returns are not guaranteed.</i>',
+].join('\n');
+
+export const alphaosScanGuide = [
+  '<b>🔎 Screen a token or wallet</b>', '',
+  'Send <code>/scan &lt;contract address&gt;</code> or paste one address in private chat.',
+  'For a wallet, send <code>/scan wallet &lt;wallet address&gt;</code>.', '',
+  'Supported here: <b>Robinchain and ARC</b>. If an address exists on both chains, choose the chain shown by the bot.',
+  'Available research may include price, MC or FDV, liquidity, volume, socials, creator balance and observed launch history.',
+  'MC and FDV are different. Unavailable history does not mean the creator has never launched a token.', '',
+  'Use Refresh for an updated snapshot. Creator links open wallet research.',
+  '<i>Coverage is partial. Missing data is not a safety check.</i>',
+].join('\n');
+
+export const alphaosGroupGuide = [
+  '<b>👥 Use AlphaOS in your group</b>', '',
+  '1. Add AlphaOS using the button below.',
+  '2. A group administrator sends <code>/scan_on</code>.',
+  '3. Members send <code>/scan@YourBotUsername &lt;address&gt;</code>, replacing YourBotUsername with this bot’s username.',
+  'For automatic screening of pasted addresses, make AlphaOS a group administrator so it can receive ordinary messages.',
+  'Use <code>/scan_off</code> to disable automatic screening.', '',
+  'Group members receive requested research in the group. Personal alert feeds and preferences stay in private chats; each user must open the bot and tap Start.',
+].join('\n');
+
+export const alphaosUsageGuide = [
+  '<b>📖 AlphaOS · How to Use</b>', '',
+  '<b>Screen</b> — /scan &lt;contract address&gt; for token research; /scan wallet &lt;address&gt; for wallet research. Robinchain and ARC are supported in this flow.', '',
+  '<b>Choose alerts</b> — Alert Preferences opens available strategy controls. Availability depends on access and active feeds.', '',
+  '<b>What the alerts mean</b>',
+  '⚡ <b>Boost</b> — additional token promotion; promotion does not establish quality.',
+  '🕶 <b>Social Mafia</b> — verified launchpad origin and contract publication passes social confirmation. Ownership and safety remain unverified.',
+  '🔎 <b>Protocol Discovery</b> — PONS projects named Protocol/Protocols with X and Telegram links. Social ownership is unverified.',
+  '📊 <b>Trade Setup Watch</b> — a monitored token meets configured market conditions; a research setup, not an instruction to buy.', '',
+  '<b>Groups</b> — an admin enables /scan_on. Open Add to Group for instructions.',
+  '<b>Help</b> — reopen this guide anytime with /help or How to Use on Home.', '',
+  '<i>Missing data is not a passed check. AlphaOS does not guarantee legitimacy, safety or profits.</i>',
+].join('\n');
+
+export function alphaosWelcomeKeyboard(username?: string) {
+  const invite = /^[A-Za-z0-9_]{5,32}$/.test(username ?? '') ? `https://t.me/${username}?startgroup=true` : null;
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('🔎 Scan', 'WELCOME_SCAN'), Markup.button.callback('⚙️ Alert Preferences', 'STRATEGY_SETTINGS')],
+    [Markup.button.callback('📖 How to Use', 'WELCOME_HELP'), Markup.button.callback('👥 Group Setup', 'WELCOME_GROUP')],
+    ...(invite ? [[Markup.button.url('➕ Add to Group', invite)]] : []),
+    [Markup.button.callback('⌂ Home', 'MAIN_MENU')],
+  ]);
+}
