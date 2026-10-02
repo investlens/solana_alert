@@ -1,3 +1,5 @@
+import { buildAlphaosAlertCard } from '../ui/alphaosAlertCard.js';
+import { sendAlphaosPhotoAlert } from '../ui/alphaosPhotoDelivery.js';
 import { config } from '../config.js';
 import { polishArcTelegramPresentation } from '../chains/arc/telegramPresentation.js';
 
@@ -72,6 +74,18 @@ async function sendTelegramRequest(chatId: string, text: string, buttons?: Inlin
     return null;
   }
 
+  // Only bounded market cards become photos; interactive screens stay as text.
+  // Images exist in memory only. The caption stays within Telegram's limit.
+  const category = text.match(/(?:BOOST DETECTED|BOOST INCREASED|MAX BOOST 500\+|ARC OPPORTUNITY|TRADE SETUP WATCH|SUPPLY BURN|SOCIAL MAFIA ALERT)/)?.[0];
+  if (category && text.length <= 1024) {
+    const ticker = text.match(/<b>\$([A-Za-z_][A-Za-z0-9_]{0,23})\b/)?.[1];
+    const image = await buildAlphaosAlertCard({ symbol: ticker, category,
+      chainLabel: /ARC OPPORTUNITY/.test(category) ? 'ARC' : 'ALPHAOS / TOKEN RESEARCH',
+      badge: 'INFORMATION / DYOR', footer: 'Promotion and market activity do not establish token safety.' }).catch(() => null);
+    return (await sendAlphaosPhotoAlert({ botToken: config.botToken, chatId, text,
+      keyboard: buttons ?? [], image })).messageId;
+  }
+
   const res = await fetch(`https://api.telegram.org/bot${config.botToken}/sendMessage`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -114,6 +128,17 @@ export async function editTelegramMessage(chatId: string, messageId: number, tex
   if (!res.ok) {
     const bodyText = await res.text().catch(() => '');
     if (res.status === 400 && bodyText.includes('message is not modified')) return;
+    if (res.status === 400 && /there is no text in the message/i.test(bodyText)) {
+      const caption = await fetch(`https://api.telegram.org/bot${config.botToken}/editMessageCaption`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(5_000),
+        body: JSON.stringify({ chat_id: chatId, message_id: messageId, caption: text, parse_mode: 'HTML',
+          reply_markup: { inline_keyboard: buttons ?? [] } }),
+      });
+      if (caption.ok) return;
+      const error = await caption.text().catch(() => '');
+      if (caption.status === 400 && error.includes('message is not modified')) return;
+      throw new Error(`Telegram caption edit failed: ${caption.status}`);
+    }
     throw new Error(`Telegram edit failed: ${res.status} ${bodyText}`);
   }
 }

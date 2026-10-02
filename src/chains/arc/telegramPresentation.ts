@@ -23,7 +23,7 @@ function compactArcOpportunity(text: string): string {
     flow ? `🟢 <b>Buy / sell</b>    ${flow}` : '',
     '',
     '<b>SAFETY</b>',
-    '✅ Core ARC checks passed',
+    'Market checks passed · Contract risks unverified',
     ...warnings.slice(0, 2).map(item => `⚠️ ${item}`),
     '',
     ca ? '<b>CONTRACT</b>' : '',
