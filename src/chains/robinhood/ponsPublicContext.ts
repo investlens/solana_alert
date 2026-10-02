@@ -1,5 +1,6 @@
 import { getPonsFactoryDeployments } from './ponsContracts.js';
-import { encodeFunctionData, parseAbi, type Address } from 'viem';
+import { createPublicClient, http, encodeFunctionData, parseAbi, type Address } from 'viem';
+import { robinhoodChain } from './config.js';
 import { requestRobinhoodRpcResilient } from './rpc.js';
 
 export type TelegramPreviewType = 'Group' | 'Channel' | 'Personal account' | 'Type unverified';
@@ -122,4 +123,33 @@ export async function getVerifiedPonsPublicContext(token: string, factoryAddress
     if (context) return context;
   }
   return null;
+}
+
+// Requested research may display exact-contract website metadata with its source
+// explicitly labelled. This does NOT verify launch provenance or social ownership.
+export async function getReportedPonsPublicContext(token: string): Promise<PonsPublicContext | null> {
+  if (!/^0x[a-fA-F0-9]{40}$/.test(token)) return null;
+  const html = await publicHtml(`https://www.ponsfamily.com/launchpad/${token}`);
+  if (!html) return null;
+  for (const factory of getPonsFactoryDeployments()) {
+    if (!factory.enabled) continue;
+    const context = parsePonsPublicContext(html, token, factory.address);
+    if (context) return context;
+  }
+  return null;
+}
+
+// Interactive scans have a separate hard deadline and no automatic retries.
+// A website-reported creator is an identity claim, not evidence of ownership.
+export async function getScreenCreatorBalance(token: string, creator: string): Promise<number | null> {
+  if (![token, creator].every(value => /^0x[a-fA-F0-9]{40}$/.test(value))) return null;
+  const client = createPublicClient({ chain: robinhoodChain, transport: http(robinhoodChain.rpcUrls.default.http[0], {
+    timeout: 2_000, retryCount: 0, fetchOptions: { signal: AbortSignal.timeout(4_000) },
+  }) });
+  try {
+    const blockNumber = await client.getBlockNumber();
+    const balance = await client.readContract({ address: token as Address, abi, functionName: 'balanceOf', args: [creator as Address], blockNumber, authorizationList: undefined });
+    const supply = await client.readContract({ address: token as Address, abi, functionName: 'totalSupply', blockNumber, authorizationList: undefined });
+    return supply > 0n && balance <= supply ? Number(balance * 1_000_000n / supply) / 10_000 : null;
+  } catch { return null; }
 }

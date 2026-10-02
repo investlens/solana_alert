@@ -28,7 +28,7 @@ test('pre-bond PONS snapshot supplies identity, price and supply without inventi
     decimals: 18, totalSupplyRaw: 1_000_000n * 10n ** 18n, priceUsd: 1e-10, fdvUsd: 0.0001,
     twitter: null, telegram: null });
   assert.match(text, /PONS snapshot · DEX market not indexed/);
-  assert.match(text, /1\.0000e-10/); assert.match(text, /Total supply.*1,000,000/);
+  assert.match(text, /1e-10/); assert.match(text, /Total supply.*1,000,000/);
   assert.doesNotMatch(text, /MC  |LP liquidity|ATH/); assert.ok(text.length <= 1024);
 });
 test('signed hourly change and genuine zero volume remain truthful in a bounded caption', () => {
@@ -37,4 +37,37 @@ test('signed hourly change and genuine zero volume remain truthful in a bounded 
     priceChange: { h1: -25.5 }, txns: { m5: { buys: 0, sells: 1 } } });
   assert.match(text, /Move · 1h.*-25\.50%/); assert.match(text, /Vol · 24h/);
   assert.match(text, /Vol · 5m.*0/); assert.ok(text.length <= 1024);
+});
+
+test('screen formats inactive five-minute data and age without padding or duplicate title', () => {
+  const text = renderContractScreen(token, { priceUsd: '0.000010350', marketCap: 10400,
+    volume: { m5: 0 }, txns: { m5: { buys: 0, sells: 0 } }, pairCreatedAt: Date.now() - 487 * 60_000 });
+  assert.match(text, /Price.*\$0\.00001035<\/b>/);
+  assert.match(text, /Vol · 5m.*\$0<\/b>/);
+  assert.match(text, /No trades reported/);
+  assert.match(text, /8h 7m/);
+  assert.doesNotMatch(text, /ALPHAOS · CONTRACT SCREEN|\$0\.0000<\/b>|487m/);
+});
+
+test('reported creator identity is sourced and real zero balance remains distinct from missing balance', () => {
+  const pons = { name: 'Launch', symbol: 'NEW', creator: token, decimals: 18,
+    totalSupplyRaw: 1_000_000_000n * 10n ** 18n, fdvUsd: null, twitter: null, telegram: null };
+  assert.doesNotMatch(renderContractScreen(token, null, pons), /Creator balance/);
+  const text = renderContractScreen(token, null, pons, 0);
+  assert.match(text, /Creator · PONS page/); assert.match(text, /Creator balance.*0\.00%/);
+  assert.match(text, /risks not assessed/); assert.ok(text.length <= 1024);
+});
+
+test('refresh edits original photo and never sends another report even when edit fails', async () => {
+  const { registerContractScreening } = await import('../src/bot/contractScreening.js');
+  let action: any; let edits = 0; let sends = 0; const refreshes: boolean[] = [];
+  const bot = { command() {}, on() {}, action(_pattern: unknown, handler: any) { action = handler; } };
+  registerContractScreening(bot as any, async (_token, refresh) => {
+    refreshes.push(!!refresh); return { text: 'Updated', image: Buffer.from('png') };
+  });
+  const context = (id: number, fail: boolean) => ({ chat: { id }, match: ['', token],
+    async answerCbQuery() {}, async reply() { sends++; }, async replyWithPhoto() { sends++; },
+    async editMessageMedia(media: any) { edits++; assert.equal(media.caption, 'Updated'); if (fail) throw new Error('timeout'); } });
+  await action(context(9001, false)); await action(context(9002, true));
+  assert.equal(edits, 2); assert.equal(sends, 0); assert.deepEqual(refreshes, [true, true]);
 });
