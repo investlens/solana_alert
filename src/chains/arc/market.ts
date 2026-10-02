@@ -88,22 +88,20 @@ export async function enrichArcMarket(token: ArcTokenEnrichment): Promise<ArcMar
       });
     }
 
-    // DexScreener's ARC token-pairs endpoint is already scoped to the requested
-    // token and chain. Keep independent identity verification here: require the
-    // provider to identify the chain as ARC and the requested token as the base
-    // asset. Do not require one specific quote-token representation: ARC pools
-    // can legitimately expose different quote addresses (native/canonical or
-    // other bonded quote assets), and rejecting those caused valid returned
-    // pairs to become PAIR_NOT_INDEXED. Security remains fail-closed because a
-    // pair with the wrong chain or wrong base token is never accepted.
+    // Uniswap v4 pools share a manager, so the 32-byte pool ID is the
+    // security identity. Never borrow another pool's market data while retaining
+    // this candidate's hooks, fee or launch evidence.
+    const poolId = String(token.poolId ?? '').toLowerCase();
+    if (!/^0x[a-f0-9]{64}$/.test(poolId)) throw new Error('ARC pool identity unavailable');
     const matching = pairs.filter(pair => {
       const chain = String(pair.chainId ?? '').trim().toLowerCase();
       const base = String(pair.baseToken?.address ?? '').trim().toLowerCase();
-      return chain === 'arc' && base === asset;
+      const pairId = String(pair.pairAddress ?? '').trim().toLowerCase();
+      return chain === 'arc' && base === asset && pairId === poolId;
     });
 
     const best = matching.sort((a, b) => (n(b.liquidity?.usd) ?? 0) - (n(a.liquidity?.usd) ?? 0))[0];
-    if (!best) throw new Error('No verified Arc pair returned by market provider');
+    if (!best) throw new Error('No verified Arc candidate pool returned by market provider');
 
     return {
       ...token,
