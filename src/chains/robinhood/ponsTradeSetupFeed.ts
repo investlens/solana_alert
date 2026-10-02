@@ -107,9 +107,9 @@ async function tick(): Promise<void> {
       } catch { console.log(`[TradeSetup] CHECK_FAILED token=${token}`); }
     }
     for (const [token, launch] of deferredAdmissions) {
-      if (launchSocialEligibility(token) === false || !isTradeSetupLaunchAdmissible(launch, Date.now())) { deferredAdmissions.delete(token); continue; }
+      if (launchSocialEligibility(token) === false || !isTradeSetupLaunchAdmissible(launch, Date.now(), MAX_AGE)) { deferredAdmissions.delete(token); continue; }
       if (candidates.size >= MAX_CANDIDATES) break;
-      deferredAdmissions.delete(token); queuePonsTradeSetup(launch);
+      deferredAdmissions.delete(token); admitCandidate(launch);
     }
     for (const [token, outcome] of outcomes) {
       const now = Date.now();
@@ -145,21 +145,30 @@ export function queuePonsTradeSetup(launch: PonsLaunch): void {
     if (deferredAdmissions.size < 50) deferredAdmissions.set(token, launch);
     console.log(`[TradeSetup] DEFERRED candidates=${candidates.size} pending=${deferredAdmissions.size} token=${token}`); return;
   }
+  admitCandidate(launch);
+}
+
+// Called only after fresh admission, or promotion of an already-admitted launch.
+function admitCandidate(launch: PonsLaunch): void {
+  const token = launch.token_address.toLowerCase();
+  const launchedAt = Date.parse(launch.block_timestamp);
   deferredAdmissions.delete(token);
   candidates.set(token, { launch, launchedAt, trend: emptySetupTrend(), screenAfter: 0 });
   console.log(`[TradeSetup] WATCH token=${token} minAgeMin=30 maxAgeMin=120`);
   if (!timer) { timer = setInterval(() => { void tick(); }, INTERVAL); timer.unref(); }
 }
 
-export function isTradeSetupLaunchAdmissible(launch: PonsLaunch, now: number): boolean {
+export function isTradeSetupLaunchAdmissible(launch: PonsLaunch, now: number, maxAge = 5 * 60_000): boolean {
   const age = now - Date.parse(launch.block_timestamp);
   // Live-only admission prevents restart/backfill replay; only registered V2
   // factories with WETH curves have the reserve evidence this version supports.
   return isVerifiedSocialMafiaLaunch(launch, 'PONS') && launch.protocol_version.startsWith('v2')
     && [PONS_CONTRACTS.weth.toLowerCase(), '0x' + '0'.repeat(40)].includes(launch.pair_token_address?.toLowerCase() ?? '')
     && [launch.token_address, launch.curve_address, launch.deployer_address].every(address => typeof address === 'string' && /^0x[a-fA-F0-9]{40}$/.test(address))
-    && Number.isFinite(age) && age >= 0 && age <= 5 * 60_000;
+    && Number.isFinite(age) && age >= 0 && age <= maxAge;
 }
+
+export async function tickTradeSetupForTests() { await tick(); }
 
 export function tradeSetupSchedulingStateForTests() { return { candidates: [...candidates.keys()], deferred: [...deferredAdmissions.keys()] }; }
 export function resetTradeSetupSchedulingForTests() { if (timer) clearInterval(timer); timer = null; candidates.clear(); deferredAdmissions.clear(); outcomes.clear(); }
