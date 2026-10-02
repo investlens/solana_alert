@@ -8,6 +8,7 @@ export type ArcMarketEnrichment = ArcTokenEnrichment & {
   buys5m: number | null;
   sells5m: number | null;
   marketCapUsd: number | null;
+  fdvUsd?: number | null;
   priceUsd: number | null;
   pairCreatedAt: number | null;
   dexUrl: string | null;
@@ -33,6 +34,7 @@ type Pair = {
 };
 
 const n = (value: unknown): number | null => {
+  if (value == null || (typeof value !== 'number' && typeof value !== 'string') || String(value).trim() === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 };
@@ -110,7 +112,8 @@ export async function enrichArcMarket(token: ArcTokenEnrichment): Promise<ArcMar
       volume5mUsd: n(best.volume?.m5),
       buys5m: n(best.txns?.m5?.buys),
       sells5m: n(best.txns?.m5?.sells),
-      marketCapUsd: n(best.marketCap) ?? n(best.fdv),
+      marketCapUsd: n(best.marketCap),
+      fdvUsd: n(best.fdv),
       priceUsd: n(best.priceUsd),
       pairCreatedAt: n(best.pairCreatedAt),
       dexUrl: typeof best.url === 'string' && best.url.startsWith('http') ? best.url : `https://dexscreener.com/arc/${token.assetId}`,
@@ -123,6 +126,6 @@ export async function enrichArcMarket(token: ArcTokenEnrichment): Promise<ArcMar
       assetId: token.assetId,
       reason: error instanceof Error ? error.message : String(error),
     });
-    return { ...token, marketDataSource: null, liquidityUsd: null, volume5mUsd: null, buys5m: null, sells5m: null, marketCapUsd: null, priceUsd: null, pairCreatedAt: null, dexUrl: null, projectWebsite: null, projectTwitter: null, projectTelegram: null };
+    return { ...token, marketDataSource: null, liquidityUsd: null, volume5mUsd: null, buys5m: null, sells5m: null, marketCapUsd: null, fdvUsd: null, priceUsd: null, pairCreatedAt: null, dexUrl: null, projectWebsite: null, projectTwitter: null, projectTelegram: null };
   }
 }

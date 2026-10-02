@@ -28,7 +28,33 @@ async function safeRead<T>(address: `0x${string}`, functionName: string): Promis
   }
 }
 
+type ArcFacts = Pick<ArcTokenEnrichment, 'contractCodePresent' | 'metadataReadable' | 'name' | 'symbol' | 'decimals' | 'totalSupplyRaw' | 'eligibleForScoring' | 'safetyReasons'>;
+export function canRetryArcEnrichment(value: ArcTokenEnrichment): boolean {
+  return value.hooks.toLowerCase() === '0x0000000000000000000000000000000000000000'
+    && value.safetyReasons.every(reason => ['ERC20_METADATA_UNREADABLE', 'CONTRACT_CODE_UNAVAILABLE', 'METADATA_CAPACITY_UNAVAILABLE'].includes(reason));
+}
+const factsCache = new Map<string, { expires: number; facts: ArcFacts }>();
+const factsInflight = new Map<string, Promise<ArcTokenEnrichment>>();
 export async function enrichArcCandidate(candidate: ArcLaunchCandidate): Promise<ArcTokenEnrichment> {
+  const key = candidate.assetId.toLowerCase();
+  const cached = factsCache.get(key);
+  if (cached && cached.expires > Date.now()) return { ...candidate, ...cached.facts, safetyReasons: [...cached.facts.safetyReasons] };
+  const pending = factsInflight.get(key);
+  if (pending) { const value = await pending; return { ...value, ...candidate }; }
+  if (factsInflight.size >= 16) return { ...candidate, contractCodePresent: false, metadataReadable: false,
+    name: null, symbol: null, decimals: null, totalSupplyRaw: null, eligibleForScoring: false, safetyReasons: ['METADATA_CAPACITY_UNAVAILABLE'] };
+  const work = readArcCandidate(candidate).then(value => {
+    const { contractCodePresent, metadataReadable, name, symbol, decimals, totalSupplyRaw, eligibleForScoring, safetyReasons } = value;
+    if (factsCache.size >= 200) factsCache.delete(factsCache.keys().next().value!);
+    factsCache.set(key, { expires: Date.now() + (eligibleForScoring ? 30_000 : 5_000),
+      facts: { contractCodePresent, metadataReadable, name, symbol, decimals, totalSupplyRaw, eligibleForScoring, safetyReasons } });
+    return value;
+  }).finally(() => factsInflight.delete(key));
+  factsInflight.set(key, work);
+  return work;
+}
+
+async function readArcCandidate(candidate: ArcLaunchCandidate): Promise<ArcTokenEnrichment> {
   const reasons: string[] = [];
   const bytecode = await getArcBytecode(candidate.assetId).catch(() => undefined);
   const contractCodePresent = Boolean(bytecode && bytecode !== '0x');
@@ -39,7 +65,7 @@ export async function enrichArcCandidate(candidate: ArcLaunchCandidate): Promise
   // data and used to count as RPC-provider failures, eventually cooling down a
   // healthy provider and starving unrelated ARC candidates/burn verification.
   if (!contractCodePresent) {
-    reasons.push('NO_CONTRACT_CODE');
+    reasons.push(bytecode === undefined ? 'CONTRACT_CODE_UNAVAILABLE' : 'NO_CONTRACT_CODE');
     return {
       ...candidate,
       contractCodePresent: false,

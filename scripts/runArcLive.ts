@@ -3,7 +3,7 @@ import 'dotenv/config';
 import { verifyArcMainnet, getArcBlockNumber, getArcLogs, readArcContract } from '../src/chains/arc/rpc.js';
 import { discoverArcV4Pools } from '../src/chains/arc/uniswap.js';
 import { normalizeArcPoolCandidate } from '../src/chains/arc/candidate.js';
-import { enrichArcCandidate } from '../src/chains/arc/enrichment.js';
+import { enrichArcCandidate, canRetryArcEnrichment } from '../src/chains/arc/enrichment.js';
 import { enrichArcMarket } from '../src/chains/arc/market.js';
 import { assessArcForAlert } from '../src/chains/arc/alertGate.js';
 import { sendTelegramWithMessageId } from '../src/services/telegram.js';
@@ -276,7 +276,8 @@ async function deliverArcAlert(market: Awaited<ReturnType<typeof enrichArcMarket
     `💧 Liquidity     <b>${formatUsd(market.liquidityUsd)}</b>`,
     `📊 5m Volume     <b>${formatUsd(market.volume5mUsd)}</b>`,
     `🟢 Buys / Sells  <b>${buys} / ${sells}</b>  ·  <b>${ratio}x</b>`,
-    `💰 Market Cap    <b>${formatUsd(market.marketCapUsd)}</b>`,
+    ...(market.marketCapUsd != null ? [`💰 Market Cap    <b>${formatUsd(market.marketCapUsd)}</b>`]
+      : market.fdvUsd != null ? [`💰 FDV    <b>${formatUsd(market.fdvUsd)}</b>`] : []),
     '',
     '🎯 <b>WHY ALPHAOS FLAGGED IT</b>',
     ...(evidence.length ? evidence : ['• Market opportunity criteria passed']),
@@ -310,10 +311,7 @@ async function deliverArcAlert(market: Awaited<ReturnType<typeof enrichArcMarket
 
 
 function canRetryMarket(enriched: Awaited<ReturnType<typeof enrichArcCandidate>>): boolean {
-  return enriched.contractCodePresent &&
-    enriched.metadataReadable &&
-    enriched.safetyReasons.length === 0 &&
-    enriched.hooks.toLowerCase() === '0x0000000000000000000000000000000000000000';
+  return canRetryArcEnrichment(enriched);
 }
 
 function queueMarketRetry(enriched: Awaited<ReturnType<typeof enrichArcCandidate>>): void {
@@ -340,10 +338,19 @@ async function processMarketRetries(): Promise<void> {
   let processed = 0;
   const now = Date.now();
   for (const [key, pending] of pendingMarketRetries) {
+    if (now - pending.firstSeenAt > 60 * 60_000) { pendingMarketRetries.delete(key); continue; }
     if (processed >= MARKET_RETRY_PER_POLL) break;
     if (pending.retryAt > now) continue;
     pendingMarketRetries.delete(key);
     processed += 1;
+
+    if (!pending.enriched.metadataReadable || !pending.enriched.contractCodePresent) {
+      pending.enriched = await enrichArcCandidate(pending.enriched);
+      if (!pending.enriched.eligibleForScoring) {
+        if (canRetryMarket(pending.enriched)) pendingMarketRetries.set(key, { ...pending, retryAt: Date.now() + MARKET_RETRY_DELAY_MS });
+        continue;
+      }
+    }
 
     const market = await enrichArcMarket(pending.enriched);
     if (market.marketDataSource == null) {
@@ -553,6 +560,7 @@ async function main() {
   let last = verified.blockNumber;
   while (true) {
     await new Promise(resolve => setTimeout(resolve, POLL_MS));
+    try {
     await processMarketRetries();
     await processArcBoosts();
     const current = await getArcBlockNumber();
@@ -601,12 +609,17 @@ async function main() {
           pendingMarketRetries.set(key, { enriched, retryAt: Date.now() + ARC_REVERSAL_CONFIRM_MS, firstSeenAt: Date.now(), baselinePrice: market.priceUsd });
           console.log('[ArcLive] REVERSAL_WATCH', { assetId: market.assetId, ageMin: (pairAgeMs / 60_000).toFixed(1) });
         }
-      } else if (market.marketDataSource == null) {
+      } else if (market.marketDataSource == null || !enriched.metadataReadable) {
         queueMarketRetry(enriched);
       }
     }
 
     last = toBlock;
+    } catch (error) {
+      console.warn('[ArcLive] cycle deferred; scanner checkpoint retained', {
+        reason: (error instanceof Error ? error.message : String(error)).replace(/\s+/g, ' ').slice(0, 180),
+      });
+    }
   }
 }
 
