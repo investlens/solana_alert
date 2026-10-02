@@ -62,7 +62,7 @@ export async function pollPonsLiveLaunchesOnce(
           try {
             checkpoint = await retryPonsOperation('liveCheckpointRead', () => storage.getLiveCheckpoint(factory.id), retry);
             if (checkpoint != null) liveCheckpointCache.set(factory.id, checkpoint);
-            else checkpoint = liveCheckpointCache.get(factory.id) ?? null;
+            else checkpoint = liveCheckpointCache.get(factory.id) ?? (head > 300n ? head - 300n : 0n);
           } catch (error) {
             const cached = liveCheckpointCache.get(factory.id);
             if (cached == null) {

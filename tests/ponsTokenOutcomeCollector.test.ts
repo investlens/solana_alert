@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  collectPonsTokenOutcomes, derivePonsCollectedOutcome, formatPonsOutcomeSummary, historicalObservationsFromRobinhoodRows,
+  collectPonsTokenOutcomes, derivePonsCollectedOutcome, mergePonsOutcome, formatPonsOutcomeSummary, historicalObservationsFromRobinhoodRows,
   type PonsMarketObservation, type PonsOutcomeCollectorSource, type PonsOutcomeLaunch,
 } from '../src/chains/robinhood/ponsTokenOutcomeCollector.js';
 
@@ -13,6 +13,48 @@ const launch = (token_address = tokenA): PonsOutcomeLaunch => ({ token_address, 
   block_timestamp: '2026-08-10T00:00:00.000Z' });
 const observation = (tokenAddress: string, marketCap: number, observedAt: string, kind: 'HISTORICAL' | 'CURRENT'): PonsMarketObservation =>
   ({ tokenAddress, marketCap, observedAt, kind, source: kind === 'CURRENT' ? 'DEXSCREENER_ROBINHOOD_CURRENT' : 'ROBINHOOD_OBSERVATION_5M' });
+
+test('successive current samples preserve first value, observed peak and a 95% drop', () => {
+  const first = mergePonsOutcome(undefined, derivePonsCollectedOutcome(launch(), [observation(tokenA, 45_000, '2026-08-10T00:01:00Z', 'CURRENT')]));
+  const high = mergePonsOutcome(first, derivePonsCollectedOutcome(launch(), [observation(tokenA, 100_000, '2026-08-10T00:06:00Z', 'CURRENT')]));
+  const low = mergePonsOutcome(high, derivePonsCollectedOutcome(launch(), [observation(tokenA, 2_400, '2026-08-10T00:11:00Z', 'CURRENT')]));
+  assert.equal(first.peakMarketCap, null);
+  assert.equal(low.firstMarketCap, 45_000); assert.equal(low.peakMarketCap, 100_000);
+  assert.equal(low.currentMarketCap, 2_400); assert.equal(low.observationCount, 3);
+  assert.equal(low.dataConfidence, 'OBSERVED_HISTORY'); assert.equal(low.catastrophicCrash, true);
+  const missing = mergePonsOutcome(low, derivePonsCollectedOutcome(launch(), []));
+  assert.equal(missing.currentMarketCap, 2_400); assert.equal(missing.peakMarketCap, 100_000);
+  assert.equal(missing.lastObservedAt, low.lastObservedAt); assert.equal(missing.observationCount, 3);
+});
+
+test('repeated cached samples do not inflate observations and cross-token merge is rejected', () => {
+  const first = derivePonsCollectedOutcome(launch(), [observation(tokenA, 45_000, '2026-08-10T00:01:00Z', 'CURRENT')]);
+  const repeat = mergePonsOutcome(first, first);
+  assert.equal(repeat.observationCount, 1); assert.equal(repeat.peakMarketCap, null);
+  assert.throws(() => mergePonsOutcome(first, { ...first, tokenAddress: tokenB }), /identity mismatch/);
+});
+
+test('current sample above historical high updates the observed peak and milestones', () => {
+  const outcome = mergePonsOutcome(undefined, derivePonsCollectedOutcome(launch(), [
+    observation(tokenA, 650_000, '2026-08-10T00:05:00Z', 'HISTORICAL'),
+    observation(tokenA, 8_000_000, '2026-08-10T00:10:00Z', 'CURRENT'),
+  ]));
+  assert.equal(outcome.peakMarketCap, 8_000_000); assert.equal(outcome.crossed5m, true);
+  assert.equal(outcome.severeCrash, false);
+});
+
+test('collector reloads persisted summary rather than forgetting a peak on restart', async () => {
+  const saved = mergePonsOutcome(undefined, derivePonsCollectedOutcome(launch(), [
+    observation(tokenA, 20_000, '2026-08-10T00:01:00Z', 'HISTORICAL'),
+    observation(tokenA, 100_000, '2026-08-10T00:05:00Z', 'CURRENT'),
+  ]));
+  const result = await collectPonsTokenOutcomes({ loadLaunches: async () => [launch()],
+    loadPreviousOutcomes: async () => [saved], loadHistoricalObservations: async () => [],
+    loadCurrentObservation: async () => observation(tokenA, 2_400, '2026-08-10T00:10:00Z', 'CURRENT') });
+  assert.equal(result.outcomes[0].peakMarketCap, 100_000);
+  assert.equal(result.outcomes[0].firstMarketCap, 20_000);
+  assert.equal(result.outcomes[0].catastrophicCrash, true);
+});
 
 test('current market cap remains current-only and never becomes peak', () => {
   const result = derivePonsCollectedOutcome(launch(), [observation(tokenA, 700_000, '2026-08-11T00:00:00.000Z', 'CURRENT')]);

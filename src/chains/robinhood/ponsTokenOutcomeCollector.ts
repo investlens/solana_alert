@@ -13,16 +13,52 @@ export type PonsCollectedTokenOutcome = {
   crossed5m: boolean | null; crossed10m: boolean | null;
   severeCrash: boolean | null; catastrophicCrash: boolean | null; observationCount: number;
   peakSource: string | null; currentSource: string | null;
-  dataConfidence: 'VERIFIED_HISTORY' | 'CURRENT_ONLY' | 'UNKNOWN';
+  dataConfidence: 'VERIFIED_HISTORY' | 'OBSERVED_HISTORY' | 'CURRENT_ONLY' | 'UNKNOWN';
   outcomeSource: string[]; firstObservedAt: string | null; lastObservedAt: string | null; lastCheckedAt: string;
 };
-export type PonsOutcomeCollectorFilters = { factory?: string; deployer?: string; token?: string; limit?: number; newestFirst?: boolean };
+export type PonsOutcomeCollectorFilters = { factory?: string; deployer?: string; token?: string; limit?: number; newestFirst?: boolean; launchedSince?: string; rotate?: boolean };
+export type PonsStoredOutcome = Pick<PonsCollectedTokenOutcome, 'chain' | 'factoryAddress' | 'tokenAddress' | 'firstMarketCap' | 'currentMarketCap' | 'peakMarketCap' | 'peakSource' | 'currentSource' | 'dataConfidence' | 'observationCount' | 'firstObservedAt' | 'lastObservedAt'>;
 export type PonsOutcomeCollectorSource = {
   loadLaunches(filters: PonsOutcomeCollectorFilters): Promise<PonsOutcomeLaunch[]>;
   loadHistoricalObservations(tokenAddresses: string[]): Promise<PonsMarketObservation[]>;
   loadCurrentObservation(launch: PonsOutcomeLaunch, signal?: AbortSignal): Promise<PonsMarketObservation | null>;
+  loadPreviousOutcomes?(tokenAddresses: string[]): Promise<PonsStoredOutcome[]>;
   writeOutcomes?(outcomes: PonsCollectedTokenOutcome[]): Promise<void>;
 };
+
+// An observed peak is a sampled high, never an all-time high. Keep one compact
+// summary per exact chain/factory/token; a missing provider response cannot erase it.
+export function mergePonsOutcome(previous: PonsStoredOutcome | undefined, fresh: PonsCollectedTokenOutcome): PonsCollectedTokenOutcome {
+  if (previous && (previous.chain !== fresh.chain || lower(previous.factoryAddress) !== fresh.factoryAddress
+    || lower(previous.tokenAddress) !== fresh.tokenAddress)) throw new Error('outcome identity mismatch');
+  const valid = (value: number | null | undefined): value is number => value != null && Number.isFinite(value) && value > 0;
+  const newCurrent = valid(fresh.currentMarketCap) && fresh.lastObservedAt != null
+    && (!previous?.lastObservedAt || Date.parse(fresh.lastObservedAt) > Date.parse(previous.lastObservedAt));
+  const current = newCurrent || !previous ? fresh.currentMarketCap : previous.currentMarketCap;
+  const sampledHistory = valid(fresh.peakMarketCap) || valid(previous?.peakMarketCap) || (valid(previous?.currentMarketCap) && newCurrent);
+  const peaks = [
+    { value: fresh.peakMarketCap, source: fresh.peakSource },
+    { value: previous?.peakMarketCap, source: previous?.peakSource },
+    ...(sampledHistory ? [{ value: fresh.currentMarketCap, source: fresh.currentSource },
+      { value: previous?.currentMarketCap, source: previous?.currentSource }] : []),
+  ].filter((row): row is { value: number; source: string | null | undefined } => valid(row.value));
+  const peak = peaks.sort((a, b) => b.value - a.value)[0];
+  const firstTimes = [previous?.firstObservedAt, fresh.firstObservedAt].filter((v): v is string => !!v).sort();
+  const previousFirst = previous != null && previous.firstObservedAt === firstTimes[0] && valid(previous.firstMarketCap);
+  const count = previous ? Math.max(previous.observationCount, fresh.observationCount - (fresh.currentMarketCap != null ? 1 : 0)) + (newCurrent ? 1 : 0) : fresh.observationCount;
+  const confidence = fresh.dataConfidence === 'VERIFIED_HISTORY' || previous?.dataConfidence === 'VERIFIED_HISTORY'
+    ? 'VERIFIED_HISTORY' : sampledHistory ? 'OBSERVED_HISTORY' : valid(current) ? 'CURRENT_ONLY' : 'UNKNOWN';
+  const drawdown = peak && valid(current) ? current / peak.value - 1 : null;
+  return { ...fresh, currentMarketCap: current, peakMarketCap: peak?.value ?? null, peakSource: peak?.source ?? null,
+    firstMarketCap: previousFirst ? previous!.firstMarketCap : fresh.firstMarketCap,
+    firstObservedAt: firstTimes[0] ?? null, lastObservedAt: newCurrent || !previous ? fresh.lastObservedAt : previous.lastObservedAt,
+    currentSource: newCurrent || !previous ? fresh.currentSource : previous.currentSource,
+    observationCount: count, dataConfidence: confidence,
+    crossed100k: peak ? peak.value >= 100_000 : null, crossed500k: peak ? peak.value >= 500_000 : null,
+    crossed1m: peak ? peak.value >= 1_000_000 : null, crossed5m: peak ? peak.value >= 5_000_000 : null,
+    crossed10m: peak ? peak.value >= 10_000_000 : null,
+    severeCrash: drawdown == null ? null : drawdown <= -0.8, catastrophicCrash: drawdown == null ? null : drawdown <= -0.9 };
+}
 export type PonsOutcomeCollection = {
   outcomes: PonsCollectedTokenOutcome[]; scanned: number; currentMcFound: number;
   historicalObservationsFound: number; verifiedPeakFound: number; crossed100k: number; crossed500k: number;
@@ -107,6 +143,8 @@ export async function collectPonsTokenOutcomes(source: PonsOutcomeCollectorSourc
     currentLookupFailures: 0, wrote: false, writes: 0 };
   const tokens = [...new Set(launches.map(row => lower(row.token_address)))];
   const historical = await source.loadHistoricalObservations(tokens);
+  const previous = await source.loadPreviousOutcomes?.(tokens) ?? [];
+  const previousByIdentity = new Map(previous.map(row => [`${row.factoryAddress.toLowerCase()}:${row.tokenAddress.toLowerCase()}`, row]));
   const historicalTokens = new Set(historical.filter(row => row.kind === 'HISTORICAL' && validObservation(row)).map(row => lower(row.tokenAddress)));
   let processed = 0; let progressCurrentFound = 0; let progressHistoricalFound = 0; let currentLookupFailures = 0;
   const current = await mapConcurrent(launches, concurrency, async launch => {
@@ -143,7 +181,8 @@ export async function collectPonsTokenOutcomes(source: PonsOutcomeCollectorSourc
     if (lower(observation.tokenAddress) !== expected) return;
     byToken.set(expected, [...(byToken.get(expected) ?? []), observation]);
   });
-  const outcomes = launches.map(launch => derivePonsCollectedOutcome(launch, byToken.get(lower(launch.token_address)) ?? [], options.now));
+  const outcomes = launches.map(launch => mergePonsOutcome(previousByIdentity.get(`${lower(launch.factory_address)}:${lower(launch.token_address)}`),
+    derivePonsCollectedOutcome(launch, byToken.get(lower(launch.token_address)) ?? [], options.now)));
   if (options.write) {
     if (!source.writeOutcomes) throw new Error('Pons outcome persistence is unavailable until a dedicated provenance table exists');
     await source.writeOutcomes(outcomes);
@@ -187,13 +226,41 @@ export async function createProductionPonsOutcomeSource(): Promise<PonsOutcomeCo
   return {
     async loadLaunches(filters) {
       let query = supabase.from('pons_launches').select('factory_address,token_address,deployer_address,protocol_version,block_timestamp')
-        .eq('chain', 'robinhood').order('block_timestamp', { ascending: !filters.newestFirst }).limit(filters.limit ?? 100);
+        .eq('chain', 'robinhood').order('block_timestamp', { ascending: !filters.newestFirst }).limit(filters.rotate ? 500 : filters.limit ?? 100);
       if (filters.factory) query = query.eq('protocol_version', filters.factory);
       if (filters.deployer) query = query.eq('deployer_address', lower(filters.deployer));
       if (filters.token) query = query.eq('token_address', lower(filters.token));
+      if (filters.launchedSince) query = query.gte('block_timestamp', filters.launchedSince);
       const { data, error } = await query;
       if (error) throw new Error(`Pons launch load failed: ${error.message}`);
-      return (data ?? []) as PonsOutcomeLaunch[];
+      const launches = (data ?? []) as PonsOutcomeLaunch[];
+      if (!filters.rotate || !launches.length) return launches;
+      if (launches.length === 500) console.warn('[PonsOutcomes] recent census capacity reached; coverage incomplete');
+      const times = new Map<string, number>();
+      for (let index = 0; index < launches.length; index += 100) {
+        const { data: checked, error: checkedError } = await supabase.from('pons_token_outcomes')
+          .select('factory_address,token_address,last_checked_at').eq('chain', 'robinhood')
+          .in('token_address', launches.slice(index, index + 100).map(row => row.token_address));
+        if (checkedError) throw new Error(`Pons collection rotation failed: ${checkedError.message}`);
+        for (const row of checked ?? []) times.set(`${row.factory_address}:${row.token_address}`, Date.parse(row.last_checked_at ?? '') || 0);
+      }
+      return launches.sort((a, b) => (times.get(`${a.factory_address}:${a.token_address}`) ?? 0)
+        - (times.get(`${b.factory_address}:${b.token_address}`) ?? 0)).slice(0, filters.limit ?? 50);
+    },
+    async loadPreviousOutcomes(tokenAddresses) {
+      const previous: PonsStoredOutcome[] = [];
+      for (let index = 0; index < tokenAddresses.length; index += 100) {
+        const { data, error } = await supabase.from('pons_token_outcomes')
+          .select('chain,factory_address,token_address,first_market_cap,current_market_cap,peak_market_cap,peak_source,current_source,data_confidence,observation_count,first_observed_at,last_observed_at')
+          .eq('chain', 'robinhood').in('token_address', tokenAddresses.slice(index, index + 100));
+        if (error) throw new Error(`Pons previous outcome load failed: ${error.message}`);
+        for (const row of data ?? []) previous.push({ chain: row.chain as 'robinhood', factoryAddress: row.factory_address,
+          tokenAddress: row.token_address, firstMarketCap: row.first_market_cap, currentMarketCap: row.current_market_cap,
+          peakMarketCap: row.peak_market_cap, peakSource: row.peak_source, currentSource: row.current_source,
+          dataConfidence: row.data_confidence as PonsStoredOutcome['dataConfidence'], observationCount: row.observation_count,
+          firstObservedAt: row.first_observed_at, lastObservedAt: row.last_observed_at });
+      }
+      return previous;
     },
     async loadHistoricalObservations(tokenAddresses) {
       const rows: ObservationRow[] = [];
