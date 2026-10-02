@@ -1,9 +1,10 @@
 import { Markup, Telegraf } from 'telegraf';
 import { config } from '../config.js';
-import { accessProfileForTier } from '../product/capabilities.js';
+import { getContextAccess } from './accessControl.js';
 import { ALPHAOS_SUBSCRIPTION_PLAN, subscriptionsEnabled } from '../product/subscriptionPlan.js';
 import { rememberRuntimeSubscriber } from '../services/runtimeSubscriberRegistry.js';
 import { intelligenceMenu, mainAlphaMenu, tradingMenu } from './menus.js';
+import { registerContractScreening } from './contractScreening.js';
 import { registerBotCommands } from './commands.js';
 import { registerStrategyControls } from './strategyControls.js';
 import { registerOpportunityCenter } from './opportunityCenter.js';
@@ -19,12 +20,6 @@ import { registerIntelligenceCenter } from './intelligenceCenter.js';
 import { registerTokenIntelligenceActions } from './tokenIntelligenceActions.js';
 import { registerXIntelligenceAdmin } from './xIntelligenceAdmin.js';
 
-function accessForContext(ctx: any) {
-  const telegramId = String(ctx.from?.id ?? '');
-  return accessProfileForTier(
-    telegramId === String(config.adminTelegramId) ? 'admin' : 'free',
-  );
-}
 
 async function renderFast(ctx: any, text: string, replyMarkup: any) {
   await ctx.answerCbQuery?.().catch(() => {});
@@ -62,7 +57,8 @@ export function createBot() {
 
   bot.use(async (ctx, next) => {
     const telegramId = String(ctx.from?.id ?? '');
-    if (telegramId) {
+    // Group scans do not enroll every group member into private alert delivery.
+    if (telegramId && ctx.chat?.type === 'private') {
       rememberRuntimeSubscriber({
         telegramId,
         username: ctx.from?.username ?? null,
@@ -103,7 +99,7 @@ export function createBot() {
     const data = String((ctx.callbackQuery as any)?.data ?? '');
     if (!data) return next();
 
-    const access = accessForContext(ctx);
+    const access = await getContextAccess(ctx);
 
     if (data === 'MAIN_MENU') {
       await renderFast(
@@ -219,7 +215,7 @@ export function createBot() {
     const isStart = text === '/start' || text.startsWith('/start@');
     if (!isStart) return next();
 
-    const access = accessForContext(ctx);
+    const access = await getContextAccess(ctx);
     const telegramId = String(ctx.from?.id ?? '');
     const isAdmin = telegramId === String(config.adminTelegramId);
 
@@ -246,6 +242,7 @@ export function createBot() {
   });
 
   registerBotCommands(bot);
+  registerContractScreening(bot);
   registerStrategyControls(bot);
   registerOpportunityCenter(bot);
   registerOpportunityActions(bot);

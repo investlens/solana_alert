@@ -9,6 +9,7 @@ import {
   isVerifiedSocialMafiaLaunch,
   queueVerifiedLaunchpadSocialMafiaScreen,
   resetPonsSocialMafiaForTests,
+  drainPonsSocialMafiaForTests,
   resolveSocialMafiaSocials,
 } from '../src/chains/robinhood/ponsSocialMafiaAlert.js';
 import { getPonsFactoryDeployments } from '../src/chains/robinhood/ponsContracts.js';
@@ -68,7 +69,8 @@ test('Social Mafia queue ignores unverified launches and screens duplicate token
   const factory = getPonsFactoryDeployments()[0];
   const token = '0x1234567890abcdef1234567890abcdef12345678';
   const launch = { chain: 'robinhood', protocol: 'pons', protocol_version: factory.id,
-    factory_address: factory.address, token_address: token } as PonsLaunch;
+    factory_address: factory.address, token_address: token,
+    block_timestamp: new Date(Date.now() - 15 * 60_000).toISOString() } as PonsLaunch;
   const context = { id: 'PONS', label: 'PONS', tokenUrl: () => 'https://www.ponsfamily.com' };
   let requests = 0;
   let skipped = 0;
@@ -130,4 +132,36 @@ test('Social Mafia alert shows verified launchpad plus both communities', () => 
   assert.match(text, /Market cap\s+<b>\$51\.8K<\/b>/);
   assert.match(text, /Dev holding\s+<b>4\.25%<\/b>/);
   assert.match(text, /Verified launchpad \+ X \+ Telegram/);
+});
+
+test('screening waits 15 minutes, retries four times and rejects expired launches without RPC', async t => {
+  resetPonsSocialMafiaForTests();
+  const factory = getPonsFactoryDeployments().find(f => f.enabled)!;
+  const token = '0x7777777777777777777777777777777777777777';
+  const start = Date.now(); let now = start; let requests = 0; let skipped = 0;
+  t.mock.method(Date, 'now', () => now);
+  const launch = { chain: 'robinhood', protocol: 'pons', protocol_version: factory.id, factory_address: factory.address,
+    token_address: token, block_timestamp: new Date(start).toISOString() } as PonsLaunch;
+  const context = { id: 'PONS', label: 'PONS', tokenUrl: () => 'https://www.ponsfamily.com' };
+  t.mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => {
+    requests++; const body = JSON.parse(String(init.body));
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id,
+      result: encodeAbiParameters(parseAbiParameters('string, string, string, string, string'), ['', '', '', '', '']) }),
+      { headers: { 'content-type': 'application/json' } });
+  });
+  t.mock.method(console, 'log', (message: string) => { if (message.includes('[SocialMafia] skipped')) skipped++; });
+  try {
+    queueVerifiedLaunchpadSocialMafiaScreen(launch, context);
+    assert.equal(requests, 0);
+    now += 14 * 60_000; drainPonsSocialMafiaForTests(); assert.equal(requests, 0);
+    for (const minute of [15, 30, 45, 60]) {
+      now = start + minute * 60_000; drainPonsSocialMafiaForTests();
+      for (let i = 0; i < 5; i++) await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(skipped, minute / 15);
+    }
+    assert.equal(requests, 4);
+    now = start + 61 * 60_000;
+    queueVerifiedLaunchpadSocialMafiaScreen(launch, context); drainPonsSocialMafiaForTests();
+    assert.equal(requests, 4);
+  } finally { resetPonsSocialMafiaForTests(); }
 });

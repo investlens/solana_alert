@@ -1,24 +1,45 @@
+import { subscriptionsEnabled } from '../product/subscriptionPlan.js';
+import { getUserByTelegramId } from '../core/subscriptions.js';
 import { Markup } from 'telegraf';
 import { config } from '../config.js';
 import {
   accessProfileForTier,
+  accessProfileForUser,
   CAPABILITY_BENEFITS,
   hasCapability,
   type AccessProfile,
   type Capability,
 } from '../product/capabilities.js';
 
-/**
- * Telegram navigation must remain usable during database degradation.
- * In the current tester model FREE and PRO intentionally expose the same
- * product capabilities; only the configured admin identity needs a special
- * profile. Subscription/database reads belong inside the data action itself,
- * not on every button press.
- */
+// Resolve membership only when commercial access is enabled. Cache bounded user
+// membership evidence briefly; expiry is re-evaluated on every access check.
+const membershipCache = new Map<string, { expires: number; user: any }>();
+const membershipInflight = new Map<string, Promise<any>>();
 export async function getContextAccess(ctx: any): Promise<AccessProfile> {
   const telegramId = String(ctx.from?.id ?? '');
-  const isAdmin = telegramId !== '' && telegramId === String(config.adminTelegramId);
-  return accessProfileForTier(isAdmin ? 'admin' : 'free');
+  if (telegramId && telegramId === String(config.adminTelegramId)) return accessProfileForTier('admin');
+  if (!subscriptionsEnabled() || !telegramId) return accessProfileForTier('free');
+  const now = Date.now();
+  for (const [key, value] of membershipCache) if (value.expires <= now) membershipCache.delete(key);
+  const cached = membershipCache.get(telegramId);
+  if (cached) return accessProfileForUser(cached.user);
+  if (membershipInflight.size >= 10 && !membershipInflight.has(telegramId)) return accessProfileForTier('free');
+  let lookup = membershipInflight.get(telegramId);
+  if (!lookup) {
+    lookup = getUserByTelegramId(telegramId).then(user => {
+      if (membershipCache.size >= 500) membershipCache.delete(membershipCache.keys().next().value!);
+      membershipCache.set(telegramId, { user: user ? { tier: user.tier,
+        subscription_status: user.subscription_status, paid_active_until: user.paid_active_until } : null,
+        expires: Date.now() + 30_000 });
+      return user;
+    }).catch(() => null).finally(() => membershipInflight.delete(telegramId));
+    membershipInflight.set(telegramId, lookup);
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const user = await Promise.race([lookup, new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), 1_000); })]);
+    return accessProfileForUser(user);
+  } finally { if (timer) clearTimeout(timer); }
 }
 
 export async function requireCapability(

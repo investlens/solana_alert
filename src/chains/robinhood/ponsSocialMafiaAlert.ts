@@ -30,9 +30,12 @@ export type SocialMafiaSocials = {
   telegramLabel: string;
 };
 
-type QueuedLaunch = { launch: PonsLaunch; launchpad: VerifiedLaunchpadContext };
+type QueuedLaunch = { launch: PonsLaunch; launchpad: VerifiedLaunchpadContext; createdAt: number; nextAt: number; attempt: number };
+const SCREEN_INTERVAL_MS = 15 * 60_000;
+const SCREEN_LIFETIME_MS = 60 * 60_000;
+let wakeTimer: ReturnType<typeof setTimeout> | null = null;
 const queue: QueuedLaunch[] = [];
-const seen = new Set<string>();
+const seen = new Map<string, number>();
 let active = 0;
 let recipientCacheAt = 0;
 let recipientCache = new Set<string>();
@@ -187,32 +190,32 @@ export function buildSocialMafiaAlertText(args: {
   ].join('\n');
 }
 
-async function processLaunch(item: QueuedLaunch): Promise<void> {
+async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   const { launch, launchpad } = item;
   const token = normalize(launch.token_address);
 
   // Social Mafia is intentionally launchpad-only. Callers must supply a verified
   // launchpad context; custom/unknown contracts never enter this queue.
   const pons = await getPonsPublicContext(token, launch.factory_address, launch.deployer_address);
-  const onchainSocials = await getRobinhoodTokenSocials(token)
+  const onchainSocials = await getRobinhoodTokenSocials(token, { refresh: true })
     .catch(() => ({ twitter: null, telegram: null, website: null }));
-  const rawSocials = { twitter: onchainSocials.twitter || pons?.twitter, telegram: onchainSocials.telegram || pons?.telegram };
+  const rawSocials = { twitter: pons?.twitter || onchainSocials.twitter, telegram: pons?.telegram || onchainSocials.telegram };
   const socials = resolveSocialMafiaSocials(rawSocials);
   if (!socials) {
-    recordLaunchSocialEligibility(token, false);
+    if (item.attempt >= 4) recordLaunchSocialEligibility(token, false);
     console.log('[SocialMafia] skipped; both X and Telegram are required', {
       token,
       launchpad: launchpad.id,
       hasX: Boolean(extractXUsername(rawSocials.twitter)),
     });
-    return;
+    return false;
   }
 
   const identity = await verifySocialContract({ token, xHandle: socials.xHandle, telegramUrl: socials.telegramUrl });
   if (!identity.confirmed) {
-    recordLaunchSocialEligibility(token, false);
+    if (item.attempt >= 4) recordLaunchSocialEligibility(token, false);
     console.log('[SocialMafia] suppressed; social contract not confirmed', { token, reason: identity.reason });
-    return;
+    return false;
   }
 
   recordLaunchSocialEligibility(token, true);
@@ -282,39 +285,67 @@ async function processLaunch(item: QueuedLaunch): Promise<void> {
     token, launchpad: launchpad.id, xHandle: socials.xHandle,
     telegram: socials.telegramLabel, delivered, failed,
   });
+  // Never replay ambiguous Telegram sends to recipients who may have received it.
+  return true;
+}
+
+function prune(now: number): void {
+  for (const [identity, expires] of seen) if (now > expires) seen.delete(identity);
+  for (let i = queue.length - 1; i >= 0; i--) if (now > queue[i].createdAt + SCREEN_LIFETIME_MS + 30_000) {
+    recordLaunchSocialEligibility(normalize(queue[i].launch.token_address), false);
+    queue.splice(i, 1);
+  }
 }
 
 function drain(): void {
-  while (active < MAX_CONCURRENT && queue.length > 0) {
+  if (wakeTimer) { clearTimeout(wakeTimer); wakeTimer = null; }
+  const now = Date.now();
+  prune(now);
+  queue.sort((a, b) => a.nextAt - b.nextAt);
+  while (active < MAX_CONCURRENT && queue.length > 0 && queue[0].nextAt <= now) {
     const item = queue.shift()!;
+    // Skip missed intervals rather than issuing a burst of catch-up requests.
+    item.attempt = Math.min(4, Math.max(item.attempt + 1, Math.floor((now - item.createdAt) / SCREEN_INTERVAL_MS)));
     active += 1;
     void processLaunch(item)
-      .catch(error => console.warn('[SocialMafia] screening failed', {
-        token: normalize(item.launch.token_address),
-        launchpad: item.launchpad.id,
-        reason: error instanceof Error ? error.message : String(error),
-      }))
+      .catch(error => {
+        console.warn('[SocialMafia] screening failed', { token: normalize(item.launch.token_address),
+          reason: error instanceof Error ? error.message : String(error) });
+        return false;
+      })
+      .then(done => {
+        if (!done && item.attempt < 4 && Date.now() < item.createdAt + SCREEN_LIFETIME_MS) {
+          item.nextAt = item.createdAt + (item.attempt + 1) * SCREEN_INTERVAL_MS;
+          if (queue.length < MAX_QUEUE) queue.push(item);
+        } else if (!done) recordLaunchSocialEligibility(normalize(item.launch.token_address), false);
+      })
       .finally(() => { active -= 1; drain(); });
+  }
+  if (queue.length > 0 && active < MAX_CONCURRENT) {
+    wakeTimer = setTimeout(drain, Math.max(1, queue[0].nextAt - Date.now()));
+    wakeTimer.unref();
+  } else if (seen.size > 0 && queue.length === 0 && active === 0) {
+    wakeTimer = setTimeout(drain, 30_000); wakeTimer.unref();
   }
 }
 
-export function queueVerifiedLaunchpadSocialMafiaScreen(
-  launch: PonsLaunch,
-  launchpad: VerifiedLaunchpadContext,
-): void {
+export function queueVerifiedLaunchpadSocialMafiaScreen(launch: PonsLaunch, launchpad: VerifiedLaunchpadContext): void {
   if (!enabled()) return;
+  const now = Date.now(); prune(now);
   const token = normalize(launch.token_address);
   const launchpadId = String(launchpad.id ?? '').trim().toUpperCase();
-  if (!token || !isVerifiedSocialMafiaLaunch(launch, launchpadId)) return;
+  const createdAt = Date.parse(launch.block_timestamp);
+  if (!/^0x[a-f0-9]{40}$/.test(token) || !isVerifiedSocialMafiaLaunch(launch, launchpadId)
+    || !Number.isFinite(createdAt) || createdAt > now || now > createdAt + SCREEN_LIFETIME_MS) return;
   const identity = `${launchpadId}:${token}`;
   if (seen.has(identity)) return;
-  seen.add(identity);
-  if (queue.length >= MAX_QUEUE) {
-    const dropped = queue.shift();
-    if (dropped) seen.delete(`${dropped.launchpad.id.toUpperCase()}:${normalize(dropped.launch.token_address)}`);
-    console.warn('[SocialMafia] queue full; oldest candidate dropped', { queueDepth: queue.length, maxQueue: MAX_QUEUE });
+  // Reject excess admissions, preserving once-per-token protection for admitted candidates.
+  if (queue.length + active >= MAX_QUEUE || seen.size >= 500) {
+    console.warn('[SocialMafia] admission capacity reached', { queueDepth: queue.length }); return;
   }
-  queue.push({ launch, launchpad });
+  seen.set(identity, createdAt + SCREEN_LIFETIME_MS + 30_000);
+  queue.push({ launch, launchpad, createdAt, nextAt: Math.max(now, createdAt + SCREEN_INTERVAL_MS), attempt: 0 });
+  console.log('[SocialMafia] SCHEDULED', { token, firstCheckMinutes: 15, expiresMinutes: 60 });
   drain();
 }
 
@@ -334,7 +365,11 @@ export function queuePonsSocialMafiaScreen(launch: PonsLaunch): void {
   queueVerifiedLaunchpadSocialMafiaScreen(launch, PONS_LAUNCHPAD);
 }
 
+export function drainPonsSocialMafiaForTests(): void { drain(); }
+
 export function resetPonsSocialMafiaForTests(): void {
+  if (wakeTimer) clearTimeout(wakeTimer);
+  wakeTimer = null;
   queue.length = 0;
   seen.clear();
   recipientCache.clear();

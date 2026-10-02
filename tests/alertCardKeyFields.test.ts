@@ -24,7 +24,7 @@ test('boost metadata fallback never turns a contract address into a ticker', () 
   assert.equal(fallback.name, null);
 });
 
-test('boost cards keep required unknown fields visible and do not render CA as ticker', () => {
+test('boost cards consolidate missing creator evidence and do not render CA as ticker', () => {
   const message = buildPremiumTokenNotification({
     state: 'BOOST',
     symbol: address,
@@ -47,8 +47,8 @@ test('boost cards keep required unknown fields visible and do not render CA as t
   assert.doesNotMatch(message, /\$0xA8936B/i);
   assert.match(message, /Market cap<\/b>\s+Unavailable/);
   assert.match(message, /Liquidity<\/b>\s+Unavailable/);
-  assert.match(message, /Dev holding<\/b>\s+Unverified/);
-  assert.match(message, /Burned<\/b>\s+Unverified/);
+  assert.match(message, /Creator holding not verified/);
+  assert.doesNotMatch(message, /Burned<\/b>\s+Unverified/);
   assert.match(message, /10 total \(\+10\)/);
 });
 

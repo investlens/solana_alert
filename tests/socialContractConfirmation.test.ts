@@ -37,3 +37,9 @@ test('identity gate runs before market, creator enrichment and all message deliv
   assert.ok(process.indexOf('if (!identity.confirmed)') < process.indexOf('const chats = await recipients()'));
   assert.match(process, /if \(!identity\.confirmed\) \{[\s\S]*?return;/);
 });
+
+ test('public X shells are unavailable evidence, not a contract mismatch', async () => {
+  const result = await verifySocialContract(args, async () => '<html><script>renderProfile()</script></html>');
+  assert.equal(result.reason, 'X_CONTENT_UNREADABLE');
+  assert.equal(result.confirmed, false);
+});
