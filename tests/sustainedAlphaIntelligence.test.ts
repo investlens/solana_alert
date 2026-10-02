@@ -124,7 +124,7 @@ test('volume surge requires comparable m5 data and deduplicates within one Boost
   assert.equal(isMaterialVolumeSurge({ previousVolume5m: null, currentVolume5m: 200, previousPrice: 1, currentPrice: 1 }), false);
   assert.equal(isMaterialVolumeSurge({ previousVolume5m: 100, currentVolume5m: 150, previousPrice: 1, currentPrice: 0.8 }), true);
   const source = await readFile(new URL('../src/chains/robinhood/robinhoodBoostObserver.ts', import.meta.url), 'utf8');
-  assert.match(source, /comparisonWindow: 'DEXSCREENER_M5_TO_DEXSCREENER_M5'/); assert.match(source, /identity: `\$\{eventId\}:volume-surge`/);
+  assert.match(source, /comparisonWindow: 'DEXSCREENER_M5_TO_DEXSCREENER_M5'/); assert.match(source, /identity: `\$\{args.semanticIdentity\}:volume-surge`/);
 });
 test('developer burn and transfer materiality preserve internal evidence', () => {
   assert.equal(developerEvent({ burnedPercent: 0.2, evidence: 'VERIFIED' }).notify, false);

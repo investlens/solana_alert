@@ -36,7 +36,7 @@ test('Full Intel action is callback-safe and does not introduce Trade', () => {
     copyContractCallback: 'COPY_CA_0x5571E3b04487438847566a54B59b940e6668A8c6',
     fullIntelCallback: 'FI_RH_0x5571E3b04487438847566a54B59b940e6668A8c6' });
   const flat = rows.flat();
-  assert(flat.some(x => x.text === '🔬 Full Intel'));
+  assert(flat.some(x => x.text === '🧠 Full Intel'));
   assert(flat.every(x => !('callback_data' in x) || Buffer.byteLength(x.callback_data!, 'utf8') <= 64));
   assert(!flat.some(x => /Trade/i.test(x.text)));
 });

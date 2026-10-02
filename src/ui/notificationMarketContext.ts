@@ -121,17 +121,7 @@ export function normalizeCoreDecisionMetrics(...sources: MarketContextSource[]):
 function percent(value: number): string { return `${Number(value.toFixed(2)).toString()}%`; }
 export function coreDecisionEvidenceMetrics(context: CoreDecisionMetricContext): AlphaNotificationMetric[] {
   return [
-    {
-      label: 'Dev holding',
-      value: context.devHoldingEvidence === 'VERIFIED' && context.devHoldingPercent != null
-        ? percent(context.devHoldingPercent)
-        : 'UNVERIFIED',
-    },
-    {
-      label: 'Burned',
-      value: context.burnEvidence === 'VERIFIED' && context.burnedPercent != null
-        ? percent(context.burnedPercent)
-        : 'UNVERIFIED',
-    },
+    ...(context.devHoldingEvidence === 'VERIFIED' && context.devHoldingPercent != null ? [{ label: 'Dev holding', value: percent(context.devHoldingPercent) }] : []),
+    ...(context.burnEvidence === 'VERIFIED' && context.burnedPercent != null ? [{ label: 'Burned', value: percent(context.burnedPercent) }] : []),
   ];
 }

@@ -120,9 +120,9 @@ test('first actionable CHECK_ENTRY is explicit entry intent and bounded to three
   await import('dotenv/config');
   const { buildOpportunityMessage } = await import('../src/services/opportunityDeliveryService.js');
   const message = buildOpportunityMessage(intentOpportunity({}));
-  assert.match(message, /^🎯 <b>ENTRY OPPORTUNITY<\/b>/);
+  assert.match(message, /^🔥 <b>ALPHA ENTRY — [^\n]+<\/b>/);
   assert.match(message, /🎯 <b>ACTION: CHECK ENTRY<\/b>/);
-  assert.match(message, /Conditions qualify for entry consideration/);
+  assert.match(message, /ALPHAOS VERDICT: CHECK ENTRY/);
   assert.doesNotMatch(message, /Previously alerted opportunity has a new qualified momentum signal/);
   assert.equal((message.match(/^• /gm) ?? []).length, 3);
   assert.match(message, /• Breakout confirmed\n• Volume acceleration increased\n• Structure remains confirmed/);
@@ -137,11 +137,11 @@ test('prior successfully delivered actionable event produces momentum intent wit
     price: { previous: 0.00004, current: 0.00004952, changePct: 23.8 }, previousState: 'CONFIRMED', currentState: 'RUNNER' };
   const message = buildOpportunityMessage(base, comparison, { intent: 'MOMENTUM_UPDATE', notify: true,
     factors: ['PROGRESSION'], reasons: ['Price advanced 23.8% since previous alert'] });
-  assert.match(message, /^📈 <b>MOMENTUM UPDATE<\/b>/);
-  assert.match(message, /📈 <b>ACTION: MOMENTUM UPDATE<\/b>/);
-  assert.match(message, /Previously alerted opportunity has a new qualified momentum signal/);
+  assert.match(message, /^📈 <b>MOMENTUM UPDATE — [^\n]+<\/b>/);
+  assert.match(message, /🎯 <b>ACTION: MOMENTUM UPDATE<\/b>/);
+  assert.match(message, /Price advanced 23.8% since previous alert/);
   assert.match(message, /Previously alerted[\s\S]*Now[\s\S]*Change[\s\S]*\+23\.8%/);
-  assert.match(message, /This is an update to an earlier opportunity/);
+  assert.match(message, /MOMENTUM UPDATE/);
   const unavailable = buildOpportunityMessage(base, { hasPriorAlert: true });
   assert.doesNotMatch(unavailable, /Previously alerted\s+<b>\$0/);
 });

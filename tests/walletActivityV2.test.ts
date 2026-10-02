@@ -126,10 +126,10 @@ test('wallet delivery failure retains V2 evidence in an immediately reclaimable 
   assert.match(source, /reservedWalletActivityMetadata\(args\.event, args\.leaseToken, new Date\(0\)/);
   assert.match(source, /retry_pending:\s*true/);
   assert.match(source, /state:\s*'SENT_UNCONFIRMED'/);
-  assert.match(source, /if \(delivery\.sent\)[\s\S]{0,200}markSentUnconfirmed/);
+  assert.match(source, /complete: async \(\)[\s\S]*markDelivered[\s\S]*catch \(error\)[\s\S]*markSentUnconfirmed/);
   assert.match(watcher, /\['RESERVED', 'SENT_UNCONFIRMED'\]/);
   assert.doesNotMatch(source, /from\(\s*'wallet_activity_deliveries'[\s\S]{0,100}\.delete\(\)/);
-  assert.match(source, /if \(state !== 'DELIVERED'/);
+  assert.match(source, /existingState !== 'DELIVERED'/);
 });
 
 test('Analyze Wallet is Robinhood-only and launch history is safely capped', async () => {

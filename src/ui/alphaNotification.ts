@@ -32,7 +32,7 @@ function observedLabel(value:string|number|Date|null|undefined):string { if(valu
 export function renderAlphaNotification(alert:AlphaNotification):string {
   const compactAddress=compactAlphaAddress(alert.address), symbol=normalizeAlphaSymbol(alert.symbol), name=boundedAlphaText(alert.subtitle||alert.token||alert.title,80);
   const identity=name&&symbol?`${name} ($${symbol})`:symbol?`$${symbol}`:name||compactAddress;
-  const rawLabel=alphaStateLabel(alert.state); const firstSpace=rawLabel.indexOf(' '); const icon=firstSpace>0?rawLabel.slice(0,firstSpace):'ℹ️'; const label=firstSpace>0?rawLabel.slice(firstSpace+1):rawLabel;
+  const rawLabel=alert.displayIntent==='MOMENTUM_UPDATE'?'📈 MOMENTUM UPDATE':alphaStateLabel(alert.state); const firstSpace=rawLabel.indexOf(' '); const icon=firstSpace>0?rawLabel.slice(0,firstSpace):'ℹ️'; const label=firstSpace>0?rawLabel.slice(firstSpace+1):rawLabel;
   const lines:string[]=[`${icon} <b>${escapeAlphaHtml(label)}${identity?` — ${escapeAlphaHtml(identity)}`:''}</b>`, ...(chainLabel(alert.chain)?[`<b>${escapeAlphaHtml(chainLabel(alert.chain))}</b>`]:[])];
   if(alert.address)lines.push(symbol?`<b>${escapeAlphaHtml(symbol)}</b> · <code>${escapeAlphaHtml(compactAddress)}</code>`:`<code>${escapeAlphaHtml(compactAddress)}</code>`);
   // Specialist evidence (developer holding/burn/transfer) is time-sensitive. EXIT
@@ -42,6 +42,7 @@ export function renderAlphaNotification(alert:AlphaNotification):string {
   const specialistMetrics=alert.displayIntent==='EXIT'?[]:(alert.specialistMetrics??[]);
   const metrics=[...(alert.age?[{label:'Age',value:alert.age}]:[]),...(alert.metrics??[]),...specialistMetrics].filter(validMetric).slice(0,12);
   const take=(...labels:string[])=>metrics.find(m=>labels.includes(m.label.toLowerCase())); const p=take('price'),mc=take('market cap','fdv'),liq=take('liquidity'),vol=take('5m volume');
+  if(alert.comparison && [alert.comparison.previous,alert.comparison.current,alert.comparison.changePct].every(Number.isFinite) && alert.comparison.previous>0 && alert.comparison.current>0) lines.push('', `Previously alerted <b>${alert.comparison.previous}</b> · Now <b>${alert.comparison.current}</b> · Change <b>${alert.comparison.changePct>=0?'+':''}${alert.comparison.changePct.toFixed(1)}%</b>`);
   if(p||mc)lines.push('',`${p?`💰 Price <b>${escapeAlphaHtml(boundedAlphaText(p.value,80))}</b>`:''}${p&&mc?'  •  ':''}${mc?`${mc.label} <b>${escapeAlphaHtml(boundedAlphaText(mc.value,80))}</b>`:''}`);
   if(liq||vol)lines.push(`${liq?`💧 Liquidity <b>${escapeAlphaHtml(boundedAlphaText(liq.value,80))}</b>`:''}${liq&&vol?'  •  ':''}${vol?`📊 5m volume <b>${escapeAlphaHtml(boundedAlphaText(vol.value,80))}</b>`:''}`);
   for(const m of metrics.filter(x=>![p,mc,liq,vol].includes(x)).slice(0,4))lines.push(`${m.icon?`${escapeAlphaHtml(m.icon)} `:''}${escapeAlphaHtml(boundedAlphaText(m.label,24))} <b>${escapeAlphaHtml(boundedAlphaText(m.value,80))}</b>`);

@@ -1,3 +1,4 @@
+import { createGroupResearchSettings } from '../services/groupResearchSettings.js';
 import type { Telegraf } from 'telegraf';
 import { extractScanContract, getRobinhoodContractReport, renderContractScreen } from './contractScreening.js';
 import { buildAlphaosAlertCard } from '../ui/alphaosAlertCard.js';
@@ -9,7 +10,7 @@ type Screen = { text: string; image: Buffer; chain: ResearchChain; wallet: boole
 type Choice = { choices: ResearchChain[]; reason: string };
 const cache = new Map<string, { expires: number; value: Screen | Choice }>();
 const inflight = new Map<string, Promise<Screen | Choice>>();
-const groups = new Map<string, number>(); const freshLookups = new Map<string, number>();
+const groupSettings = createGroupResearchSettings(); const freshLookups = new Map<string, number>();
 let budgetAt = 0; let budget = 0;
 const code = (chain: ResearchChain) => chain === 'robinhood' ? 'RH' : 'ARC';
 const chainFromCode = (value: string): ResearchChain => value === 'RH' ? 'robinhood' : 'arc';
@@ -95,7 +96,6 @@ export function registerAddressScreening(bot: Telegraf<any>, lookup = getAddress
   const timer = setInterval(() => {
     const now = Date.now();
     for (const [key, value] of cache) if (value.expires <= now) cache.delete(key);
-    for (const [key, expiry] of groups) if (expiry <= now) groups.delete(key);
     for (const [key, expiry] of freshLookups) if (expiry <= now) freshLookups.delete(key);
     getReportedCreatorProjects('', 'robinhood', now);
   }, 30_000); timer.unref();
@@ -153,14 +153,13 @@ export function registerAddressScreening(bot: Telegraf<any>, lookup = getAddress
   }
   bot.command('scan_on', async ctx => {
     if (!await admin(ctx)) { await ctx.reply('A group administrator must enable scanning.'); return; }
-    if (groups.size >= 100 && !groups.has(String(ctx.chat.id))) { await ctx.reply('Group scanning capacity reached.'); return; }
-    groups.set(String(ctx.chat.id), Date.now() + 24 * 60 * 60_000);
-    await ctx.reply('Address research enabled for 24 hours. Paste a Robinchain or ARC contract or wallet. For bare-address scanning, make the bot a group administrator; otherwise use /scan@' + (ctx.botInfo?.username ?? bot.botInfo?.username ?? 'bot') + ' <address>. Creator links open private research. Personal alerts stay in private chats. /scan_off disables scanning.');
+    if (!await groupSettings.set(String(ctx.chat.id), true)) { await ctx.reply('Group scanning capacity reached.'); return; }
+    await ctx.reply('Address research enabled. Settings survive restarts when shared storage is available. Paste a Robinchain or ARC contract or wallet. For bare-address scanning, make the bot a group administrator; otherwise use /scan@' + (ctx.botInfo?.username ?? bot.botInfo?.username ?? 'bot') + ' <address>. Creator links open private research. Personal alerts stay in private chats. /scan_off disables scanning.');
   });
-  bot.command('scan_off', async ctx => { if (await admin(ctx)) { groups.delete(String(ctx.chat.id)); await ctx.reply('Automatic address research disabled.'); } });
+  bot.command('scan_off', async ctx => { if (await admin(ctx)) { await groupSettings.set(String(ctx.chat.id), false); await ctx.reply('Automatic address research disabled.'); } });
   bot.on('text', async (ctx, next) => {
     if (ctx.message.text.startsWith('/')) return next();
-    if (ctx.chat.type !== 'private' && (groups.get(String(ctx.chat.id)) ?? 0) <= Date.now()) return next();
+    if (ctx.chat.type !== 'private' && !await groupSettings.enabled(String(ctx.chat.id))) return next();
     const text = ctx.message.text.trim(); const address = extractScanContract(text);
     if (!address || text.toLowerCase() !== address) return next();
     await screen(ctx, address);
