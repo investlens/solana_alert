@@ -2,6 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { extractScanContract, renderContractScreen } from '../src/bot/contractScreening.js';
 const token = '0x1111111111111111111111111111111111111111';
+test('pre-bond PONS market excludes a dust side pool and preserves source labels', () => {
+  const side = { baseToken: { name: 'Elvo Exchange', symbol: 'ELVO' }, priceUsd: '0.000003425',
+    marketCap: 3425, liquidity: { usd: 0.16 }, volume: { m5: 0, h24: 0.53 }, pairCreatedAt: Date.now() - 9 * 60 * 60_000 };
+  const pons = { name: 'Elvo Exchange', symbol: 'ELVO', creator: token, decimals: 18,
+    totalSupplyRaw: 1_000_000_000n * 10n ** 18n, priceUsd: 5.772482807e-9 * 2745.0147663737143,
+    fdvUsd: 5.772482807e-9 * 2745.0147663737143 * 1e9, twitter: null, telegram: null, phase: 0, venue: 'curve' };
+  const text = renderContractScreen(token, side, pons);
+  assert.match(text, /FDV.*15\.8K/); assert.match(text, /PONS bonding curve/);
+  assert.doesNotMatch(text, /MC  |LP liquidity|Vol ·|Pair age|DEXScreener|3\.4K/);
+  assert.ok(text.length <= 1024);
+  const graduated = renderContractScreen(token, side, { ...pons, phase: 1, venue: 'pool' });
+  assert.match(graduated, /MC.*3\.4K/); assert.match(graduated, /LP liquidity/);
+});
 test('contract scans reject partial, embedded and multiple addresses', () => {
   assert.equal(extractScanContract(`/scan robinhood ${token}`), token);
   assert.equal(extractScanContract(`a${token}`), null);

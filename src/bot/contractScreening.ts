@@ -21,6 +21,10 @@ export function extractScanContract(text: string): string | null {
   return addresses.length === 1 ? addresses[0].toLowerCase() : null;
 }
 export function renderContractScreen(token: string, pair: DexScreenerPair | null, pons?: PonsPublicContext | null, creatorBalance?: number | null, chainLabel = 'Robinchain'): string {
+  const curveMarket = pons?.phase === 0 && pons.venue === 'curve';
+  // A side pool is not the active launchpad market. Never mix its valuation,
+  // liquidity, volume, trades or age into a pre-bond PONS report.
+  if (curveMarket) pair = null;
   const rows: string[] = [];
   for (const [label, value] of [['Price', pair ? pair.priceUsd : pons?.priceUsd], ['MC', pair?.marketCap], ['FDV', pair?.marketCap == null ? (pair ? pair.fdv : pons?.fdvUsd) : null],
     ['LP liquidity', pair?.liquidity?.usd], ['Vol · 5m', pair?.volume?.m5]] as const) {
@@ -48,8 +52,9 @@ export function renderContractScreen(token: string, pair: DexScreenerPair | null
   const symbol = pair?.baseToken?.symbol || pons?.symbol;
   const identity = `<b>${escape((pair?.baseToken?.name || pons?.name || 'Token report').slice(0, 32))}</b>${symbol ? ` ($${escape(symbol.slice(0, 16))})` : ''}`;
   const fixed = [identity, `${chainLabel} · Contract screen`, '',
-    ...(!pair && pons ? ['PONS snapshot · DEX market not indexed'] : []),
+    ...(curveMarket ? ['PONS bonding curve · Pre-bond snapshot'] : !pair && pons ? ['PONS snapshot · DEX market not indexed'] : []),
     ...(rows.length ? ['<b>📊 STATS</b>', ...rows] : ['Indexed market data could not be verified.']), '',
+    ...(curveMarket ? ['FDV = price × total supply.', 'Curve liquidity, volume and age unavailable in this snapshot.', ''] : []),
     '<b>SOCIALS</b>', links.length && links.join(' · ').length < 180 ? links.join(' · ') : 'Not listed', '',
     ...(pons ? [`Creator · PONS page  <a href="https://robinhoodchain.blockscout.com/address/${pons.creator}">${pons.creator.slice(0, 6)}…${pons.creator.slice(-4)}</a>`] : []),
     ...(creatorBalance != null && Number.isFinite(creatorBalance) && creatorBalance >= 0 && creatorBalance <= 100 ? [`Creator balance  <b>${(creatorBalance === 0 ? '0.00' : creatorBalance < 0.01 ? '&lt;0.01' : creatorBalance.toFixed(2))}%</b> · On-chain`] : []),
@@ -76,7 +81,7 @@ export async function getRobinhoodContractReport(token: string, refresh = false)
   budgetUsed++;
   const work = (async () => {
     const pairs = await fetchRobinhoodPairs(token, { priority: 'NORMAL', caller: 'contract_screen', queueWaitTimeoutMs: 1_000 });
-    const pair = chooseBestRobinhoodPair(pairs, token);
+    const dexPair = chooseBestRobinhoodPair(pairs, token);
     const marker = await getSharedJson<{ factory?: string }>(`alphaos:pons:verified:${token}`);
     let factory = marker?.value.factory;
     if (!factory) {
@@ -92,11 +97,13 @@ export async function getRobinhoodContractReport(token: string, refresh = false)
     // Website metadata is sourced explicitly in requested research; it never
     // changes automatic launch/social eligibility or claims verified provenance.
     const pons = await (known ? getVerifiedPonsPublicContext(token, factory) : getReportedPonsPublicContext(token)).catch(() => null);
+    const curveMarket = pons?.phase === 0 && pons.venue === 'curve';
+    const pair = curveMarket ? null : dexPair;
     const creatorBalance = pons ? await getScreenCreatorBalance(token, pons.creator) : null;
     const text = renderContractScreen(token, pair, pons, creatorBalance);
     const image = await buildAlphaosAlertCard({ title: pair?.baseToken?.symbol || pons?.symbol ? undefined : 'Contract research', symbol: pair?.baseToken?.symbol || pons?.symbol, name: pair?.baseToken?.name || pons?.name, logo: pons?.logo,
-      category: 'CONTRACT SCREEN', chainLabel: 'ROBINCHAIN', badge: !pair && pons ? 'PONS SNAPSHOT' : 'MARKET SNAPSHOT', footer: 'Requested contract research · Live market snapshot' });
-    const result = { text, image, chart: pair ? verifiedRobinhoodChartUrl(pair) : undefined };
+      category: 'CONTRACT SCREEN', chainLabel: 'ROBINCHAIN', badge: curveMarket ? 'PONS PRE-BOND' : !pair && pons ? 'PONS SNAPSHOT' : 'MARKET SNAPSHOT', footer: 'Requested contract research · Sourced market snapshot' });
+    const result = { text, image, chart: curveMarket ? `https://www.ponsfamily.com/launchpad/${token}` : pair ? verifiedRobinhoodChartUrl(pair) : undefined };
     if (reports.size >= 50) reports.delete(reports.keys().next().value!);
     reports.set(token, { ...result, expires: Date.now() + TTL }); return result;
   })();

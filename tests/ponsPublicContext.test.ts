@@ -6,13 +6,14 @@ const factory = '0x2222222222222222222222222222222222222222';
 const creator = '0x3333333333333333333333333333333333333333';
 function page(address = token) {
   const record = { initialDetails: { token: address, factory, deployer: creator, name: 'AXIL', symbol: '$$AXIL',
-    decimals: 18, totalSupplyWei: '1000000000000000000000000000', socials: { twitter: 'https://x.com/axil', telegram: 'https://t.me/axil_coin' } }, initialPriceQuote: 1.664e-8, quoteUsd: 228.38 };
+    phase: 0, venue: 'curve', decimals: 18, totalSupplyWei: '1000000000000000000000000000', socials: { twitter: 'https://x.com/axil', telegram: 'https://t.me/axil_coin' } }, initialPriceQuote: 1.664e-8, quoteUsd: 228.38 };
   return `<script>self.__next_f.push(${JSON.stringify([1, '18:' + JSON.stringify(['$', 'screen', null, record]) + '\n'])})</script>`;
 }
 test('PONS identity and non-native quote FDV require matching token, factory and creator', () => {
   const context = parsePonsPublicContext(page(), token, factory, creator)!;
   assert.equal(context.symbol, 'AXIL'); assert.equal(context.name, 'AXIL');
   assert.equal(context.creator, creator); assert.ok(Math.abs(context.fdvUsd! - 3800.2432) < 0.001);
+  assert.equal(context.phase, 0); assert.equal(context.venue, 'curve');
   assert.equal(parsePonsPublicContext(page(factory), token, factory, creator), null);
   assert.equal(parsePonsPublicContext(page(), token, token, creator), null);
   assert.equal(parsePonsPublicContext(page(), token, factory, token), null);
