@@ -71,7 +71,9 @@ async function sendTelegramRequest(chatId: string, text: string, buttons?: Inlin
   const category = text.match(/(?:BOOST DETECTED|BOOST INCREASED|MAX BOOST 500\+|ARC OPPORTUNITY|TRADE SETUP WATCH|SUPPLY BURN|SOCIAL MAFIA ALERT)/)?.[0];
   if (category && text.length <= 1024) {
     const ticker = text.match(/<b>\$([A-Za-z_][A-Za-z0-9_]{0,23})\b/)?.[1];
-    const image = await buildAlphaosAlertCard({ symbol: ticker, category,
+    const identityName = text.match(/<b>\$[^<]+<\/b> · ([^\n]+)/)?.[1];
+    const name = identityName?.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+    const image = await buildAlphaosAlertCard({ symbol: ticker, name, category,
       chainLabel: /ARC OPPORTUNITY/.test(category) ? 'ARC' : 'ALPHAOS / TOKEN RESEARCH',
       badge: 'INFORMATION / DYOR', footer: 'Promotion and market activity do not establish token safety.' }).catch(() => null);
     return (await sendAlphaosPhotoAlert({ botToken: config.botToken, chatId, text,

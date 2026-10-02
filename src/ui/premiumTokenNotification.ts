@@ -14,7 +14,7 @@ export function buildPremiumTokenNotification(args:{
   state:PremiumState; symbol?:string|null; name?:string|null; address:string; chain?:string|null; observedAt?:string|number|Date|null;
   age?:string|null; market:NotificationMarketContext; evidence?:CoreDecisionMetricContext|null; volumeMultiple?:number|null; move?:number|null; peakMove?:number|null;
   retainedPeakPercent?:number|null; boostTotal?:number|null; boostIncrement?:number|null; devLaunches?:number|null; devBurnPercent?:number|null; risk?:string|null; confidence?:number|null;
-  telegramType?:string; launchSource?:'PONS'|'CUSTOM'|'UNKNOWN'|null; socials?:{twitter?:string|null;telegram?:string|null};
+  buys5m?:number|null; sells5m?:number|null; move1h?:number|null; source?:string|null; telegramType?:string; launchSource?:'PONS'|'CUSTOM'|'UNKNOWN'|null; socials?:{twitter?:string|null;telegram?:string|null};
   insightTitle:string; insight:string[]; statusTitle:string; status:string; displayIntent?:'ENTRY'|'MOMENTUM_UPDATE'|'RECOVERY_WATCH'|'WATCH'|'AVOID'|'EXIT';
   comparison?:{previous:number;current:number;changePct:number}; entryAction?:'BUY'|'CHECK_ENTRY'; structureContext?:string|null;
 }) {
@@ -40,7 +40,8 @@ export function buildPremiumTokenNotification(args:{
   if (args.state === 'BOOST' || args.state === 'MAJOR_BOOST') {
     const title = args.state === 'MAJOR_BOOST' ? '🚨🔥 MAX BOOST 500+' : '🚀 BOOST DETECTED';
     const symbol = displayTicker(args.symbol);
-    const chain = String(args.chain ?? '').trim().toUpperCase();
+    const rawChain = String(args.chain ?? '').trim();
+    const chain = /^robin(?:hood|chain)$/i.test(rawChain) ? 'Robinchain' : rawChain.toUpperCase();
     const identity = symbol
       ? `<b>$${escapeHtml(symbol)}</b>${args.name ? ` · ${escapeHtml(args.name)}` : ''}`
       : args.name
@@ -63,30 +64,32 @@ export function buildPremiumTokenNotification(args:{
         : '',
       ...(args.move==null?[]:[`📈 <b>Move</b>  ${args.move>=0?'+':''}${args.move.toFixed(1)}%`]),
     ];
-    const lines = [
-      `<b>${title}</b>`,
-      `🧭 Launch: <b>${launchLabel}</b>`,
-      identity,
-      chain ? `<i>${escapeHtml(chain)}</i>` : '',
-      '',
-      ...marketLines,
-      '',
-      ...(args.evidence?.devHoldingEvidence !== 'VERIFIED' ? ['Creator holding not verified.'] : []),
-      '<b>SAFETY</b>',
-      unlockedLpWarning
-        ? '⚠️ LP unlocked · <b>HIGH RUG RISK</b>'
-        : `🛡 ${escapeHtml(args.status)}`,
-      unlockedLpWarning ? 'No sell-restriction flag reported' : '',
-      '',
-      ...(args.socials ? ['<b>SOCIAL LINKS</b>',
-        socialLinks.xUrl ? `𝕏 <a href="${escapeHtml(socialLinks.xUrl).replace(/"/g, '&quot;')}">X</a>` : '',
-        socialLinks.telegramUrl ? `✈️ <a href="${escapeHtml(socialLinks.telegramUrl).replace(/"/g, '&quot;')}">TG</a> · ${escapeHtml(args.telegramType ?? 'Type unverified')}` : ''] : []),
-      `<b>CONTRACT</b>`,
-      `<code>${escapeHtml(args.address)}</code>`,
-      '',
-      '<i>Information only · DYOR</i>',
+    const activity = [
+      ...(args.age ? [`⏱ <b>Pair age</b>  ${escapeHtml(args.age)}`] : []),
+      ...(args.move1h != null && Number.isFinite(args.move1h) ? [`📈 <b>Move · 1h</b>  ${args.move1h >= 0 ? '+' : ''}${args.move1h.toFixed(2)}%`] : []),
+      ...(args.buys5m != null && args.sells5m != null && Number.isInteger(args.buys5m) && Number.isInteger(args.sells5m) && args.buys5m >= 0 && args.sells5m >= 0 ? [`<b>Trades · 5m</b>  ${args.buys5m} buy / ${args.sells5m} sell`] : []),
+    ];
+    const socials = [
+      socialLinks.xUrl ? `<a href="${escapeHtml(socialLinks.xUrl).replace(/"/g, '&quot;')}">X</a>` : '',
+      socialLinks.telegramUrl ? `<a href="${escapeHtml(socialLinks.telegramUrl).replace(/"/g, '&quot;')}">TG</a> · ${escapeHtml(args.telegramType ?? 'Type unverified')}` : '',
     ].filter(Boolean);
-    return lines.join('\n');
+    const checked = args.observedAt == null ? null : new Date(args.observedAt);
+    const sections = [
+      [`<b>${title}</b>`, identity, chain ? `<i>${escapeHtml(chain)}</i>` : ''].filter(Boolean).join('\n'),
+      ['<b>STATS</b>', ...marketLines.filter(Boolean), ...activity].join('\n'),
+      ['<b>RISK</b>', `🧭 Launch: <b>${launchLabel}</b>`,
+        ...(args.evidence?.devHoldingEvidence !== 'VERIFIED' ? ['Creator holding not verified.'] : []),
+        unlockedLpWarning ? '⚠️ LP unlocked · <b>HIGH RUG RISK</b>' : `🛡 ${escapeHtml(args.status)}`,
+        ...(unlockedLpWarning ? ['No sell-restriction flag reported'] : []),
+      ].join('\n'),
+      socials.length ? `<b>SOCIALS</b>\n${socials.join(' · ')}` : 'Socials: Not listed',
+      `<b>CONTRACT</b>\n<code>${escapeHtml(args.address)}</code>`,
+      ['<i>Paid promotion ≠ buying momentum · DYOR</i>',
+        ...(args.source && checked && Number.isFinite(checked.getTime()) ? [`${escapeHtml(args.source)} · Checked ${checked.toISOString().slice(11, 19)} UTC`] : []),
+      ].join('\n'),
+    ];
+    const lines = sections;
+    return lines.join('\n\n');
   }
 
   const developerParts=[...(!lightweight&&args.evidence?.devHoldingEvidence==='VERIFIED'&&args.evidence.devHoldingPercent!=null?[`Dev holds ${percent(args.evidence.devHoldingPercent)}`]:[]), ...(args.devBurnPercent!=null&&Number.isFinite(args.devBurnPercent)?[`Dev burned ${percent(args.devBurnPercent)}`]:[]), ...(args.devLaunches!=null&&args.devLaunches>0?[`${args.devLaunches} observed creator launches`]:[])];
