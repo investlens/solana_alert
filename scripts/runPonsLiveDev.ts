@@ -1,3 +1,4 @@
+import { compactOutcomesEnabled, runCompactOutcomeCycle } from '../src/services/compactAlertOutcomes.js';
 import 'dotenv/config';
 import { robinhoodResilientScannerRpc } from '../src/chains/robinhood/rpc.js';
 import { getPonsLiveConfig } from '../src/chains/robinhood/ponsLiveConfig.js';
@@ -62,6 +63,12 @@ async function runPonsOutcomeCollection(): Promise<void> {
 }
 
 function startPonsOutcomeCollectionLoop(): void {
+  if (compactOutcomesEnabled()) {
+    console.log('[CompactOutcomes] START maxActive=20 checkpoints=15m,1h,6h retentionDays=7 observationsPerMinute=2 legacyPonsCollector=replaced');
+    void runCompactOutcomeCycle();
+    setInterval(() => { void runCompactOutcomeCycle(); }, 60_000);
+    return;
+  }
   const enabled = String(process.env.PONS_OUTCOME_COLLECTION_ENABLED ?? 'true').toLowerCase() === 'true';
   if (!enabled) {
     console.log('[PonsOutcomes] automatic collection disabled');

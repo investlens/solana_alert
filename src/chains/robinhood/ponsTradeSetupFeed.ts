@@ -1,3 +1,4 @@
+import { compactOutcomesEnabled } from '../../services/compactAlertOutcomes.js';
 import { launchSocialEligibility } from './alertEligibilityState.js';
 import { setSharedJson } from '../../services/sharedJsonCache.js';
 import { PONS_CONTRACTS } from './ponsContracts.js';
@@ -100,9 +101,11 @@ async function tick(): Promise<void> {
         // to recipients who may already have received the message.
         candidates.delete(token);
         await setSharedJson(`alphaos:setup:evidence:${token}`, { creator: context.creator, holding, rawLow: item.trend.low, curve: item.launch.curve_address, at: Date.now() }, new Date().toISOString(), 2 * 60 * 60_000);
-        const delivery = await directTelegramRecipients(text, token, { twitter: socials.xUrl, telegram: socials.telegramUrl, website: null }, true, true);
+        const delivery = await directTelegramRecipients(text, token, { twitter: socials.xUrl, telegram: socials.telegramUrl, website: null }, true, true, {chain:'robinhood', token, feed:'TRADE_SETUP_WATCH', price:finalPrice, pair:item.launch.curve_address, unit:'ETH_RESERVE_RATIO', creator:item.launch.deployer_address, creatorSource:'PONS_FACTORY_EVENT'});
+        if (!compactOutcomesEnabled()) {
         if (outcomes.size >= 20) outcomes.delete(outcomes.keys().next().value!);
         outcomes.set(token, { launch: item.launch, price: finalPrice, at: Date.now(), checked: Date.now(), min: finalPrice, max: finalPrice });
+        }
         console.log(`[TradeSetup] SENT token=${token} delivered=${delivery.delivered} failed=${delivery.failed}`);
       } catch { console.log(`[TradeSetup] CHECK_FAILED token=${token}`); }
     }
