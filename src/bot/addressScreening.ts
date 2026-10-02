@@ -3,13 +3,13 @@ import { extractScanContract, getRobinhoodContractReport, renderContractScreen }
 import { buildAlphaosAlertCard } from '../ui/alphaosAlertCard.js';
 import { getReportedPonsPublicContext } from '../chains/robinhood/ponsPublicContext.js';
 import { chooseResearchPair, fetchResearchPairs, loadCreatorResearch, readResearchAccount, renderCreatorResearch,
-  researchCandidates, researchChains, type ResearchChain } from '../services/addressResearch.js';
+  researchCandidates, researchChains, rememberReportedPonsProject, getReportedCreatorProjects, type ResearchChain } from '../services/addressResearch.js';
 
-type Screen = { text: string; image: Buffer; chain: ResearchChain; wallet: boolean; chart?: string };
+type Screen = { text: string; image: Buffer; chain: ResearchChain; wallet: boolean; creatorToken?: string; chart?: string };
 type Choice = { choices: ResearchChain[]; reason: string };
 const cache = new Map<string, { expires: number; value: Screen | Choice }>();
 const inflight = new Map<string, Promise<Screen | Choice>>();
-const groups = new Map<string, number>(); const cooldowns = new Map<string, number>();
+const groups = new Map<string, number>(); const freshLookups = new Map<string, number>();
 let budgetAt = 0; let budget = 0;
 const code = (chain: ResearchChain) => chain === 'robinhood' ? 'RH' : 'ARC';
 const chainFromCode = (value: string): ResearchChain => value === 'RH' ? 'robinhood' : 'arc';
@@ -18,18 +18,33 @@ export function parseResearchChain(text: string): ResearchChain | null {
   if (/^arc\s/i.test(text)) return 'arc';
   return null;
 }
-export function creatorDeepLink(text: string, username?: string): string {
+export function creatorDeepLink(text: string, username?: string, token?: string): string {
   if (!username || !/^[A-Za-z0-9_]+$/.test(username)) return text;
   return text.replace(/href="https:\/\/robinhoodchain\.blockscout\.com\/address\/(0x[a-fA-F0-9]{40})"/g,
-    (_match, address: string) => `href="https://t.me/${username}?start=ci_RH_${address.toLowerCase()}"`);
+    (_match, address: string) => `href="https://t.me/${username}?start=${token && /^0x[a-fA-F0-9]{40}$/.test(token) ? `cp_RH_${encodeCreatorContext(address, token)}` : `ci_RH_${address.toLowerCase()}`}"`);
 }
-export async function getAddressScreen(address: string, chain?: ResearchChain | null, fresh = false, wallet = false): Promise<Screen | Choice> {
-  const key = `${chain ?? 'auto'}:${address}:${wallet}`; const cached = cache.get(key);
+export function encodeCreatorContext(creator: string, token: string): string {
+  return Buffer.from(creator.slice(2) + token.slice(2), 'hex').toString('base64url');
+}
+export function decodeCreatorContext(payload: string): { creator: string; token: string } | null {
+  if (!/^[A-Za-z0-9_-]{54}$/.test(payload)) return null;
+  const data = Buffer.from(payload, 'base64url');
+  if (data.length !== 40 || data.toString('base64url') !== payload) return null;
+  const hex = data.toString('hex'); return { creator: `0x${hex.slice(0, 40)}`, token: `0x${hex.slice(40)}` };
+}
+export async function getAddressScreen(address: string, chain?: ResearchChain | null, fresh = false, wallet = false, creatorToken?: string): Promise<Screen | Choice> {
+  const key = `${chain ?? 'auto'}:${address}:${wallet}:${creatorToken ?? ''}`; const cached = cache.get(key);
   if (!fresh && cached && cached.expires > Date.now()) return cached.value;
   if (inflight.has(key)) return inflight.get(key)!;
+  if (fresh && (freshLookups.get(key) ?? 0) > Date.now()) {
+    if (cached && cached.expires > Date.now()) return cached.value;
+    throw new Error('This lookup was just attempted; retry shortly');
+  }
   if (inflight.size >= 3) throw new Error('Research capacity reached');
   if (Date.now() - budgetAt >= 60_000) { budgetAt = Date.now(); budget = 0; }
   if (budget >= 10) throw new Error('Research budget reached'); budget++;
+  if (freshLookups.size >= 100) freshLookups.delete(freshLookups.keys().next().value!);
+  freshLookups.set(key, Date.now() + 15_000);
   const work = (async (): Promise<Screen | Choice> => {
     const pairs = wallet ? [] : await fetchResearchPairs(address).catch(() => []);
     let selected = chain;
@@ -50,10 +65,15 @@ export async function getAddressScreen(address: string, chain?: ResearchChain | 
     const config = researchChains[selected]; const pair = chooseResearchPair(pairs, address, selected);
     const pons = !wallet && selected === 'robinhood' ? await getReportedPonsPublicContext(address).catch(() => null) : null;
     const account = pair || pons ? null : await readResearchAccount(address, selected, fresh);
+    if (pons) rememberReportedPonsProject(address, pons);
     if (wallet || account?.kind === 'wallet') {
+      if (creatorToken && selected === 'robinhood') {
+        const context = await getReportedPonsPublicContext(creatorToken).catch(() => null);
+        if (context?.creator.toLowerCase() === address.toLowerCase()) rememberReportedPonsProject(creatorToken, context);
+      }
       const facts = account ?? await readResearchAccount(address, selected, fresh);
       const history = await loadCreatorResearch(address, selected).catch(() => ({ launches: [], available: false, capped: false }));
-      return { chain: selected, wallet: true, text: renderCreatorResearch(address, selected, facts, history),
+      return { chain: selected, wallet: true, creatorToken, text: renderCreatorResearch(address, selected, facts, history, getReportedCreatorProjects(address, selected)),
         image: await buildAlphaosAlertCard({ title: 'Creator research', symbol: null, name: `${address.slice(0, 6)}…${address.slice(-4)}`, category: 'CREATOR INTEL',
           chainLabel: config.label.toUpperCase(), badge: 'WALLET RESEARCH', footer: 'Recorded launch history · Partial coverage · Research only' }) };
     }
@@ -76,28 +96,21 @@ export function registerAddressScreening(bot: Telegraf<any>, lookup = getAddress
     const now = Date.now();
     for (const [key, value] of cache) if (value.expires <= now) cache.delete(key);
     for (const [key, expiry] of groups) if (expiry <= now) groups.delete(key);
-    for (const [key, expiry] of cooldowns) if (expiry <= now) cooldowns.delete(key);
+    for (const [key, expiry] of freshLookups) if (expiry <= now) freshLookups.delete(key);
+    getReportedCreatorProjects('', 'robinhood', now);
   }, 30_000); timer.unref();
-  async function screen(ctx: any, address: string, chain?: ResearchChain | null, refresh = false, wallet = false) {
-    const chat = String(ctx.chat.id);
-    if ((cooldowns.get(chat) ?? 0) > Date.now()) {
-      if (ctx.callbackQuery) await ctx.answerCbQuery('Please wait 15 seconds.').catch(() => {});
-      else await ctx.reply('Please wait 15 seconds between scans.'); return;
-    }
-    if (cooldowns.size >= 500) cooldowns.delete(cooldowns.keys().next().value!);
-    cooldowns.set(chat, Date.now() + 15_000);
+  async function screen(ctx: any, address: string, chain?: ResearchChain | null, refresh = false, wallet = false, creatorToken?: string) {
     if (ctx.callbackQuery) await ctx.answerCbQuery('Checking…').catch(() => {});
     try {
-      const result = await lookup(address, chain, refresh, wallet);
+      const result = await lookup(address, chain, refresh, wallet, creatorToken);
       if ('choices' in result) {
-        cooldowns.delete(chat); // A chain-choice click must not be blocked by its own scan.
         await ctx.reply(result.reason, { reply_markup: { inline_keyboard: [result.choices.map(c => ({ text: researchChains[c].label, callback_data: `${wallet ? 'WS' : 'AS'}_${code(c)}_${address}` }))] } }); return;
       }
       const config = researchChains[result.chain]; const tag = code(result.chain);
-      const caption = creatorDeepLink(result.text, ctx.botInfo?.username ?? bot.botInfo?.username);
+      const caption = creatorDeepLink(result.text, ctx.botInfo?.username ?? bot.botInfo?.username, result.wallet ? undefined : address);
       const explorer = { text: '🔎 Explorer', url: `${config.explorer}/${result.wallet ? 'address' : 'token'}/${address}` };
       const keyboard = { inline_keyboard: result.wallet || result.chain === 'arc' ? [
-        [{ text: '↻ Refresh', callback_data: `${result.wallet ? 'CW' : 'AR'}_${tag}_${address}` }, explorer],
+        [{ text: '↻ Refresh', callback_data: result.wallet && result.creatorToken ? `CR_${tag}_${encodeCreatorContext(address, result.creatorToken)}` : `${result.wallet ? 'CW' : 'AR'}_${tag}_${address}` }, explorer],
         ...(result.chart ? [[{ text: '📊 Chart', url: result.chart }]] : []),
       ] : [
         [{ text: '↻ Refresh', callback_data: `AR_${tag}_${address}` }, { text: '🧠 Full Intel', callback_data: `FI_RH_${address}` }],
@@ -113,6 +126,14 @@ export function registerAddressScreening(bot: Telegraf<any>, lookup = getAddress
   }
   // Register before the standard /start handler so creator deep links resolve here.
   bot.hears(/^\/start(?:@\S+)?\s+ci_(RH|ARC)_(0x[a-fA-F0-9]{40})$/, async ctx => screen(ctx, ctx.match[2].toLowerCase(), chainFromCode(ctx.match[1]), false, true));
+  bot.hears(/^\/start(?:@\S+)?\s+cp_(RH|ARC)_([A-Za-z0-9_-]{54})$/, async ctx => {
+    const context = decodeCreatorContext(ctx.match[2]);
+    if (context) await screen(ctx, context.creator, chainFromCode(ctx.match[1]), false, true, context.token);
+  });
+  bot.action(/^CR_(RH|ARC)_([A-Za-z0-9_-]{54})$/, async ctx => {
+    const context = decodeCreatorContext(ctx.match[2]);
+    if (context) await screen(ctx, context.creator, chainFromCode(ctx.match[1]), true, true, context.token);
+  });
   bot.command('scan', async ctx => {
     const text = ctx.message.text.replace(/^\/scan(?:@\S+)?\s*/i, ''); const address = extractScanContract(text);
     if (!address) { await ctx.reply('Paste one Robinchain or ARC address, or use /scan <address>. Other chains are not supported in this scan yet.'); return; }
@@ -129,7 +150,7 @@ export function registerAddressScreening(bot: Telegraf<any>, lookup = getAddress
     if (!await admin(ctx)) { await ctx.reply('A group administrator must enable scanning.'); return; }
     if (groups.size >= 100 && !groups.has(String(ctx.chat.id))) { await ctx.reply('Group scanning capacity reached.'); return; }
     groups.set(String(ctx.chat.id), Date.now() + 24 * 60 * 60_000);
-    await ctx.reply('Address research enabled for 24 hours. Paste a Robinchain or ARC contract or wallet. /scan_off disables it.');
+    await ctx.reply('Address research enabled for 24 hours. Paste a Robinchain or ARC contract or wallet. For bare-address scanning, make the bot a group administrator; otherwise use /scan@' + (ctx.botInfo?.username ?? bot.botInfo?.username ?? 'bot') + ' <address>. Creator links open private research. Personal alerts stay in private chats. /scan_off disables scanning.');
   });
   bot.command('scan_off', async ctx => { if (await admin(ctx)) { groups.delete(String(ctx.chat.id)); await ctx.reply('Automatic address research disabled.'); } });
   bot.on('text', async (ctx, next) => {

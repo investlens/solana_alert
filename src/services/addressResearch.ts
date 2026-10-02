@@ -2,6 +2,7 @@ import { createPublicClient, http, formatUnits, type Address } from 'viem';
 import { robinhoodChain } from '../chains/robinhood/config.js';
 import { governedDexScreenerJson } from './dexscreenerRequestGovernor.js';
 import type { DexScreenerPair } from '../chains/robinhood/market.js';
+import type { PonsPublicContext } from '../chains/robinhood/ponsPublicContext.js';
 
 export type ResearchChain = 'robinhood' | 'arc';
 export const researchChains = {
@@ -51,6 +52,28 @@ export function researchCandidates(pairs: DexScreenerPair[], address: string, ac
 }
 export type LaunchResearch = { token: string; launchedAt: string | null; peak: number | null; current: number | null; checkedAt: string | null };
 export type CreatorHistory = { launches: LaunchResearch[]; available: boolean; capped: boolean };
+export type ReportedCreatorProject = { token: string; name: string; symbol: string; source: 'PONS page' };
+const reportedProjects = new Map<string, { expires: number; projects: ReportedCreatorProject[] }>();
+export function rememberReportedPonsProject(token: string, context: PonsPublicContext, now = Date.now()): void {
+  if (![token, context.creator].every(value => /^0x[a-fA-F0-9]{40}$/.test(value))) return;
+  const key = `robinhood:${context.creator.toLowerCase()}`;
+  const previous = reportedProjects.get(key);
+  const projects = previous && previous.expires > now ? previous.projects.filter(p => p.token !== token.toLowerCase()) : [];
+  if (reportedProjects.size >= 100 && !reportedProjects.has(key)) reportedProjects.delete(reportedProjects.keys().next().value!);
+  reportedProjects.set(key, { expires: now + 60 * 60_000, projects: [{ token: token.toLowerCase(),
+    name: context.name.slice(0, 32), symbol: context.symbol.slice(0, 16), source: 'PONS page' as const }, ...projects].slice(0, 3) });
+}
+export function getReportedCreatorProjects(address: string, chain: ResearchChain, now = Date.now()): ReportedCreatorProject[] {
+  for (const [key, value] of reportedProjects) if (value.expires <= now) reportedProjects.delete(key);
+  return (reportedProjects.get(`${chain}:${address.toLowerCase()}`)?.projects ?? []).map(project => ({ ...project }));
+}
+export function formatResearchBalance(balance: bigint, decimals = 18): string {
+  if (balance === 0n) return '0';
+  const step = 10n ** BigInt(Math.max(0, decimals - 6));
+  const rounded = (balance + step / 2n) / step;
+  if (rounded === 0n) return '&lt;0.000001';
+  return formatUnits(rounded, Math.min(6, decimals));
+}
 const positive = (value: unknown): number | null => value != null && Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : null;
 export async function loadCreatorResearch(address: string, chain: ResearchChain): Promise<CreatorHistory> {
   const { supabase } = await import('./supabase.js');
@@ -80,20 +103,29 @@ export async function loadCreatorResearch(address: string, chain: ResearchChain)
   return { launches, available: !creator.error || (census != null && !census.error), capped: rows.size > 20 || (creator.data?.length ?? 0) >= 21 || (census?.data?.length ?? 0) >= 21 };
 }
 const money = (n: number) => n >= 1e6 ? `$${(n / 1e6).toFixed(2)}M` : n >= 1000 ? `$${(n / 1000).toFixed(1)}K` : `$${n.toFixed(2)}`;
-export function renderCreatorResearch(address: string, chain: ResearchChain, account: AccountFacts, history: CreatorHistory): string {
+export function renderCreatorResearch(address: string, chain: ResearchChain, account: AccountFacts, history: CreatorHistory,
+  projects: ReportedCreatorProject[] = []): string {
   const config = researchChains[chain];
   const lines = ['<b>ALPHAOS · CREATOR INTEL</b>', `${config.label} · Wallet research`, `<code>${address}</code>`, ''];
-  if (account.balance != null) lines.push(`Native balance  <b>${formatUnits(account.balance, config.decimals)} ${config.native}</b>`);
+  if (account.balance != null) lines.push(`Native balance  <b>${formatResearchBalance(account.balance, config.decimals)} ${config.native}</b>`);
   if (account.nonce != null) lines.push(`Transactions sent  <b>${account.nonce}</b>`);
   if (account.kind === 'contract') lines.push('Contract account · May be a smart wallet');
   if (account.kind === 'unknown') lines.push('Live account data unavailable');
-  lines.push('', '<b>RECORDED LAUNCHES</b>');
+  if (projects.length) {
+    const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    lines.push('', '<b>KNOWN PROJECT</b>');
+    // Keep the linked project's reported identity separate from indexed history.
+    const project = projects[0];
+    lines.push(`<a href="${config.explorer}/token/${project.token}">${escape(project.name)}${project.symbol ? ` ($${escape(project.symbol)})` : ''}</a>`);
+    lines.push('Creator reported by PONS · Launch event not verified here');
+  }
+  lines.push('', '<b>RECORDED LAUNCH HISTORY</b>');
   if (!history.available) lines.push('Launch history unavailable');
-  else if (!history.launches.length) lines.push('No launches found in our records');
+  else if (!history.launches.length) lines.push(projects.length ? 'This project is not in our indexed launch history yet.' : 'No indexed launch history available for this wallet.');
   else {
     const measured = history.launches.filter(r => r.peak != null);
     lines.push(`${history.capped ? 'Latest' : 'Found'} <b>${history.launches.length}</b> recorded launches · ${measured.length} with observed peaks`);
-    for (const row of history.launches.slice(0, 3)) {
+    for (const row of history.launches.slice(0, projects.length ? 2 : 3)) {
       const link = `<a href="${config.explorer}/token/${row.token}">${row.token.slice(0, 6)}…${row.token.slice(-4)}</a>`;
       lines.push(`${link}${row.launchedAt ? ` · ${row.launchedAt.slice(0, 10)}` : ''}`);
       const facts: string[] = [];
