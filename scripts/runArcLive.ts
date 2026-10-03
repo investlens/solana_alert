@@ -1,3 +1,4 @@
+import { enabledLiveRecipients, type LiveFeedKey } from '../src/services/liveAlertPreferences.js';
 import { arcMarketNumber } from '../src/chains/arc/market.js';
 import { waitForRecipientDelivery, recordDeliveryAccepted } from '../src/services/recipientDeliveryTiming.js';
 import { recordCompactAlert } from '../src/services/compactAlertOutcomes.js';
@@ -188,7 +189,7 @@ async function processArcBurns(fromBlock: bigint, toBlock: bigint): Promise<void
         [ { text:'🔎 Explorer', url:`https://explorer.arc.io/address/${encodeURIComponent(token)}` }, ...(website ? [{text:'🌐 Project',url:website}] : []) ],
         [ ...(twitter ? [{text:'𝕏 X',url:twitter}] : []), ...(telegram ? [{text:'✈️ TG',url:telegram}] : []) ],
       ].filter(row => row.length > 0);
-      const delivery = await broadcastArcAlert(text, buttons, token);
+      const delivery = await broadcastArcAlert(text, buttons, token, 'ARC_SUPPLY_BURN');
       void recordCompactAlert({chain:'arc', token, feed:'ARC_SUPPLY_BURN', price:outcomePrice, pair:outcomePair}, delivery.delivered);
       burnDelivered.add(identity);
       console.log('[ArcBurn] ALERT_SENT', { token, symbol, burnPercent, txHash, delivered:delivery.delivered });
@@ -223,14 +224,14 @@ async function getArcRecipients(): Promise<string[]> {
   return [...recipientCache];
 }
 
-async function broadcastArcAlert(text: string, buttons: any[][], outcomeToken?: string): Promise<{delivered:number;failed:number;adminMessageId:number|null}> {
+async function broadcastArcAlert(text: string, buttons: any[][], outcomeToken?: string, feed:LiveFeedKey = 'ARC_OPPORTUNITY'): Promise<{delivered:number;failed:number;adminMessageId:number|null}> {
   // Final gate covers normal, boost and burn sends, including future callers.
   if (!outcomeToken) throw new Error('ARC alert lacks token identity for sellability check');
   const sellSafety = await checkArcBoostSecurity(outcomeToken);
   if (!sellSafety.allowed) throw new Error(`ARC sellability blocked: ${sellSafety.reason}`);
   if (outcomeToken && /^0x[a-fA-F0-9]{40}$/.test(outcomeToken)) buttons = [...buttons, [{text:'⭐ Track',callback_data:`OUT_ARC_${outcomeToken}`}]];
-  const recipients = await getArcRecipients();
-  if (!recipients.length) throw new Error('no ARC Telegram recipients available');
+  const recipients = await enabledLiveRecipients(await getArcRecipients(), feed);
+  if (!recipients.length) return {delivered:0,failed:0,adminMessageId:null};
   const deliveryStartedAt = Date.now();
   const results = await Promise.allSettled(recipients.map(async chatId => {
     await waitForRecipientDelivery(chatId, deliveryStartedAt);
@@ -558,7 +559,7 @@ async function deliverArcBoost(boost: {tokenAddress:string;amount:number;totalAm
     [ ...(website ? [{text:'🌐 Project',url:website}] : []), ...(twitter ? [{text:'𝕏 X',url:twitter}] : []), ...(telegram ? [{text:'✈️ TG',url:telegram}] : []) ],
   ].filter(row => row.length > 0);
   try {
-    const delivery = await broadcastArcAlert(text, buttons, boost.tokenAddress);
+    const delivery = await broadcastArcAlert(text, buttons, boost.tokenAddress, 'ARC_BOOST');
     void recordCompactAlert({chain:'arc', token:boost.tokenAddress, feed:'BOOST', price:outcomePrice, pair:outcomePair}, delivery.delivered);
     arcBoostDelivered.add(identity);
     await persistArcBoostDelivery(boost).catch(error => console.warn('[ArcBoost] PERSIST_FAILED', { token:key, totalBoost:boost.totalAmount, reason:error instanceof Error ? error.message : String(error) }));
