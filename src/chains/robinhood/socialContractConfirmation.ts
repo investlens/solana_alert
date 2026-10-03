@@ -54,7 +54,7 @@ export async function readPublicSocialHtml(url: string): Promise<string | null> 
   } catch { return null; }
 }
 
-export async function verifySocialContract(args: {
+async function verifySocialContractUncached(args: {
   token: string; xHandle: string; telegramUrl: string;
 }, readHtml = readPublicSocialHtml): Promise<SocialContractConfirmation> {
   if (!/^[A-Za-z0-9_]{1,15}$/.test(args.xHandle) || !/^0x[a-f0-9]{40}$/i.test(args.token))
@@ -77,4 +77,41 @@ export async function verifySocialContract(args: {
     }
   } catch { /* Telegram type/availability is separate; it never substitutes for X confirmation. */ }
   return { confirmed: true, reason: 'X_CONTRACT_MATCH' };
+}
+
+export function socialEvidenceEligibility(result: SocialContractConfirmation): boolean | null {
+  if (result.confirmed) return true;
+  return ['X_UNAVAILABLE', 'X_CONTENT_UNREADABLE'].includes(result.reason) ? null : false;
+}
+
+// Cache only small verdicts, never page HTML. Share in-flight checks between
+// Social Mafia and Trade Setup; unavailable pages cool down rather than burst.
+export function createSocialContractVerifier(readHtml = readPublicSocialHtml, now = Date.now) {
+  const cache = new Map<string, { result: SocialContractConfirmation; expires: number }>();
+  const pending = new Map<string, Promise<SocialContractConfirmation>>();
+  let requests: number[] = [];
+  return async (args: { token: string; xHandle: string; telegramUrl: string }): Promise<SocialContractConfirmation> => {
+    const key = `${args.xHandle.toLowerCase()}:${args.token.toLowerCase()}:${args.telegramUrl}`;
+    const time = now();
+    for (const [id, entry] of cache) if (entry.expires <= time) cache.delete(id);
+    const cached = cache.get(key);
+    if (cached) return cached.result;
+    const running = pending.get(key);
+    if (running) return running;
+    requests = requests.filter(at => time - at < 60_000);
+    if (requests.length >= 20 || pending.size >= 3) return { confirmed: false, reason: 'X_UNAVAILABLE' };
+    requests.push(time);
+    const check = verifySocialContractUncached(args, readHtml).then(result => {
+      if (cache.size >= 100) cache.delete(cache.keys().next().value!);
+      cache.set(key, { result, expires: now() + (socialEvidenceEligibility(result) === null ? 5 * 60_000 : 60_000) });
+      return result;
+    }).finally(() => pending.delete(key));
+    pending.set(key, check);
+    return check;
+  };
+}
+const productionVerifier = createSocialContractVerifier();
+export async function verifySocialContract(args: { token: string; xHandle: string; telegramUrl: string },
+  readHtml = readPublicSocialHtml): Promise<SocialContractConfirmation> {
+  return readHtml === readPublicSocialHtml ? productionVerifier(args) : verifySocialContractUncached(args, readHtml);
 }
