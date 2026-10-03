@@ -166,24 +166,6 @@ export function createBot() {
       return;
     }
 
-    if (data === 'SETTINGS') {
-      await renderFast(
-        ctx,
-        [
-          '⚙ <b>SETTINGS</b>',
-          '',
-          'Alert strategies and preferences.',
-          '',
-          'Database-backed preference editing is temporarily protected while Supabase recovers.',
-        ].join('\n'),
-        Markup.inlineKeyboard([
-          [Markup.button.callback('🎯 Strategies', 'STRATEGY_SETTINGS')],
-          [Markup.button.callback('⌂ Home', 'MAIN_MENU')],
-        ]).reply_markup,
-      );
-      return;
-    }
-
     if (data === 'MEMBERSHIP_HOME') {
       await renderFast(
         ctx,

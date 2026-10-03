@@ -1,288 +1,38 @@
-import {
-  Markup,
-  type Telegraf,
-} from 'telegraf';
+import { Markup, type Telegraf } from 'telegraf';
+import { requireCapability } from './accessControl.js';
+import { LIVE_ALERT_FEEDS, liveAlertPreferences, toggleLiveFeed, isLiveFeedKey } from '../services/liveAlertPreferences.js';
 
-import {
-  getUserStrategyState,
-  toggleUserStrategy,
-} from '../services/strategyService.js';
-import { strategyDisplay } from '../product/strategyPresentation.js';
-import { escapeTelegramHtml } from '../ui/escapeHtml.js';
-import { assertValidCallbackData } from './callbackData.js';
-import { requireCapability, getContextAccess } from './accessControl.js';
-
-const isPrimaryStrategy = (key: string) => /^(DEX_PAID|BOOSTER_INSTANT|BOOST|SOCIAL_MAFIA|PROTOCOL_DISCOVERY|TRADE_SETUP_WATCH|ARC_OPPORTUNITY)$/.test(key.toUpperCase());
-
-function chainLabel(chain: string): string {
-  if (chain === 'solana') {
-    return '🟣 SOLANA';
+async function renderPreferences(ctx:any):Promise<void> {
+  const user=String(ctx.from?.id??'');if(!user)return;
+  const prefs=await liveAlertPreferences(user);
+  const lines=['⚙️ <b>ALERT SETTINGS</b>','','Choose the feeds you want to receive.','✅ ON · ⭕ OFF. Changes apply to upcoming alerts.','Free: 30-second release delay · Pro: priority delivery.','Risk warnings remain separate from discovery preferences.',''];
+  const rows:any[][]=[];
+  for(const chain of ['Robinchain / PONS','ARC']) {
+    lines.push(`<b>${chain}</b>`);
+    const feeds=LIVE_ALERT_FEEDS.filter(feed=>feed.chain===chain);
+    for(const feed of feeds)lines.push(`${prefs[feed.key]?'✅':'⭕'} <b>${feed.name}</b> — ${feed.description}`);
+    lines.push('');
+    for(let i=0;i<feeds.length;i+=2) rows.push(feeds.slice(i,i+2).map(feed=>Markup.button.callback(`${prefs[feed.key]?'✅':'⭕'} ${chain==='ARC'?'ARC ':''}${feed.name}`,`FEED_TOGGLE_${feed.key}`)));
   }
-
-  if (chain === 'robinhood') {
-    return '🟢 ROBINHOOD / PONS';
-  }
-
-  return '🔥 MULTI-SIGNAL';
+  lines.push('<i>Alerts require qualifying data. Social and ARC security coverage can limit delivery.</i>');
+  rows.push([Markup.button.callback('↻ Refresh','STRATEGY_SETTINGS'),Markup.button.callback('⌂ Home','MAIN_MENU')]);
+  const options={parse_mode:'HTML' as const,...Markup.inlineKeyboard(rows)};
+  if(ctx.callbackQuery?.message) {try{await ctx.editMessageText(lines.join('\n'),options);return;}catch(error){if(String(error).includes('message is not modified'))return;}}
+  await ctx.reply(lines.join('\n'),options);
 }
-
-function strategyIcon(
-  enabled: boolean,
-): string {
-  return enabled
-    ? '✅'
-    : '⭕';
-}
-
-async function renderStrategies(
-  ctx: any,
-  advanced = false,
-): Promise<void> {
-  const telegramId =
-    String(
-      ctx.from?.id ??
-      '',
-    );
-
-  if (!telegramId) {
-    return;
-  }
-
-  const access = await getContextAccess(ctx);
-  const admin = access.tier === 'admin';
-  advanced = advanced && admin;
-  const all = await getUserStrategyState(telegramId);
-  const strategies = all.filter(strategy => advanced ? !isPrimaryStrategy(strategy.strategy_key) : isPrimaryStrategy(strategy.strategy_key));
-
-  const lines: string[] = [
-    advanced ? '⚙️ <b>ADVANCED PREFERENCES</b>' : '⚡ <b>ALERT PREFERENCES</b>',
-    '',
-    'ON/OFF controls your preference, not engine health.',
-    'Delivery still requires a qualifying event and available data.',
-    'Other feeds: Boost · Social Mafia · Protocol Discovery · Trade Setup · ARC Opportunity.',
-    'Available preference controls appear below. Each feed requires qualifying evidence.',
-    '',
-    '✅ ON · alerts enabled',
-    '⭕ OFF · alerts muted',
-    '',
-  ];
-
-  let currentChain = '';
-
-  for (const strategy of strategies) {
-    if (strategy.chain !== currentChain) {
-      currentChain =
-        strategy.chain;
-
-      lines.push(
-        `<b>${chainLabel(
-          currentChain,
-        )}</b>`,
-      );
-    }
-
-    lines.push(
-      `${
-        strategyIcon(
-          strategy.user_enabled,
-        )
-      } ${escapeTelegramHtml(strategyDisplay(
-        strategy.strategy_key,
-        strategy.name,
-      ).name)}${strategy.enabled ? '' : ' · unavailable'}`,
-    );
-  }
-
-  lines.push(
-    '',
-    'You can change these at any time.',
-    '',
-    'Risk/emergency protection may still send critical safety alerts.',
-  );
-
-  const buttons =
-    strategies.map(
-      strategy => [
-        Markup.button.callback(
-          `${
-            strategyIcon(
-              strategy.user_enabled,
-            )
-          } ${strategyDisplay(strategy.strategy_key, strategy.name).name}`,
-          assertValidCallbackData(`STRAT_TOGGLE_${strategy.strategy_key}`),
-        ),
-      ],
-    );
-
-  if (!advanced && buttons.length > 1) {
-    const flat = buttons.flat(); buttons.length = 0;
-    for (let i = 0; i < flat.length; i += 2) buttons.push(flat.slice(i, i + 2));
-  }
-  if (admin) buttons.push([Markup.button.callback(advanced ? '‹ Alert Preferences' : '⚙ Admin · Legacy Controls', advanced ? 'STRATEGY_SETTINGS' : 'STRATEGY_ADVANCED')]);
-  buttons.push([
-    Markup.button.callback(
-      '🔄 Refresh',
-      'STRATEGY_SETTINGS',
-    ),
-
-    Markup.button.callback(
-      '⬅️ Controls',
-      'SETTINGS',
-    ),
-
-    Markup.button.callback(
-      '🏠 Home',
-      'MAIN_MENU',
-    ),
-  ]);
-
-  const extra = {
-    parse_mode: 'HTML' as const,
-    ...Markup.inlineKeyboard(
-      buttons,
-    ),
+export function registerStrategyControls(bot:Telegraf<any>):void {
+  const open=async(ctx:any)=>{
+    if(!await requireCapability(ctx,'strategies.manage','MAIN_MENU'))return;
+    await ctx.answerCbQuery?.().catch(()=>{});
+    try{await renderPreferences(ctx);}catch{await ctx.reply('Alert preferences are temporarily unavailable. Your saved choices have not changed.');}
   };
-
-  if (
-    ctx.callbackQuery?.message
-  ) {
-    try {
-      await ctx.editMessageText(
-        lines.join('\n'),
-        extra,
-      );
-
-      return;
-    } catch {
-      // Message may be unchanged or no longer editable.
-    }
-  }
-
-  await ctx.reply(
-    lines.join('\n'),
-    extra,
-  );
-}
-
-export function registerStrategyControls(
-  bot: Telegraf<any>,
-): void {
-  bot.command(
-    'strategies',
-    async ctx => {
-      try {
-        await renderStrategies(
-          ctx,
-        );
-      } catch (error) {
-        console.error(
-          '[StrategyControls] /strategies failed:',
-          error,
-        );
-
-        await ctx.reply(
-          '❌ Unable to load strategy settings.',
-        );
-      }
-    },
-  );
-
-  bot.action('STRATEGY_ADVANCED', async ctx => {
-    if ((await getContextAccess(ctx)).tier !== 'admin') {
-      await ctx.answerCbQuery('Legacy controls are available to administrators only.');
-      await renderStrategies(ctx); return;
-    }
-    if (!await requireCapability(ctx, 'strategies.manage', 'SETTINGS')) return;
-    await ctx.answerCbQuery().catch(() => {});
-    try { await renderStrategies(ctx, true); }
-    catch { await ctx.reply('Preferences unavailable. Please try again shortly.'); }
+  bot.command('strategies',open);
+  for(const callback of ['SETTINGS','STRATEGY_SETTINGS','STRATEGY_ADVANCED'])bot.action(callback,open);
+  bot.action(/^FEED_TOGGLE_(.+)$/,async ctx=>{
+    if(!await requireCapability(ctx,'strategies.manage','MAIN_MENU'))return;
+    const key=String(ctx.match?.[1]??'');if(!isLiveFeedKey(key)){await ctx.answerCbQuery('Unknown feed');return;}
+    try{const enabled=await toggleLiveFeed(String(ctx.from?.id??''),key);await ctx.answerCbQuery(enabled?'Alerts enabled':'Alerts muted');await renderPreferences(ctx);}
+    catch{await ctx.answerCbQuery('Update unavailable. Please refresh before retrying.',{show_alert:true});}
   });
-
-  bot.action(
-    'STRATEGY_SETTINGS',
-    async ctx => {
-      if (!await requireCapability(ctx, 'strategies.manage', 'SETTINGS')) return;
-      await ctx.answerCbQuery();
-
-      try {
-        await renderStrategies(
-          ctx,
-        );
-      } catch (error) {
-        console.error(
-          '[StrategyControls] settings failed:',
-          error,
-        );
-
-        await ctx.reply(
-          '❌ Unable to load strategy settings.',
-        );
-      }
-    },
-  );
-
-  bot.action(
-    /^STRAT_TOGGLE_(.+)$/,
-    async ctx => {
-      if (!await requireCapability(ctx, 'strategies.manage', 'SETTINGS')) return;
-      const strategyKey =
-        ctx.match?.[1];
-
-      if (!strategyKey) {
-        await ctx.answerCbQuery(
-          'Strategy not found',
-          {
-            show_alert: true,
-          },
-        );
-
-        return;
-      }
-
-      if (!isPrimaryStrategy(strategyKey) && (await getContextAccess(ctx)).tier !== 'admin') {
-        await ctx.answerCbQuery('This legacy control is no longer in user preferences.');
-        await renderStrategies(ctx); return;
-      }
-
-      const telegramId =
-        String(
-          ctx.from?.id ??
-          '',
-        );
-
-      try {
-        const enabled =
-          await toggleUserStrategy({
-            telegramId,
-            strategyKey,
-          });
-
-        await ctx.answerCbQuery(
-          enabled
-            ? 'Strategy enabled ✅'
-            : 'Strategy muted ⭕',
-        );
-
-        await renderStrategies(
-          ctx,
-        );
-      } catch (error) {
-        console.error(
-          '[StrategyControls] toggle failed:',
-          {
-            telegramId,
-            strategyKey,
-            error,
-          },
-        );
-
-        await ctx.answerCbQuery(
-          'Update failed',
-          {
-            show_alert: true,
-          },
-        );
-      }
-    },
-  );
+  bot.action(/^STRAT_TOGGLE_(.+)$/,open);
 }

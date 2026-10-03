@@ -1,3 +1,4 @@
+import { enabledLiveRecipients } from '../../services/liveAlertPreferences.js';
 import { waitForRecipientDelivery, recordDeliveryAccepted } from '../../services/recipientDeliveryTiming.js';
 import { claimBoostDelivery, markBoostDeliveryAccepted } from '../../services/boostDeliveryGuard.js';
 import { boostVerificationDue, recordBoostSecurityBlock, type BoostVerificationRetry } from './alertEligibilityState.js';
@@ -122,7 +123,8 @@ export async function deliverAdminBoostFallback(
   if (acceptedAdminBoostNotifications.has(identity)) return false;
   const log = dependencies.log ?? ((event, details) => console.log(`[RobinhoodBoostObserver] ${event}`, details));
   const send = dependencies.send ?? sendTelegramWithMessageId;
-  const recipients = dependencies.adminTelegramId ? [dependencies.adminTelegramId] : await boostRecipients();
+  const available = dependencies.adminTelegramId ? [dependencies.adminTelegramId] : await boostRecipients();
+  const recipients = dependencies.send ? available : await enabledLiveRecipients(available, 'RH_BOOST');
   if (!recipients.length) return false;
   const deliveryStartedAt = Date.now();
   const results = await Promise.allSettled(recipients.map(async chatId => {

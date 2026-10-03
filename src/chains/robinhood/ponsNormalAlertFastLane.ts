@@ -1,3 +1,4 @@
+import { enabledLiveRecipients } from '../../services/liveAlertPreferences.js';
 import { waitForRecipientDelivery, recordDeliveryAccepted } from '../../services/recipientDeliveryTiming.js';
 import { recordCompactAlert, type CompactAlertBaseline } from '../../services/compactAlertOutcomes.js';
 import { sendAlphaosPhotoAlert } from '../../ui/alphaosPhotoDelivery.js';
@@ -202,8 +203,8 @@ export async function directTelegramRecipients(text: string, tokenAddress: strin
   if (setupControls && recipientRefreshInFlight) {
     await Promise.race([recipientRefreshInFlight, new Promise<void>(resolve => { const timer = setTimeout(resolve, 3_000); timer.unref(); })]);
   }
-  const recipients = [...recipientCache];
-  if (!recipients.length) throw new Error('no Telegram recipients available');
+  const recipients = await enabledLiveRecipients([...recipientCache], setupControls ? 'RH_TRADE_SETUP' : 'RH_MOMENTUM');
+  if (!recipients.length) return {delivered:0,failed:0};
 
   const deliveryStartedAt = Date.now();
   const results = await Promise.allSettled(recipients.map(async chatId => {
