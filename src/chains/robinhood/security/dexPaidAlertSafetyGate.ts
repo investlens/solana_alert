@@ -21,6 +21,7 @@ const MAX_SELL_IMPACT_PERCENT = Number(process.env.DEX_PAID_MAX_SELL_IMPACT_PERC
 
 type GateCheck = { key: string; passed: boolean; detail: string };
 export type DexPaidAlertSafetyResult = {
+  devHoldingPercent?: number | null; top10Percent?: number | null;
   allowed: boolean; reasons: string[]; checks: GateCheck[];
   marketCapUsd: number | null; liquidityUsd: number | null; pairAgeMinutes: number | null;
   paymentAgeSeconds: number | null; sellImpactPercent: number | null; ponsDeployer: string | null;
@@ -163,7 +164,7 @@ export async function evaluateDexPaidAlertSafety(tokenAddress: string): Promise<
       push(checks, reasons, 'ROBINHOOD_BUNDLE', false, 'verified deployer unavailable for bundle analysis');
     }
 
-    const result: DexPaidAlertSafetyResult = { allowed: reasons.length === 0, reasons, checks, marketCapUsd: marketCap, liquidityUsd: liquidity,
+    const result: DexPaidAlertSafetyResult = { devHoldingPercent: devHolding?.holdingPercent ?? null, top10Percent: holder.sampledWallets.length ? holder.top10Pct : null, allowed: reasons.length === 0, reasons, checks, marketCapUsd: marketCap, liquidityUsd: liquidity,
       pairAgeMinutes, paymentAgeSeconds, sellImpactPercent: sellImpact, ponsDeployer: launch?.exists ? String(launch.deployer) : null };
 
     void persistSecuritySnapshot({

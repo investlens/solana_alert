@@ -1,3 +1,4 @@
+import { discloseRobinhoodOwnership } from '../../services/alertOwnershipService.js';
 import { enabledLiveRecipients } from '../../services/liveAlertPreferences.js';
 import { getSharedJson, setSharedJson, claimSharedDelivery } from '../../services/sharedJsonCache.js';
 import { waitForRecipientDelivery, recordDeliveryAccepted } from '../../services/recipientDeliveryTiming.js';
@@ -316,7 +317,7 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
     });
   };
   const initial = await boundedSocialMafiaContext(work, 1_500);
-  const text = render(initial);
+  const text = await discloseRobinhoodOwnership(render(initial), token, launch.deployer_address, launch.curve_address);
 
   const deliveryClaim = await claimSharedDelivery(`alphaos:social:delivered:${token}`, 24 * 60 * 60_000);
   if (deliveryClaim === 'EXISTS') return true;
@@ -340,7 +341,7 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
     return accepted;
   }));
   if (initial == null) void boundedSocialMafiaContext(work, 12_000).then(async values => {
-    const enriched = render(values);
+    const enriched = await discloseRobinhoodOwnership(render(values), token, launch.deployer_address, launch.curve_address);
     if (enriched === text) return;
     const botToken = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
     await Promise.allSettled(results.map(async (result, index) => {

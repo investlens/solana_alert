@@ -1,3 +1,4 @@
+import { discloseRobinhoodOwnership } from '../../services/alertOwnershipService.js';
 import { enabledLiveRecipients } from '../../services/liveAlertPreferences.js';
 import { waitForRecipientDelivery, recordDeliveryAccepted } from '../../services/recipientDeliveryTiming.js';
 import { claimBoostDelivery, markBoostDeliveryAccepted } from '../../services/boostDeliveryGuard.js';
@@ -294,7 +295,7 @@ export async function enrichDeliveredBoostAlert(args: {
     volume5m: market?.volume5mUsd ?? null,
     chartUrl: market?.chartUrl ?? null,
   };
-  const message = buildPremiumTokenNotification({
+  let message = buildPremiumTokenNotification({
     age: verifiedPairAge(market?.pairCreatedAt), move1h: market?.priceChange1h,
     buys5m: market?.trades5mReported ? market.buys5m : null, sells5m: market?.trades5mReported ? market.sells5m : null,
     observedAt: market?.timestamp, source: market ? 'DEXScreener' : null,
@@ -306,6 +307,7 @@ export async function enrichDeliveredBoostAlert(args: {
     insightTitle: 'WHY NOW', insight: [`${args.canonicalTitle} verified after security gate`, args.securityReason],
     statusTitle: 'Security', status: 'VERIFIED', displayIntent: 'WATCH',
   });
+  message = await discloseRobinhoodOwnership(message, args.tokenAddress, pons?.creator, market?.pairAddress ?? pons?.curveAddress);
   const tokenUrl = args.verifiedPons
     ? `https://www.ponsfamily.com/launchpad/${encodeURIComponent(args.tokenAddress)}`
     : `https://robinhoodchain.blockscout.com/token/${encodeURIComponent(args.tokenAddress)}`;
@@ -487,7 +489,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
     volume5m: market?.volume5mUsd ?? null,
     chartUrl: market?.chartUrl ?? null,
   };
-  const baseMessage = buildPremiumTokenNotification({
+  let baseMessage = buildPremiumTokenNotification({
     age: verifiedPairAge(market?.pairCreatedAt), move1h: market?.priceChange1h,
     buys5m: market?.trades5mReported ? market.buys5m : null, sells5m: market?.trades5mReported ? market.sells5m : null,
     observedAt: market?.timestamp, source: market ? 'DEXScreener' : null,
@@ -503,6 +505,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
       : 'VERIFIED',
     displayIntent: 'WATCH',
   });
+  baseMessage = await discloseRobinhoodOwnership(baseMessage, boost.tokenAddress, pons?.creator, market?.pairAddress ?? pons?.curveAddress);
   const tokenUrl = verifiedPons
     ? `https://www.ponsfamily.com/launchpad/${encodeURIComponent(boost.tokenAddress)}`
     : `https://robinhoodchain.blockscout.com/token/${encodeURIComponent(boost.tokenAddress)}`;
