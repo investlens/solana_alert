@@ -10,7 +10,9 @@ import {
 import { strategyDisplay } from '../product/strategyPresentation.js';
 import { escapeTelegramHtml } from '../ui/escapeHtml.js';
 import { assertValidCallbackData } from './callbackData.js';
-import { requireCapability } from './accessControl.js';
+import { requireCapability, getContextAccess } from './accessControl.js';
+
+const isPrimaryStrategy = (key: string) => /^(DEX_PAID|BOOSTER_INSTANT|BOOST|SOCIAL_MAFIA|PROTOCOL_DISCOVERY|TRADE_SETUP_WATCH|ARC_OPPORTUNITY)$/.test(key.toUpperCase());
 
 function chainLabel(chain: string): string {
   if (chain === 'solana') {
@@ -46,9 +48,11 @@ async function renderStrategies(
     return;
   }
 
+  const access = await getContextAccess(ctx);
+  const admin = access.tier === 'admin';
+  advanced = advanced && admin;
   const all = await getUserStrategyState(telegramId);
-  const primary = (key: string) => /^(DEX_PAID|BOOSTER_INSTANT|BOOST|SOCIAL_MAFIA|PROTOCOL_DISCOVERY|TRADE_SETUP_WATCH|ARC_OPPORTUNITY)$/.test(key.toUpperCase());
-  const strategies = all.filter(strategy => advanced ? !primary(strategy.strategy_key) : primary(strategy.strategy_key));
+  const strategies = all.filter(strategy => advanced ? !isPrimaryStrategy(strategy.strategy_key) : isPrimaryStrategy(strategy.strategy_key));
 
   const lines: string[] = [
     advanced ? '⚙️ <b>ADVANCED PREFERENCES</b>' : '⚡ <b>ALERT PREFERENCES</b>',
@@ -56,7 +60,7 @@ async function renderStrategies(
     'ON/OFF controls your preference, not engine health.',
     'Delivery still requires a qualifying event and available data.',
     'Other feeds: Boost · Social Mafia · Protocol Discovery · Trade Setup · ARC Opportunity.',
-    'These legacy preference switches do not control every feed.',
+    'Available preference controls appear below. Each feed requires qualifying evidence.',
     '',
     '✅ ON · alerts enabled',
     '⭕ OFF · alerts muted',
@@ -114,7 +118,7 @@ async function renderStrategies(
     const flat = buttons.flat(); buttons.length = 0;
     for (let i = 0; i < flat.length; i += 2) buttons.push(flat.slice(i, i + 2));
   }
-  buttons.push([Markup.button.callback(advanced ? '‹ Main Preferences' : '⚙ Advanced · legacy strategies', advanced ? 'STRATEGY_SETTINGS' : 'STRATEGY_ADVANCED')]);
+  if (admin) buttons.push([Markup.button.callback(advanced ? '‹ Alert Preferences' : '⚙ Admin · Legacy Controls', advanced ? 'STRATEGY_SETTINGS' : 'STRATEGY_ADVANCED')]);
   buttons.push([
     Markup.button.callback(
       '🔄 Refresh',
@@ -184,6 +188,10 @@ export function registerStrategyControls(
   );
 
   bot.action('STRATEGY_ADVANCED', async ctx => {
+    if ((await getContextAccess(ctx)).tier !== 'admin') {
+      await ctx.answerCbQuery('Legacy controls are available to administrators only.');
+      await renderStrategies(ctx); return;
+    }
     if (!await requireCapability(ctx, 'strategies.manage', 'SETTINGS')) return;
     await ctx.answerCbQuery().catch(() => {});
     try { await renderStrategies(ctx, true); }
@@ -229,6 +237,11 @@ export function registerStrategyControls(
         );
 
         return;
+      }
+
+      if (!isPrimaryStrategy(strategyKey) && (await getContextAccess(ctx)).tier !== 'admin') {
+        await ctx.answerCbQuery('This legacy control is no longer in user preferences.');
+        await renderStrategies(ctx); return;
       }
 
       const telegramId =
