@@ -1,3 +1,4 @@
+import { waitForRecipientDelivery } from '../../services/recipientDeliveryTiming.js';
 import { claimBoostDelivery, markBoostDeliveryAccepted } from '../../services/boostDeliveryGuard.js';
 import { boostVerificationDue, recordBoostSecurityBlock, type BoostVerificationRetry } from './alertEligibilityState.js';
 import { getVerifiedPonsPublicContext, getCreatorHoldingPercent, getTelegramPreviewType } from './ponsPublicContext.js';
@@ -123,7 +124,11 @@ export async function deliverAdminBoostFallback(
   const send = dependencies.send ?? sendTelegramWithMessageId;
   const recipients = dependencies.adminTelegramId ? [dependencies.adminTelegramId] : await boostRecipients();
   if (!recipients.length) return false;
-  const results = await Promise.allSettled(recipients.map(chatId => send(chatId, args.message, args.buttons)));
+  const deliveryStartedAt = Date.now();
+  const results = await Promise.allSettled(recipients.map(async chatId => {
+    if (!dependencies.send) await waitForRecipientDelivery(chatId, deliveryStartedAt);
+    return send(chatId, args.message, args.buttons);
+  }));
   const delivered = results.filter(result => result.status === 'fulfilled').length;
   const failed = results.length - delivered;
   if (delivered > 0) {

@@ -38,6 +38,7 @@ const TESTER = new Set<Capability>([
 
 const COMMERCIAL_FREE = new Set<Capability>([
   'opportunities.view',
+  'opportunities.realtime',
   'intelligence.investigations',
   'trading.external',
   'strategies.manage',
@@ -97,7 +98,7 @@ export const CAPABILITY_BENEFITS: Record<Capability, string> = {
   'trade.readiness': 'Review fresh market screening and remaining entry checks.',
   'monitoring.personal': 'Follow selected Robinchain pools with bounded one-hour deterioration monitoring.',
   'opportunities.view': 'Explore current market opportunities.',
-  'opportunities.realtime': 'Receive faster actionable opportunity intelligence.',
+  'opportunities.realtime': 'Receive qualifying discovery alerts with plan-based delivery timing.',
   'watchlist.use': 'Save opportunities and follow their current thesis.',
   'intelligence.investigations': 'Review AlphaOS market investigations.',
   'intelligence.smartMoney': 'See recent tracked smart-money activity.',

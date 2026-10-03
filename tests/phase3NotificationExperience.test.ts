@@ -128,7 +128,7 @@ test('delivery invariants retain mute, admin-first release, lifecycle identity a
   const identity = await readFile(new URL('../src/services/opportunityDeliveryIdentity.ts', import.meta.url), 'utf8');
   const watchlist = await readFile(new URL('../src/services/opportunityWatchlistService.ts', import.meta.url), 'utf8');
   assert.match(delivery, /isStrategyEnabledForUser/);
-  assert.match(delivery, /paidReleaseAt[\s\S]*10_000/);
+  assert.match(delivery, /waitForRecipientDelivery\(user, deliveryStartedAt, action === 'EXIT'\)/);
   assert.match(delivery, /releaseDelivery\(/);
   assert.match(identity, /action/);
   assert.doesNotMatch(watchlist, /opportunity_deliveries/);

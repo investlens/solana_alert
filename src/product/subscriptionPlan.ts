@@ -40,10 +40,7 @@ export function deliveryDelayMsForTier(
   tier: AlphaCommercialTier,
   options: { safetyCritical?: boolean } = {},
 ): number {
-  // During pre-subscription production validation every tester receives the
-  // canonical event immediately. We only introduce tier delays once the
-  // commercial gate is explicitly opened.
-  if (!subscriptionsEnabled()) return 0;
+  // Delivery timing remains active independently of payment collection.
 
   // Safety/risk warnings are never monetization-delayed.
   if (options.safetyCritical) return 0;

@@ -1,3 +1,4 @@
+import { waitForRecipientDelivery } from '../../services/recipientDeliveryTiming.js';
 import { recordCompactAlert } from '../../services/compactAlertOutcomes.js';
 import { recordLaunchSocialEligibility } from './alertEligibilityState.js';
 import { buildAlphaosAlertCard } from '../../ui/alphaosAlertCard.js';
@@ -320,9 +321,11 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   const baseline = partial.market?.priceUsd && partial.market?.pairAddress
     ? {price:partial.market.priceUsd, pair:partial.market.pairAddress, unit:'USD' as const, marketCap:partial.market.marketCapUsd, liquidity:partial.market.liquidityUsd}
     : {price:partial.curveRatio, pair:launch.curve_address, unit:'ETH_RESERVE_RATIO' as const};
-  const results = await Promise.allSettled(chats.map(chatId => sendTelegram({
-    chatId, text, tokenAddress: token, launchpad, socials, image,
-  })));
+  const deliveryStartedAt = Date.now();
+  const results = await Promise.allSettled(chats.map(async chatId => {
+    await waitForRecipientDelivery(chatId, deliveryStartedAt);
+    return sendTelegram({chatId, text, tokenAddress: token, launchpad, socials, image});
+  }));
   if (initial == null) void boundedSocialMafiaContext(work, 12_000).then(async values => {
     const enriched = render(values);
     if (enriched === text) return;

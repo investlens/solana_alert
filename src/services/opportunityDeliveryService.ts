@@ -1,3 +1,4 @@
+import { waitForRecipientDelivery, recipientDelayMs } from './recipientDeliveryTiming.js';
 import {
   resolveTokenOpenTarget,
 } from '../core/tokenOpenRouter.js';
@@ -1119,43 +1120,8 @@ async function deliverOpportunity(
   }
   const criticalReason = action === 'EXIT' ? criticalAvoidReason(opportunity.raw_data) : null;
 
-  const users =
-    (
-      await getDeliverableUsers()
-    ).sort(
-      (a, b) => {
-        const priority = (
-          tier: DeliverableUser['tier'],
-        ) =>
-          tier === 'admin'
-            ? 0
-            : tier === 'paid'
-              ? 1
-              : 2;
-
-        return (
-          priority(
-            a.tier,
-          ) -
-          priority(
-            b.tier,
-          )
-        );
-      },
-    );
-
-  /*
-   * Admin receives actionable intelligence first.
-   *
-   * Paid users become eligible 10 seconds after
-   * unified delivery begins.
-   *
-   * This is one shared gate — NOT 10 seconds per
-   * subscriber.
-   */
-  const paidReleaseAt =
-    Date.now() +
-    10_000;
+  const deliveryStartedAt = Date.now();
+  const users = (await getDeliverableUsers()).sort((a, b) => recipientDelayMs(a, deliveryStartedAt) - recipientDelayMs(b, deliveryStartedAt));
 
   let delivered =
     0;
@@ -1179,44 +1145,7 @@ async function deliverOpportunity(
       if (!shouldDeliverExit({ action, relevant, criticalReason })) continue;
     }
 
-    if (
-      user.tier ===
-      'paid'
-    ) {
-      const delayMs =
-        Math.max(
-          0,
-          paidReleaseAt -
-          Date.now(),
-        );
-
-      if (
-        delayMs >
-        0
-      ) {
-        console.log(
-          '[OpportunityDelivery] Admin-first release gate:',
-          {
-            opportunityId:
-              opportunity.id,
-
-            telegramId:
-              user.telegram_id,
-
-            delayMs,
-          },
-        );
-
-        await new Promise<void>(
-          resolve => {
-            setTimeout(
-              resolve,
-              delayMs,
-            );
-          },
-        );
-      }
-    }
+    await waitForRecipientDelivery(user, deliveryStartedAt, action === 'EXIT');
 
     let strategyEnabled =
       false;
