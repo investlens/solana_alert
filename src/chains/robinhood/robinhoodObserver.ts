@@ -1,4 +1,5 @@
 import { recentDexPayment } from './dexPaidWatchState.js';
+import { recordDexPaidCheck } from './dexPaidDiagnostics.js';
 import { renderAlphaNotification } from '../../ui/alphaNotification.js';
 import { buildAlphaMarketActions } from '../../ui/alphaNotificationActions.js';
 import { coreDecisionEvidenceMetrics, marketContextMetrics, normalizeCoreDecisionMetrics, normalizeNotificationMarketContext } from '../../ui/notificationMarketContext.js';
@@ -2128,10 +2129,15 @@ const dexPaymentAttempts = new Map<string,{payment:number;nextAt:number}>();
 export async function processRobinhoodDexPaidSignal(token: RobinhoodDiscoveredToken): Promise<boolean> {
   const dexPaid = await scanRobinhoodDexPaid(token.tokenAddress);
   dexPaidEvidence.set(normalize(token.tokenAddress), dexPaid);
-  if (dexPaid.dexPaid !== true || !recentDexPayment(dexPaid.latestPaymentTimestamp)) return false;
+  if (dexPaid.dexPaid !== true) {
+    recordDexPaidCheck(dexPaid.dexPaid === null ? 'PROVIDER_UNAVAILABLE' : 'NO_PAID_ORDER'); return false;
+  }
+  if (!recentDexPayment(dexPaid.latestPaymentTimestamp)) { recordDexPaidCheck('PAYMENT_OUTSIDE_WINDOW'); return false; }
   const attemptKey = normalize(token.tokenAddress);
   const previousAttempt = dexPaymentAttempts.get(attemptKey);
-  if (previousAttempt?.payment === dexPaid.latestPaymentTimestamp && previousAttempt.nextAt > Date.now()) return false;
+  if (previousAttempt?.payment === dexPaid.latestPaymentTimestamp && previousAttempt.nextAt > Date.now()) {
+    recordDexPaidCheck('RETRY_COOLDOWN'); return false;
+  }
   if (dexPaymentAttempts.size >= 100 && !dexPaymentAttempts.has(attemptKey)) dexPaymentAttempts.delete(dexPaymentAttempts.keys().next().value!);
   dexPaymentAttempts.set(attemptKey, {payment:dexPaid.latestPaymentTimestamp!,nextAt:Date.now()+60_000});
   const market = await getRobinhoodMarketSnapshot(token.tokenAddress, { priority: 'NORMAL',
@@ -2164,6 +2170,7 @@ export async function processRobinhoodDexPaidSignal(token: RobinhoodDiscoveredTo
     buttons: buildAlphaMarketActions({ chartUrl, tokenUrl: buildExplorerUrl(token.tokenAddress),
       fullIntelCallback: `FI_RH_${token.tokenAddress}`, copyContractCallback: `COPY_CA_${token.tokenAddress}` }) });
   if (result.delivered > 0) dexPaymentAttempts.set(attemptKey,{payment:dexPaid.latestPaymentTimestamp!,nextAt:Date.now()+10*60_000});
+  recordDexPaidCheck(result.delivered > 0 ? 'TELEGRAM_ACCEPTED' : result.failed > 0 ? 'DELIVERY_FAILURE' : 'NO_DELIVERY');
   console.log('[RobinhoodObserver] DEX PAID semantic delivery:', { token: token.tokenAddress,
     paymentTimestamp: dexPaid.latestPaymentTimestamp, delivered: result.delivered, failed: result.failed });
   return true;
