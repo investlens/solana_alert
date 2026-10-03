@@ -1,3 +1,4 @@
+import { arcMarketNumber } from '../src/chains/arc/market.js';
 import { waitForRecipientDelivery, recordDeliveryAccepted } from '../src/services/recipientDeliveryTiming.js';
 import { recordCompactAlert } from '../src/services/compactAlertOutcomes.js';
 import { arcBoostSafetyFromEvidence, processArcBoostObservation } from '../src/chains/arc/boostSafety.js';
@@ -132,7 +133,7 @@ async function processArcBurns(fromBlock: bigint, toBlock: bigint): Promise<void
       const burned = formatUnits(args.value, decimals);
       const from = String(args.from ?? '').toLowerCase();
       // Locked AlphaOS Burn card: keep detection lean; enrich only after >= threshold qualifies.
-      let marketCap: number | null = null;
+      let marketCap: number | null = null; let fdv: number | null = null;
       let outcomePrice: number | null = null; let outcomePair: string | null = null;
       let liquidity: number | null = null;
       let dexUrl: string | null = null;
@@ -145,7 +146,7 @@ async function processArcBurns(fromBlock: bigint, toBlock: bigint): Promise<void
           const pairs = await response.json() as any[];
           const pair = Array.isArray(pairs) ? pairs.find(p => p?.chainId === 'arc' && String(p?.baseToken?.address ?? '').toLowerCase() === token.toLowerCase()) : null;
           outcomePrice = Number(pair?.priceUsd) || null; outcomePair = pair?.pairAddress ?? null;
-          marketCap = Number.isFinite(Number(pair?.marketCap)) ? Number(pair.marketCap) : Number.isFinite(Number(pair?.fdv)) ? Number(pair.fdv) : null;
+          marketCap = arcMarketNumber(pair?.marketCap); fdv = arcMarketNumber(pair?.fdv);
           liquidity = Number.isFinite(Number(pair?.liquidity?.usd)) ? Number(pair.liquidity.usd) : null;
           dexUrl = pair?.url ? String(pair.url) : null;
           website = Array.isArray(pair?.info?.websites) ? pair.info.websites.find((x:any)=>x?.url)?.url ?? null : null;
@@ -176,7 +177,7 @@ async function processArcBurns(fromBlock: bigint, toBlock: bigint): Promise<void
         `Burn Address  <code>${String(args.to).slice(0,10)}…${String(args.to).slice(-6)}</code>`,
         `Source Wallet <code>${from.slice(0,8)}…${from.slice(-6)}</code>`,'',
         '📊 <b>MARKET</b>',
-        `Market Cap    <b>${formatUsd(marketCap)}</b>`,
+        ...(marketCap != null ? [`Market Cap    <b>${formatUsd(marketCap)}</b>`] : fdv != null ? [`FDV    <b>${formatUsd(fdv)}</b>`] : []),
         `Liquidity     <b>${formatUsd(liquidity)}</b>`,'',
         '🛡️ <b>Verified supply reduction · on-chain</b>','',
         '⚠️ <b>Supply burn is not a guarantee of price appreciation.</b>','',
@@ -266,8 +267,8 @@ async function deliverArcAlert(market: Awaited<ReturnType<typeof enrichArcMarket
 
   const symbol = market.symbol || 'ARC TOKEN';
   const buys = market.buys5m ?? 0;
-  const sells = market.sells5m ?? 0;
-  const ratio = sells > 0 ? (buys / sells).toFixed(2) : buys > 0 ? '∞' : 'n/a';
+  const sells = market.sells5m;
+  const ratio = sells != null && sells > 0 ? (buys / sells).toFixed(2) : sells === 0 && buys > 0 ? '∞' : 'n/a';
   const shortCa = market.assetId.length > 14
     ? `${market.assetId.slice(0, 8)}…${market.assetId.slice(-6)}`
     : market.assetId;
@@ -276,7 +277,7 @@ async function deliverArcAlert(market: Awaited<ReturnType<typeof enrichArcMarket
     .map(item => item.replace(/_UNKNOWN$/i, '').replace(/_/g, ' ').toLowerCase())
     .map(item => item.replace(/\b\w/g, char => char.toUpperCase()));
   const otherWarnings = warnings.filter(item => !/UNKNOWN/i.test(item));
-  const ratioNumber = sells > 0 ? buys / sells : buys > 0 ? 99 : 0;
+  const ratioNumber = sells != null && sells > 0 ? buys / sells : sells === 0 && buys > 0 ? 99 : 0;
   const evidence = [
     ratioNumber >= 1.5 ? `🟢 Strong <b>${ratio}x</b> buy pressure` : null,
     (market.volume5mUsd ?? 0) > 0 ? `📊 <b>${formatUsd(market.volume5mUsd)}</b> activity in 5m` : null,
@@ -291,7 +292,7 @@ async function deliverArcAlert(market: Awaited<ReturnType<typeof enrichArcMarket
     '',
     `💧 Liquidity     <b>${formatUsd(market.liquidityUsd)}</b>`,
     `📊 5m Volume     <b>${formatUsd(market.volume5mUsd)}</b>`,
-    `🟢 Buys / Sells  <b>${buys} / ${sells}</b>  ·  <b>${ratio}x</b>`,
+    `🟢 Buys / Sells  <b>${buys} / ${sells ?? 'Unavailable'}</b>  ·  <b>${ratio}x</b>`,
     ...(market.marketCapUsd != null ? [`💰 Market Cap    <b>${formatUsd(market.marketCapUsd)}</b>`]
       : market.fdvUsd != null ? [`💰 FDV    <b>${formatUsd(market.fdvUsd)}</b>`] : []),
     '',
@@ -516,7 +517,7 @@ async function deliverArcBoost(boost: {tokenAddress:string;amount:number;totalAm
   }
   let symbol = 'ARC TOKEN';
   let name: string | null = null;
-  let marketCap: number | null = null;
+  let marketCap: number | null = null; let fdv: number | null = null;
       let outcomePrice: number | null = null; let outcomePair: string | null = null;
   let dexUrl: string | null = null;
   let website: string | null = null;
@@ -530,7 +531,7 @@ async function deliverArcBoost(boost: {tokenAddress:string;amount:number;totalAm
       symbol = String(pair?.baseToken?.symbol || symbol);
       name = pair?.baseToken?.name ? String(pair.baseToken.name) : null;
       outcomePrice = Number(pair?.priceUsd) || null; outcomePair = pair?.pairAddress ?? null;
-          marketCap = Number.isFinite(Number(pair?.marketCap)) ? Number(pair.marketCap) : Number.isFinite(Number(pair?.fdv)) ? Number(pair.fdv) : null;
+          marketCap = arcMarketNumber(pair?.marketCap); fdv = arcMarketNumber(pair?.fdv);
       dexUrl = pair?.url ? String(pair.url) : null;
       const websites = Array.isArray(pair?.info?.websites) ? pair.info.websites : [];
       const socials = Array.isArray(pair?.info?.socials) ? pair.info.socials : [];
@@ -544,7 +545,7 @@ async function deliverArcBoost(boost: {tokenAddress:string;amount:number;totalAm
     '',
     `<b>${symbol}</b>${name ? ` · ${name}` : ''}`,
     `🔥 Boost  <b>${boost.totalAmount} total (+${boost.amount})</b>`,
-    `💰 Market Cap  <b>${formatUsd(marketCap)}</b>`,
+    ...(marketCap != null ? [`💰 Market Cap  <b>${formatUsd(marketCap)}</b>`] : fdv != null ? [`💰 FDV  <b>${formatUsd(fdv)}</b>`] : []),
     `👤 Dev Holding  <b>${security.devHoldingPercent == null ? 'Not available' : `${security.devHoldingPercent.toFixed(2)}%`}</b>`,
     '🛡️ Sell safety  <b>No honeypot/cannot-sell flag detected</b>',
     '',

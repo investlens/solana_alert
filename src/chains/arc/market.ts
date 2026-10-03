@@ -33,11 +33,13 @@ type Pair = {
   info?: { websites?: Array<{ url?: string }>; socials?: Array<{ type?: string; url?: string }> };
 };
 
-const n = (value: unknown): number | null => {
+export const arcMarketNumber = (value: unknown): number | null => {
   if (value == null || (typeof value !== 'number' && typeof value !== 'string') || String(value).trim() === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 };
+
+const n = arcMarketNumber;
 
 export async function enrichArcMarket(token: ArcTokenEnrichment): Promise<ArcMarketEnrichment> {
   try {

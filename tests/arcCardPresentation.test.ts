@@ -17,3 +17,13 @@ test('ARC FDV-only presentation never relabels FDV as market cap', () => {
   const text = polishArcTelegramPresentation('AlphaOS · ARC OPPORTUNITY\n🚀 <b>NEW</b>\n💰 FDV <b>$45,498</b>\n💧 Liquidity <b>$18,767</b>\n📊 5m Volume <b>$8,225</b>').text;
   assert.match(text, /<b>FDV<\/b>/); assert.doesNotMatch(text, /Market cap|n\/a/);
 });
+
+test('Boost and Burn preserve FDV labels and opportunities preserve flow ratio', () => {
+  for (const heading of ['BOOST DETECTED · ARC', 'AlphaOS · ARC SUPPLY BURN']) {
+    const text = polishArcTelegramPresentation(`${heading}\n<b>TEST</b>\n💰 FDV <b>$12K</b>`).text;
+    assert.match(text, /<b>FDV<\/b>.*\$12K/);
+    assert.doesNotMatch(text, /Market cap/);
+  }
+  const flow = polishArcTelegramPresentation('AlphaOS · ARC OPPORTUNITY\n🟢 Buys / Sells <b>30 / 10</b> · <b>3.00x</b>').text;
+  assert.match(flow, /30 \/ 10 · 3.00x/);
+});
