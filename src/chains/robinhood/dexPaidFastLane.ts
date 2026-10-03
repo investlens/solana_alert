@@ -4,7 +4,7 @@ import { processRobinhoodDexPaidSignal } from './robinhoodObserver.js';
 
 const INTERVAL_MS = Math.max(10_000, Number(process.env.DEX_PAID_FAST_LANE_INTERVAL_MS ?? 15_000));
 const CANDIDATE_TTL_MS = Math.max(5 * 60_000, Number(process.env.DEX_PAID_FAST_LANE_CANDIDATE_TTL_MS ?? 30 * 60_000));
-const MAX_CHECKS_PER_CYCLE = Math.max(1, Number(process.env.DEX_PAID_FAST_LANE_MAX_CHECKS ?? 8));
+const MAX_CHECKS_PER_CYCLE = Math.max(1, Math.min(4, Number(process.env.DEX_PAID_FAST_LANE_MAX_CHECKS ?? 2)));
 const LIVE_LOOKBACK_BLOCKS = BigInt(Math.max(50, Number(process.env.DEX_PAID_FAST_LANE_LOOKBACK_BLOCKS ?? 300)));
 const STARTUP_LOOKBACK_BLOCKS = BigInt(Math.max(Number(LIVE_LOOKBACK_BLOCKS), Number(process.env.DEX_PAID_FAST_LANE_STARTUP_LOOKBACK_BLOCKS ?? 2_000)));
 
@@ -24,6 +24,7 @@ function key(address: string) { return address.trim().toLowerCase(); }
 function remember(token: RobinhoodDiscoveredToken) {
   const k = key(token.tokenAddress);
   const previous = candidates.get(k);
+  if (!previous && candidates.size >= 100) candidates.delete(candidates.keys().next().value!);
   candidates.set(k, { token, lastSeenAt: Date.now(), lastCheckedAt: previous?.lastCheckedAt ?? 0 });
 }
 

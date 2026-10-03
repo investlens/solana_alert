@@ -154,3 +154,19 @@ test('DEX_PAID UI and delivery share the durable database-backed preference key'
   assert.ok(observer.indexOf('persistOrLoadAlphaSemanticEventRecord({') < observer.indexOf("eventIdentity: semanticEvent.event_identity, type: 'DEX_PAID'"),
     'internal semantic persistence must precede preference-gated delivery');
 });
+
+
+test('DEX shared claims deduplicate recipient/payment and fail closed when Redis is unavailable', async () => {
+  const { claimDexRecipient } = await import('../src/services/alphaSemanticDeliveryService.js');
+  const keys = new Set<string>();
+  const claim = async (key: string, ttl: number): Promise<'CLAIMED' | 'EXISTS' | 'UNAVAILABLE'> => {
+    assert.equal(ttl, 86_400_000);
+    if (keys.has(key)) return 'EXISTS';
+    keys.add(key); return 'CLAIMED';
+  };
+  assert.deepEqual(await Promise.all([claimDexRecipient('v2:DEX_PAID:token:1','userA',claim),
+    claimDexRecipient('v2:DEX_PAID:token:1','userA',claim)]),[true,false]);
+  assert.equal(await claimDexRecipient('v2:DEX_PAID:token:1','userB',claim),true);
+  assert.equal(await claimDexRecipient('v2:DEX_PAID:token:2','userA',claim),true);
+  assert.equal(await claimDexRecipient('v2:DEX_PAID:token:3','userA',async () => 'UNAVAILABLE'),false);
+});

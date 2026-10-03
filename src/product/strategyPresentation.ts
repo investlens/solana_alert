@@ -1,4 +1,7 @@
 const STRATEGIES: Record<string, { name: string; description: string }> = {
+  DEX_PAID: { name: 'DEX Paid · Robinchain', description: 'Verified DexScreener payment; qualification and security checks apply.' },
+  SOL_DEX_PAID: { name: 'Solana DEX Research · Unverified', description: 'Legacy preference; delivery wiring is unverified.' },
+  BOOSTER_INSTANT: { name: 'Boost', description: 'New or increased promotion; promotion is not proof of safety.' },
   PONS_RISK: {
     name: 'PONS Risk Monitor',
     description: 'Material risk changes on monitored PONS tokens.',
