@@ -27,3 +27,9 @@ Checks are sampled: rapid dumps, intervening events and recovery can be missed. 
 ## Validation
 
 592 main tests plus typecheck. scripts/validation/monitorAtomicLua.py executes the production script using local Lua 5.4 with Redis/cjson command shims (not a real Redis server); validates global/user capacity, in-flight lease, five/minute budget, stored-state dedup, recovery hysteresis, three-event ceiling, stop, expiry and TTL. Production STORE_READY and no store errors verify actual Redis Lua acceptance after deployment. No synthetic Telegram alerts or persisted test tokens are used.
+
+## V4 coverage and unavailable-result correction
+
+The first validator wrongly required 20-byte pair addresses and discarded DOVE's successful market response, whose Uniswap V4 pool ID is 32 bytes. Pool identities now accept either exact 20-byte addresses or exact 32-byte pool IDs; token/chain/freshness and exact-pool comparison remain unchanged. DOVE's historical research snapshot confirms a USD price and liquidity existed; those historical values are not treated as a current quote.
+
+Unavailable Readiness produces a short Unable to assess card and hides Monitor 1h. Scan/Full Intel offer Readiness first, then monitoring only after market availability is established. Unsupported Position Check produces one short reason without empty holder sections or budget buttons. Full Intel offers Curve Estimate only when a cached trusted v2 PONS marker identifies the exact token/curve/creator and there is no indexed chart. The model still independently validates native quote, graduation and executable curve evidence. No background coverage probe is added.

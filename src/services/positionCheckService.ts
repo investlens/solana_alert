@@ -39,6 +39,14 @@ type Baseline = { creator: string; holding: number; at: number };
 const baselines = new Map<string, Baseline>();
 const cache = new Map<string, PositionCheck>();
 const pending = new Map<string, Promise<PositionCheck>>();
+export async function hasCachedPonsCurve(token: string): Promise<boolean> {
+  if (!/^0x[a-f0-9]{40}$/i.test(token)) return false;
+  const marker = (await getSharedJson<{ factory: string; token?: string; curveAddress?: string; creator?: string }>(`alphaos:pons:verified:${token.toLowerCase()}`))?.value;
+  return Boolean(marker && marker.token?.toLowerCase() === token.toLowerCase()
+    && /^0x[a-f0-9]{40}$/i.test(marker.curveAddress ?? '') && /^0x[a-f0-9]{40}$/i.test(marker.creator ?? '')
+    && getPonsFactoryDeployments().some(factory => factory.enabled && factory.generation === 'v2'
+      && factory.address.toLowerCase() === marker.factory?.toLowerCase()));
+}
 export async function getPositionCheck(token: string, size: PositionSize): Promise<PositionCheck> {
   if (!/^0x[a-fA-F0-9]{40}$/.test(token) || !POSITION_SIZES.includes(size)) throw Error('Invalid position check');
   token = token.toLowerCase(); const key = `${token}:${size}`;

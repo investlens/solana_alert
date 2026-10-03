@@ -28,8 +28,9 @@ test('allocation boundaries, unsupported and invalid curves are rejected', () =>
 test('unavailable data stays explicit and callbacks remain below Telegram limit', () => {
   const check: PositionCheck = { token: address, size: '0.01', checkedAt: Date.now(), block: null, quote: null, holders: null, creator: null, setup: null, reason: 'Source <unavailable>' };
   const text = renderPositionCheck(check);
-  assert.match(text, /Unable to assess execution/); assert.match(text, /Source &lt;unavailable&gt;/);
-  assert.match(text, /Holder concentration.*Unable to assess/); assert.doesNotMatch(text, /0\.00%|SAFE|APPROVED/);
+  assert.match(text, /Execution estimate unavailable/); assert.match(text, /Source &lt;unavailable&gt;/);
+  assert.doesNotMatch(text, /HOLDERS|Holder concentration|Selected budget/);
+  assert.ok(text.length < 650); assert.doesNotMatch(text, /0\.00%|SAFE|APPROVED/);
   for (const row of positionCheckButtons(address)) for (const button of row) if ('callback_data' in button) assert.ok(Buffer.byteLength(button.callback_data) <= 64);
 });
 test('estimates disclose model assumptions, excluded gas and holder sample limitations', () => {

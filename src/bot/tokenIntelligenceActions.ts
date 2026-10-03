@@ -4,7 +4,7 @@ import { requireCapability } from './accessControl.js';
 import { getRobinhoodTokenIntelligence } from '../services/tokenIntelligenceService.js';
 import { renderTokenIntelligence, tokenIntelligenceButtons } from '../ui/tokenIntelligenceView.js';
 import { trackRuntimeToken } from '../services/runtimeTokenTracking.js';
-import { getPositionCheck, type PositionSize } from '../services/positionCheckService.js';
+import { getPositionCheck, hasCachedPonsCurve, type PositionSize } from '../services/positionCheckService.js';
 import { renderPositionCheck, positionCheckButtons } from '../ui/positionCheckView.js';
 
 const activeReplies = new Set<string>();
@@ -21,7 +21,7 @@ export function registerTokenIntelligenceActions(bot: Telegraf<any>) {
     try {
       const check = await getPositionCheck(ctx.match[2], ctx.match[1] as PositionSize);
       const options = { parse_mode: 'HTML' as const, link_preview_options: { is_disabled: true },
-        reply_markup: { inline_keyboard: positionCheckButtons(check.token) } };
+        reply_markup: { inline_keyboard: positionCheckButtons(check.token, Boolean(check.quote)) } };
       const previous = ctx.callbackQuery?.message;
       if (previous && 'text' in previous && previous.text.startsWith('🎯 POSITION CHECK')) {
         await ctx.editMessageText(renderPositionCheck(check), options);
@@ -71,7 +71,7 @@ export function registerTokenIntelligenceActions(bot: Telegraf<any>) {
     try {
       const intel = await getRobinhoodTokenIntelligence(ctx.match[1]);
       await ctx.reply(renderTokenIntelligence(intel), { parse_mode: 'HTML',
-        link_preview_options: { is_disabled: true }, reply_markup: { inline_keyboard: tokenIntelligenceButtons(intel) } });
+        link_preview_options: { is_disabled: true }, reply_markup: { inline_keyboard: tokenIntelligenceButtons(intel, !intel.chartUrl && await hasCachedPonsCurve(intel.tokenAddress)) } });
     } catch (error) {
       console.error('[TokenIntel]', { event: 'ANALYSIS_FAILED', token: ctx.match[1],
         reason: error instanceof Error ? error.message : String(error) });

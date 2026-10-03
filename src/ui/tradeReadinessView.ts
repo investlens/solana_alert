@@ -5,6 +5,10 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 const usd = (v: number) => '$' + v.toLocaleString('en-US', { maximumFractionDigits: v < 1 ? 9 : 2 });
 export function renderReadiness(token: string, result: Readiness): string {
   const m = result.market;
+  if (!m) return ['🎯 <b>TRADE READINESS</b>', '<b>Unable to assess · Robinchain</b>', '',
+    'A fresh indexed USD price and pool liquidity could not be verified.',
+    'Monitoring is unavailable for this snapshot. Retry or open Full Intel for available research.', '',
+    `<code>${esc(token)}</code>`, '<i>No readiness or safety conclusion</i>'].join('\n');
   return ['🎯 <b>TRADE READINESS · PRO</b>', `<b>${esc(m?.symbol || 'Token')} · ROBINCHAIN</b>`,
     `<b>${result.state === 'WATCH' ? 'WATCH' : 'SETUP FORMING'}</b>`, '',
     ...(m ? [`Price <b>${usd(m.priceUsd)}</b> · LP <b>${usd(m.liquidityUsd)}</b>`,
@@ -14,7 +18,7 @@ export function renderReadiness(token: string, result: Readiness): string {
       ...(Number.isFinite(m.priceChange1h) ? [`Move · 1h <b>${m.priceChange1h! >= 0 ? '+' : ''}${m.priceChange1h!.toFixed(2)}%</b>`] : []), ''] : []),
     '<b>WHAT TO CHECK</b>', ...result.reasons.map(reason => `• ${esc(reason)}`),
     '• Creator selling, complete holder ownership and size-specific execution are not assessed by this market check.',
-    'Use Position Check / Full Intel for available deeper evidence.', '',
+    'Open Full Intel for available creator and holder evidence.', '',
     '<b>PERSONAL MONITOR</b>', 'Opt in below for price ≤ −15% or liquidity ≤ −20% versus the starting snapshot.',
     'About 2-minute checks · 1-hour expiry · Maximum 3 warning events.',
     'Data gaps and pool changes are flagged. Fast dumps can occur between checks.', '',
@@ -23,10 +27,9 @@ export function renderReadiness(token: string, result: Readiness): string {
     '<i>Market screening only · No entry approval or automatic trade</i>',
   ].join('\n');
 }
-export function readinessButtons(token: string) {
-  return [[{ text: '↻ Readiness', callback_data: `TR_RH_${token}` }, { text: '🔔 Monitor 1h', callback_data: `DM_RH_${token}` }],
-    [{ text: '🎯 Position Check', callback_data: `PC_RH_0.01_${token}` }, { text: '🧠 Full Intel', callback_data: `FI_RH_${token}` }],
-    [{ text: 'My Monitors', callback_data: 'DM_HOME' }, { text: 'Free / Pro', callback_data: 'FEATURE_GUIDE' }]];
+export function readinessButtons(token: string, marketAvailable = false) {
+  return [[{ text: '↻ Retry Readiness', callback_data: `TR_RH_${token}` }, { text: '🧠 Full Intel', callback_data: `FI_RH_${token}` }],
+    ...(marketAvailable ? [[{ text: '🔔 Monitor 1h', callback_data: `DM_RH_${token}` }, { text: 'My Monitors', callback_data: 'DM_HOME' }]] : [])];
 }
 export function renderDeterioration(row: Monitor, market: ChainMarketSnapshot | null, mask: number): string {
   const valid = (mask & 12) === 0 && market;

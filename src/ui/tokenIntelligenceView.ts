@@ -108,13 +108,13 @@ export function renderTokenIntelligence(intel: TokenIntel): string {
   return rendered;
 }
 
-export function tokenIntelligenceButtons(intel: TokenIntel) {
+export function tokenIntelligenceButtons(intel: TokenIntel, supportedCurve = false) {
   const rows: Array<Array<{ text: string; url: string } | { text: string; callback_data: string }>> = [];
   const market = [] as Array<{ text: string; url: string }>;
   if (intel.chartUrl) market.push({ text: '📊 Chart', url: intel.chartUrl });
   market.push({ text: '🔎 Explorer', url: `https://robinhoodchain.blockscout.com/token/${intel.tokenAddress}` });
   rows.push(market);
-  if (/^0x[a-fA-F0-9]{40}$/.test(intel.tokenAddress)) rows.push([{ text: '🎯 Position Check', callback_data: `PC_RH_0.01_${intel.tokenAddress}` }, { text: '📋 Copy CA', callback_data: `COPY_CA_${intel.tokenAddress}` }]);
-  rows.push([{ text: '🎯 Readiness · Pro', callback_data: `TR_RH_${intel.tokenAddress}` }, { text: '🔔 Monitor · Pro', callback_data: `DM_RH_${intel.tokenAddress}` }]);
+  if (/^0x[a-fA-F0-9]{40}$/.test(intel.tokenAddress)) rows.push([...(supportedCurve ? [{ text: '🎯 Curve Estimate', callback_data: `PC_RH_0.01_${intel.tokenAddress}` }] : []), { text: '📋 Copy CA', callback_data: `COPY_CA_${intel.tokenAddress}` }]);
+  rows.push([{ text: '🎯 Readiness · Pro', callback_data: `TR_RH_${intel.tokenAddress}` }, { text: 'My Monitors', callback_data: 'DM_HOME' }]);
   return rows;
 }

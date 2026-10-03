@@ -53,3 +53,20 @@ test('commercial free cannot start personal monitors; testing access remains ope
     assert.match(alphaosFeatureGuide(), /Payments remain closed/);
   } finally { if (previous == null) delete process.env.SUBSCRIPTIONS_ENABLED; else process.env.SUBSCRIPTIONS_ENABLED = previous; }
 });
+
+test('DOVE-style V4 pool ID is supported without accepting mismatched tokens or arbitrary pool identifiers', () => {
+  const pool = '0xc088dabf68ae649397e70c4a5e2ea35445e9c5682f8e9de9109cc808e52d676d';
+  const snapshot = market({ pairAddress: pool, symbol: 'DOVE', priceUsd: 0.0001276, liquidityUsd: 5500.73 });
+  assert.equal(validReadinessMarket(snapshot, token, now), true);
+  assert.equal(deteriorationMask({ ...row, pair: pool, price: snapshot.priceUsd, liquidity: snapshot.liquidityUsd }, snapshot, now), 0);
+  assert.equal(validReadinessMarket(market({ pairAddress: pool + '0' }), token, now), false);
+  assert.equal(validReadinessMarket(market({ pairAddress: pool, tokenAddress: pair }), token, now), false);
+});
+test('unavailable readiness is compact, has no enrollment button and remains research-only', () => {
+  const result = assessReadiness(null, token, now);
+  const text = renderReadiness(token, result);
+  assert.ok(text.length < 600);
+  assert.doesNotMatch(text, /PERSONAL MONITOR|SETUP FORMING|Position Check/);
+  assert.equal(readinessButtons(token, false).flat().some(b => b.callback_data.startsWith('DM_RH_')), false);
+  assert.equal(readinessButtons(token, true).flat().some(b => b.callback_data.startsWith('DM_RH_')), true);
+});

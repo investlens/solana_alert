@@ -3,7 +3,7 @@ import { getRobinhoodMarketSnapshot } from '../chains/robinhood/market.js';
 export type Readiness = { state: 'WATCH' | 'SETUP_FORMING'; market: ChainMarketSnapshot | null; reasons: string[]; at: number };
 export function validReadinessMarket(market: ChainMarketSnapshot | null, token: string, now = Date.now()): market is ChainMarketSnapshot {
   return Boolean(market && market.chain === 'robinhood' && market.tokenAddress.toLowerCase() === token.toLowerCase()
-    && /^0x[a-f0-9]{40}$/i.test(market.pairAddress ?? '') && Number.isFinite(market.timestamp)
+    && /^0x(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(market.pairAddress ?? '') && Number.isFinite(market.timestamp)
     && now >= market.timestamp && now - market.timestamp <= 120_000
     && [market.priceUsd, market.liquidityUsd].every(v => Number.isFinite(v) && v > 0));
 }
