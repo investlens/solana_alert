@@ -43,3 +43,21 @@ test('feed eligibility gate runs before market, creator enrichment and all messa
   assert.equal(result.reason, 'X_CONTENT_UNREADABLE');
   assert.equal(result.confirmed, false);
 });
+
+test('technical X failures preserve unknown eligibility while readable rejection remains false', async () => {
+  const { socialEvidenceEligibility } = await import('../src/chains/robinhood/socialContractConfirmation.js');
+  for (const reason of ['X_UNAVAILABLE', 'X_CONTENT_UNREADABLE'] as const)
+    assert.equal(socialEvidenceEligibility({ confirmed: false, reason }), null);
+  for (const reason of ['X_CONTRACT_NOT_CONFIRMED', 'TELEGRAM_CONTRACT_CONFLICT'] as const)
+    assert.equal(socialEvidenceEligibility({ confirmed: false, reason }), false);
+});
+test('unavailable X checks coalesce, cool down and retry after expiry; no proof is invented', async () => {
+  const { createSocialContractVerifier } = await import('../src/chains/robinhood/socialContractConfirmation.js');
+  let calls = 0; let time = 0;
+  const verify = createSocialContractVerifier(async () => { calls++; return '<html>X shell</html>'; }, () => time);
+  const results = await Promise.all([verify(args), verify(args)]);
+  assert.equal(calls, 1);
+  assert.ok(results.every(result => !result.confirmed && result.reason === 'X_CONTENT_UNREADABLE'));
+  time = 299_999; await verify(args); assert.equal(calls, 1);
+  time = 300_000; await verify(args); assert.equal(calls, 2);
+});

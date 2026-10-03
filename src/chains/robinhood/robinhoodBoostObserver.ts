@@ -1,3 +1,4 @@
+import { claimBoostDelivery, markBoostDeliveryAccepted } from '../../services/boostDeliveryGuard.js';
 import { boostVerificationDue, recordBoostSecurityBlock, type BoostVerificationRetry } from './alertEligibilityState.js';
 import { getVerifiedPonsPublicContext, getCreatorHoldingPercent, getTelegramPreviewType } from './ponsPublicContext.js';
 import { reuseRobinhoodDevTokenFlow } from './security/devTokenFlowScanner.js';
@@ -507,17 +508,32 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
     telegramUrl: socials.telegram,
   });
 
+  const claim = await claimBoostDelivery(boost.tokenAddress, boost.totalAmount);
+  if (claim !== 'CLAIMED') {
+    console.log('[RobinhoodBoostObserver] BOOST_DELIVERY_GUARD', { token: tokenKey, totalBoost: boost.totalAmount, state: claim });
+    if (claim === 'EXISTS') boostTotals.set(tokenKey, boost.totalAmount);
+    else {
+      if (verificationRetries.size >= 100 && !verificationRetries.has(tokenKey)) verificationRetries.delete(verificationRetries.keys().next().value!);
+      verificationRetries.set(tokenKey, { total: boost.totalAmount, firstAt: Date.now(), nextAt: Date.now() + 60_000, attempts: 1 });
+    }
+    return false;
+  }
   let delivered = 0;
+  let accepted = 0;
+  let sharedDeliveryUnavailable = false;
   try {
-    const result = await deliverAlphaSemanticEvent({ event: semanticEvent, message: baseMessage, buttons: baseButtons, preserveMessage: true });
+    const result = await deliverAlphaSemanticEvent({ event: semanticEvent, message: baseMessage, buttons: baseButtons, preserveMessage: true,
+      onTelegramAccepted: () => { accepted += 1; recordAcceptedAdminBoostNotification(boost.tokenAddress, boost.totalAmount); },
+    });
     delivered = result.delivered;
   } catch (error) {
+    sharedDeliveryUnavailable = true;
     console.warn('[RobinhoodBoostObserver] Shared delivery unavailable; using bounded runtime/admin fallback', {
       token: tokenKey, reason: error instanceof Error ? error.message : String(error),
     });
   }
 
-  if (delivered === 0) {
+  if (sharedDeliveryUnavailable && accepted === 0) {
     const fallbackDelivered = await deliverAdminBoostFallback({
       tokenAddress: boost.tokenAddress,
       totalBoostAmount: boost.totalAmount,
@@ -527,7 +543,8 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
     if (fallbackDelivered) delivered = 1;
   }
 
-  if (delivered > 0 || acceptedAdminBoostNotifications.has(boostFallbackIdentity(boost.tokenAddress, boost.totalAmount))) {
+  if (delivered > 0 || accepted > 0 || acceptedAdminBoostNotifications.has(boostFallbackIdentity(boost.tokenAddress, boost.totalAmount))) {
+    await markBoostDeliveryAccepted(semanticEvent.eventIdentity, rawSnapshot);
     boostTotals.set(tokenKey, boost.totalAmount);
     verificationRetries.delete(tokenKey);
     console.log('[RobinhoodBoostObserver] BOOST_ALERT_VERIFIED', {
