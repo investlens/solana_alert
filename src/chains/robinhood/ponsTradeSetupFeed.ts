@@ -1,6 +1,6 @@
 import { compactOutcomesEnabled } from '../../services/compactAlertOutcomes.js';
 import { launchSocialEligibility } from './alertEligibilityState.js';
-import { setSharedJson } from '../../services/sharedJsonCache.js';
+import { setSharedJson, getSharedJson, claimSharedDelivery } from '../../services/sharedJsonCache.js';
 import { PONS_CONTRACTS } from './ponsContracts.js';
 import type { PonsLaunch } from './ponsHistoricalLaunchScanner.js';
 import { isVerifiedSocialMafiaLaunch, resolveSocialMafiaSocials } from './ponsSocialMafiaAlert.js';
@@ -58,6 +58,18 @@ async function tick(): Promise<void> {
   if (running) return;
   running = true;
   try {
+    // Give confirmed social candidates a slot before spending scarce checks
+    // on unknown identity candidates; do not increase concurrent work.
+    const confirmed = [...deferredAdmissions].find(([token]) => launchSocialEligibility(token) === true);
+    if (confirmed && candidates.size >= MAX_CANDIDATES) {
+      const replace = [...candidates].find(([token]) => launchSocialEligibility(token) !== true);
+      if (replace) {
+        candidates.delete(replace[0]);
+        deferredAdmissions.delete(confirmed[0]);
+        if (deferredAdmissions.size < 50) deferredAdmissions.set(replace[0], replace[1].launch);
+        admitCandidate(confirmed[1]);
+      }
+    }
     for (const [token, item] of candidates) {
       const now = Date.now();
       if (launchSocialEligibility(token, now) === false) { candidates.delete(token); console.log(`[TradeSetup] RELEASE token=${token} reason=SOCIAL_GATE_FAILED`); continue; }
@@ -97,6 +109,9 @@ async function tick(): Promise<void> {
         const text = buildTradeSetupText({ token, symbol: context.symbol, name: context.name,
           age: (Date.now() - item.launchedAt) / 60_000, holding, burned: flow.confirmedDevBurnPercent,
           recovery: (finalPrice / item.trend.low - 1) * 100, depth: Number(final.quoteReserve) / 1e18, lowEth: item.trend.low * 10 ** context.decimals / 1e18, fdvUsd: context.fdvUsd, creator: context.creator, xUrl: socials.xUrl, tgUrl: socials.telegramUrl, at: Date.now() });
+        const claim = await claimSharedDelivery(`alphaos:setup:delivered:${token}`, 24 * 60 * 60_000);
+        if (claim === 'EXISTS') { candidates.delete(token); continue; }
+        if (claim !== 'CLAIMED') continue;
         // Retire before sending: an ambiguous Telegram response must not resend
         // to recipients who may already have received the message.
         candidates.delete(token);
@@ -109,7 +124,8 @@ async function tick(): Promise<void> {
         console.log(`[TradeSetup] SENT token=${token} delivered=${delivery.delivered} failed=${delivery.failed}`);
       } catch { console.log(`[TradeSetup] CHECK_FAILED token=${token}`); }
     }
-    for (const [token, launch] of deferredAdmissions) {
+    const pendingByEvidence = [...deferredAdmissions].sort(([a], [b]) => Number(launchSocialEligibility(b) === true) - Number(launchSocialEligibility(a) === true));
+    for (const [token, launch] of pendingByEvidence) {
       if (launchSocialEligibility(token) === false || !isTradeSetupLaunchAdmissible(launch, Date.now(), MAX_AGE)) { deferredAdmissions.delete(token); continue; }
       if (candidates.size >= MAX_CANDIDATES) break;
       deferredAdmissions.delete(token); admitCandidate(launch);
@@ -175,3 +191,35 @@ export async function tickTradeSetupForTests() { await tick(); }
 
 export function tradeSetupSchedulingStateForTests() { return { candidates: [...candidates.keys()], deferred: [...deferredAdmissions.keys()] }; }
 export function resetTradeSetupSchedulingForTests() { if (timer) clearInterval(timer); timer = null; candidates.clear(); deferredAdmissions.clear(); outcomes.clear(); }
+
+export async function saveSetupWatchCheckpoint(): Promise<void> {
+  await setSharedJson('alphaos:watch:setup:v1', {
+    candidates: [...candidates.values()].slice(0, MAX_CANDIDATES),
+    deferred: [...deferredAdmissions.values()].slice(0, 50),
+  }, new Date().toISOString(), MAX_AGE);
+}
+export async function restoreSetupWatchCheckpoint(load = () => getSharedJson<{ candidates: Candidate[]; deferred: PonsLaunch[] }>('alphaos:watch:setup:v1')): Promise<void> {
+  if (String(process.env.PONS_TRADE_SETUP_ENABLED ?? 'true').toLowerCase() !== 'true') return;
+  const saved = await load();
+  if (!saved?.value) return;
+  for (const item of (Array.isArray(saved.value.candidates) ? saved.value.candidates : []).slice(0, MAX_CANDIDATES)) {
+    if (!item?.launch || !isTradeSetupLaunchAdmissible(item.launch, Date.now(), MAX_AGE)) continue;
+    const token = item.launch.token_address.toLowerCase();
+    if (!candidates.has(token)) {
+      // Restart requires fresh consecutive observations; never reuse stale confirmation.
+      candidates.set(token, { launch: item.launch, launchedAt: Date.parse(item.launch.block_timestamp), trend: recoveredSetupTrend(item.trend), screenAfter: 0 });
+    }
+  }
+  for (const launch of (Array.isArray(saved.value.deferred) ? saved.value.deferred : []).slice(0, 50)) {
+    if (launch && isTradeSetupLaunchAdmissible(launch, Date.now(), MAX_AGE) && !candidates.has(launch.token_address.toLowerCase()))
+      deferredAdmissions.set(launch.token_address.toLowerCase(), launch);
+  }
+  if ((candidates.size || deferredAdmissions.size) && !timer) { timer = setInterval(() => { void tick(); }, INTERVAL); timer.unref(); }
+  console.log(`[TradeSetup] RECOVERED candidates=${candidates.size} pending=${deferredAdmissions.size} dbWrites=0`);
+}
+
+export function recoveredSetupTrend(trend: SetupTrend | null | undefined): SetupTrend {
+  if (!trend || !Number.isFinite(trend.peak) || !Number.isFinite(trend.low)
+    || trend.peak < 0 || trend.low < 0 || trend.low > trend.peak || typeof trend.dip !== 'boolean') return emptySetupTrend();
+  return {peak:trend.peak,low:trend.low,dip:trend.dip,previous:null,confirmations:0};
+}

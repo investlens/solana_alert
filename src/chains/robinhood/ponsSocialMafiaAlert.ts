@@ -1,3 +1,4 @@
+import { getSharedJson, setSharedJson, claimSharedDelivery } from '../../services/sharedJsonCache.js';
 import { waitForRecipientDelivery, recordDeliveryAccepted } from '../../services/recipientDeliveryTiming.js';
 import { recordCompactAlert } from '../../services/compactAlertOutcomes.js';
 import { recordLaunchSocialEligibility } from './alertEligibilityState.js';
@@ -39,6 +40,7 @@ const SCREEN_INTERVAL_MS = 15 * 60_000;
 const SCREEN_LIFETIME_MS = 60 * 60_000;
 let wakeTimer: ReturnType<typeof setTimeout> | null = null;
 const queue: QueuedLaunch[] = [];
+const processing = new Map<string, QueuedLaunch>();
 const seen = new Map<string, number>();
 let active = 0;
 let recipientCacheAt = 0;
@@ -311,6 +313,10 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   const initial = await boundedSocialMafiaContext(work, 1_500);
   const text = render(initial);
 
+  const deliveryClaim = await claimSharedDelivery(`alphaos:social:delivered:${token}`, 24 * 60 * 60_000);
+  if (deliveryClaim === 'EXISTS') return true;
+  if (deliveryClaim !== 'CLAIMED') return false;
+
   // Render once per eligible token, reuse the in-memory buffer across recipients.
   const image = await buildAlphaosAlertCard({ symbol: partial.metadata?.symbol || pons?.symbol,
     name: partial.metadata?.name || pons?.name, logo: pons?.logo,
@@ -380,6 +386,7 @@ function drain(): void {
     // Skip missed intervals rather than issuing a burst of catch-up requests.
     item.attempt = Math.min(4, Math.max(item.attempt + 1, Math.floor((now - item.createdAt) / SCREEN_INTERVAL_MS)));
     active += 1;
+    processing.set(item.launch.token_address.toLowerCase(), item);
     void processLaunch(item)
       .catch(error => {
         item.eligibility = null;
@@ -393,7 +400,7 @@ function drain(): void {
           if (queue.length < MAX_QUEUE) queue.push(item);
         } else if (!done) finishSocialScreen(item);
       })
-      .finally(() => { active -= 1; drain(); });
+      .finally(() => { processing.delete(item.launch.token_address.toLowerCase()); active -= 1; drain(); });
   }
   if (queue.length > 0 && active < MAX_CONCURRENT) {
     wakeTimer = setTimeout(drain, Math.max(1, queue[0].nextAt - Date.now()));
@@ -468,4 +475,30 @@ async function boundedSocialMafiaContext<T>(work: Promise<T>, milliseconds: numb
     const timer = setTimeout(() => resolve(null), milliseconds);
     work.then(value => { clearTimeout(timer); resolve(value); }, () => { clearTimeout(timer); resolve(null); });
   });
+}
+
+export async function saveSocialWatchCheckpoint(): Promise<void> {
+  const items = [...queue, ...processing.values()].filter(item => item.launchpad.id === 'PONS')
+    .slice(0, MAX_QUEUE).map(({ launch, createdAt, nextAt, attempt, eligibility }) => ({ launch, createdAt, nextAt, attempt, eligibility }));
+  await setSharedJson('alphaos:watch:social:v1', items, new Date().toISOString(), SCREEN_LIFETIME_MS);
+}
+export async function restoreSocialWatchCheckpoint(load = () => getSharedJson<Array<Omit<QueuedLaunch, 'launchpad'>>>('alphaos:watch:social:v1')): Promise<void> {
+  if (!enabled()) return;
+  const saved = await load();
+  if (!Array.isArray(saved?.value)) return;
+  let restored = 0;
+  for (const item of saved.value.slice(0, MAX_QUEUE)) {
+    if (!item?.launch || !/^0x[a-fA-F0-9]{40}$/.test(item.launch.token_address) || !isVerifiedSocialMafiaLaunch(item.launch, 'PONS') || queue.length + active >= MAX_QUEUE) continue;
+    const createdAt = Date.parse(item.launch.block_timestamp);
+    if (!Number.isFinite(createdAt) || createdAt > Date.now() || Date.now() >= createdAt + SCREEN_LIFETIME_MS) continue;
+    const identity = `PONS:${normalize(item.launch.token_address)}`;
+    if (seen.has(identity)) continue;
+    seen.set(identity, createdAt + SCREEN_LIFETIME_MS + 30_000);
+    queue.push({ launch: item.launch, launchpad: PONS_LAUNCHPAD, createdAt,
+      nextAt: Math.max(Date.now(), Number.isFinite(item.nextAt) ? item.nextAt : createdAt + SCREEN_INTERVAL_MS),
+      attempt: Number.isInteger(item.attempt) ? Math.max(0, Math.min(4, item.attempt)) : 0 });
+    restored++;
+  }
+  console.log(`[SocialMafia] RECOVERED waiting=${restored} dbWrites=0`);
+  drain();
 }

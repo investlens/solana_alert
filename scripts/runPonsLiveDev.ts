@@ -1,3 +1,5 @@
+import { saveSocialWatchCheckpoint, restoreSocialWatchCheckpoint } from '../src/chains/robinhood/ponsSocialMafiaAlert.js';
+import { saveSetupWatchCheckpoint, restoreSetupWatchCheckpoint } from '../src/chains/robinhood/ponsTradeSetupFeed.js';
 import { compactOutcomesEnabled, runCompactOutcomeCycle } from '../src/services/compactAlertOutcomes.js';
 import 'dotenv/config';
 import { robinhoodResilientScannerRpc } from '../src/chains/robinhood/rpc.js';
@@ -113,8 +115,18 @@ if (mode.kind === 'ONCE') {
   const storage = dbWritesEnabled ? createBufferedPonsLiveStorage(supabasePonsLiveDetectorStorage) : recoveryMemoryStorage;
   console.log(`[PonsLive] mode=SHADOW dryRun=true realTrades=0 liveStateWrites=${dbWritesEnabled ? 'enabled' : 'disabled-memory-checkpoint'}`);
   startPonsOutcomeCollectionLoop();
+  await Promise.all([restoreSocialWatchCheckpoint(), restoreSetupWatchCheckpoint()]);
+  let checkpointAt = 0;
   await runPonsLivePollingLoop({
     pollIntervalMs: ponsLivePollInterval(),
-    poll: () => pollPonsLiveLaunchesOnce(robinhoodResilientScannerRpc as never, storage as never, route, { retry: liveRetry }),
+    poll: async () => {
+      const result = await pollPonsLiveLaunchesOnce(robinhoodResilientScannerRpc as never, storage as never, route, { retry: liveRetry });
+      if (Date.now() - checkpointAt >= 30_000) {
+        checkpointAt = Date.now();
+        await Promise.all([saveSocialWatchCheckpoint(), saveSetupWatchCheckpoint()]);
+      }
+      return result;
+    },
   });
+  await Promise.all([saveSocialWatchCheckpoint(), saveSetupWatchCheckpoint()]);
 }
