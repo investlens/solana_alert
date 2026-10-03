@@ -286,6 +286,7 @@ export async function getRobinhoodTokenMetadata(
 
 
 export type RobinhoodTokenSocials = {
+  readStatus?: 'AVAILABLE' | 'UNAVAILABLE';
   twitter: string | null;
   telegram: string | null;
   website: string | null;
@@ -307,12 +308,13 @@ export async function getRobinhoodTokenSocials(tokenAddress: string, options: { 
   const key = address.toLowerCase();
   const cached = socialsCache.get(key);
   if (!options.refresh && cached && cached.expiresAt > Date.now()) return cached.value;
-  let value: RobinhoodTokenSocials = { twitter: null, telegram: null, website: null };
+  let value: RobinhoodTokenSocials = { twitter: null, telegram: null, website: null, readStatus: 'UNAVAILABLE' };
   try {
     const data = encodeFunctionData({ abi: TOKEN_ABI, functionName: 'socials' });
     const result = await rawEthCall({ address, data });
     const decoded = decodeFunctionResult({ abi: TOKEN_ABI, functionName: 'socials', data: result }) as readonly [string, string, string, string, string];
     value = {
+      readStatus: 'AVAILABLE',
       twitter: safeProjectUrl(decoded[0]),
       telegram: safeProjectUrl(decoded[1]),
       website: safeProjectUrl(decoded[3]),
@@ -320,7 +322,7 @@ export async function getRobinhoodTokenSocials(tokenAddress: string, options: { 
   } catch {
     // Social metadata is optional and must never block an opportunity alert.
   }
-  socialsCache.set(key, { expiresAt: Date.now() + 30 * 60_000, value });
+  socialsCache.set(key, { expiresAt: Date.now() + (value.readStatus === 'UNAVAILABLE' ? 60_000 : 30 * 60_000), value });
   if (socialsCache.size > 2_000) {
     const oldest = socialsCache.keys().next().value;
     if (oldest) socialsCache.delete(oldest);

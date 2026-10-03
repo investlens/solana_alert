@@ -236,11 +236,11 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   const pons = await getPonsPublicContext(token, launch.factory_address, launch.deployer_address);
   let socialsReadFailed = false;
   const onchainSocials = await getRobinhoodTokenSocials(token, { refresh: true })
-    .catch(() => { socialsReadFailed = true; return { twitter: null, telegram: null, website: null }; });
+    .catch(() => { socialsReadFailed = true; return { twitter: null, telegram: null, website: null, readStatus: 'UNAVAILABLE' as const }; });
   const rawSocials = { twitter: pons?.twitter || onchainSocials.twitter, telegram: pons?.telegram || onchainSocials.telegram };
   const socials = resolveSocialMafiaSocials(rawSocials);
   if (!socials) {
-    item.eligibility = socialsReadFailed ? null : false;
+    item.eligibility = socialsReadFailed || onchainSocials.readStatus === 'UNAVAILABLE' ? null : false;
     if (item.attempt >= 4 && item.eligibility === false) recordLaunchSocialEligibility(token, false);
     console.log('[SocialMafia] skipped; both X and Telegram are required', {
       token,
@@ -250,17 +250,21 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
     return false;
   }
 
-  const identity = await verifySocialContract({ token, xHandle: socials.xHandle, telegramUrl: socials.telegramUrl });
-  item.eligibility = socialEvidenceEligibility(identity);
   const earlyMetadata = !pons?.name ? await getRobinhoodTokenMetadata(token, { signal: AbortSignal.timeout(8_000) }).catch(() => null) : null;
-  const route = protocolDiscoveryRoute(pons?.name || earlyMetadata?.name, identity.confirmed);
+  // Protocol discovery explicitly does not claim social identity. Avoid spending
+  // scarce public-X requests on a feed whose rules only require metadata links.
+  const protocol = protocolDiscoveryRoute(pons?.name || earlyMetadata?.name, false) === 'PROTOCOL_DISCOVERY';
+  const identity = protocol ? null
+    : await verifySocialContract({ token, xHandle: socials.xHandle, telegramUrl: socials.telegramUrl });
+  item.eligibility = identity ? socialEvidenceEligibility(identity) : null;
+  const route = protocol ? 'PROTOCOL_DISCOVERY' : protocolDiscoveryRoute(pons?.name || earlyMetadata?.name, identity?.confirmed === true);
   if (!route) {
     if (item.attempt >= 4 && item.eligibility === false) recordLaunchSocialEligibility(token, false);
-    console.log('[SocialMafia] suppressed; social contract not confirmed', { token, reason: identity.reason });
+    console.log('[SocialMafia] suppressed; social contract not confirmed', { token, reason: identity?.reason ?? 'PROTOCOL_SOCIAL_OWNERSHIP_UNVERIFIED' });
     return false;
   }
 
-  recordLaunchSocialEligibility(token, identity.confirmed);
+  if (!protocol) recordLaunchSocialEligibility(token, identity?.confirmed === true);
 
   // Independent on-chain identity and verified valuation; never require a DEX index.
   const partial: {
