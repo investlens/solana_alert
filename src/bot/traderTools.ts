@@ -39,7 +39,7 @@ export function registerTraderTools(bot: Telegraf<any>) {
         return;
       }
       await ctx.reply(renderReadiness(token, result), { parse_mode: 'HTML', link_preview_options: { is_disabled: true },
-        reply_markup: { inline_keyboard: readinessButtons(token) } });
+        reply_markup: { inline_keyboard: readinessButtons(token, Boolean(result.market)) } });
     } catch {
       await ctx.reply('Trader tools are busy or shared monitoring is unavailable. No new monitoring was confirmed; check My Monitors before retrying.').catch(() => {});
     } finally { busy.delete(user); }

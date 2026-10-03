@@ -3,6 +3,10 @@ const esc = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 const eth = (v: string) => Number(v).toPrecision(6);
 export function renderPositionCheck(check: PositionCheck): string {
   const q = check.quote;
+  if (!q) return ['🎯 <b>POSITION CHECK</b>', '<b>Execution estimate unavailable</b>', '',
+    esc(check.reason ?? 'Verified PONS pre-bond curve evidence is required.'),
+    'This model supports verified PONS native-ETH pre-bond curves only. It does not estimate indexed DEX execution.', '',
+    `<code>${esc(check.token)}</code>`, '<i>No estimate or trade placed</i>'].join('\n');
   return ['🎯 <b>POSITION CHECK · ROBINCHAIN</b>', `Selected budget  <b>${check.size} ETH</b>`,
     'Read-only analysis', '', '<b>CURVE MODEL ESTIMATE</b>',
     ...(q ? [
@@ -39,7 +43,7 @@ export function renderPositionCheck(check: PositionCheck): string {
     '<i>Research evidence · No investment approval or trade placed</i>',
   ].join('\n');
 }
-export function positionCheckButtons(token: string) {
-  return [POSITION_SIZES.map(size => ({ text: `${size} ETH`, callback_data: `PC_RH_${size}_${token}` })),
+export function positionCheckButtons(token: string, supported = false) {
+  return [...(supported ? [POSITION_SIZES.map(size => ({ text: `${size} ETH`, callback_data: `PC_RH_${size}_${token}` }))] : []),
     [{ text: '🧠 Full Intel', callback_data: `FI_RH_${token}` }, { text: '📋 Copy CA', callback_data: `COPY_CA_${token}` }]];
 }
