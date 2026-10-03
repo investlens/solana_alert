@@ -115,10 +115,17 @@ export function polishArcTelegramPresentation(text: string, buttons?: ArcInlineB
   text: string;
   buttons?: ArcInlineButton[][];
 } {
+  const originalText = text;
+  const ownership = text.match(/<b>OWNERSHIP<\/b>\n[\s\S]*?(?=\n\n|$)/)?.[0];
+  if (ownership) text = text.replace(ownership, '');
   let polished = text;
   if (text.includes('AlphaOS · ARC OPPORTUNITY')) polished = compactArcOpportunity(text);
   else if (text.includes('BOOST DETECTED · ARC')) polished = compactArcBoost(text);
   else if (text.includes('AlphaOS · ARC SUPPLY BURN')) polished = compactArcBurn(text);
-  else return { text, buttons };
+  else return { text: originalText, buttons };
+  if (ownership) {
+    polished = polished.replace(/^.*Dev holding[^\n]*\n?/gmi, '');
+    polished = polished.includes('<b>CONTRACT</b>') ? polished.replace('<b>CONTRACT</b>', ownership + '\n\n<b>CONTRACT</b>') : polished + '\n\n' + ownership;
+  }
   return { text: polished, buttons: normalizeArcButtons(buttons) };
 }

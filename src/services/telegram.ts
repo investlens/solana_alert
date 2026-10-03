@@ -1,5 +1,5 @@
 import { buildAlphaosAlertCard } from '../ui/alphaosAlertCard.js';
-import { sendAlphaosPhotoAlert } from '../ui/alphaosPhotoDelivery.js';
+import { sendAlphaosPhotoAlert, telegramCaptionLength } from '../ui/alphaosPhotoDelivery.js';
 import { config } from '../config.js';
 import { polishArcTelegramPresentation } from '../chains/arc/telegramPresentation.js';
 
@@ -77,7 +77,7 @@ async function sendTelegramRequest(chatId: string, text: string, buttons?: Inlin
   // Only bounded market cards become photos; interactive screens stay as text.
   // Images exist in memory only. The caption stays within Telegram's limit.
   const category = text.match(/(?:BOOST DETECTED|BOOST INCREASED|MAX BOOST 500\+|ARC OPPORTUNITY|TRADE SETUP WATCH|SUPPLY BURN|SOCIAL MAFIA ALERT)/)?.[0];
-  if (category && text.length <= 1024) {
+  if (category && telegramCaptionLength(text) <= 1024) {
     const ticker = text.match(/<b>\$([A-Za-z_][A-Za-z0-9_]{0,23})\b/)?.[1];
     const image = await buildAlphaosAlertCard({ symbol: ticker, category,
       chainLabel: /ARC OPPORTUNITY/.test(category) ? 'ARC' : 'ALPHAOS / TOKEN RESEARCH',

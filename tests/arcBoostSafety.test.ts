@@ -15,3 +15,14 @@ test('failed ARC delivery retries same total; accepted delivery deduplicates and
   await processArcBoostObservation(totals,{...boost,totalAmount:50},send);
   assert.deepEqual(calls,['NEW','INCREASE']);assert.equal(totals.get('0xabc'),50);
 });
+
+test('creator percent is a fraction; missing creator does not borrow owner holding',()=>{
+ assert.equal(arcBoostSafetyFromEvidence({is_honeypot:'0',cannot_sell_all:'0',creator_percent:''}).devHoldingPercent,null);
+ assert.equal(arcBoostSafetyFromEvidence({is_honeypot:'0',cannot_sell_all:'0',owner_percent:'0.10'}).devHoldingPercent,null);
+ assert.equal(arcBoostSafetyFromEvidence({is_honeypot:'0',cannot_sell_all:'0',creator_percent:'1'}).devHoldingPercent,100);
+});
+test('provider wallet sample excludes contracts and burn addresses; incomplete percentage remains unknown',()=>{
+ const base={is_honeypot:'0',cannot_sell_all:'0'};
+ assert.equal(arcBoostSafetyFromEvidence({...base,holders:[{is_contract:'0',percent:'0.1'},{is_contract:'1',percent:'0.8'}]}).top10Percent,10);
+ assert.equal(arcBoostSafetyFromEvidence({...base,holders:[{is_contract:'0',percent:''}]}).top10Percent,null);
+});

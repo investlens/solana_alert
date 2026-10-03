@@ -1,3 +1,4 @@
+import { withOwnershipDisclosure } from '../src/ui/ownershipDisclosure.js';
 import { enabledLiveRecipients, type LiveFeedKey } from '../src/services/liveAlertPreferences.js';
 import { arcMarketNumber } from '../src/chains/arc/market.js';
 import { waitForRecipientDelivery, recordDeliveryAccepted } from '../src/services/recipientDeliveryTiming.js';
@@ -229,6 +230,8 @@ async function broadcastArcAlert(text: string, buttons: any[][], outcomeToken?: 
   if (!outcomeToken) throw new Error('ARC alert lacks token identity for sellability check');
   const sellSafety = await checkArcBoostSecurity(outcomeToken);
   if (!sellSafety.allowed) throw new Error(`ARC sellability blocked: ${sellSafety.reason}`);
+  text = withOwnershipDisclosure(text, {devPercent: sellSafety.devHoldingPercent ?? null,
+    top10Percent: sellSafety.top10Percent ?? null, top10Coverage: sellSafety.top10Percent == null ? 'UNAVAILABLE' : 'PROVIDER_REPORTED'});
   if (outcomeToken && /^0x[a-fA-F0-9]{40}$/.test(outcomeToken)) buttons = [...buttons, [{text:'⭐ Track',callback_data:`OUT_ARC_${outcomeToken}`}]];
   const recipients = await enabledLiveRecipients(await getArcRecipients(), feed);
   if (!recipients.length) return {delivered:0,failed:0,adminMessageId:null};
@@ -414,7 +417,7 @@ async function processMarketRetries(): Promise<void> {
 }
 
 type ArcBoost = { chainId?: string; tokenAddress?: string; amount?: number; totalAmount?: number };
-type ArcBoostSecurity = { allowed: boolean; reason: string; devHoldingPercent?: number | null };
+type ArcBoostSecurity = { allowed: boolean; reason: string; devHoldingPercent?: number | null; top10Percent?: number | null };
 
 async function fetchArcBoosts(): Promise<Array<{tokenAddress:string;amount:number;totalAmount:number}>> {
   try {
