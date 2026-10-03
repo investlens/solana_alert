@@ -1,4 +1,4 @@
-import { waitForRecipientDelivery } from '../../services/recipientDeliveryTiming.js';
+import { waitForRecipientDelivery, recordDeliveryAccepted } from '../../services/recipientDeliveryTiming.js';
 import { recordCompactAlert } from '../../services/compactAlertOutcomes.js';
 import { recordLaunchSocialEligibility } from './alertEligibilityState.js';
 import { buildAlphaosAlertCard } from '../../ui/alphaosAlertCard.js';
@@ -324,7 +324,9 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   const deliveryStartedAt = Date.now();
   const results = await Promise.allSettled(chats.map(async chatId => {
     await waitForRecipientDelivery(chatId, deliveryStartedAt);
-    return sendTelegram({chatId, text, tokenAddress: token, launchpad, socials, image});
+    const accepted = await sendTelegram({chatId, text, tokenAddress: token, launchpad, socials, image});
+    recordDeliveryAccepted(chatId, deliveryStartedAt, `pons:social:${token}`);
+    return accepted;
   }));
   if (initial == null) void boundedSocialMafiaContext(work, 12_000).then(async values => {
     const enriched = render(values);

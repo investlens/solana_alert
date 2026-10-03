@@ -78,11 +78,11 @@ test('token burn and LP status remain distinct', () => {
 });
 
 test('verified ATH and distance render; unavailable ATH stays UNKNOWN', () => {
-  assert.match(renderTokenIntelligence(fixture()), /23\.0% below ATH/);
+  assert.match(renderTokenIntelligence(fixture()), /23\.0% below observed peak/);
   const unknown = fixture({ ath: { priceUsd: null, priceObservedAt: null, priceSource: null, marketCapUsd: null,
     marketCapObservedAt: null, marketCapSource: null, distanceFromPricePct: null, distanceFromMarketCapPct: null } });
   assert.doesNotMatch(renderTokenIntelligence(unknown), /ATH Market Cap/);
-  assert.match(renderTokenIntelligence(unknown), /From ATH\s+<b>UNKNOWN<\/b>/);
+  assert.match(renderTokenIntelligence(unknown), /Lifetime ATH not established/);
 });
 
 test('TROLL failure shape distinguishes unavailable current market from last verified AlphaOS evidence', () => {
@@ -196,8 +196,8 @@ test('ATH is monotonic, includes verified current values, and keeps independent 
   const unverified = mergeTokenAth({ previous, currentPrice: 1, currentMc: 9_000_000, observedAt: 'bad', currentVerified: false });
   assert.equal(unverified.priceUsd, previous.priceUsd); assert.equal(unverified.marketCapUsd, previous.marketCapUsd);
   const rendered = renderTokenIntelligence(fixture());
-  assert.match(rendered, /ATH source\s+<b>AlphaOS verified history<\/b>/);
-  assert.match(rendered, /ATH observed\s+<b>00:00 UTC<\/b>/);
+  assert.match(rendered, /Peak source\s+<b>AlphaOS verified history<\/b>/);
+  assert.match(rendered, /Peak observed\s+<b>00:00 UTC<\/b>/);
 });
 
 test('Full Intel performance controls are bounded and deduplicate cache misses', async () => {
@@ -242,4 +242,21 @@ test('Full Intel PONS fallback presents FDV with its source without fabricating 
   assert.match(text, /PONS public launchpad/);
   assert.match(text, /Holding\s+<b>0\.0%<\/b>/);
   assert.doesNotMatch(text, /Market Cap\s+<b>\$3\.8K/);
+});
+
+test('market details preserve real zeroes and signed movement, omit absent values', async () => {
+  const { finiteMarketNumber, finitePercentage } = await import('../src/services/tokenIntelligenceService.js');
+  assert.equal(finiteMarketNumber(null), null);
+  assert.equal(finiteMarketNumber(''), null);
+  assert.equal(finiteMarketNumber(0), 0);
+  assert.equal(finiteMarketNumber(-12.5), null);
+  assert.equal(finiteMarketNumber(-12.5, true), -12.5);
+  assert.equal(finitePercentage(0), 0);
+  assert.equal(finitePercentage(101), null);
+  const text = renderTokenIntelligence(fixture({volume24h:12000,priceChange1h:-12.5}));
+  assert.match(text, /Volume \(24h\).*12\.0K/);
+  assert.match(text, /Move \(1h\).*\-12\.50%/);
+  assert.match(text, /full lifetime ATH is not established/);
+  const missing = renderTokenIntelligence(fixture({price:null,marketCap:null,volume5m:null,supply:null}));
+  assert.doesNotMatch(missing, /Price\s+<b>UNKNOWN|Market Cap\s+<b>UNKNOWN|Supply\s+<b>UNKNOWN/);
 });

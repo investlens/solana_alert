@@ -1,4 +1,4 @@
-import { waitForRecipientDelivery, recipientDelayMs } from './recipientDeliveryTiming.js';
+import { waitForRecipientDelivery, recipientDelayMs, recordDeliveryAccepted } from './recipientDeliveryTiming.js';
 import {
   resolveTokenOpenTarget,
 } from '../core/tokenOpenRouter.js';
@@ -1218,6 +1218,7 @@ async function deliverOpportunity(
       release: () => releaseDelivery(opportunity.id, user.telegram_id, deliveryIdentity, leaseToken),
     });
 
+    if (delivery.sent) recordDeliveryAccepted(user, deliveryStartedAt, `opportunity:${opportunity.id}:${action}`, action === 'EXIT');
     if (delivery.recorded) {
       delivered += 1;
     } else if (delivery.error) {

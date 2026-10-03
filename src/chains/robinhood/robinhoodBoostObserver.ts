@@ -1,4 +1,4 @@
-import { waitForRecipientDelivery } from '../../services/recipientDeliveryTiming.js';
+import { waitForRecipientDelivery, recordDeliveryAccepted } from '../../services/recipientDeliveryTiming.js';
 import { claimBoostDelivery, markBoostDeliveryAccepted } from '../../services/boostDeliveryGuard.js';
 import { boostVerificationDue, recordBoostSecurityBlock, type BoostVerificationRetry } from './alertEligibilityState.js';
 import { getVerifiedPonsPublicContext, getCreatorHoldingPercent, getTelegramPreviewType } from './ponsPublicContext.js';
@@ -127,7 +127,9 @@ export async function deliverAdminBoostFallback(
   const deliveryStartedAt = Date.now();
   const results = await Promise.allSettled(recipients.map(async chatId => {
     if (!dependencies.send) await waitForRecipientDelivery(chatId, deliveryStartedAt);
-    return send(chatId, args.message, args.buttons);
+    const accepted = await send(chatId, args.message, args.buttons);
+    if (!dependencies.send) recordDeliveryAccepted(chatId, deliveryStartedAt, `boost:${identity}`);
+    return accepted;
   }));
   const delivered = results.filter(result => result.status === 'fulfilled').length;
   const failed = results.length - delivered;

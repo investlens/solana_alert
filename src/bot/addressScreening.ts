@@ -84,7 +84,7 @@ export async function getAddressScreen(address: string, chain?: ResearchChain | 
     if (selected === 'robinhood') return { ...await getRobinhoodContractReport(address, fresh), chain: selected, wallet: false };
     const supply = pair ? await readResearchTokenSupply(address, selected) : null;
     const text = renderContractScreen(address, pair, null, null, config.label, supply);
-    const chart = pair?.pairAddress && /^0x[a-fA-F0-9]{40}$/.test(pair.pairAddress) ? `https://dexscreener.com/arc/${pair.pairAddress}` : undefined;
+    const chart = pair?.pairAddress && /^0x(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$/.test(pair.pairAddress) ? `https://dexscreener.com/arc/${pair.pairAddress}` : undefined;
     return { chain: selected, wallet: false, text, chart, image: await buildAlphaosAlertCard({ title: pair?.baseToken?.symbol ? undefined : 'Contract research', symbol: pair?.baseToken?.symbol,
       name: pair?.baseToken?.name, category: 'CONTRACT SCREEN', chainLabel: 'ARC', badge: 'MARKET SNAPSHOT', footer: 'Requested contract research · Safety not assessed' }) };
   })();
@@ -109,7 +109,7 @@ export function registerAddressScreening(bot: Telegraf<any>, lookup = getAddress
       if ('choices' in result) {
         await ctx.reply(result.reason, { reply_markup: { inline_keyboard: [result.choices.map(c => ({ text: researchChains[c].label, callback_data: `${wallet ? 'WS' : 'AS'}_${code(c)}_${address}` }))] } }); return;
       }
-      if (result.wallet && !await requireCapability(ctx,'intelligence.creators')) return;
+      if (result.wallet && !await requireCapability(ctx,'intelligence.investigations')) return;
       const config = researchChains[result.chain]; const tag = code(result.chain);
       const username = ctx.botInfo?.username ?? bot.botInfo?.username;
       const groupInvite = ['group', 'supergroup'].includes(ctx.chat?.type) && /^[A-Za-z0-9_]{5,32}$/.test(username ?? '');

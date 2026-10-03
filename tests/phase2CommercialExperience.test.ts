@@ -50,7 +50,7 @@ test('Home and Trading presentation differ safely by tier', () => {
   assert.ok(freeHome.some(button => button.text === '🐋 Wallets'));
   assert.ok(proHome.some(button => button.text === '🐋 Wallets'));
   assert.ok(adminHome.some(button => button.callback_data === 'ADMIN_TERMINAL_REFRESH'));
-  assert.deepEqual(publicTrading.map(button => button.callback_data), ['OPPORTUNITY_CENTER', 'MAIN_MENU']);
+  assert.deepEqual(publicTrading.map(button => button.callback_data), ['WELCOME_SCAN', 'DM_HOME', 'OPPORTUNITY_CENTER', 'FEATURE_GUIDE', 'MAIN_MENU']);
   assert.ok(adminTrading.some(button => button.callback_data === 'ADMIN_TRADE_SETTINGS'));
   assert.equal(publicTrading.some(button => /wallet|position|automation|win rate/i.test(button.text ?? '')), false);
 });

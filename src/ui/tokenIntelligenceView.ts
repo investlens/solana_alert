@@ -29,8 +29,8 @@ export function normalizedTokenSupply(raw: string | null, decimals: number | nul
 
 export function renderTokenIntelligence(intel: TokenIntel): string {
   const athDistance = intel.ath.distanceFromMarketCapPct == null ? 'UNKNOWN'
-    : intel.ath.distanceFromMarketCapPct <= 0 ? `${Math.abs(intel.ath.distanceFromMarketCapPct).toFixed(1)}% below ATH`
-      : `${intel.ath.distanceFromMarketCapPct.toFixed(1)}% above prior observed ATH`;
+    : intel.ath.distanceFromMarketCapPct <= 0 ? `${Math.abs(intel.ath.distanceFromMarketCapPct).toFixed(1)}% below observed peak`
+      : `${intel.ath.distanceFromMarketCapPct.toFixed(1)}% above prior observed peak`;
   const currentMarketAvailable = intel.price != null || intel.marketCap != null || intel.liquidity != null || intel.volume5m != null;
   const holdersAvailable = intel.holders.count != null || intel.holders.top10Pct != null || intel.holders.largestPct != null;
   const freshAvailable = intel.freshWallets.evidence === 'VERIFIED';
@@ -45,9 +45,12 @@ export function renderTokenIntelligence(intel: TokenIntel): string {
     `<b>${esc(intel.name ?? 'Unknown Token')} (${esc(intel.symbol ? `$${intel.symbol}` : 'UNKNOWN')})</b>`,
     `<code>${esc(short(intel.tokenAddress))}</code>`, '',
     '📊 <b>MARKET</b>', ...(currentMarketAvailable ? [
-      `Price             <b>${money(intel.price)}</b>`,
-      `Market Cap        <b>${money(intel.marketCap)}</b>`, `Liquidity         <b>${money(intel.liquidity)}</b>`,
-      `Volume (5m)       <b>${money(intel.volume5m)}</b>`,
+      ...(intel.price != null ? [`Price             <b>${money(intel.price)}</b>`] : []),
+      ...(intel.marketCap != null ? [`Market Cap        <b>${money(intel.marketCap)}</b>`] : []),
+      ...(intel.liquidity != null ? [`Liquidity         <b>${money(intel.liquidity)}</b>`] : []),
+      ...(intel.volume5m != null ? [`Volume (5m)       <b>${money(intel.volume5m)}</b>`] : []),
+      ...(intel.volume24h != null ? [`Volume (24h)      <b>${money(intel.volume24h)}</b>`] : []),
+      ...(intel.priceChange1h != null ? [`Move (1h)         <b>${intel.priceChange1h >= 0 ? '+' : ''}${intel.priceChange1h.toFixed(2)}%</b>`] : []),
       ...(intel.ageObservedAt ? [`Pair observed     <b>${formatIntelTime(intel.ageObservedAt)}</b>`] : []),
       `Observed          <b>${formatIntelTime(intel.marketObservedAt ?? intel.analyzedAt)}</b>`,
     ] : [
@@ -59,12 +62,15 @@ export function renderTokenIntelligence(intel: TokenIntel): string {
       ...(intel.lastVerifiedMarket?.observedAt ? [`Last observed       <b>${formatIntelTime(intel.lastVerifiedMarket.observedAt)}</b>`] : []),
     ]),
     ...(intel.fdv != null && intel.marketCap == null ? [`FDV               <b>${money(intel.fdv)}</b>`, `Valuation source  ${esc(intel.valuationSource ?? 'Unavailable')}`] : []),
-    `From ATH          <b>${esc(athDistance)}</b>`,
-    ...(intel.ath.priceUsd != null ? [`ATH Price         <b>${money(intel.ath.priceUsd)}</b>`] : []),
-    ...(intel.ath.marketCapUsd != null ? [`ATH Market Cap    <b>${money(intel.ath.marketCapUsd)}</b>`] : []),
-    ...(sourceName(intel.ath.priceSource ?? intel.ath.marketCapSource) ? [`ATH source        <b>${sourceName(intel.ath.priceSource ?? intel.ath.marketCapSource)}</b>`] : []),
-    ...(intel.ath.priceObservedAt || intel.ath.marketCapObservedAt ? [`ATH observed      <b>${formatIntelTime(intel.ath.priceObservedAt ?? intel.ath.marketCapObservedAt)}</b>`] : []),
-    `Supply            <b>${esc(supply ?? 'UNKNOWN')}</b>`, '',
+    ...(intel.ath.priceUsd != null || intel.ath.marketCapUsd != null ? [
+      ...(intel.ath.distanceFromMarketCapPct != null ? [`From observed peak <b>${esc(athDistance)}</b>`] : []),
+      ...(intel.ath.priceUsd != null ? [`Observed peak price <b>${money(intel.ath.priceUsd)}</b>`] : []),
+      ...(intel.ath.marketCapUsd != null ? [`Observed peak MC   <b>${money(intel.ath.marketCapUsd)}</b>`] : []),
+      ...(sourceName(intel.ath.priceSource ?? intel.ath.marketCapSource) ? [`Peak source        <b>${sourceName(intel.ath.priceSource ?? intel.ath.marketCapSource)}</b>`] : []),
+      ...(intel.ath.priceObservedAt || intel.ath.marketCapObservedAt ? [`Peak observed      <b>${formatIntelTime(intel.ath.priceObservedAt ?? intel.ath.marketCapObservedAt)}</b>`] : []),
+      '<i>Highest verified AlphaOS observation; full lifetime ATH is not established.</i>',
+    ] : ['Lifetime ATH not established.']),
+    ...(supply ? [`Supply            <b>${esc(supply)}</b>`] : []), '',
     ...(!holdersAvailable && !freshAvailable ? ['👥 <b>HOLDERS &amp; FRESH WALLETS</b>', 'Analysis currently unavailable.',
       'Not used for opportunity filtering.'] : []),
     ...(holdersAvailable ? ['👥 <b>HOLDERS</b>',
@@ -96,7 +102,9 @@ export function renderTokenIntelligence(intel: TokenIntel): string {
       ...(intel.security.lpStatus !== 'UNKNOWN' ? [`LP status         <b>${intel.security.lpStatus}</b>`] : []),
       ...(intel.security.dexPaid != null ? [`DEX Paid          <b>${intel.security.dexPaid ? 'YES' : 'NO'}</b>`] : []),
       ...(intel.security.boostTotal != null ? [`Boost total       <b>${intel.security.boostTotal}</b>`] : []),
-    ] : ['No verified token-security data available.']), '',
+    ] : ['No verified token-security data available.']),
+    'Sellability and contract controls are not established by this report. DEX payment is promotion evidence.',
+    '24h fees unavailable from current sources.', '',
     '🧠 <b>ALPHAOS</b>', `State              <b>${esc(intel.alpha.state ?? 'UNKNOWN')}</b>`,
     `Risk               ${esc(intel.alpha.risk === 'MEASURED' ? 'UNKNOWN' : intel.alpha.risk ?? 'UNKNOWN')}`,
     ...intel.alpha.positive.slice(0, 3).map(x => `✅ ${esc(x)}`), ...watch.map(x => `⚠️ ${esc(x)}`),

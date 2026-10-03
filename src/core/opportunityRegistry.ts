@@ -718,7 +718,7 @@ export async function getLatestOpportunities(
       )
       .limit(
         limit,
-      );
+      ).abortSignal(AbortSignal.timeout(2_000));
 
   if (error) {
     console.log(
