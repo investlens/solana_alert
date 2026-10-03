@@ -1,4 +1,4 @@
-import { waitForRecipientDelivery } from '../src/services/recipientDeliveryTiming.js';
+import { waitForRecipientDelivery, recordDeliveryAccepted } from '../src/services/recipientDeliveryTiming.js';
 import { recordCompactAlert } from '../src/services/compactAlertOutcomes.js';
 import { arcBoostSafetyFromEvidence, processArcBoostObservation } from '../src/chains/arc/boostSafety.js';
 import 'dotenv/config';
@@ -229,7 +229,9 @@ async function broadcastArcAlert(text: string, buttons: any[][], outcomeToken?: 
   const deliveryStartedAt = Date.now();
   const results = await Promise.allSettled(recipients.map(async chatId => {
     await waitForRecipientDelivery(chatId, deliveryStartedAt);
-    return sendTelegramWithMessageId(chatId, text, buttons);
+    const accepted = await sendTelegramWithMessageId(chatId, text, buttons);
+    recordDeliveryAccepted(chatId, deliveryStartedAt, `arc:${outcomeToken ?? 'discovery'}`);
+    return accepted;
   }));
   let deliveredCount = 0;
   let failed = 0;

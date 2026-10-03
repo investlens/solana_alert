@@ -23,3 +23,15 @@ test('risk events bypass every tier delay using event identity', () => {
   }
   assert.equal(isUndelayedRiskEvent('BOOST'), false);
 });
+
+test('acceptance evidence distinguishes Telegram acceptance from a scheduled release', async () => {
+  const { deliveryAcceptanceEvidence, cacheDeliveryRecipients } = await import('../src/services/recipientDeliveryTiming.js');
+  cacheDeliveryRecipients([{...paid, telegram_id:'member'}], now);
+  const valid = deliveryAcceptanceEvidence('member', now, 'BOOST:token:30', false, now+5200);
+  assert.equal(valid.tier, 'pro');
+  assert.equal(valid.releaseDeadlineMet, true);
+  assert.equal(valid.elapsedMs, 5200);
+  assert.equal('telegram_id' in valid, false);
+  assert.equal(deliveryAcceptanceEvidence({tier:'free'}, now, 'BOOST', false, now+29000).releaseDeadlineMet, false);
+  assert.equal(deliveryAcceptanceEvidence({tier:'free'}, now, 'DANGER', true, now+10).releaseDelayMs, 0);
+});
