@@ -1,3 +1,4 @@
+import { waitForRecipientDelivery } from '../../services/recipientDeliveryTiming.js';
 import { recordCompactAlert, type CompactAlertBaseline } from '../../services/compactAlertOutcomes.js';
 import { sendAlphaosPhotoAlert } from '../../ui/alphaosPhotoDelivery.js';
 import { decodeFunctionResult, encodeFunctionData, parseAbi } from 'viem';
@@ -204,7 +205,11 @@ export async function directTelegramRecipients(text: string, tokenAddress: strin
   const recipients = [...recipientCache];
   if (!recipients.length) throw new Error('no Telegram recipients available');
 
-  const results = await Promise.allSettled(recipients.map(chatId => sendTelegram(chatId, text, tokenAddress, socials, preBond, setupControls)));
+  const deliveryStartedAt = Date.now();
+  const results = await Promise.allSettled(recipients.map(async chatId => {
+    await waitForRecipientDelivery(chatId, deliveryStartedAt);
+    return sendTelegram(chatId, text, tokenAddress, socials, preBond, setupControls);
+  }));
   let delivered = 0;
   let failed = 0;
   results.forEach((result, index) => {

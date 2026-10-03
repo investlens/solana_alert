@@ -1,5 +1,6 @@
 import { recordCompactAlert } from './compactAlertOutcomes.js';
 import { recordRecoveryAlertAudit } from './recoveryAlertAudit.js';
+import { waitForRecipientDelivery, isUndelayedRiskEvent, recipientDelayMs } from './recipientDeliveryTiming.js';
 import { getDeliverableUsers, markTelegramUserBlocked, type DeliverableUser } from '../core/delivery.js';
 import { accessProfileForUser, hasCapability } from '../product/capabilities.js';
 import { evaluateDexPaidAlertSafety } from '../chains/robinhood/security/dexPaidAlertSafetyGate.js';
@@ -181,10 +182,8 @@ export async function deliverAlphaSemanticEvent(args: {
   }
   if (launchType) deliveryMessage = labelLaunchType(deliveryMessage, launchType);
 
-  const users = (await dependencies.getUsers()).sort((a, b) => {
-    const rank = (tier: DeliverableUser['tier']) => tier === 'admin' ? 0 : tier === 'paid' ? 1 : 2;
-    return rank(a.tier) - rank(b.tier);
-  });
+  const deliveryStartedAt = Date.now();
+  const users = (await dependencies.getUsers()).sort((a, b) => recipientDelayMs(a, deliveryStartedAt) - recipientDelayMs(b, deliveryStartedAt));
   const renderedCharacters = deliveryMessage.length;
   const renderedBytes = Buffer.byteLength(deliveryMessage, 'utf8');
   let delivered = 0; let failed = 0; let accepted = 0;
@@ -193,6 +192,8 @@ export async function deliverAlphaSemanticEvent(args: {
     try {
       const preferenceKey = preferenceKeyForSemanticEvent(args.event);
       if (preferenceKey && !await dependencies.strategyEnabled(user.telegram_id, preferenceKey)) continue;
+
+      if (dependencies === productionDependencies) await waitForRecipientDelivery(user, deliveryStartedAt, isUndelayedRiskEvent(args.event.type));
 
       if (ephemeralMode) {
         if (!claimEphemeralDelivery(args.event, user)) continue;

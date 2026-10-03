@@ -53,11 +53,11 @@ test('subscription gate can be explicitly enabled only by environment flag', () 
   });
 });
 
-test('all validation testers stay immediate while subscriptions are disabled', () => {
+test('delivery timing stays active while tester tools and billing remain unchanged', () => {
   withSubscriptionFlag('false', () => {
     assert.equal(deliveryDelayMsForTier('admin'), 0);
-    assert.equal(deliveryDelayMsForTier('pro'), 0);
-    assert.equal(deliveryDelayMsForTier('free'), 0);
+    assert.equal(deliveryDelayMsForTier('pro'), 5_000);
+    assert.equal(deliveryDelayMsForTier('free'), 30_000);
 
     const tester = accessProfileForUser({ tier: 'free', subscription_status: 'inactive' });
     assert.equal(tester.tier, 'free');
