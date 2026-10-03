@@ -41,6 +41,7 @@ export const alphaosUsageGuide = [
   '<b>Choose alerts</b> — Alert Preferences opens available strategy controls. Availability depends on access and active feeds.', '',
   '<b>What the alerts mean</b>',
   '⚡ <b>Boost</b> — additional token promotion; promotion does not establish quality.',
+  '💎 <b>DEX Paid</b> — a verified DexScreener payment with qualifying checks. Enable DEX Paid · Robinchain in Alert Preferences. Free receives a 30-second release delay; Pro receives priority delivery.',
   '🕶 <b>Social Mafia</b> — verified launchpad origin and contract publication passes social confirmation. Ownership and safety remain unverified.',
   '🔎 <b>Protocol Discovery</b> — PONS projects named Protocol/Protocols with X and Telegram links. Screened on the bounded launch watch, with no X contract-publication requirement. Social ownership is unverified.',
   '📊 <b>Trade Setup Watch</b> — verified PONS curves show a pullback and two consecutive 60-second recoveries, with fresh creator holding/transfer evidence. X contract publication is not required; social identity remains unverified.', '',
