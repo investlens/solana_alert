@@ -86,6 +86,8 @@ test('all generated commercial callbacks fit Telegram limit', () => {
 test('production navigation callbacks have registered handlers', async () => {
   const files = await Promise.all([
     '../src/bot/commands.ts',
+    '../src/bot/index.ts',
+    '../src/bot/traderTools.ts',
     '../src/bot/opportunityCenter.ts',
     '../src/bot/opportunityActions.ts',
     '../src/bot/intelligenceCenter.ts',

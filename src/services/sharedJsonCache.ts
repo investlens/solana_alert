@@ -17,3 +17,10 @@ export async function claimSharedDelivery(key: string, ttlMs: number): Promise<'
     return result === 'OK' ? 'CLAIMED' : 'EXISTS';
   } catch { return 'UNAVAILABLE'; }
 }
+
+export async function runSharedAtomic(script: string, keys: string[], args: string[]): Promise<unknown> {
+  const redis = await getClient();
+  if (!redis) throw new Error('Shared monitoring store unavailable');
+  return Promise.race([redis.eval(script, { keys, arguments: args }),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Shared monitoring deadline')), 750))]);
+}
