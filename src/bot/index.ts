@@ -1,5 +1,5 @@
 import { registerTraderTools } from './traderTools.js';
-import { alphaosFeatureGuide } from '../product/featureGuide.js';
+import { alphaosFeatureGuide, alphaosHomeText } from '../product/featureGuide.js';
 import { Markup, Telegraf } from 'telegraf';
 import { config } from '../config.js';
 import { getContextAccess } from './accessControl.js';
@@ -106,17 +106,7 @@ export function createBot() {
     if (data === 'MAIN_MENU') {
       await renderFast(
         ctx,
-        [
-          '🧠 <b>ALPHAOS AI</b>',
-          '<i>Crypto Intelligence Terminal</i>',
-          '',
-          '⚡ Launch and market alerts',
-          '🧠 Developer & smart-money intelligence',
-          '🐋 Wallet tracking',
-          '🎯 Token research and trader tools',
-          '',
-          '<i>Navigation remains available even while market data is recovering.</i>',
-        ].join('\n'),
+        alphaosHomeText(),
         mainAlphaMenu(access).reply_markup,
       );
       return;
@@ -165,7 +155,9 @@ export function createBot() {
           '3. Monitor 1h — follow price/liquidity changes; manage in My Monitors.', '',
           '<b>Readiness &amp; Monitors · Pro</b>',
           'Indexed Robinchain USD pools only. ARC and pre-bond curves are not supported by these tools.',
-          'Readiness shows Watch / Setup forming. Monitors check about every 2 minutes and expire after one hour.',
+          'Readiness shows Watch / Setup forming; it does not approve an entry. Monitors check about every 2 minutes and expire after one hour.',
+          'Up to 2 tokens per user, 10 tokens overall and 3 warning events per monitor. Stop anytime in My Monitors.',
+          'Monitoring is periodic; fast declines can occur between checks.',
           'Curve Estimate is available separately in Full Intel for supported PONS pre-bond tokens.', '',
           subscriptionsEnabled() ? '<i>Research tools; no automatic trades. Pro tools require active membership.</i>' : '<i>Research tools; no automatic trades. Pro tools remain open during testing.</i>',
         ].join('\n'),
@@ -231,7 +223,7 @@ export function createBot() {
     console.log('[TelegramCommand] /start received', { telegramId, isAdmin });
 
     await ctx.reply(
-      alphaosFeatureGuide(),
+      alphaosHomeText(),
       {
         parse_mode: 'HTML',
         reply_markup: mainAlphaMenu(access).reply_markup,
