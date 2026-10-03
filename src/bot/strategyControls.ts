@@ -34,6 +34,7 @@ function strategyIcon(
 
 async function renderStrategies(
   ctx: any,
+  advanced = false,
 ): Promise<void> {
   const telegramId =
     String(
@@ -45,16 +46,17 @@ async function renderStrategies(
     return;
   }
 
-  const strategies =
-    await getUserStrategyState(
-      telegramId,
-    );
+  const all = await getUserStrategyState(telegramId);
+  const primary = (key: string) => /^(DEX_PAID|BOOSTER_INSTANT|BOOST|SOCIAL_MAFIA|PROTOCOL_DISCOVERY|TRADE_SETUP_WATCH|ARC_OPPORTUNITY)$/.test(key.toUpperCase());
+  const strategies = all.filter(strategy => advanced ? !primary(strategy.strategy_key) : primary(strategy.strategy_key));
 
   const lines: string[] = [
-    '🎯 <b>ALERT STRATEGIES</b>',
+    advanced ? '⚙️ <b>ADVANCED PREFERENCES</b>' : '⚡ <b>ALERT PREFERENCES</b>',
     '',
-    'ON = AlphaOS may send normal alerts from this strategy.',
-    'OFF = normal alerts from this strategy are muted.',
+    'ON/OFF controls your preference, not engine health.',
+    'Delivery still requires a qualifying event and available data.',
+    'Other feeds: Boost · Social Mafia · Protocol Discovery · Trade Setup · ARC Opportunity.',
+    'These legacy preference switches do not control every feed.',
     '',
     '✅ ON · alerts enabled',
     '⭕ OFF · alerts muted',
@@ -83,7 +85,7 @@ async function renderStrategies(
       } ${escapeTelegramHtml(strategyDisplay(
         strategy.strategy_key,
         strategy.name,
-      ).name)}`,
+      ).name)}${strategy.enabled ? '' : ' · unavailable'}`,
     );
   }
 
@@ -108,6 +110,11 @@ async function renderStrategies(
       ],
     );
 
+  if (!advanced && buttons.length > 1) {
+    const flat = buttons.flat(); buttons.length = 0;
+    for (let i = 0; i < flat.length; i += 2) buttons.push(flat.slice(i, i + 2));
+  }
+  buttons.push([Markup.button.callback(advanced ? '‹ Main Preferences' : '⚙ Advanced · legacy strategies', advanced ? 'STRATEGY_SETTINGS' : 'STRATEGY_ADVANCED')]);
   buttons.push([
     Markup.button.callback(
       '🔄 Refresh',
@@ -175,6 +182,13 @@ export function registerStrategyControls(
       }
     },
   );
+
+  bot.action('STRATEGY_ADVANCED', async ctx => {
+    if (!await requireCapability(ctx, 'strategies.manage', 'SETTINGS')) return;
+    await ctx.answerCbQuery().catch(() => {});
+    try { await renderStrategies(ctx, true); }
+    catch { await ctx.reply('Preferences unavailable. Please try again shortly.'); }
+  });
 
   bot.action(
     'STRATEGY_SETTINGS',

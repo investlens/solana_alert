@@ -1,3 +1,4 @@
+import { claimSharedDelivery } from './sharedJsonCache.js';
 import { recordCompactAlert } from './compactAlertOutcomes.js';
 import { recordRecoveryAlertAudit } from './recoveryAlertAudit.js';
 import { waitForRecipientDelivery, isUndelayedRiskEvent, recipientDelayMs, recordDeliveryAccepted } from './recipientDeliveryTiming.js';
@@ -22,6 +23,11 @@ export type UserFacingSemanticEvent = {
   ephemeral?: boolean;
   rawSnapshot?: Record<string, unknown> | null;
 };
+
+export async function claimDexRecipient(eventIdentity: string, recipient: string,
+  claim = claimSharedDelivery): Promise<boolean> {
+  return await claim(`alphaos:dex:delivery:${eventIdentity}:${recipient}`, 24 * 60 * 60_000) === 'CLAIMED';
+}
 
 type SemanticDeliveryDependencies = {
   getUsers: () => Promise<DeliverableUser[]>;
@@ -194,6 +200,12 @@ export async function deliverAlphaSemanticEvent(args: {
       if (preferenceKey && !await dependencies.strategyEnabled(user.telegram_id, preferenceKey)) continue;
 
       if (dependencies === productionDependencies) await waitForRecipientDelivery(user, deliveryStartedAt, isUndelayedRiskEvent(args.event.type));
+
+      // DEX payment claims survive DB outages, restarts and concurrent workers.
+      // Keep an ambiguous Telegram result claimed rather than risk a duplicate.
+      if (dependencies === productionDependencies && args.event.type === 'DEX_PAID') {
+        if (!await claimDexRecipient(args.event.eventIdentity, user.telegram_id)) continue;
+      }
 
       if (ephemeralMode) {
         if (!claimEphemeralDelivery(args.event, user)) continue;

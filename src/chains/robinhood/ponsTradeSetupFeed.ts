@@ -21,6 +21,7 @@ const deferredAdmissions = new Map<string, PonsLaunch>();
 const outcomes = new Map<string, { launch: PonsLaunch; price: number; at: number; checked: number; min: number; max: number }>();
 let timer: ReturnType<typeof setInterval> | null = null;
 let running = false;
+let lastRotationAt = 0;
 console.log(`[TradeSetup] READY enabled=${String(process.env.PONS_TRADE_SETUP_ENABLED ?? 'true').toLowerCase() === 'true'} launchpad=PONS mode=RESEARCH_WATCH minAgeMin=30 maxCandidates=${MAX_CANDIDATES} dbWrites=0`);
 const html = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -67,6 +68,18 @@ async function tick(): Promise<void> {
         deferredAdmissions.delete(confirmed[0]);
         if (deferredAdmissions.size < 50) deferredAdmissions.set(replace[0], replace[1].launch);
         admitCandidate(confirmed[1]);
+      }
+    }
+    // Rotate one inactive slot every five minutes, keeping the same work budget.
+    // Recovery candidates retain their history; newly promoted watches start fresh.
+    if (deferredAdmissions.size && candidates.size >= MAX_CANDIDATES && Date.now() - lastRotationAt >= 5 * 60_000) {
+      const inactive = [...candidates].find(([, item]) => Date.now() - item.launchedAt >= MIN_AGE && !item.trend.dip);
+      const next = [...deferredAdmissions].find(([, launch]) => isTradeSetupLaunchAdmissible(launch, Date.now(), MAX_AGE));
+      if (inactive && next) {
+        candidates.delete(inactive[0]); deferredAdmissions.delete(next[0]);
+        deferredAdmissions.set(inactive[0], inactive[1].launch);
+        admitCandidate(next[1]); lastRotationAt = Date.now();
+        console.log(`[TradeSetup] ROTATED reason=NO_PULLBACK candidates=${candidates.size} pending=${deferredAdmissions.size}`);
       }
     }
     for (const [token, item] of candidates) {
@@ -184,7 +197,7 @@ export function isTradeSetupLaunchAdmissible(launch: PonsLaunch, now: number, ma
 export async function tickTradeSetupForTests() { await tick(); }
 
 export function tradeSetupSchedulingStateForTests() { return { candidates: [...candidates.keys()], deferred: [...deferredAdmissions.keys()] }; }
-export function resetTradeSetupSchedulingForTests() { if (timer) clearInterval(timer); timer = null; candidates.clear(); deferredAdmissions.clear(); outcomes.clear(); }
+export function resetTradeSetupSchedulingForTests() { if (timer) clearInterval(timer); timer = null; candidates.clear(); deferredAdmissions.clear(); outcomes.clear(); lastRotationAt = 0; }
 
 export async function saveSetupWatchCheckpoint(): Promise<void> {
   await setSharedJson('alphaos:watch:setup:v1', {
