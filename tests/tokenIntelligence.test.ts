@@ -260,3 +260,25 @@ test('market details preserve real zeroes and signed movement, omit absent value
   const missing = renderTokenIntelligence(fixture({price:null,marketCap:null,volume5m:null,supply:null}));
   assert.doesNotMatch(missing, /Price\s+<b>UNKNOWN|Market Cap\s+<b>UNKNOWN|Supply\s+<b>UNKNOWN/);
 });
+
+
+test('creator flow exposes snapshot age and does not imply complete selling history', () => {
+  const text = renderTokenIntelligence(fixture({ developer: {
+    wallet: '0xf435ac1926e21d47bfe0916bd1f15c22ca6ceb4b', holdingPct: 0,
+    sold: false, transferredPct: 0, burnedPct: 0, observedAt: '2026-08-28T12:00:00Z',
+    holdingObservedAt: new Date().toISOString(),
+  }}));
+  assert.match(text, /Holding observed\s+just now/);
+  assert.match(text, /Flow snapshot\s+12:00 UTC/);
+  assert.match(text, /Transfers are not confirmed sales/);
+  assert.match(text, /Flow history is incomplete/);
+  assert.match(text, /Indexed sample; percentages use total supply/);
+});
+
+test('missing burn reads remain unknown while verified zeros remain zero', async () => {
+  const { combineVerifiedBurnBalances } = await import('../src/chains/robinhood/security/devTokenFlowScanner.js');
+  assert.equal(combineVerifiedBurnBalances(null, 0n), null);
+  assert.equal(combineVerifiedBurnBalances(10n, null), null);
+  assert.equal(combineVerifiedBurnBalances(0n, 0n), 0n);
+  assert.equal(combineVerifiedBurnBalances(10n, 2n), 12n);
+});
