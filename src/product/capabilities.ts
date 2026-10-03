@@ -5,6 +5,8 @@ export type CommercialTier = 'free' | 'pro' | 'admin';
 export type Capability =
   | 'opportunities.view'
   | 'opportunities.realtime'
+  | 'trade.readiness'
+  | 'monitoring.personal'
   | 'watchlist.use'
   | 'intelligence.investigations'
   | 'intelligence.smartMoney'
@@ -18,6 +20,8 @@ export type Capability =
   | 'membership.manage';
 
 const TESTER = new Set<Capability>([
+  'trade.readiness',
+  'monitoring.personal',
   'opportunities.view',
   'opportunities.realtime',
   'watchlist.use',
@@ -90,6 +94,8 @@ export function hasCapability(
 }
 
 export const CAPABILITY_BENEFITS: Record<Capability, string> = {
+  'trade.readiness': 'Review fresh market screening and remaining entry checks.',
+  'monitoring.personal': 'Follow selected Robinchain pools with bounded one-hour deterioration monitoring.',
   'opportunities.view': 'Explore current market opportunities.',
   'opportunities.realtime': 'Receive faster actionable opportunity intelligence.',
   'watchlist.use': 'Save opportunities and follow their current thesis.',

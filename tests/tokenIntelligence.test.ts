@@ -58,7 +58,7 @@ test('social URLs remain allowlisted data but Full Intel keyboard cannot emit st
     { label: 'X', url: 'https://x.com/stonkatm' }, { label: 'X', url: 'https://twitter.com/stonkatm' },
   ] }));
   assert.deepEqual(buttons.map(row => row.map(button => button.text)),
-    [['📊 Chart', '🔎 Explorer'], ['🎯 Position Check', '📋 Copy CA']]);
+    [['📊 Chart', '🔎 Explorer'], ['🎯 Position Check', '📋 Copy CA'], ['🎯 Readiness · Pro', '🔔 Monitor · Pro']]);
   assert.equal(buttons.flat().some(button => /(^|\s)X($|\s)/.test(button.text)), false);
   assert.equal(buttons.flat().some(button => /Trade/i.test(button.text)), false);
 });

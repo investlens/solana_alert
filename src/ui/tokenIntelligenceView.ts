@@ -115,5 +115,6 @@ export function tokenIntelligenceButtons(intel: TokenIntel) {
   market.push({ text: '🔎 Explorer', url: `https://robinhoodchain.blockscout.com/token/${intel.tokenAddress}` });
   rows.push(market);
   if (/^0x[a-fA-F0-9]{40}$/.test(intel.tokenAddress)) rows.push([{ text: '🎯 Position Check', callback_data: `PC_RH_0.01_${intel.tokenAddress}` }, { text: '📋 Copy CA', callback_data: `COPY_CA_${intel.tokenAddress}` }]);
+  rows.push([{ text: '🎯 Readiness · Pro', callback_data: `TR_RH_${intel.tokenAddress}` }, { text: '🔔 Monitor · Pro', callback_data: `DM_RH_${intel.tokenAddress}` }]);
   return rows;
 }

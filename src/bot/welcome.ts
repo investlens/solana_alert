@@ -43,6 +43,8 @@ export const alphaosUsageGuide = [
   '🕶 <b>Social Mafia</b> — verified launchpad origin and contract publication passes social confirmation. Ownership and safety remain unverified.',
   '🔎 <b>Protocol Discovery</b> — PONS projects named Protocol/Protocols with X and Telegram links. Social ownership is unverified.',
   '📊 <b>Trade Setup Watch</b> — a monitored token meets configured market conditions; a research setup, not an instruction to buy.', '',
+  '<b>Trader tools · Pro</b> — open Readiness on an indexed Robinchain token, then Monitor 1h. Watch / Setup forming describes market screening, not entry approval. Personal monitors check about every 2 minutes, expire after one hour and issue at most three warning events. Manage them in Intelligence → My Monitors.', '',
+  '<b>Free / Pro</b> — open the plan guide on Home. Pro tools are available during testing; payments remain closed.', '',
   '<b>Groups</b> — an admin enables /scan_on. Open Add to Group for instructions.',
   '<b>Help</b> — reopen this guide anytime with /help or How to Use on Home.', '',
   '<i>Missing data is not a passed check. AlphaOS does not guarantee legitimacy, safety or profits.</i>',
@@ -54,6 +56,6 @@ export function alphaosWelcomeKeyboard(username?: string) {
     [Markup.button.callback('🔎 Scan', 'WELCOME_SCAN'), Markup.button.callback('⚙️ Alert Preferences', 'STRATEGY_SETTINGS')],
     [Markup.button.callback('📖 How to Use', 'WELCOME_HELP'), Markup.button.callback('👥 Group Setup', 'WELCOME_GROUP')],
     ...(invite ? [[Markup.button.url('➕ Add to Group', invite)]] : []),
-    [Markup.button.callback('⌂ Home', 'MAIN_MENU')],
+    [Markup.button.callback('✦ Free / Pro', 'FEATURE_GUIDE'), Markup.button.callback('⌂ Home', 'MAIN_MENU')],
   ]);
 }

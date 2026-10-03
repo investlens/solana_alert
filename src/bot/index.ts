@@ -1,3 +1,5 @@
+import { registerTraderTools } from './traderTools.js';
+import { alphaosFeatureGuide } from '../product/featureGuide.js';
 import { Markup, Telegraf } from 'telegraf';
 import { config } from '../config.js';
 import { getContextAccess } from './accessControl.js';
@@ -209,6 +211,11 @@ export function createBot() {
     return next();
   });
 
+  bot.action('FEATURE_GUIDE', async ctx => {
+    const access = await getContextAccess(ctx);
+    await renderFast(ctx, alphaosFeatureGuide(), mainAlphaMenu(access).reply_markup);
+  });
+
   // /start also stays independent of Supabase.
   bot.use(async (ctx, next) => {
     const text = String((ctx.message as any)?.text ?? '').trim();
@@ -222,17 +229,7 @@ export function createBot() {
     console.log('[TelegramCommand] /start received', { telegramId, isAdmin });
 
     await ctx.reply(
-      [
-        '🧠 <b>ALPHAOS AI</b>',
-        '<i>Crypto Intelligence Terminal</i>',
-        '',
-        '⚡ Live opportunities',
-        '🧠 Developer & smart-money intelligence',
-        '🐋 Wallet tracking',
-        '📈 Trading workspace',
-        '',
-        'Choose a workspace below.',
-      ].join('\n'),
+      alphaosFeatureGuide(),
       {
         parse_mode: 'HTML',
         reply_markup: mainAlphaMenu(access).reply_markup,
@@ -249,6 +246,7 @@ export function createBot() {
   registerWalletTracking(bot);
   registerIntelligenceCenter(bot);
   registerTokenIntelligenceActions(bot);
+  registerTraderTools(bot);
   registerXIntelligenceAdmin(bot);
   return bot;
 }

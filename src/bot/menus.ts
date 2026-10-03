@@ -29,7 +29,7 @@ export function mainAlphaMenu(access: AccessProfile) {
     ],
     [
       Markup.button.callback('⚙ Controls', 'SETTINGS'),
-      Markup.button.callback('✦ Pro', 'MEMBERSHIP_HOME'),
+      Markup.button.callback('✦ Free / Pro', 'FEATURE_GUIDE'),
     ],
   );
 
@@ -52,7 +52,7 @@ export function intelligenceMenu(access: AccessProfile) {
       Markup.button.callback('🐋 Smart Money', 'INTEL_SMART_MONEY'),
       Markup.button.callback('👤 Developers', 'INTEL_CREATORS'),
     ]);
-    rows.push([Markup.button.callback('📊 Track Record', 'INTEL_PERFORMANCE')]);
+    rows.push([Markup.button.callback('📊 Track Record', 'INTEL_PERFORMANCE'), Markup.button.callback('🔔 My Monitors', 'DM_HOME')]);
   } else {
     rows.push([Markup.button.callback('✦ Unlock Intelligence', 'MEMBERSHIP_PLANS')]);
   }
