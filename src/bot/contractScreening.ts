@@ -86,7 +86,7 @@ export async function getRobinhoodContractReport(token: string, refresh = false,
     const pairs = prefetchedPairs ?? await fetchRobinhoodPairs(token, { priority: 'NORMAL', caller: 'contract_screen', queueWaitTimeoutMs: 1_000 }).catch(error => {
       console.warn('[ContractScreen] MARKET_UNAVAILABLE', {reason:researchErrorSummary(error)}); return [];
     });
-    const dexPair = chooseBestRobinhoodPair(pairs, token);
+    const dexPair = chooseBestRobinhoodPair(pairs.filter(pair => pair.chainId === 'robinhood'), token);
     const marker = await getSharedJson<{ factory?: string }>(`alphaos:pons:verified:${token}`);
     let factory = marker?.value.factory;
     if (!factory) {
