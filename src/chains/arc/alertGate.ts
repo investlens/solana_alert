@@ -1,3 +1,4 @@
+import type { ArcBoostSafety } from './boostSafety.js';
 import type { ArcMarketEnrichment } from './market.js';
 import { evaluateArcSecurity, type ArcSecurityDecision } from './security.js';
 
@@ -12,7 +13,7 @@ export type ArcAlertAssessment = {
  * Optional enrichment that is not yet available is surfaced as a warning and
  * must not globally disable the live feed.
  */
-export function assessArcForAlert(token: ArcMarketEnrichment): ArcAlertAssessment {
+export function assessArcForAlert(token: ArcMarketEnrichment, sellSafety?: ArcBoostSafety): ArcAlertAssessment {
   const security = evaluateArcSecurity({
     ...token,
     topHolderPct: null,
@@ -21,6 +22,11 @@ export function assessArcForAlert(token: ArcMarketEnrichment): ArcAlertAssessmen
     sellSimulationPassed: null,
     externalRiskFlag: null,
   });
+
+  if (sellSafety?.allowed !== true) {
+    security.reasons.push('SELLABILITY_UNVERIFIED');
+    security.allowAlert = false;
+  }
 
   return {
     alertable: security.allowAlert,
