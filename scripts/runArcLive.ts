@@ -1,3 +1,4 @@
+import { waitForRecipientDelivery } from '../src/services/recipientDeliveryTiming.js';
 import { recordCompactAlert } from '../src/services/compactAlertOutcomes.js';
 import { arcBoostSafetyFromEvidence, processArcBoostObservation } from '../src/chains/arc/boostSafety.js';
 import 'dotenv/config';
@@ -225,7 +226,11 @@ async function broadcastArcAlert(text: string, buttons: any[][], outcomeToken?: 
   if (outcomeToken && /^0x[a-fA-F0-9]{40}$/.test(outcomeToken)) buttons = [...buttons, [{text:'⭐ Track',callback_data:`OUT_ARC_${outcomeToken}`}]];
   const recipients = await getArcRecipients();
   if (!recipients.length) throw new Error('no ARC Telegram recipients available');
-  const results = await Promise.allSettled(recipients.map(chatId => sendTelegramWithMessageId(chatId, text, buttons)));
+  const deliveryStartedAt = Date.now();
+  const results = await Promise.allSettled(recipients.map(async chatId => {
+    await waitForRecipientDelivery(chatId, deliveryStartedAt);
+    return sendTelegramWithMessageId(chatId, text, buttons);
+  }));
   let deliveredCount = 0;
   let failed = 0;
   let adminMessageId: number | null = null;
