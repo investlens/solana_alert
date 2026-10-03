@@ -115,7 +115,7 @@ export function createBot() {
     if (data === 'OPPORTUNITY_CENTER') {
       await renderFast(ctx, [
         '⚡ <b>ALERTS</b>', '',
-        'Boost · Social Mafia · Protocol Discovery · Qualifying market/setup feeds.', '',
+        'Boost · DEX Paid · Social Mafia · Protocol Discovery · Qualifying market/setup feeds.', '',
         'Choose your feeds in Alert Preferences. Qualifying discovery alerts are released after 30 seconds for Free users; Pro gets priority delivery.',
         'Risk warnings have no added delay. Scan a contract to research a token before acting.', '',
         'Recorded Setups shows the available strategy list; it is not a complete history of every feed.',
