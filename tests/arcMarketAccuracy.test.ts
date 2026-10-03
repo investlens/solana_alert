@@ -41,3 +41,9 @@ test('ARC missing or mismatched pool identity cannot acquire market evidence', a
     }
   } finally { globalThis.fetch = original; resetDexScreenerGovernorForTests(); }
 });
+
+test('ARC valuation parser preserves unknown and genuine zero separately', async () => {
+  const { arcMarketNumber } = await import('../src/chains/arc/market.js');
+  for (const value of [null, undefined, '', ' ', NaN, -1]) assert.equal(arcMarketNumber(value), null);
+  assert.equal(arcMarketNumber(0), 0); assert.equal(arcMarketNumber('12000'), 12000);
+});
