@@ -1,3 +1,4 @@
+import { DEX_PAID_PAYMENT_MAX_AGE_SECONDS } from '../dexPaidWatchState.js';
 import { getRobinhoodMarketSnapshot } from '../market.js';
 import { getPonsLaunchState } from '../ponsLaunchState.js';
 import { supabase } from '../../../services/supabase.js';
@@ -14,7 +15,7 @@ import { scanRobinhoodBundleIntelligence, type RobinhoodBundleIntelligenceResult
 const MAX_MARKET_CAP_USD = Number(process.env.DEX_PAID_MAX_MARKET_CAP_USD ?? 15_000);
 const MIN_LIQUIDITY_USD = Number(process.env.DEX_PAID_MIN_LIQUIDITY_USD ?? 2_500);
 const MAX_PAIR_AGE_MINUTES = Number(process.env.DEX_PAID_MAX_PAIR_AGE_MINUTES ?? 30);
-const MAX_PAYMENT_AGE_SECONDS = Number(process.env.DEX_PAID_MAX_PAYMENT_AGE_SECONDS ?? 120);
+const MAX_PAYMENT_AGE_SECONDS = DEX_PAID_PAYMENT_MAX_AGE_SECONDS;
 const MAX_TOP1_PERCENT = Number(process.env.DEX_PAID_MAX_TOP1_PERCENT ?? 15);
 const MAX_DEV_HOLDING_PERCENT = Number(process.env.DEX_PAID_MAX_DEV_HOLDING_PERCENT ?? 20);
 const MAX_SELL_IMPACT_PERCENT = Number(process.env.DEX_PAID_MAX_SELL_IMPACT_PERCENT ?? 20);

@@ -1,3 +1,4 @@
+import { deliverResearchCard, researchErrorSummary } from './researchCardDelivery.js';
 import { requireCapability } from './accessControl.js';
 import { readResearchTokenSupply } from '../services/researchTokenSupply.js';
 import { createGroupResearchSettings } from '../services/groupResearchSettings.js';
@@ -8,7 +9,7 @@ import { getReportedPonsPublicContext } from '../chains/robinhood/ponsPublicCont
 import { chooseResearchPair, fetchResearchPairs, loadCreatorResearch, readResearchAccount, renderCreatorResearch,
   researchCandidates, researchChains, rememberReportedPonsProject, getReportedCreatorProjects, type ResearchChain } from '../services/addressResearch.js';
 
-type Screen = { text: string; image: Buffer; chain: ResearchChain; wallet: boolean; creatorToken?: string; chart?: string };
+type Screen = { text: string; image: Buffer | null; chain: ResearchChain; wallet: boolean; creatorToken?: string; chart?: string };
 type Choice = { choices: ResearchChain[]; reason: string };
 const cache = new Map<string, { expires: number; value: Screen | Choice }>();
 const inflight = new Map<string, Promise<Screen | Choice>>();
@@ -78,15 +79,15 @@ export async function getAddressScreen(address: string, chain?: ResearchChain | 
       const history = await loadCreatorResearch(address, selected).catch(() => ({ launches: [], available: false, capped: false }));
       return { chain: selected, wallet: true, creatorToken, text: renderCreatorResearch(address, selected, facts, history, getReportedCreatorProjects(address, selected)),
         image: await buildAlphaosAlertCard({ title: 'Creator research', symbol: null, name: `${address.slice(0, 6)}…${address.slice(-4)}`, category: 'CREATOR INTEL',
-          chainLabel: config.label.toUpperCase(), badge: 'WALLET RESEARCH', footer: 'Recorded launch history · Partial coverage · Research only' }) };
+          chainLabel: config.label.toUpperCase(), badge: 'WALLET RESEARCH', footer: 'Recorded launch history · Partial coverage · Research only' }).catch(() => null) };
     }
     if (!pair && !pons && account?.kind === 'unknown') return { choices: [selected], reason: 'Live lookup is unavailable. Retry the selected chain shortly.' };
-    if (selected === 'robinhood') return { ...await getRobinhoodContractReport(address, fresh), chain: selected, wallet: false };
+    if (selected === 'robinhood') return { ...await getRobinhoodContractReport(address, fresh, pairs), chain: selected, wallet: false };
     const supply = pair ? await readResearchTokenSupply(address, selected) : null;
     const text = renderContractScreen(address, pair, null, null, config.label, supply);
     const chart = pair?.pairAddress && /^0x(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$/.test(pair.pairAddress) ? `https://dexscreener.com/arc/${pair.pairAddress}` : undefined;
     return { chain: selected, wallet: false, text, chart, image: await buildAlphaosAlertCard({ title: pair?.baseToken?.symbol ? undefined : 'Contract research', symbol: pair?.baseToken?.symbol,
-      name: pair?.baseToken?.name, category: 'CONTRACT SCREEN', chainLabel: 'ARC', badge: 'MARKET SNAPSHOT', footer: 'Requested contract research · Safety not assessed' }) };
+      name: pair?.baseToken?.name, category: 'CONTRACT SCREEN', chainLabel: 'ARC', badge: 'MARKET SNAPSHOT', footer: 'Requested contract research · Safety not assessed' }).catch(() => null) };
   })();
   inflight.set(key, work);
   try {
@@ -127,12 +128,11 @@ export function registerAddressScreening(bot: Telegraf<any>, lookup = getAddress
       if (!result.wallet && result.chain === 'robinhood') keyboard.inline_keyboard.push([{ text: '🎯 Readiness · Pro', callback_data: `TR_RH_${address}` }, { text: 'My Monitors', callback_data: 'DM_HOME' }]);
       if (result.wallet) keyboard.inline_keyboard.push([{text:'📊 Creator Outcomes',callback_data:`CO_${tag}_${address}`}]);
       if (groupInvite) keyboard.inline_keyboard.push([{ text: '🔔 Get Private Alerts', url: `https://t.me/${username}` }]);
-      if (refresh) await ctx.editMessageMedia({ type: 'photo', media: { source: result.image }, caption, parse_mode: 'HTML' }, { reply_markup: keyboard });
-      else await ctx.replyWithPhoto({ source: result.image }, { caption, parse_mode: 'HTML', reply_markup: keyboard,
-        reply_parameters: ctx.message ? { message_id: ctx.message.message_id } : undefined });
+      await deliverResearchCard(ctx, {image:result.image,caption,keyboard,refresh});
     } catch (error) {
+      console.warn('[AddressScreen] REQUEST_FAILED', {chain:chain ?? 'auto',refresh,reason:researchErrorSummary(error)});
       if (refresh) { if (!/message is not modified/i.test(String(error))) await ctx.answerCbQuery('Refresh unavailable; try again shortly.', { show_alert: true }).catch(() => {}); }
-      else await ctx.reply('Research is temporarily unavailable. No safety conclusion was made.');
+      else await ctx.reply(/budget|capacity/i.test(researchErrorSummary(error)) ? 'Research is busy. Please retry in a minute.' : /just attempted/i.test(researchErrorSummary(error)) ? 'This lookup was just attempted. Please retry in 15 seconds.' : 'Research is temporarily unavailable. No safety conclusion was made.');
     }
   }
   // Register before the standard /start handler so creator deep links resolve here.

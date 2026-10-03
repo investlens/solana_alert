@@ -1,3 +1,4 @@
+import { deliverResearchCard, researchErrorSummary } from './researchCardDelivery.js';
 import { readResearchTokenSupply, formatResearchSupply, type ResearchTokenSupply } from '../services/researchTokenSupply.js';
 import { extractAutomaticSocials } from '../ui/alphaNotificationActions.js';
 import type { Telegraf } from 'telegraf';
@@ -9,8 +10,8 @@ import { getVerifiedPonsPublicContext, getReportedPonsPublicContext, getScreenCr
 
 const groups = new Map<string, number>();
 const cooldowns = new Map<string, number>();
-const reports = new Map<string, { expires: number; text: string; image: Buffer; chart?: string }>();
-const inflight = new Map<string, Promise<{ text: string; image: Buffer; chart?: string }>>();
+const reports = new Map<string, { expires: number; text: string; image: Buffer | null; chart?: string }>();
+const inflight = new Map<string, Promise<{ text: string; image: Buffer | null; chart?: string }>>();
 const TTL = 30_000;
 let budgetStarted = 0; let budgetUsed = 0;
 const escape = (v: unknown) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -75,14 +76,16 @@ function prune(now: number): void {
   for (const [k, v] of groups) if (v <= now) groups.delete(k);
   for (const [k, v] of cooldowns) if (v <= now) cooldowns.delete(k);
 }
-export async function getRobinhoodContractReport(token: string, refresh = false) {
+export async function getRobinhoodContractReport(token: string, refresh = false, prefetchedPairs?: DexScreenerPair[]) {
   const cached = reports.get(token); if (!refresh && cached && cached.expires > Date.now()) return cached;
   if (inflight.has(token)) return inflight.get(token)!;
   if (Date.now() - budgetStarted >= 60_000) { budgetStarted = Date.now(); budgetUsed = 0; }
   if (budgetUsed >= 10) throw new Error('Screening lookup budget reached');
   budgetUsed++;
   const work = (async () => {
-    const pairs = await fetchRobinhoodPairs(token, { priority: 'NORMAL', caller: 'contract_screen', queueWaitTimeoutMs: 1_000 });
+    const pairs = prefetchedPairs ?? await fetchRobinhoodPairs(token, { priority: 'NORMAL', caller: 'contract_screen', queueWaitTimeoutMs: 1_000 }).catch(error => {
+      console.warn('[ContractScreen] MARKET_UNAVAILABLE', {reason:researchErrorSummary(error)}); return [];
+    });
     const dexPair = chooseBestRobinhoodPair(pairs, token);
     const marker = await getSharedJson<{ factory?: string }>(`alphaos:pons:verified:${token}`);
     let factory = marker?.value.factory;
@@ -105,7 +108,7 @@ export async function getRobinhoodContractReport(token: string, refresh = false)
     const supply = !pons && pair ? await readResearchTokenSupply(token, 'robinhood') : null;
     const text = renderContractScreen(token, pair, pons, creatorBalance, 'Robinchain', supply);
     const image = await buildAlphaosAlertCard({ title: pair?.baseToken?.symbol || pons?.symbol ? undefined : 'Contract research', symbol: pair?.baseToken?.symbol || pons?.symbol, name: pair?.baseToken?.name || pons?.name, logo: pons?.logo,
-      category: 'CONTRACT SCREEN', chainLabel: 'ROBINCHAIN', badge: curveMarket ? 'PONS PRE-BOND' : !pair && pons ? 'PONS SNAPSHOT' : 'MARKET SNAPSHOT', footer: 'Requested contract research · Sourced market snapshot' });
+      category: 'CONTRACT SCREEN', chainLabel: 'ROBINCHAIN', badge: curveMarket ? 'PONS PRE-BOND' : !pair && pons ? 'PONS SNAPSHOT' : 'MARKET SNAPSHOT', footer: 'Requested contract research · Sourced market snapshot' }).catch(() => null);
     const result = { text, image, chart: curveMarket ? `https://www.ponsfamily.com/launchpad/${token}` : pair ? verifiedRobinhoodChartUrl(pair) : undefined };
     if (reports.size >= 50) reports.delete(reports.keys().next().value!);
     reports.set(token, { ...result, expires: Date.now() + TTL }); return result;
@@ -147,9 +150,9 @@ export function registerContractScreening(bot: Telegraf<any>, lookup = getRobinh
           [{ text: '↻ Refresh', callback_data: `SCAN_RH_${token}` }, { text: '🧠 Full Intel', callback_data: `FI_RH_${token}` }],
           [{ text: '🔎 Explorer', url: `https://robinhoodchain.blockscout.com/token/${token}` }, ...(result.chart ? [{ text: '📊 Chart', url: result.chart }] : [])],
         ] } };
-      if (refresh) await ctx.editMessageMedia({ type: 'photo', media: { source: result.image }, caption: result.text, parse_mode: 'HTML' }, { reply_markup: options.reply_markup });
-      else await ctx.replyWithPhoto({ source: result.image }, { ...options, reply_parameters: ctx.message ? { message_id: ctx.message.message_id } : undefined });
+      await deliverResearchCard(ctx,{image:result.image,caption:result.text,keyboard:options.reply_markup,refresh});
     } catch (error) {
+      console.warn('[ContractScreen] REQUEST_FAILED', {refresh,reason:researchErrorSummary(error)});
       if (refresh) {
         if (!/message is not modified/i.test(String(error))) await ctx.answerCbQuery('Refresh unavailable. Please try again shortly.', { show_alert: true }).catch(() => {});
       } else await ctx.reply('Screen could not be completed. No safety or trading conclusion was made.');
