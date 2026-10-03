@@ -1,4 +1,5 @@
 import { withOwnershipDisclosure, type OwnershipDisclosure } from '../ui/ownershipDisclosure.js';
+import { decorateDexPaidAlert, discloseAlertDexPaid } from './alertDexPaidDisclosure.js';
 import { discloseRobinhoodOwnership } from './alertOwnershipService.js';
 import { liveFeedEnabled, semanticLiveFeed } from './liveAlertPreferences.js';
 import { claimSharedDelivery } from './sharedJsonCache.js';
@@ -203,6 +204,13 @@ export async function deliverAlphaSemanticEvent(args: {
           typeof args.event.rawSnapshot?.pairAddress === 'string' ? args.event.rawSnapshot.pairAddress : null,
           isUndelayedRiskEvent(args.event.type));
   }
+  let deliveryButtons = args.buttons;
+  if (dependencies === productionDependencies && args.event.chain === 'robinhood' && !isUndelayedRiskEvent(args.event.type)) {
+    const card = args.event.type === 'DEX_PAID'
+      ? decorateDexPaidAlert(deliveryMessage, deliveryButtons ?? [], args.event.assetId, 'PAID')
+      : await discloseAlertDexPaid(deliveryMessage, deliveryButtons ?? [], args.event.assetId);
+    deliveryMessage = card.text; deliveryButtons = card.buttons;
+  }
   const renderedCharacters = deliveryMessage.length;
   const renderedBytes = Buffer.byteLength(deliveryMessage, 'utf8');
   let delivered = 0; let failed = 0; let accepted = 0;
@@ -226,7 +234,7 @@ export async function deliverAlphaSemanticEvent(args: {
       if (ephemeralMode) {
         if (!claimEphemeralDelivery(args.event, user)) continue;
         try {
-          const sendResult = await dependencies.send(user.telegram_id, deliveryMessage, args.buttons);
+          const sendResult = await dependencies.send(user.telegram_id, deliveryMessage, deliveryButtons);
           if (dependencies === productionDependencies) recordDeliveryAccepted(user, deliveryStartedAt, args.event.eventIdentity, isUndelayedRiskEvent(args.event.type));
           delivered += 1; accepted += 1;
           args.onTelegramAccepted?.(user);
@@ -256,7 +264,7 @@ export async function deliverAlphaSemanticEvent(args: {
       const leaseToken = createLeaseToken();
       if (!await dependencies.reserve(args.event, user, leaseToken)) continue;
       const result = await deliverReservedTelegram({
-        send: () => dependencies.send(user.telegram_id, deliveryMessage, args.buttons),
+        send: () => dependencies.send(user.telegram_id, deliveryMessage, deliveryButtons),
         complete: sendResult => dependencies.complete(args.event, user, leaseToken,
           Number.isFinite(Number(sendResult)) ? Number(sendResult) : null),
         release: () => dependencies.release(args.event, user, leaseToken),

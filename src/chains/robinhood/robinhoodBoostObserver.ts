@@ -18,6 +18,7 @@ import { observeBoostCanonicalEvent, boostCanonicalTitle } from './boostCanonica
 import { routeBoostSecurity } from './boostSecurityRouter.js';
 import { buildPremiumTokenNotification, verifiedPairAge } from '../../ui/premiumTokenNotification.js';
 import { buildAlphaMarketActions } from '../../ui/alphaNotificationActions.js';
+import { discloseAlertDexPaid } from '../../services/alertDexPaidDisclosure.js';
 import { persistOrLoadAlphaSemanticEventRecord } from '../../services/alphaSemanticEventService.js';
 import { deliverAlphaSemanticEvent } from '../../services/alphaSemanticDeliveryService.js';
 import { supabase } from '../../services/supabase.js';
@@ -320,8 +321,9 @@ export async function enrichDeliveredBoostAlert(args: {
     xUrl: socials.twitter, telegramUrl: socials.telegram,
   });
   const deliveries = await loadDeliveredBoostMessages(args.eventId).catch(() => []);
+  const card = await discloseAlertDexPaid(message, buttons, args.tokenAddress);
   const edits = await Promise.allSettled(deliveries.map(delivery =>
-    editTelegramMessage(delivery.telegramId, delivery.messageId, message, buttons)));
+    editTelegramMessage(delivery.telegramId, delivery.messageId, card.text, card.buttons)));
 
   if (market) {
     const tokenKey = normalize(args.tokenAddress);
@@ -546,11 +548,12 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
   }
 
   if (sharedDeliveryUnavailable && accepted === 0) {
+    const fallbackCard = await discloseAlertDexPaid(baseMessage, baseButtons, boost.tokenAddress);
     const fallbackDelivered = await deliverAdminBoostFallback({
       tokenAddress: boost.tokenAddress,
       totalBoostAmount: boost.totalAmount,
-      message: baseMessage,
-      buttons: baseButtons,
+      message: fallbackCard.text,
+      buttons: fallbackCard.buttons,
     });
     if (fallbackDelivered) delivered = 1;
   }
