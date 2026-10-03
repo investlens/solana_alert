@@ -33,9 +33,13 @@ test('setup card escapes project text and distinguishes FDV, reserves and execut
   assert.match(text, /Reserve is not a size-specific sell quote/);
   assert.match(text, /Observed low \/ invalidation reference/);
   assert.match(text, /Research setup/);
+  assert.match(text, /Social identity.*Not verified/);
+  assert.doesNotMatch(text, /Exact CA listed/);
+  const noSocials = buildTradeSetupText({ token: address, symbol: 'TEST', name: 'Test', age:35, holding:0.7, burned:null,recovery:4,depth:0.3,lowEth:1e-8,fdvUsd:4600,creator:address,xUrl:null,tgUrl:null,at:now });
+  assert.doesNotMatch(noSocials, /href="null"|>X<|>Telegram</);
 });
 
-test('failed social candidates release full watch slots and a deferred eligible launch can enter', () => {
+test('missing social identity does not discard market candidates or exceed queue limits', () => {
   resetTradeSetupSchedulingForTests();
   const live = { ...launch, block_timestamp: new Date().toISOString() };
   const tokens = Array.from({ length: 11 }, (_, i) => '0x' + (i + 100).toString(16).padStart(40, '0'));
@@ -45,8 +49,8 @@ test('failed social candidates release full watch slots and a deferred eligible 
   for (const token of tokens.slice(0, 10)) recordLaunchSocialEligibility(token, false);
   recordLaunchSocialEligibility(tokens[10], true);
   queuePonsTradeSetup({ ...live, token_address: tokens[10] });
-  assert.deepEqual(tradeSetupSchedulingStateForTests().candidates, [tokens[10]]);
-  assert.equal(tradeSetupSchedulingStateForTests().deferred.length, 0);
+  assert.equal(tradeSetupSchedulingStateForTests().candidates.length, 10);
+  assert.deepEqual(tradeSetupSchedulingStateForTests().deferred, [tokens[10]]);
   resetTradeSetupSchedulingForTests();
 });
 
@@ -62,11 +66,13 @@ test('already admitted deferred launches survive the five-minute ingress limit w
     clock += 6 * 60_000;
     assert.equal(isTradeSetupLaunchAdmissible(live, clock), false);
     for (const token of tokens.slice(0, 10)) recordLaunchSocialEligibility(token, false);
+    recordLaunchSocialEligibility(tokens[10], true);
     await tickTradeSetupForTests();
-    assert.deepEqual(tradeSetupSchedulingStateForTests().candidates, [tokens[10]]);
-    assert.equal(tradeSetupSchedulingStateForTests().deferred.length, 0);
+    assert.equal(tradeSetupSchedulingStateForTests().candidates.length, 10);
+    assert.ok(tradeSetupSchedulingStateForTests().candidates.includes(tokens[10]));
+    assert.equal(tradeSetupSchedulingStateForTests().deferred.length, 1);
     queuePonsTradeSetup({ ...live, token_address: '0x' + 'f'.repeat(40) });
-    assert.deepEqual(tradeSetupSchedulingStateForTests().candidates, [tokens[10]]);
+    assert.equal(tradeSetupSchedulingStateForTests().candidates.length, 10);
   } finally { Date.now = originalNow; resetTradeSetupSchedulingForTests(); }
 });
 

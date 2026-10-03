@@ -6,7 +6,6 @@ import type { PonsLaunch } from './ponsHistoricalLaunchScanner.js';
 import { isVerifiedSocialMafiaLaunch, resolveSocialMafiaSocials } from './ponsSocialMafiaAlert.js';
 import { directTelegramRecipients, readPonsV2Curve } from './ponsNormalAlertFastLane.js';
 import { getCreatorHoldingPercent, getPonsPublicContext } from './ponsPublicContext.js';
-import { verifySocialContract } from './socialContractConfirmation.js';
 import { scanRobinhoodDevTokenFlow } from './security/devTokenFlowScanner.js';
 import { advanceSetupTrend, creatorSetupEligible, emptySetupTrend, type SetupTrend } from './tradeSetupEvidence.js';
 
@@ -25,7 +24,7 @@ let running = false;
 console.log(`[TradeSetup] READY enabled=${String(process.env.PONS_TRADE_SETUP_ENABLED ?? 'true').toLowerCase() === 'true'} launchpad=PONS mode=RESEARCH_WATCH minAgeMin=30 maxCandidates=${MAX_CANDIDATES} dbWrites=0`);
 const html = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-export function buildTradeSetupText(args: { token: string; symbol: string; name: string; age: number; holding: number | null; burned: number | null; recovery: number; depth: number; lowEth: number; fdvUsd: number | null; creator: string; xUrl: string; tgUrl: string; at: number }): string {
+export function buildTradeSetupText(args: { token: string; symbol: string; name: string; age: number; holding: number | null; burned: number | null; recovery: number; depth: number; lowEth: number; fdvUsd: number | null; creator: string; xUrl: string | null; tgUrl: string | null; at: number }): string {
   return [
     '🎯 <b>AlphaOS · TRADE SETUP WATCH</b>',
     `<b>${html(args.symbol.slice(0, 24))}</b> · ${html(args.name.slice(0, 64))}`,
@@ -33,13 +32,13 @@ export function buildTradeSetupText(args: { token: string; symbol: string; name:
     '<b>CONFIRMED EVIDENCE</b>',
     `FDV  <b>${args.fdvUsd != null && Number.isFinite(args.fdvUsd) ? '$' + args.fdvUsd.toLocaleString('en-US', { maximumFractionDigits: 0 }) : 'Unavailable'}</b> · PONS page snapshot`,
     `Launch age  <b>${Math.floor(args.age)}m</b>`,
-    'Identity  <b>Exact CA listed on linked X</b>',
+    'Social identity  <b>Not verified for this market setup</b>',
     `Recovery from observed low  <b>+${args.recovery.toFixed(1)}%</b>`,
     'Confirmation  <b>Two consecutive 60s reserve/price increases</b>',
     `Dev holding  <b>${args.holding == null ? 'Unavailable' : `${args.holding.toFixed(2)}%`}</b>`,
     ...(args.burned != null && args.burned > 0 ? [`Verified dev burn  <b>${args.burned.toFixed(2)}%</b>`] : []),
     'Creator transfers  <b>None in scanned evidence</b>',
-    `<a href="https://robinhoodchain.blockscout.com/address/${html(args.creator)}">Creator wallet</a> · <a href="${html(args.xUrl)}">X</a> · <a href="${html(args.tgUrl)}">Telegram</a>`, '',
+    `<a href="https://robinhoodchain.blockscout.com/address/${html(args.creator)}">Creator wallet</a>${args.xUrl ? ` · <a href="${html(args.xUrl)}">X</a>` : ''}${args.tgUrl ? ` · <a href="${html(args.tgUrl)}">Telegram</a>` : ''}`, '',
     '<b>EXECUTION &amp; RISK</b>',
     `Curve quote reserve  <b>${args.depth.toFixed(4)} ETH</b>`,
     'Reserve is not a size-specific sell quote.',
@@ -72,7 +71,6 @@ async function tick(): Promise<void> {
     }
     for (const [token, item] of candidates) {
       const now = Date.now();
-      if (launchSocialEligibility(token, now) === false) { candidates.delete(token); console.log(`[TradeSetup] RELEASE token=${token} reason=SOCIAL_GATE_FAILED`); continue; }
       if (now - item.launchedAt > MAX_AGE) { candidates.delete(token); continue; }
       if (now - item.launchedAt < MIN_AGE) continue;
       try {
@@ -88,9 +86,7 @@ async function tick(): Promise<void> {
         item.screenAfter = Date.now() + 5 * 60_000;
         const context = await getPonsPublicContext(token, item.launch.factory_address, item.launch.deployer_address);
         const socials = context ? resolveSocialMafiaSocials(context) : null;
-        if (!context || !socials) { console.log(`[TradeSetup] BLOCK token=${token} reason=METADATA_SOCIALS_UNAVAILABLE`); continue; }
-        const identity = await verifySocialContract({ token, xHandle: socials.xHandle, telegramUrl: socials.telegramUrl });
-        if (!identity.confirmed) { console.log(`[TradeSetup] BLOCK token=${token} reason=${identity.reason}`); continue; }
+        if (!context) { console.log(`[TradeSetup] BLOCK token=${token} reason=VERIFIED_METADATA_UNAVAILABLE`); continue; }
         const [flow, holding] = await Promise.all([
           scanRobinhoodDevTokenFlow(token, item.launch.deployer_address),
           getCreatorHoldingPercent(token, item.launch.deployer_address),
@@ -108,7 +104,7 @@ async function tick(): Promise<void> {
         if (!Number.isFinite(finalPrice) || finalPrice < price || final.quoteReserve < curve.quoteReserve) continue;
         const text = buildTradeSetupText({ token, symbol: context.symbol, name: context.name,
           age: (Date.now() - item.launchedAt) / 60_000, holding, burned: flow.confirmedDevBurnPercent,
-          recovery: (finalPrice / item.trend.low - 1) * 100, depth: Number(final.quoteReserve) / 1e18, lowEth: item.trend.low * 10 ** context.decimals / 1e18, fdvUsd: context.fdvUsd, creator: context.creator, xUrl: socials.xUrl, tgUrl: socials.telegramUrl, at: Date.now() });
+          recovery: (finalPrice / item.trend.low - 1) * 100, depth: Number(final.quoteReserve) / 1e18, lowEth: item.trend.low * 10 ** context.decimals / 1e18, fdvUsd: context.fdvUsd, creator: context.creator, xUrl: socials?.xUrl ?? null, tgUrl: socials?.telegramUrl ?? null, at: Date.now() });
         const claim = await claimSharedDelivery(`alphaos:setup:delivered:${token}`, 24 * 60 * 60_000);
         if (claim === 'EXISTS') { candidates.delete(token); continue; }
         if (claim !== 'CLAIMED') continue;
@@ -116,7 +112,7 @@ async function tick(): Promise<void> {
         // to recipients who may already have received the message.
         candidates.delete(token);
         await setSharedJson(`alphaos:setup:evidence:${token}`, { creator: context.creator, holding, rawLow: item.trend.low, curve: item.launch.curve_address, at: Date.now() }, new Date().toISOString(), 2 * 60 * 60_000);
-        const delivery = await directTelegramRecipients(text, token, { twitter: socials.xUrl, telegram: socials.telegramUrl, website: null }, true, true, {chain:'robinhood', token, feed:'TRADE_SETUP_WATCH', price:finalPrice, pair:item.launch.curve_address, unit:'ETH_RESERVE_RATIO', creator:item.launch.deployer_address, creatorSource:'PONS_FACTORY_EVENT'});
+        const delivery = await directTelegramRecipients(text, token, { twitter: socials?.xUrl ?? null, telegram: socials?.telegramUrl ?? null, website: null }, true, true, {chain:'robinhood', token, feed:'TRADE_SETUP_WATCH', price:finalPrice, pair:item.launch.curve_address, unit:'ETH_RESERVE_RATIO', creator:item.launch.deployer_address, creatorSource:'PONS_FACTORY_EVENT'});
         if (!compactOutcomesEnabled()) {
         if (outcomes.size >= 20) outcomes.delete(outcomes.keys().next().value!);
         outcomes.set(token, { launch: item.launch, price: finalPrice, at: Date.now(), checked: Date.now(), min: finalPrice, max: finalPrice });
@@ -126,7 +122,7 @@ async function tick(): Promise<void> {
     }
     const pendingByEvidence = [...deferredAdmissions].sort(([a], [b]) => Number(launchSocialEligibility(b) === true) - Number(launchSocialEligibility(a) === true));
     for (const [token, launch] of pendingByEvidence) {
-      if (launchSocialEligibility(token) === false || !isTradeSetupLaunchAdmissible(launch, Date.now(), MAX_AGE)) { deferredAdmissions.delete(token); continue; }
+      if (!isTradeSetupLaunchAdmissible(launch, Date.now(), MAX_AGE)) { deferredAdmissions.delete(token); continue; }
       if (candidates.size >= MAX_CANDIDATES) break;
       deferredAdmissions.delete(token); admitCandidate(launch);
     }
@@ -158,8 +154,6 @@ export function queuePonsTradeSetup(launch: PonsLaunch): void {
   const launchedAt = Date.parse(launch.block_timestamp);
   const token = launch.token_address.toLowerCase();
   if (!isTradeSetupLaunchAdmissible(launch, Date.now()) || candidates.has(token)) return;
-  for (const key of candidates.keys()) if (launchSocialEligibility(key) === false) candidates.delete(key);
-  if (launchSocialEligibility(token) === false) return;
   if (candidates.size >= MAX_CANDIDATES) {
     if (deferredAdmissions.size < 50) deferredAdmissions.set(token, launch);
     console.log(`[TradeSetup] DEFERRED candidates=${candidates.size} pending=${deferredAdmissions.size} token=${token}`); return;
