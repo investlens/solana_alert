@@ -48,17 +48,17 @@ async function cycle() {
   const startedAt = Date.now();
   try {
     if (!restored) {
-      const saved = await getSharedJson<unknown>(CHECKPOINT_KEY);
+      const saved = await getSharedJson<unknown>(CHECKPOINT_KEY, 1_000);
       for (const entry of restoreDexPaidWatch(saved?.value, Date.now(), WATCH_LIMIT)) candidates.set(key(entry.token.tokenAddress), entry);
       // One bounded read of the existing verified PONS launch queue also warms
       // the first deployment of this checkpoint. No SQL census sweep is needed.
-      const launches = await getSharedJson<unknown>('alphaos:watch:social:v1');
+      const launches = await getSharedJson<unknown>('alphaos:watch:social:v1', 1_000);
       for (const entry of seedDexPaidWatch(launches?.value, Date.now(), WATCH_LIMIT,
         getPonsFactoryDeployments().filter(f=>f.enabled).map(f=>f.address))) {
         if (!candidates.has(key(entry.token.tokenAddress)) && candidates.size < WATCH_LIMIT) candidates.set(key(entry.token.tokenAddress),entry);
       }
       restored = true;
-      console.log('[DexPaidFastLane] WATCH_RESTORED', {candidates:candidates.size, cap:WATCH_LIMIT, dbWrites:0});
+      console.log('[DexPaidFastLane] WATCH_RESTORED', {candidates:candidates.size, cap:WATCH_LIMIT, checkpointRead:saved ? 'PRESENT' : 'MISSING_OR_UNAVAILABLE', socialSeedRead:launches ? 'PRESENT' : 'MISSING_OR_UNAVAILABLE', dbWrites:0});
     }
     const batch = await discoverFromPons(firstCycle ? STARTUP_LOOKBACK_BLOCKS : LIVE_LOOKBACK_BLOCKS);
     firstCycle = false;
