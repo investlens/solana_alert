@@ -34,7 +34,7 @@ test('feed eligibility gate runs before market, creator enrichment and all messa
   const source = await readFile(new URL('../src/chains/robinhood/ponsSocialMafiaAlert.ts', import.meta.url), 'utf8');
   const process = source.slice(source.indexOf('async function processLaunch'));
   assert.ok(process.indexOf('if (!route)') < process.indexOf('const partial:'));
-  assert.ok(process.indexOf('if (!route)') < process.indexOf('const chats = await recipients()'));
+  assert.ok(process.indexOf('if (!route)') < process.indexOf('const chats = await enabledLiveRecipients'));
   assert.match(process, /if \(!route\) \{[\s\S]*?return false;/);
 });
 

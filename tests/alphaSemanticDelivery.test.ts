@@ -147,7 +147,7 @@ test('DEX_PAID UI and delivery share the durable database-backed preference key'
     readFile(new URL('../src/chains/robinhood/robinhoodObserver.ts', import.meta.url), 'utf8'),
   ]);
   assert.match(delivery, /event\.type === 'DEX_PAID'.*DEX_PAID_STRATEGY_KEY/);
-  assert.match(controls, /STRAT_TOGGLE_\$\{strategy\.strategy_key\}/);
+  assert.match(controls, /FEED_TOGGLE_\$\{feed\.key\}/);
   assert.match(strategies, /strategy_key: args\.strategyKey[\s\S]*onConflict: 'telegram_id,strategy_key'/);
   assert.match(strategies, /eq\('telegram_id', telegramId\)[\s\S]*eq\('strategy_key', strategyKey\)/);
   assert.doesNotMatch(strategies, /Map<string, boolean>\(\).*cache|preferenceCache/);

@@ -1,3 +1,4 @@
+import { liveFeedEnabled, semanticLiveFeed } from './liveAlertPreferences.js';
 import { claimSharedDelivery } from './sharedJsonCache.js';
 import { recordCompactAlert } from './compactAlertOutcomes.js';
 import { recordRecoveryAlertAudit } from './recoveryAlertAudit.js';
@@ -196,6 +197,8 @@ export async function deliverAlphaSemanticEvent(args: {
   for (const user of users) {
     if (!hasCapability(accessProfileForUser(user), 'opportunities.realtime')) continue;
     try {
+      const liveFeed = semanticLiveFeed(args.event.type, args.event.chain);
+      if (dependencies === productionDependencies && liveFeed && !await liveFeedEnabled(user.telegram_id, liveFeed)) continue;
       const preferenceKey = preferenceKeyForSemanticEvent(args.event);
       if (preferenceKey && !await dependencies.strategyEnabled(user.telegram_id, preferenceKey)) continue;
 

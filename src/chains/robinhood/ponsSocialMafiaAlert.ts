@@ -1,3 +1,4 @@
+import { enabledLiveRecipients } from '../../services/liveAlertPreferences.js';
 import { getSharedJson, setSharedJson, claimSharedDelivery } from '../../services/sharedJsonCache.js';
 import { waitForRecipientDelivery, recordDeliveryAccepted } from '../../services/recipientDeliveryTiming.js';
 import { recordCompactAlert } from '../../services/compactAlertOutcomes.js';
@@ -327,7 +328,7 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
     ...(route === 'PROTOCOL_DISCOVERY' ? { category: 'PROTOCOL DISCOVERY', badge: 'SOCIAL OWNERSHIP UNVERIFIED', footer: 'Protocol-name discovery. Research only; no safety or trade endorsement.' } : {}) }).catch(() => {
       console.warn('[AlphaosCard] rendering unavailable; using text alert'); return null;
     });
-  const chats = await recipients();
+  const chats = await enabledLiveRecipients(await recipients(), route === 'PROTOCOL_DISCOVERY' ? 'RH_PROTOCOL_DISCOVERY' : 'RH_SOCIAL_MAFIA');
   const baseline = partial.market?.priceUsd && partial.market?.pairAddress
     ? {price:partial.market.priceUsd, pair:partial.market.pairAddress, unit:'USD' as const, marketCap:partial.market.marketCapUsd, liquidity:partial.market.liquidityUsd}
     : {price:partial.curveRatio, pair:launch.curve_address, unit:'ETH_RESERVE_RATIO' as const};
