@@ -223,6 +223,10 @@ async function getArcRecipients(): Promise<string[]> {
 }
 
 async function broadcastArcAlert(text: string, buttons: any[][], outcomeToken?: string): Promise<{delivered:number;failed:number;adminMessageId:number|null}> {
+  // Final gate covers normal, boost and burn sends, including future callers.
+  if (!outcomeToken) throw new Error('ARC alert lacks token identity for sellability check');
+  const sellSafety = await checkArcBoostSecurity(outcomeToken);
+  if (!sellSafety.allowed) throw new Error(`ARC sellability blocked: ${sellSafety.reason}`);
   if (outcomeToken && /^0x[a-fA-F0-9]{40}$/.test(outcomeToken)) buttons = [...buttons, [{text:'⭐ Track',callback_data:`OUT_ARC_${outcomeToken}`}]];
   const recipients = await getArcRecipients();
   if (!recipients.length) throw new Error('no ARC Telegram recipients available');
@@ -371,7 +375,7 @@ async function processMarketRetries(): Promise<void> {
       console.log('[ArcLive] PRE_BOND_WAIT', { assetId: pending.enriched.assetId, ageMin: ((Date.now() - pending.firstSeenAt) / 60_000).toFixed(1), reason: 'PAIR_NOT_INDEXED' });
       continue;
     }
-    const assessment = assessArcForAlert(market);
+    const assessment = await assessArcWithSellSafety(market);
     console.log('[ArcLive] MARKET_RETRY_RESULT', {
       assetId: market.assetId,
       symbol: market.symbol,
@@ -432,7 +436,7 @@ function burnLike(holder: Record<string, unknown>): boolean {
     tag.includes('burn') || tag.includes('dead') || tag.includes('null address') || tag.includes('black hole');
 }
 
-async function checkArcBoostSecurity(tokenAddress: string): Promise<ArcBoostSecurity> {
+async function loadArcSellSafety(tokenAddress: string): Promise<ArcBoostSecurity> {
   try {
     const url = `https://api.gopluslabs.io/api/v1/token_security/5042?contract_addresses=${encodeURIComponent(tokenAddress)}`;
     const response = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(4_000) });
@@ -444,6 +448,30 @@ async function checkArcBoostSecurity(tokenAddress: string): Promise<ArcBoostSecu
   } catch (error) {
     return { allowed: false, reason: `honeypot check unavailable: ${error instanceof Error ? error.message : String(error)}; LP check intentionally skipped for BOOST`, devHoldingPercent: null };
   }
+}
+
+const arcSellSafetyCache = new Map<string, { at: number; result: ArcBoostSecurity }>();
+const arcSellSafetyPending = new Map<string, Promise<ArcBoostSecurity>>();
+async function checkArcBoostSecurity(tokenAddress: string): Promise<ArcBoostSecurity> {
+  const key = tokenAddress.toLowerCase();
+  const cached = arcSellSafetyCache.get(key);
+  if (cached && Date.now() - cached.at < (cached.result.allowed ? 30_000 : 60_000)) return cached.result;
+  const pending = arcSellSafetyPending.get(key);
+  if (pending) return pending;
+  if (arcSellSafetyPending.size >= 2) return { allowed: false, reason: 'sellability check busy' };
+  const work = loadArcSellSafety(tokenAddress).then(result => {
+    if (arcSellSafetyCache.size >= 100) arcSellSafetyCache.delete(arcSellSafetyCache.keys().next().value!);
+    arcSellSafetyCache.set(key, { at: Date.now(), result });
+    return result;
+  }).finally(() => arcSellSafetyPending.delete(key));
+  arcSellSafetyPending.set(key, work);
+  return work;
+}
+async function assessArcWithSellSafety(market: Parameters<typeof assessArcForAlert>[0]) {
+  const preliminary = assessArcForAlert(market);
+  // Spend no security request on candidates already blocked by market or contract gates.
+  if (preliminary.security.reasons.some(reason => reason !== 'SELLABILITY_UNVERIFIED')) return preliminary;
+  return assessArcForAlert(market, await checkArcBoostSecurity(market.assetId));
 }
 
 function arcBoostIdentity(tokenAddress: string, totalAmount: number): string {
@@ -594,7 +622,7 @@ async function main() {
     for (const candidate of candidates) {
       const enriched = await enrichArcCandidate(candidate);
       const market = await enrichArcMarket(enriched);
-      const assessment = assessArcForAlert(market);
+      const assessment = await assessArcWithSellSafety(market);
       console.log('[ArcLive] SECURITY_ASSESSMENT', {
         assetId: market.assetId,
         symbol: market.symbol,
