@@ -1,3 +1,4 @@
+import { cacheDeliveryRecipients } from '../services/recipientDeliveryTiming.js';
 import { supabase } from '../services/supabase.js';
 import {
   eventEngine,
@@ -34,6 +35,7 @@ export async function getDeliverableUsers(): Promise<DeliverableUser[]> {
   }
 
   const users = (data ?? []) as DeliverableUser[];
+  cacheDeliveryRecipients(users);
 
   console.log('deliverable users loaded:', {
     count: users.length,
