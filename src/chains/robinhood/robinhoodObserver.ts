@@ -1,3 +1,4 @@
+import { recentDexPayment } from './dexPaidWatchState.js';
 import { renderAlphaNotification } from '../../ui/alphaNotification.js';
 import { buildAlphaMarketActions } from '../../ui/alphaNotificationActions.js';
 import { coreDecisionEvidenceMetrics, marketContextMetrics, normalizeCoreDecisionMetrics, normalizeNotificationMarketContext } from '../../ui/notificationMarketContext.js';
@@ -2123,10 +2124,16 @@ if (!observationId) {
   return true;
 }
 
+const dexPaymentAttempts = new Map<string,{payment:number;nextAt:number}>();
 export async function processRobinhoodDexPaidSignal(token: RobinhoodDiscoveredToken): Promise<boolean> {
   const dexPaid = await scanRobinhoodDexPaid(token.tokenAddress);
   dexPaidEvidence.set(normalize(token.tokenAddress), dexPaid);
-  if (dexPaid.dexPaid !== true || dexPaid.latestPaymentTimestamp == null) return false;
+  if (dexPaid.dexPaid !== true || !recentDexPayment(dexPaid.latestPaymentTimestamp)) return false;
+  const attemptKey = normalize(token.tokenAddress);
+  const previousAttempt = dexPaymentAttempts.get(attemptKey);
+  if (previousAttempt?.payment === dexPaid.latestPaymentTimestamp && previousAttempt.nextAt > Date.now()) return false;
+  if (dexPaymentAttempts.size >= 100 && !dexPaymentAttempts.has(attemptKey)) dexPaymentAttempts.delete(dexPaymentAttempts.keys().next().value!);
+  dexPaymentAttempts.set(attemptKey, {payment:dexPaid.latestPaymentTimestamp!,nextAt:Date.now()+60_000});
   const market = await getRobinhoodMarketSnapshot(token.tokenAddress, { priority: 'NORMAL',
     caller: 'robinhood_dex_paid_context', queueWaitTimeoutMs: 750 }).catch(() => null);
   const chartUrl = market?.chartUrl ?? (token.pairAddress
@@ -2152,10 +2159,11 @@ export async function processRobinhoodDexPaidSignal(token: RobinhoodDiscoveredTo
     eventIdentity: semanticEvent.event_identity, type: 'DEX_PAID', assetId: token.tokenAddress, chain: 'robinhood' },
     message: buildPremiumTokenNotification({ state: 'DEX_PAID', symbol: marketContext.symbol, name: marketContext.name,
       address: token.tokenAddress, market: marketContext, evidence, age,
-      insightTitle: 'VERIFIED EVENT', insight: ['A verified Dex visibility payment was detected.'],
+      insightTitle: 'VERIFIED EVENT', insight: ['A verified Dex visibility payment was detected.', `Payment age · ${Math.max(0, Math.floor((Date.now() - (dexPaid.latestPaymentTimestamp! < 10_000_000_000 ? dexPaid.latestPaymentTimestamp! * 1000 : dexPaid.latestPaymentTimestamp!)) / 60_000))}m · Checked now`],
       statusTitle: '💎 STATUS', status: 'Dex Paid confirmed · evaluate live market conditions.' }),
     buttons: buildAlphaMarketActions({ chartUrl, tokenUrl: buildExplorerUrl(token.tokenAddress),
       fullIntelCallback: `FI_RH_${token.tokenAddress}`, copyContractCallback: `COPY_CA_${token.tokenAddress}` }) });
+  if (result.delivered > 0) dexPaymentAttempts.set(attemptKey,{payment:dexPaid.latestPaymentTimestamp!,nextAt:Date.now()+10*60_000});
   console.log('[RobinhoodObserver] DEX PAID semantic delivery:', { token: token.tokenAddress,
     paymentTimestamp: dexPaid.latestPaymentTimestamp, delivered: result.delivered, failed: result.failed });
   return true;
