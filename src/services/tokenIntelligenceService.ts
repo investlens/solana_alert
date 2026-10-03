@@ -35,7 +35,7 @@ export type TokenIntel = {
   ath: TokenAth;
   holders: { count: number | null; top10Pct: number | null; largestPct: number | null; risk: string; warnings: string[] };
   freshWallets: FreshWalletIntel;
-  developer: { wallet: string | null; holdingPct: number | null; sold: boolean | null; transferredPct: number | null; burnedPct: number | null };
+  developer: { observedAt?: string | null; holdingObservedAt?: string | null; wallet: string | null; holdingPct: number | null; sold: boolean | null; transferredPct: number | null; burnedPct: number | null };
   devHistory: { launches: number; measuredSuccessful: number; weakOrFailed: number; verdict: string; risks: string[] };
   security: { tokenBurnedPct: number | null; lpStatus: 'LOCKED' | 'BURNED' | 'UNLOCKED' | 'UNKNOWN'; dexPaid: boolean | null; boostTotal: number | null };
   socials: SafeSocial[]; alpha: { state: string | null; risk: string | null; verdict: string; positive: string[]; watch: string[] };
@@ -283,7 +283,7 @@ export async function analyzeRobinhoodToken(tokenAddress: string, previous?: Tok
         observedAt: db.latest?.alerted_at ?? null,
         source: db.latest?.price_provenance ?? (lastPrice ? 'ALPHAOS_VERIFIED_EVENT_SNAPSHOT' : null),
       };
-      result.developer = { wallet: typeof raw.deployerAddress === 'string' ? raw.deployerAddress : null,
+      result.developer = { observedAt: db.latest?.alerted_at ?? null, wallet: typeof raw.deployerAddress === 'string' ? raw.deployerAddress : null,
         holdingPct: finitePercentage(raw.devHoldingPercent), sold: raw.confirmedDevSell === true ? true : raw.confirmedDevSell === false ? false : null,
         transferredPct: finitePercentage(raw.otherDevTransferPercent), burnedPct: finitePercentage(raw.confirmedDevBurnPercent) };
       result.security.tokenBurnedPct = finitePercentage(raw.totalBurnPercent);
@@ -310,8 +310,10 @@ export async function analyzeRobinhoodToken(tokenAddress: string, previous?: Tok
       result.decimals ??= pons.decimals; result.supply ??= pons.totalSupplyRaw.toString();
       if (result.marketCap == null && pons.fdvUsd != null) { result.fdv = pons.fdvUsd; result.valuationSource = 'PONS public launchpad'; }
       result.developer.wallet ||= pons.creator;
-      if (result.developer.wallet.toLowerCase() === pons.creator.toLowerCase() && result.developer.holdingPct == null)
+      if (result.developer.wallet.toLowerCase() === pons.creator.toLowerCase() && result.developer.holdingPct == null) {
         result.developer.holdingPct = await ponsHoldingWork;
+        if (result.developer.holdingPct != null) result.developer.holdingObservedAt = new Date().toISOString();
+      }
       for (const [url, kind] of [[pons.twitter, 'twitter'], [pons.telegram, 'telegram']] as const) {
         const social = validateProjectSocial(url, kind);
         if (social && !result.socials.some(link => link.label === social.label)) result.socials.push(social);

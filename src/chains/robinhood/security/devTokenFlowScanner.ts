@@ -65,6 +65,10 @@ export type DevTokenFlowResult = {
   scannedAt: number;
 };
 
+export function combineVerifiedBurnBalances(dead: bigint | null, zero: bigint | null): bigint | null {
+  return dead == null || zero == null ? null : dead + zero;
+}
+
 const FLOW_CACHE_TTL_MS = 5 * 60 * 1000;
 const FLOW_FAILURE_TTL_MS = 60 * 1000;
 const FLOW_TIMEOUT_MS = 3_000;
@@ -155,6 +159,7 @@ function addressTopic(
 async function ethCall(
   token: Address,
   data: string,
+  block: string,
 ): Promise<bigint | null> {
   const result =
     await rpc<string>(
@@ -164,7 +169,7 @@ async function ethCall(
           to: token,
           data,
         },
-        'latest',
+        block,
       ],
     );
 
@@ -179,12 +184,11 @@ type RpcLog = {
 async function scanRecentDevTransfers(
   token: Address,
   deployer: Address,
+  latest: bigint,
 ): Promise<{
   burned: bigint;
   transferred: bigint;
 }> {
-  const latest = await getRobinhoodBlockNumberResilient();
-
   const lookback =
     20_000n;
 
@@ -204,7 +208,7 @@ async function scanRecentDevTransfers(
             `0x${fromBlock.toString(16)}`,
 
           toBlock:
-            'latest',
+            `0x${latest.toString(16)}`,
 
           topics: [
             TRANSFER_TOPIC,
@@ -447,55 +451,20 @@ scanRobinhoodDevTokenFlowUncached(
       },
     );
 
-    const [
-      totalSupply,
-      devBalance,
-      deadBalance,
-      zeroBalance,
-      decimals,
-    ] =
-      await Promise.all([
-        ethCall(
-          token,
-          TOTAL_SUPPLY,
-        ),
-
-        ethCall(
-          token,
-          balanceOfData(
-            deployer,
-          ),
-        ),
-
-        ethCall(
-          token,
-          balanceOfData(
-            DEAD_ADDRESS,
-          ),
-        ),
-
-        ethCall(
-          token,
-          balanceOfData(
-            ZERO_ADDRESS,
-          ),
-        ),
-
-        ethCall(
-          token,
-          DECIMALS,
-        ),
-      ]);
-
-    const totalBurn =
-      (
-        deadBalance ??
-        0n
-      ) +
-      (
-        zeroBalance ??
-        0n
-      );
+    // Pin all evidence to one block; a missing optional read must not erase
+    // successful holdings or become a fabricated zero burn balance.
+    const latest = await getRobinhoodBlockNumberResilient();
+    const block = `0x${latest.toString(16)}`;
+    const reads = await Promise.allSettled([
+      ethCall(token, TOTAL_SUPPLY, block),
+      ethCall(token, balanceOfData(deployer), block),
+      ethCall(token, balanceOfData(DEAD_ADDRESS), block),
+      ethCall(token, balanceOfData(ZERO_ADDRESS), block),
+      ethCall(token, DECIMALS, block),
+    ]);
+    const [totalSupply, devBalance, deadBalance, zeroBalance, decimals] =
+      reads.map(read => read.status === 'fulfilled' ? read.value : null);
+    const totalBurn = combineVerifiedBurnBalances(deadBalance, zeroBalance);
 
     const base:
       DevTokenFlowResult = {
@@ -531,6 +500,7 @@ scanRobinhoodDevTokenFlowUncached(
         await scanRecentDevTransfers(
           token,
           deployer,
+          latest,
         );
 
       return {
