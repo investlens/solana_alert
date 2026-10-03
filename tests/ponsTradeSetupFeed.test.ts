@@ -69,3 +69,20 @@ test('already admitted deferred launches survive the five-minute ingress limit w
     assert.deepEqual(tradeSetupSchedulingStateForTests().candidates, [tokens[10]]);
   } finally { Date.now = originalNow; resetTradeSetupSchedulingForTests(); }
 });
+
+test('checkpoint recovery accepts only unexpired verified launches and discards stale trend confirmations', async () => {
+  const { restoreSetupWatchCheckpoint } = await import('../src/chains/robinhood/ponsTradeSetupFeed.js');
+  resetTradeSetupSchedulingForTests();
+  const live = { ...launch, token_address: '0x' + 'a'.repeat(40), block_timestamp: new Date(Date.now()-40*60_000).toISOString() };
+  const item = (value: PonsLaunch) => ({ launch:value, launchedAt:Date.parse(value.block_timestamp), trend:{peak:1,low:0.5,previous:null,dip:true,confirmations:2},screenAfter:0 });
+  await restoreSetupWatchCheckpoint(async () => ({fetchedAt:new Date().toISOString(),value:{candidates:[item(live),item({...live,token_address:'0x'+'b'.repeat(40),protocol_version:'CUSTOM'}),item({...live,token_address:'0x'+'c'.repeat(40),block_timestamp:new Date(Date.now()-121*60_000).toISOString()})],deferred:[]}}));
+  assert.deepEqual(tradeSetupSchedulingStateForTests().candidates,[live.token_address]);
+  resetTradeSetupSchedulingForTests();
+});
+
+test('recovered trend retains observed levels but requires new consecutive confirmation', async () => {
+  const { recoveredSetupTrend } = await import('../src/chains/robinhood/ponsTradeSetupFeed.js');
+  assert.deepEqual(recoveredSetupTrend({peak:2,low:1,dip:true,confirmations:2,previous:{at:1,price:1.1,quoteDepth:2}}),
+    {peak:2,low:1,dip:true,confirmations:0,previous:null});
+  assert.equal(recoveredSetupTrend({peak:NaN,low:1,dip:true,confirmations:2,previous:null}).dip,false);
+});

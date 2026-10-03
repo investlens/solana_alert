@@ -192,3 +192,19 @@ test('waiting launch burst fits the bounded identity budget without starting ear
     assert.equal(socialMafiaScreeningStatus().identityCount, 0);
   } finally { resetPonsSocialMafiaForTests(); }
 });
+
+test('temporary social checkpoint restores only verified unexpired unique launches', async () => {
+  const { restoreSocialWatchCheckpoint } = await import('../src/chains/robinhood/ponsSocialMafiaAlert.js');
+  resetPonsSocialMafiaForTests();
+  const factory = getPonsFactoryDeployments().find(value => value.enabled)!;
+  const launch = {chain:'robinhood',protocol:'pons',protocol_version:factory.id,factory_address:factory.address,
+    token_address:'0x'+'d'.repeat(40),block_timestamp:new Date(Date.now()).toISOString()} as PonsLaunch;
+  const item = {launch,createdAt:Date.now(),nextAt:Date.now()+15*60_000,attempt:0};
+  const rows = [item,item,{...item,launch:{...launch,token_address:'0x'+'e'.repeat(40),protocol_version:'CUSTOM'}},
+    {...item,launch:{...launch,token_address:'0x'+'f'.repeat(40),block_timestamp:new Date(Date.now()-61*60_000).toISOString()}}];
+  try {
+    await restoreSocialWatchCheckpoint(async()=>({fetchedAt:new Date().toISOString(),value:rows}));
+    assert.equal(socialMafiaScreeningStatus().waiting,1);
+    assert.equal(socialMafiaScreeningStatus().identityCount,1);
+  } finally { resetPonsSocialMafiaForTests(); }
+});
