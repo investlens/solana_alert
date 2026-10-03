@@ -1,3 +1,4 @@
+import { discloseAlertDexPaid } from '../../services/alertDexPaidDisclosure.js';
 import { discloseRobinhoodOwnership } from '../../services/alertOwnershipService.js';
 import { enabledLiveRecipients } from '../../services/liveAlertPreferences.js';
 import { waitForRecipientDelivery, recordDeliveryAccepted } from '../../services/recipientDeliveryTiming.js';
@@ -165,35 +166,25 @@ function refreshRecipientsInBackground(): void {
 async function sendTelegram(chatId: string, text: string, tokenAddress: string, socials?: RobinhoodTokenSocials, preBond = false, setupControls = false, baseline?: CompactAlertBaseline): Promise<void> {
   const botToken = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
   if (!botToken || !chatId) throw new Error('missing Telegram configuration');
+  const keyboard = setupControls ? [
+    [{ text: '🚀 PONS', url: `https://www.ponsfamily.com/launchpad/${tokenAddress}` }, { text: '🧠 Full Intel', callback_data: `FI_RH_${tokenAddress}` }],
+    [{ text: '⭐ Track', callback_data: `BOOST_TRACK_${tokenAddress}` }, { text: '📋 Copy CA', callback_data: `COPY_CA_${tokenAddress}` }],
+  ] : [
+    [preBond ? { text: '🚀 PONS', url: `https://www.ponsfamily.com/launchpad/${encodeURIComponent(tokenAddress)}` }
+      : { text: '📈 Chart', url: `https://dexscreener.com/robinhood/${encodeURIComponent(tokenAddress)}` },
+      { text: '🔎 Explorer', url: `https://robinhoodchain.blockscout.com/token/${encodeURIComponent(tokenAddress)}` }],
+    [...(socials?.website ? [{ text: '🌐 Project', url: socials.website }] : []),
+      ...(socials?.twitter ? [{ text: '𝕏 X', url: socials.twitter }] : []),
+      ...(socials?.telegram ? [{ text: '✈️ TG', url: socials.telegram }] : [])],
+  ].filter(row => row.length > 0);
+  const card = await discloseAlertDexPaid(text, keyboard, tokenAddress);
   if (setupControls) {
-    await sendAlphaosPhotoAlert({ botToken, chatId, text, image: null, keyboard: [
-      [{ text: '🚀 PONS', url: `https://www.ponsfamily.com/launchpad/${tokenAddress}` }, { text: '🧠 Full Intel', callback_data: `FI_RH_${tokenAddress}` }],
-      [{ text: '⭐ Track', callback_data: `BOOST_TRACK_${tokenAddress}` }, { text: '📋 Copy CA', callback_data: `COPY_CA_${tokenAddress}` }],
-    ] });
-    return;
+    await sendAlphaosPhotoAlert({ botToken, chatId, text: card.text, image: null, keyboard: card.buttons }); return;
   }
   const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-      parse_mode: 'HTML',
-      disable_web_page_preview: true,
-      reply_markup: { inline_keyboard: [
-        [
-          preBond
-            ? { text: '🚀 PONS', url: `https://www.ponsfamily.com/launchpad/${encodeURIComponent(tokenAddress)}` }
-            : { text: '📈 Chart', url: `https://dexscreener.com/robinhood/${encodeURIComponent(tokenAddress)}` },
-          { text: '🔎 Explorer', url: `https://robinhoodchain.blockscout.com/token/${encodeURIComponent(tokenAddress)}` },
-        ],
-        [
-          ...(socials?.website ? [{ text: '🌐 Project', url: socials.website }] : []),
-          ...(socials?.twitter ? [{ text: '𝕏 X', url: socials.twitter }] : []),
-          ...(socials?.telegram ? [{ text: '✈️ TG', url: socials.telegram }] : []),
-        ],
-      ].filter(row => row.length > 0) },
-    }),
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({chat_id: chatId, text: card.text, parse_mode: 'HTML', disable_web_page_preview: true,
+      reply_markup: {inline_keyboard: card.buttons}}),
   });
   if (!res.ok) throw new Error(`Telegram ${res.status}: ${await res.text().catch(() => '')}`);
 }

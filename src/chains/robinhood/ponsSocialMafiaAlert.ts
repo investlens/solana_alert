@@ -1,4 +1,5 @@
 import { discloseRobinhoodOwnership } from '../../services/alertOwnershipService.js';
+import { discloseAlertDexPaid } from '../../services/alertDexPaidDisclosure.js';
 import { enabledLiveRecipients } from '../../services/liveAlertPreferences.js';
 import { getSharedJson, setSharedJson, claimSharedDelivery } from '../../services/sharedJsonCache.js';
 import { waitForRecipientDelivery, recordDeliveryAccepted } from '../../services/recipientDeliveryTiming.js';
@@ -152,8 +153,8 @@ async function sendTelegram(args: {
 }): Promise<AlphaosDelivery> {
   const botToken = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
   if (!botToken) throw new Error('missing Telegram bot token');
-  return sendAlphaosPhotoAlert({ botToken, chatId: args.chatId, text: args.text, image: args.image,
-    keyboard: buildSocialMafiaActions(args.tokenAddress, args.launchpad, args.socials) });
+  const card = await discloseAlertDexPaid(args.text, buildSocialMafiaActions(args.tokenAddress, args.launchpad, args.socials), args.tokenAddress);
+  return sendAlphaosPhotoAlert({ botToken, chatId: args.chatId, text: card.text, image: args.image, keyboard: card.buttons });
 }
 
 export function buildSocialMafiaAlertText(args: {
@@ -346,7 +347,8 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
     const botToken = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
     await Promise.allSettled(results.map(async (result, index) => {
       if (result.status !== 'fulfilled' || result.value == null) return;
-      const edit = alphaosEnrichmentEdit(result.value, chats[index], enriched, buildSocialMafiaActions(token, launchpad, socials));
+      const card = await discloseAlertDexPaid(enriched, buildSocialMafiaActions(token, launchpad, socials), token);
+      const edit = alphaosEnrichmentEdit(result.value, chats[index], card.text, card.buttons);
       await fetch(`https://api.telegram.org/bot${botToken}/${edit.method}`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(5_000),
         body: JSON.stringify(edit.body),
