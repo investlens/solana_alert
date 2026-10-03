@@ -1,6 +1,6 @@
 import { recordCompactAlert } from './compactAlertOutcomes.js';
 import { recordRecoveryAlertAudit } from './recoveryAlertAudit.js';
-import { waitForRecipientDelivery, isUndelayedRiskEvent, recipientDelayMs } from './recipientDeliveryTiming.js';
+import { waitForRecipientDelivery, isUndelayedRiskEvent, recipientDelayMs, recordDeliveryAccepted } from './recipientDeliveryTiming.js';
 import { getDeliverableUsers, markTelegramUserBlocked, type DeliverableUser } from '../core/delivery.js';
 import { accessProfileForUser, hasCapability } from '../product/capabilities.js';
 import { evaluateDexPaidAlertSafety } from '../chains/robinhood/security/dexPaidAlertSafetyGate.js';
@@ -199,6 +199,7 @@ export async function deliverAlphaSemanticEvent(args: {
         if (!claimEphemeralDelivery(args.event, user)) continue;
         try {
           const sendResult = await dependencies.send(user.telegram_id, deliveryMessage, args.buttons);
+          if (dependencies === productionDependencies) recordDeliveryAccepted(user, deliveryStartedAt, args.event.eventIdentity, isUndelayedRiskEvent(args.event.type));
           delivered += 1; accepted += 1;
           args.onTelegramAccepted?.(user);
           console.log('[AlphaSemanticDelivery] Ephemeral Telegram accepted during DB outage.', {
@@ -232,7 +233,7 @@ export async function deliverAlphaSemanticEvent(args: {
           Number.isFinite(Number(sendResult)) ? Number(sendResult) : null),
         release: () => dependencies.release(args.event, user, leaseToken),
       });
-      if (result.sent) { accepted += 1; args.onTelegramAccepted?.(user); }
+      if (result.sent) { if (dependencies === productionDependencies) recordDeliveryAccepted(user, deliveryStartedAt, args.event.eventIdentity, isUndelayedRiskEvent(args.event.type)); accepted += 1; args.onTelegramAccepted?.(user); }
       if (result.recorded) { delivered += 1; continue; }
       failed += 1;
       args.onRecipientFailure?.(user, result.error, result.sent ? 'delivery_completion' : 'telegram_send');

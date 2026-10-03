@@ -110,10 +110,10 @@ export function createBot() {
           '🧠 <b>ALPHAOS AI</b>',
           '<i>Crypto Intelligence Terminal</i>',
           '',
-          '⚡ Live opportunities',
+          '⚡ Launch and market alerts',
           '🧠 Developer & smart-money intelligence',
           '🐋 Wallet tracking',
-          '📈 Trading workspace',
+          '🎯 Token research and trader tools',
           '',
           '<i>Navigation remains available even while market data is recovering.</i>',
         ].join('\n'),
@@ -123,22 +123,17 @@ export function createBot() {
     }
 
     if (data === 'OPPORTUNITY_CENTER') {
-      await renderFast(
-        ctx,
-        [
-          '⚡ <b>RADAR</b>',
-          '',
-          'AlphaOS scanners are running.',
-          'Live opportunity data is loaded separately so a database slowdown cannot freeze this screen.',
-          '',
-          '<i>If the live list is temporarily unavailable, alerts continue to be evaluated by the scanner.</i>',
-        ].join('\n'),
-        Markup.inlineKeyboard([
-          [Markup.button.callback('🔄 Refresh Radar', 'OPPORTUNITY_CENTER')],
-          [Markup.button.callback('🧠 Intelligence', 'INTELLIGENCE_CENTER')],
-          [Markup.button.callback('⌂ Home', 'MAIN_MENU')],
-        ]).reply_markup,
-      );
+      await renderFast(ctx, [
+        '⚡ <b>ALERTS</b>', '',
+        'Boost · Social Mafia · Protocol Discovery · Qualifying market/setup feeds.', '',
+        'Choose your feeds in Alert Preferences. Qualifying discovery alerts are released after 30 seconds for Free users; Pro gets priority delivery.',
+        'Risk warnings have no added delay. Scan a contract to research a token before acting.', '',
+        'Recorded Setups shows the available strategy list; it is not a complete history of every feed.',
+      ].join('\n'), Markup.inlineKeyboard([
+        [Markup.button.callback('⚙ Alert Preferences', 'STRATEGY_SETTINGS')],
+        [Markup.button.callback('📊 Recorded Setups', 'OPP_LIVE_LIST'), Markup.button.callback('🔎 Scan', 'WELCOME_SCAN')],
+        [Markup.button.callback('✦ Free / Pro', 'FEATURE_GUIDE'), Markup.button.callback('⌂ Home', 'MAIN_MENU')],
+      ]).reply_markup);
       return;
     }
 
@@ -160,12 +155,19 @@ export function createBot() {
     if (data === 'TRADE_MENU') {
       await renderFast(
         ctx,
-        [
-          '📈 <b>TRADING</b>',
-          '',
-          'Review opportunities and execution controls.',
-          '',
+        access.tier === 'admin' ? [
+          '📈 <b>TRADING</b>', '', 'Review opportunities and execution controls.',
           '<i>Automatic trading remains disabled unless explicitly enabled.</i>',
+        ].join('\n') : [
+          '🎯 <b>TRADER TOOLS</b>', '',
+          '1. Screen a Token — send /scan &lt;contract&gt;.',
+          '2. Robinchain — open Readiness on the token report.',
+          '3. Monitor 1h — follow price/liquidity changes; manage in My Monitors.', '',
+          '<b>Readiness &amp; Monitors · Pro</b>',
+          'Indexed Robinchain USD pools only. ARC and pre-bond curves are not supported by these tools.',
+          'Readiness shows Watch / Setup forming. Monitors check about every 2 minutes and expire after one hour.',
+          'Curve Estimate is available separately in Full Intel for supported PONS pre-bond tokens.', '',
+          subscriptionsEnabled() ? '<i>Research tools; no automatic trades. Pro tools require active membership.</i>' : '<i>Research tools; no automatic trades. Pro tools remain open during testing.</i>',
         ].join('\n'),
         tradingMenu(access).reply_markup,
       );
@@ -176,7 +178,7 @@ export function createBot() {
       await renderFast(
         ctx,
         [
-          '⚙ <b>CONTROLS</b>',
+          '⚙ <b>SETTINGS</b>',
           '',
           'Alert strategies and preferences.',
           '',

@@ -22,14 +22,25 @@ export function recipientDelayMs(user: Recipient, now = Date.now()): number {
 export function remainingDeliveryDelay(user: Recipient, startedAt: number, now = Date.now(), safetyCritical = false): number {
   return safetyCritical ? 0 : Math.max(0, startedAt + recipientDelayMs(user, now) - now);
 }
+function resolveRecipient(user: Recipient | string, now: number): Recipient {
+  if (typeof user !== 'string') return user;
+  const cached = recipients.get(user);
+  return cached && now - cached.refreshedAt < CACHE_MS ? cached.user : { telegram_id: user };
+}
 export async function waitForRecipientDelivery(user: Recipient | string, startedAt: number, safetyCritical = false): Promise<void> {
   const now = Date.now();
-  const cached = typeof user === 'string' ? recipients.get(user) : undefined;
-  const resolved = typeof user === 'string'
-    ? cached && now - cached.refreshedAt < CACHE_MS ? cached.user : { telegram_id: user }
-    : user;
-  const delay = remainingDeliveryDelay(resolved, startedAt, now, safetyCritical);
+  const delay = remainingDeliveryDelay(resolveRecipient(user, now), startedAt, now, safetyCritical);
   if (delay > 0) await new Promise<void>(resolve => setTimeout(resolve, delay));
+}
+export function deliveryAcceptanceEvidence(user: Recipient | string, startedAt: number, source: string, safetyCritical = false, now = Date.now()) {
+  const delayMs = safetyCritical ? 0 : recipientDelayMs(resolveRecipient(user, now), now);
+  return { source: source.slice(0, 160), tier: delayMs === 5_000 ? 'pro' : delayMs === 30_000 ? 'free' : 'undelayed',
+    releaseDelayMs: delayMs, startedAt: new Date(startedAt).toISOString(), acceptedAt: new Date(now).toISOString(),
+    elapsedMs: now - startedAt, releaseDeadlineMet: now >= startedAt + delayMs };
+}
+// Runtime logs only: no recipient IDs, no additional database rows, no replay.
+export function recordDeliveryAccepted(user: Recipient | string, startedAt: number, source: string, safetyCritical = false): void {
+  console.log('[AlertDeliveryTiming] TELEGRAM_ACCEPTED', deliveryAcceptanceEvidence(user, startedAt, source, safetyCritical));
 }
 export function isUndelayedRiskEvent(type: string): boolean {
   return new Set(['EXIT', 'COOLING', 'WEAKENING', 'DANGER', 'DEV_TRANSFER', 'DEV_SELL', 'LIQUIDITY_RISK', 'WALLET_CLUSTER']).has(type.toUpperCase());

@@ -65,7 +65,7 @@ test('Full Intel groups unavailable evidence and humanizes time and provenance',
     incompleteReason: 'Blockscout holders HTTP 403' };
   const message = renderTokenIntelligence(intel);
   assert.ok(message.length < 2500); assert.match(message, /FULL INTEL/); assert.match(message, /State\s+<b>RUNNER/);
-  assert.match(message, /Supply\s+<b>1,000,000,000/); assert.match(message, /ATH source\s+<b>DexScreener/);
+  assert.match(message, /Supply\s+<b>1,000,000,000/); assert.match(message, /Peak source\s+<b>DexScreener/);
   assert.doesNotMatch(message, /Blockscout holders HTTP 403/);
   assert.deepEqual(intel.holders.warnings, ['Blockscout holders HTTP 403']);
   assert.match(message, /HOLDERS &amp; FRESH WALLETS[\s\S]*Analysis currently unavailable/);

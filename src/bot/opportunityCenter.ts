@@ -206,9 +206,9 @@ function bucketMeta(
   switch (bucket) {
     case 'ENTRY':
       return {
-        title: '🔥 ENTRY READY',
+        title: '🔥 QUALIFIED SETUPS',
         description:
-          'AlphaOS sees a qualified entry or buy setup.',
+          'Recorded setups that passed their configured conditions; check the current market before acting.',
       };
 
     case 'BUILDING':
@@ -460,19 +460,19 @@ async function renderOpportunityHome(
     );
 
   const text = [
-    '⚡ <b>ALPHAOS OPPORTUNITIES</b>',
+    '⚡ <b>RECORDED SETUPS</b>',
     '━━━━━━━━━━━━━━━━━━━━━━',
     '',
-    '<b>Live strategy intelligence</b>',
+    '<b>Recorded strategy snapshots</b>',
     '',
-    'AlphaOS continuously observes market conditions and moves opportunities between stages as evidence changes.',
+    'These are the latest available recorded strategy snapshots. Discovery feeds may arrive directly in chat and are not all listed here.',
     '',
-    `🔥 Entry Ready  <b>${entry.length}</b>`,
+    `🔥 Qualified setups  <b>${entry.length}</b>`,
     `📈 Building     <b>${building.length}</b>`,
     `👀 Watching     <b>${watching.length}</b>`,
     `🚨 Risk / Exit  <b>${risk.length}</b>`,
     '',
-    `Live opportunities: <b>${opportunities.length}</b>`,
+    `Available recorded setups: <b>${opportunities.length}</b>`,
     '',
     '<i>Evidence changes continuously. Always verify live market conditions before execution.</i>',
   ].join('\n');
@@ -481,8 +481,8 @@ async function renderOpportunityHome(
       [
         Markup.button.callback(
           hasCapability(access, 'opportunities.realtime')
-            ? `🔥 Entry Ready (${entry.length})`
-            : '🔒 Entry Ready · Pro',
+            ? `🔥 Qualified setups (${entry.length})`
+            : '🔒 Qualified setups · Pro',
           'OPP_BUCKET_ENTRY',
         ),
       ],
@@ -806,7 +806,7 @@ export function registerOpportunityCenter(
   bot: Telegraf<any>,
 ) {
   bot.action(
-    'OPPORTUNITY_CENTER',
+    ['OPPORTUNITY_CENTER', 'OPP_LIVE_LIST'],
     async (ctx) => {
       await ctx.answerCbQuery();
 

@@ -17,7 +17,7 @@ export function mainAlphaMenu(access: AccessProfile) {
 
   rows.push(
     [
-      Markup.button.callback('⚡ Radar', 'OPPORTUNITY_CENTER'),
+      Markup.button.callback('⚡ Alerts', 'OPPORTUNITY_CENTER'),
       Markup.button.callback('🧠 Intelligence', 'INTELLIGENCE_CENTER'),
     ],
     [
@@ -25,14 +25,15 @@ export function mainAlphaMenu(access: AccessProfile) {
         hasCapability(access, 'wallets.track') ? '🐋 Wallets' : '🔒 Wallets',
         'WALLET_TRACKING',
       ),
-      Markup.button.callback('📈 Trading', 'TRADE_MENU'),
+      Markup.button.callback(hasCapability(access, 'trading.admin') ? '📈 Trading' : '🎯 Trader Tools', 'TRADE_MENU'),
     ],
     [
-      Markup.button.callback('⚙ Controls', 'SETTINGS'),
+      Markup.button.callback('⚙ Settings', 'SETTINGS'),
       Markup.button.callback('✦ Free / Pro', 'FEATURE_GUIDE'),
     ],
   );
 
+  if (hasCapability(access, 'monitoring.personal')) rows.push([Markup.button.callback('🔔 My Monitors', 'DM_HOME')]);
   rows.push([Markup.button.callback('📖 How to Use', 'WELCOME_HELP'), Markup.button.callback('🔎 Scan', 'WELCOME_SCAN')]);
 
   if (hasCapability(access, 'trading.admin')) {
@@ -81,7 +82,9 @@ export function tradingMenu(access: AccessProfile) {
   }
 
   return Markup.inlineKeyboard([
-    [Markup.button.callback('⚡ Open Radar', 'OPPORTUNITY_CENTER')],
+    [Markup.button.callback('🔎 Screen a Token', 'WELCOME_SCAN')],
+    ...(hasCapability(access, 'monitoring.personal') ? [[Markup.button.callback('🔔 My Monitors · Pro', 'DM_HOME')]] : []),
+    [Markup.button.callback('⚡ Alerts', 'OPPORTUNITY_CENTER'), Markup.button.callback('✦ Free / Pro', 'FEATURE_GUIDE')],
     [Markup.button.callback('⌂ Home', 'MAIN_MENU')],
   ]);
 }
