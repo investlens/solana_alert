@@ -1,25 +1,34 @@
 import { subscriptionsEnabled } from './subscriptionPlan.js';
+
+export function alphaosHomeText(): string {
+  return [
+    '✦ <b>ALPHAOS AI</b>',
+    '<i>Your crypto research workspace</i>', '',
+    '🔎 <b>Scan</b> — paste a token address or send /scan &lt;address&gt;.',
+    '⚡ <b>Alerts</b> — explore feeds and choose your preferences.',
+    '🎯 <b>Trader Tools</b> — check readiness and manage monitors.', '',
+    'Open <b>Free / Pro</b> to compare features, or <b>How to Use</b> for help.',
+    '<i>Coverage varies by chain. Research only · DYOR.</i>',
+  ].join('\n');
+}
+
 export function alphaosFeatureGuide(): string {
   return ['✦ <b>ALPHAOS · FREE / PRO</b>', '',
-    '<b>FREE · RESEARCH TOOLS</b>',
-    '1. Token screening — /scan &lt;contract&gt;.',
-    '2. Wallet screening — /scan wallet &lt;address&gt;.',
-    '3. Available market stats, socials and chart links.',
-    '4. Group contract screening — admin enables /scan_on.',
-    '5. Qualifying discovery alerts — released after 30 seconds; alert preferences.', '',
-    '<b>PRO · TRADER WORKSPACE</b>',
-    '1. Priority alerts — near-real-time Boost, Social Mafia, Protocol Discovery and qualifying market/setup feeds.',
-    '2. Trade Readiness — market screening and remaining entry checks.',
-    '3. Personal Monitors — one-hour price/liquidity deterioration notices.',
-    '4. Wallet tracking and available creator intelligence.',
-    '5. Recorded alert outcomes and creator performance.', '',
-    '<b>NEW · ROBINCHAIN TRADER TOOLS</b>',
-    'Open a Robinchain token → Readiness → Monitor 1h.',
-    'Indexed USD pools only. Readiness shows Watch / Setup forming; entry approval is not established.',
-    'Monitors: 2 tokens/user, 10 overall; about 2-minute checks, maximum 3 warning events.',
-    'Stop anytime in Home → My Monitors. No continuous protection or automatic trade.', '',
-    subscriptionsEnabled() ? 'Pro features require active membership. Safety notices are not delivery-delayed.'
-      : '<b>Testing access:</b> Pro tools are currently available to testers. Payments remain closed.',
-    '<i>Availability varies by chain and data source. Missing evidence never means a passed check.</i>',
+    '<b>FREE · RESEARCH</b>',
+    '• Token scans and available market data.',
+    '• Wallet scans and observed launch history.',
+    '• Available socials, explorer and chart links.',
+    '• Group contract screening via /scan_on.',
+    '• Qualifying alerts · 30-second release delay.', '',
+    '<b>PRO · TRADER TOOLS</b>',
+    '• Priority delivery for qualifying alerts.',
+    '• Trade Readiness · indexed Robinchain pools.',
+    '• Personal price/liquidity monitors · 1 hour.',
+    '• Wallet tracking and available creator research.',
+    '• Recorded outcomes · limited data coverage.', '',
+    subscriptionsEnabled() ? 'Pro requires active membership. Risk warnings have no added delivery delay.'
+      : '<b>Testing access:</b> Pro tools are open to testers. Payments remain closed.', '',
+    'Open <b>Trader Tools</b> for supported tokens and monitoring limits.',
+    '<i>Missing data is not a passed check. Research does not establish a safe entry.</i>',
   ].join('\n');
 }
