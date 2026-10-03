@@ -1,3 +1,5 @@
+import { withOwnershipDisclosure, type OwnershipDisclosure } from '../ui/ownershipDisclosure.js';
+import { discloseRobinhoodOwnership } from './alertOwnershipService.js';
 import { liveFeedEnabled, semanticLiveFeed } from './liveAlertPreferences.js';
 import { claimSharedDelivery } from './sharedJsonCache.js';
 import { recordCompactAlert } from './compactAlertOutcomes.js';
@@ -153,6 +155,7 @@ export async function deliverAlphaSemanticEvent(args: {
     }
   }
 
+  let paidOwnership: OwnershipDisclosure | null = null;
   if (dependencies === productionDependencies && args.event.type === 'DEX_PAID' && args.event.chain === 'robinhood') {
     const safety = await evaluateDexPaidAlertSafety(args.event.assetId);
     if (!safety.allowed) {
@@ -166,6 +169,8 @@ export async function deliverAlphaSemanticEvent(args: {
       });
       return { delivered: 0, failed: 0 };
     }
+    paidOwnership = {devPercent: safety.devHoldingPercent ?? null, top10Percent: safety.top10Percent ?? null,
+      top10Coverage: safety.top10Percent == null ? 'UNAVAILABLE' : 'INDEXED_SAMPLE'};
     console.log('[AlphaSemanticDelivery] Robinhood DEX_PAID passed strict safety gate.', {
       alertEventId: args.event.id,
       token: args.event.assetId,
@@ -191,6 +196,13 @@ export async function deliverAlphaSemanticEvent(args: {
 
   const deliveryStartedAt = Date.now();
   const users = (await dependencies.getUsers()).sort((a, b) => recipientDelayMs(a, deliveryStartedAt) - recipientDelayMs(b, deliveryStartedAt));
+  if (dependencies === productionDependencies && !deliveryMessage.includes('<b>OWNERSHIP</b>') && /^(robinhood|robinchain)$/i.test(args.event.chain ?? '')) {
+    deliveryMessage = paidOwnership ? withOwnershipDisclosure(deliveryMessage, paidOwnership)
+      : await discloseRobinhoodOwnership(deliveryMessage, args.event.assetId,
+          typeof args.event.rawSnapshot?.creator === 'string' ? args.event.rawSnapshot.creator : null,
+          typeof args.event.rawSnapshot?.pairAddress === 'string' ? args.event.rawSnapshot.pairAddress : null,
+          isUndelayedRiskEvent(args.event.type));
+  }
   const renderedCharacters = deliveryMessage.length;
   const renderedBytes = Buffer.byteLength(deliveryMessage, 'utf8');
   let delivered = 0; let failed = 0; let accepted = 0;
@@ -206,7 +218,8 @@ export async function deliverAlphaSemanticEvent(args: {
 
       // DEX payment claims survive DB outages, restarts and concurrent workers.
       // Keep an ambiguous Telegram result claimed rather than risk a duplicate.
-      if (dependencies === productionDependencies && args.event.type === 'DEX_PAID') {
+      let paidOwnership: OwnershipDisclosure | null = null;
+  if (dependencies === productionDependencies && args.event.type === 'DEX_PAID') {
         if (!await claimDexRecipient(args.event.eventIdentity, user.telegram_id)) continue;
       }
 

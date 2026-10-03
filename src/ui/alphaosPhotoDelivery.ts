@@ -1,3 +1,13 @@
+// Telegram counts caption characters after HTML entities have been parsed.
+export function telegramCaptionLength(text: string): number {
+  return text.replace(/<[^>]*>/g, '').replace(/&(?:amp|lt|gt|quot|apos|#\d+|#x[\da-f]+);/gi, entity => {
+    const named: Record<string,string> = {'&amp;':'&','&lt;':'<','&gt;':'>','&quot;':'"','&apos;':"'"};
+    if (named[entity]) return named[entity];
+    const hex = /^&#x/i.test(entity);
+    const value = parseInt(entity.slice(hex ? 3 : 2, -1), hex ? 16 : 10);
+    return Number.isFinite(value) && value >= 0 && value <= 0x10ffff ? String.fromCodePoint(value) : entity;
+  }).length;
+}
 export type AlphaosDelivery = { messageId: number; photo: boolean };
 export async function sendAlphaosPhotoAlert(args: {
   botToken: string; chatId: string; text: string; keyboard: unknown; image: Buffer | null;
