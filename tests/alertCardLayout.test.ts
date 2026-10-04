@@ -24,6 +24,21 @@ test('menu content is preserved apart from excessive blank lines',()=>{
  const text='<b>SETTINGS</b>\n\nChoose your alerts';assert.equal(cleanAlertCard(text),text);
 });
 
+test('empty legacy stats cannot swallow risk; supplemental numbers precede risk',()=>{
+ const out=cleanAlertCard(`<b>BOOST DETECTED</b>\n<b>STATS</b>\n<b>RISK</b>\nVerified PONS origin\n\n<b>KEY STATS</b>\nPrice <b>$0.01</b>\nLP lock status <b>Not independently checked</b>\nSource DEXScreener · PONS-mapped graduated pool · Checked 13:07:00 UTC\n\n<b>CONTRACT</b>\n<code>${ca}</code>`);
+ assert.ok(out.indexOf('Price')<out.indexOf('<b>RISK</b>'));
+ assert.ok(out.indexOf('LP lock status')>out.indexOf('<b>RISK</b>'));
+ assert.ok(out.indexOf('DEXScreener')>out.indexOf(ca));
+ assert.equal(cleanAlertCard(out),out);
+});
+test('inline social retains destination while redundant button disappears',()=>{
+ const url='https://x.com/Drawdown';
+ const text=cleanAlertCard(`<b>BOOST DETECTED</b>\n<a href="${url}">X</a>\n<code>${ca}</code>`);
+ assert.ok(text.includes('@Drawdown'));
+ assert.deepEqual(cleanAlertButtons([[{text:'X',url},{text:'Track',callback_data:'T'}]],text),[[{text:'Track',callback_data:'T'}]]);
+ assert.equal(cleanAlertButtons([[{text:'X',url}]],'')!.flat().length,1);
+});
+
 test('paid and prebond actions retain PONS and social links after four primary controls',()=>{
  const rows=[[{text:'PONS',url:'https://www.ponsfamily.com/launchpad/token'},{text:'DexScreener',url:'https://dexscreener.com/robinhood/token'}],[{text:'Full Intel',callback_data:'FI'},{text:'Track',callback_data:'TRACK'}],[{text:'Copy CA',callback_data:'COPY'},{text:'TG',url:'https://t.me/project'}]];
  assert.deepEqual(cleanAlertButtons(rows)!.map(row=>row.map(b=>b.text)),[['DexScreener','Full Intel'],['Track','Copy CA'],['PONS','TG']]);

@@ -13,7 +13,8 @@ export type AlphaosDelivery = { messageId: number; photo: boolean };
 export async function sendAlphaosPhotoAlert(args: {
   botToken: string; chatId: string; text: string; keyboard: unknown; image: Buffer | null;
 }, request: typeof fetch = fetch): Promise<AlphaosDelivery> {
-  args = {...args, text: cleanAlertCard(args.text), keyboard: Array.isArray(args.keyboard) ? cleanAlertButtons(args.keyboard as CardButton[][]) : args.keyboard};
+  args = {...args, text: cleanAlertCard(args.text)};
+  if (Array.isArray(args.keyboard)) args.keyboard = cleanAlertButtons(args.keyboard as CardButton[][], args.text);
   const base = `https://api.telegram.org/bot${args.botToken}`;
   if (args.image) {
     const form = new FormData();
@@ -39,7 +40,7 @@ export async function sendAlphaosPhotoAlert(args: {
 
 export function alphaosEnrichmentEdit(delivery: AlphaosDelivery, chatId: string, text: string, keyboard: unknown) {
   text = cleanAlertCard(text);
-  if (Array.isArray(keyboard)) keyboard = cleanAlertButtons(keyboard as CardButton[][]);
+  if (Array.isArray(keyboard)) keyboard = cleanAlertButtons(keyboard as CardButton[][], text);
   return { method: delivery.photo ? 'editMessageCaption' : 'editMessageText', body: {
     chat_id: chatId, message_id: delivery.messageId, ...(delivery.photo ? { caption: text } : { text, disable_web_page_preview: true }),
     parse_mode: 'HTML', reply_markup: { inline_keyboard: keyboard },
