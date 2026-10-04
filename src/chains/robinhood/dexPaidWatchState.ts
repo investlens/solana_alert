@@ -21,18 +21,28 @@ export function restoreDexPaidWatch(value: unknown, now: number, limit: number):
   for (const entry of data.candidates.slice(0, 24)) {
     if (!entry || typeof entry !== 'object') continue;
     const {token, lastSeenAt, lastCheckedAt} = entry as DexPaidCandidate;
-    if (!token || token.chain !== 'robinhood' || !address(token.tokenAddress) || token.source !== 'PONS'
+    if (!token || token.chain !== 'robinhood' || !address(token.tokenAddress) || !['PONS','DEXSCREENER'].includes(token.source)
       || !Number.isFinite(lastSeenAt) || lastSeenAt > now || now - lastSeenAt >= DEX_PAID_WATCH_TTL_MS
       || !Number.isFinite(lastCheckedAt) || lastCheckedAt < 0 || lastCheckedAt > now
       || !Number.isFinite(token.discoveredAt) || token.discoveredAt > now) continue;
     const minimal: RobinhoodDiscoveredToken = {chain:'robinhood', tokenAddress:token.tokenAddress.toLowerCase(),
-      discoveredAt:token.discoveredAt, source:'PONS', sourceType:'LAUNCHPAD', sources:[],
+      discoveredAt:token.discoveredAt, source:token.source, sourceType:token.source==='PONS'?'LAUNCHPAD':'INDEXER', sources:[],
       ...(address(token.pairAddress) ? {pairAddress:token.pairAddress} : {}),
       ...(typeof token.symbol === 'string' ? {symbol:token.symbol.slice(0,24)} : {}),
       ...(typeof token.name === 'string' ? {name:token.name.slice(0,64)} : {})};
     unique.set(minimal.tokenAddress, {token:minimal,lastSeenAt,lastCheckedAt});
   }
   return [...unique.values()].sort((a,b)=>b.lastSeenAt-a.lastSeenAt).slice(0,limit);
+}
+export function dexPaidFeedCandidates(value: unknown, now: number): RobinhoodDiscoveredToken[] {
+  if(!Array.isArray(value))return [];
+  const tokens=new Map<string,RobinhoodDiscoveredToken>();
+  for(const row of value.slice(0,100)) {
+    if(row?.chainId!=='robinhood'||!address(row.tokenAddress))continue;
+    const tokenAddress=row.tokenAddress.toLowerCase();
+    tokens.set(tokenAddress,{chain:'robinhood',tokenAddress,discoveredAt:now,source:'DEXSCREENER',sourceType:'INDEXER',sources:[]});
+  }
+  return [...tokens.values()].slice(0,24);
 }
 export function snapshotDexPaidWatch(candidates: Iterable<DexPaidCandidate>, now: number, limit: number) {
   // Round-trip validation also strips metadata, images and bulky discovery history.

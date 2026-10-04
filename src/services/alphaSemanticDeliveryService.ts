@@ -121,7 +121,7 @@ export async function deliverAlphaSemanticEvent(args: {
 }, dependencies: SemanticDeliveryDependencies = productionDependencies): Promise<{ delivered: number; failed: number }> {
   const ephemeralMode = dependencies === productionDependencies && (args.event.ephemeral === true || args.event.id < 0);
   let launchType: LaunchClassification | null = null;
-  if (dependencies === productionDependencies && isPositiveSemanticEvent(args.event.type) &&
+  if (dependencies === productionDependencies && !(args.event.type === 'DEX_PAID' && args.event.chain.toLowerCase() === 'robinhood') && isPositiveSemanticEvent(args.event.type) &&
       ['robinhood', 'solana'].includes(args.event.chain.toLowerCase())) {
     let raw: Record<string, unknown> | null = args.event.rawSnapshot ??
       (ephemeralMode ? getEphemeralSemanticEventEvidence(args.event.eventIdentity) : null);
@@ -157,10 +157,12 @@ export async function deliverAlphaSemanticEvent(args: {
   }
 
   let paidOwnership: OwnershipDisclosure | null = null;
-  if (dependencies === productionDependencies && args.event.type === 'DEX_PAID' && args.event.chain === 'robinhood') {
+  let paidCreator: string | null = null;
+  let paidSecurityNote: string | null = null;
+  if (dependencies === productionDependencies && args.event.type === 'DEX_PAID' && args.event.chain.toLowerCase() === 'robinhood') {
     const safety = await evaluateDexPaidAlertSafety(args.event.assetId);
     if (!safety.allowed) {
-      console.warn('[AlphaSemanticDelivery] Robinhood DEX_PAID suppressed by strict safety gate.', {
+      console.warn('[AlphaSemanticDelivery] Robinhood DEX_PAID suppressed by event safety gate.', {
         alertEventId: args.event.id,
         token: args.event.assetId,
         marketCapUsd: safety.marketCapUsd,
@@ -170,9 +172,10 @@ export async function deliverAlphaSemanticEvent(args: {
       });
       return { delivered: 0, failed: 0 };
     }
-    paidOwnership = {devPercent: safety.devHoldingPercent ?? null, top10Percent: safety.top10Percent ?? null,
+    launchType=safety.launchType ?? 'UNKNOWN';paidCreator=safety.ponsDeployer;paidSecurityNote=safety.securityNote ?? null;
+    if(safety.devHoldingPercent!=null||safety.top10Percent!=null)paidOwnership = {devPercent: safety.devHoldingPercent ?? null, top10Percent: safety.top10Percent ?? null,
       top10Coverage: safety.top10Percent == null ? 'UNAVAILABLE' : 'INDEXED_SAMPLE'};
-    console.log('[AlphaSemanticDelivery] Robinhood DEX_PAID passed strict safety gate.', {
+    console.log('[AlphaSemanticDelivery] Robinhood DEX_PAID passed event safety gate.', {
       alertEventId: args.event.id,
       token: args.event.assetId,
       marketCapUsd: safety.marketCapUsd,
@@ -200,10 +203,11 @@ export async function deliverAlphaSemanticEvent(args: {
   if (dependencies === productionDependencies && !deliveryMessage.includes('<b>OWNERSHIP</b>') && /^(robinhood|robinchain)$/i.test(args.event.chain ?? '')) {
     deliveryMessage = paidOwnership ? withOwnershipDisclosure(deliveryMessage, paidOwnership)
       : await discloseRobinhoodOwnership(deliveryMessage, args.event.assetId,
-          typeof args.event.rawSnapshot?.creator === 'string' ? args.event.rawSnapshot.creator : null,
+          paidCreator ?? (typeof args.event.rawSnapshot?.creator === 'string' ? args.event.rawSnapshot.creator : null),
           typeof args.event.rawSnapshot?.pairAddress === 'string' ? args.event.rawSnapshot.pairAddress : null,
           isUndelayedRiskEvent(args.event.type));
   }
+  if(paidSecurityNote)deliveryMessage += `\n\n${paidSecurityNote}`;
   let deliveryButtons = args.buttons;
   if (dependencies === productionDependencies && args.event.chain === 'robinhood' && !isUndelayedRiskEvent(args.event.type)) {
     const card = args.event.type === 'DEX_PAID'

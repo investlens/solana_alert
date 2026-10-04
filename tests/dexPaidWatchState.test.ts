@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {restoreDexPaidWatch,snapshotDexPaidWatch,seedDexPaidWatch,dexPaidWatchLimit,recentDexPayment,DEX_PAID_PAYMENT_MAX_AGE_SECONDS} from '../src/chains/robinhood/dexPaidWatchState.js';
+import {restoreDexPaidWatch,snapshotDexPaidWatch,seedDexPaidWatch,dexPaidFeedCandidates,dexPaidWatchLimit,recentDexPayment,DEX_PAID_PAYMENT_MAX_AGE_SECONDS} from '../src/chains/robinhood/dexPaidWatchState.js';
 const now=Date.now();
 const token={chain:'robinhood' as const,tokenAddress:'0x'+'a'.repeat(40),discoveredAt:now-1000,source:'PONS' as const,sourceType:'LAUNCHPAD' as const,sources:[]};
 test('restart checkpoint preserves scheduling and strips bulky unneeded metadata',()=>{
@@ -9,6 +9,15 @@ test('restart checkpoint preserves scheduling and strips bulky unneeded metadata
  assert.equal(restored.length,1);assert.equal(restored[0].lastCheckedAt,original.lastCheckedAt);
  assert.equal(restored[0].token.metadata,undefined);
  assert.equal(restoreDexPaidWatch({version:1,candidates:[{...original,lastSeenAt:now-1800000}]},now,24).length,0);
+});
+test('promotion discovery includes older-token profiles and custom candidates without inventing PONS lineage',()=>{
+ const rows=dexPaidFeedCandidates([{chainId:'robinhood',tokenAddress:token.tokenAddress},
+  {chainId:'arc',tokenAddress:'0x'+'b'.repeat(40)},{chainId:'robinhood',tokenAddress:'junk'},
+  {chainId:'robinhood',tokenAddress:token.tokenAddress.toUpperCase().replace('0X','0x')}],now);
+ assert.equal(rows.length,1);assert.equal(rows[0].source,'DEXSCREENER');
+ const saved=snapshotDexPaidWatch([{token:rows[0],lastSeenAt:now,lastCheckedAt:0}],now,24);
+ const restored=restoreDexPaidWatch(saved,now+1000,24);
+ assert.equal(restored.length,1);assert.equal(restored[0].token.sourceType,'INDEXER');
 });
 test('watch recovery rejects malformed, future, cross-chain and custom candidates',()=>{
  for (const changed of [{token:{...token,chain:'arc'}},{token:{...token,source:'OTHER'}},{lastSeenAt:now+1},{lastCheckedAt:now+1},{token:{...token,tokenAddress:'junk'}}]) {

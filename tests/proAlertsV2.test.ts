@@ -116,7 +116,7 @@ test('DEX Paid and Boost remain informational WATCH with event-specific presenta
     structureContext: 'Structure: severe drawdown from prior verified level' });
   const boost = renderAlphaNotification({ category: 'market', severity: 'watch', state: 'BOOST', symbol: 'X', displayIntent: 'WATCH' });
   const major = renderAlphaNotification({ category: 'market', severity: 'watch', state: 'MAJOR_BOOST', symbol: 'X', displayIntent: 'WATCH' });
-  assert.match(dex, /^💎 <b>DEX PAID — \$X<\/b>/); assert.match(dex, /ACTION: WATCH/); assert.match(dex, /severe drawdown/);
+  assert.match(dex, /^💎 <b>DEX PAID DETECTED — \$X<\/b>/); assert.match(dex, /ACTION: WATCH/); assert.match(dex, /severe drawdown/); assert.match(dex, /PROMOTION EVENT/); assert.doesNotMatch(dex, /monitoring for entry confirmation/);
   assert.match(boost, /^🚀 <b>BOOST DETECTED — \$X<\/b>/); assert.match(major, /^🚨 <b>MAX BOOST 500\+ — \$X<\/b>/);
   assert.doesNotMatch(`${dex}${boost}${major}`, /CHECK ENTRY|ACTION: MOMENTUM/);
 });

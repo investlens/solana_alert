@@ -1,6 +1,8 @@
 import { getPonsFactoryDeployments } from './ponsContracts.js';
+import { governedDexScreenerJson } from '../../services/dexscreenerRequestGovernor.js';
+import { fetchRobinhoodBoosts } from './discovery.js';
 import { getSharedJson, setSharedJson } from '../../services/sharedJsonCache.js';
-import { DEX_PAID_WATCH_TTL_MS, dexPaidWatchLimit, restoreDexPaidWatch, seedDexPaidWatch, snapshotDexPaidWatch, type DexPaidCandidate } from './dexPaidWatchState.js';
+import { DEX_PAID_WATCH_TTL_MS, dexPaidFeedCandidates, dexPaidWatchLimit, restoreDexPaidWatch, seedDexPaidWatch, snapshotDexPaidWatch, type DexPaidCandidate } from './dexPaidWatchState.js';
 import { discoverFromPons } from './discovery/launchpads/pons.js';
 import type { RobinhoodDiscoveredToken } from './discovery/types.js';
 import { processRobinhoodDexPaidSignal } from './robinhoodObserver.js';
@@ -19,6 +21,23 @@ let started = false;
 let running = false;
 let timer: ReturnType<typeof setInterval> | null = null;
 let firstCycle = true;
+let nextFeedDiscoveryAt = 0;
+async function discoverPromotionFeeds() {
+  if(Date.now()<nextFeedDiscoveryAt)return;
+  nextFeedDiscoveryAt=Date.now()+60_000;
+  const results=await Promise.allSettled([
+    governedDexScreenerJson<unknown>({url:'https://api.dexscreener.com/token-profiles/latest/v1',
+      caller:'dex_paid_profile_discovery',endpoint:'PROFILES',priority:'NORMAL',cacheTtlMs:60_000,
+      queueWaitTimeoutMs:1_000,httpTimeoutMs:2_500}).then(result=>dexPaidFeedCandidates(result.value,Date.now())),
+    fetchRobinhoodBoosts().then(rows=>dexPaidFeedCandidates(rows.map(row=>({chainId:'robinhood',tokenAddress:row.tokenAddress})),Date.now())),
+  ]);
+  let discovered=0;
+  for(const result of results) {
+    if(result.status==='fulfilled')for(const token of result.value){remember(token);discovered++;}
+    else console.warn('[DexPaidFastLane] promotion discovery unavailable; retained candidates remain active');
+  }
+  console.info('[DexPaidFastLane] PROMOTION_FEEDS',{discovered,cap:WATCH_LIMIT,dbWrites:0});
+}
 
 function enabled(): boolean {
   return String(process.env.DEX_PAID_FAST_LANE_ENABLED ?? 'true').toLowerCase() === 'true';
@@ -60,7 +79,10 @@ async function cycle() {
       restored = true;
       console.log('[DexPaidFastLane] WATCH_RESTORED', {candidates:candidates.size, cap:WATCH_LIMIT, checkpointRead:saved ? 'PRESENT' : 'MISSING_OR_UNAVAILABLE', socialSeedRead:launches ? 'PRESENT' : 'MISSING_OR_UNAVAILABLE', dbWrites:0});
     }
-    const batch = await discoverFromPons(firstCycle ? STARTUP_LOOKBACK_BLOCKS : LIVE_LOOKBACK_BLOCKS);
+    await discoverPromotionFeeds();
+    const batch = await discoverFromPons(firstCycle ? STARTUP_LOOKBACK_BLOCKS : LIVE_LOOKBACK_BLOCKS).catch(()=>{
+      console.warn('[DexPaidFastLane] launch discovery unavailable; checking retained/promoted tokens');return {tokens:[]};
+    });
     firstCycle = false;
     for (const token of batch.tokens) remember(token);
     prune();
@@ -108,6 +130,7 @@ export function startDexPaidFastLane() {
     maxChecksPerCycle: MAX_CHECKS_PER_CYCLE,
     candidateTtlMinutes: CANDIDATE_TTL_MS / 60_000,
     watchLimit: WATCH_LIMIT, checkpoint: 'REDIS',
+    discovery: 'PONS + Robinchain profiles + boosts', noTokenAgeLimit: true,
     stalePaymentAlertsSuppressedAfterSeconds: Number(process.env.DEX_PAID_MAX_PAYMENT_AGE_SECONDS ?? 600),
   });
   void cycle();
