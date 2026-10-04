@@ -1,5 +1,5 @@
 import { recentDexPayment } from '../dexPaidWatchState.js';
-import { getIndexedVerifiedPonsLaunch, isVerifiedPonsLaunch } from '../ponsLaunchState.js';
+import { getVerifiedRobinhoodLaunchpad } from '../trustedLaunchpad.js';
 import { routeBoostSecurity, type BoostSecurityGateDecision } from '../boostSecurityRouter.js';
 import { scanRobinhoodDexPaid, type RobinhoodDexPaidResult } from './dexPaidScanner.js';
 type GateCheck = {key:string;passed:boolean;detail:string};
@@ -8,11 +8,11 @@ export type DexPaidAlertSafetyResult = {
   marketCapUsd:number|null;liquidityUsd:number|null;pairAgeMinutes:number|null;
   paymentAgeSeconds:number|null;sellImpactPercent:number|null;ponsDeployer:string|null;
   devHoldingPercent?:number|null;top10Percent?:number|null;
-  launchType?:'PONS'|'CUSTOM'|'UNKNOWN';securityNote?:string;
+  launchType?:'PONS'|'FLAP'|'CUSTOM'|'UNKNOWN';securityNote?:string;
 };
 type Dependencies = {
   paid:(token:string)=>Promise<RobinhoodDexPaidResult>;
-  launch:(token:string)=>Promise<{exists:boolean;token:string;deployer:string|null}|null>;
+  launch:(token:string)=>Promise<{exists:boolean;token:string;deployer:string|null;launchType?:'PONS'|'FLAP'}|null>;
   custom:(token:string)=>Promise<BoostSecurityGateDecision>;
   now:()=>number;
 };
@@ -32,8 +32,8 @@ export function createDexPaidEventGate(deps:Dependencies) {
       if(!fresh){base.reasons.push('PAYMENT_OUTSIDE_WINDOW');return base;}
       const launch=await deps.launch(token).catch(()=>null);
       if(launch?.exists&&launch.token.toLowerCase()===token.toLowerCase()) {
-        base.allowed=true;base.launchType='PONS';base.ponsDeployer=launch.deployer;
-        base.securityNote='Verified PONS launchpad origin · payment is promotion, not a trade recommendation.';
+        base.allowed=true;base.launchType=launch.launchType??'PONS';base.ponsDeployer=launch.deployer;
+        base.securityNote=`Verified ${base.launchType} launchpad origin · payment is promotion, not a trade recommendation.`;
         base.checks.push({key:'TRUSTED_LAUNCHPAD',passed:true,detail:'Authoritative PONS factory verification'});
         return base;
       }
@@ -53,6 +53,5 @@ export function createDexPaidEventGate(deps:Dependencies) {
 export const evaluateDexPaidAlertSafety=createDexPaidEventGate({paid:scanRobinhoodDexPaid,
   // V2 origin is independently verifiable without the V1-only launch-state view.
   // Creator enrichment is optional and must not turn an approved origin into CUSTOM.
-  launch:async token=>(await getIndexedVerifiedPonsLaunch(token))
-    ?? (await isVerifiedPonsLaunch(token)?{exists:true,token,deployer:null}:null),
+  launch:async token=>{const origin=await getVerifiedRobinhoodLaunchpad(token);return origin?{...origin,exists:true}:null;},
   custom:token=>routeBoostSecurity({tokenAddress:token,verifiedTrustedLaunchpad:false,requireExplicitSellability:true}),now:Date.now});

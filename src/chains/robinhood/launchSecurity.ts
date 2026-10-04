@@ -1,4 +1,5 @@
 import { supabase } from '../../services/supabase.js';
+import { getVerifiedRobinhoodLaunchpad } from './trustedLaunchpad.js';
 import {
   evaluatePositiveAlertSecurity,
   type LaunchClassification,
@@ -93,6 +94,8 @@ async function verifyPonsAcrossKnownFactories(tokenAddress: string): Promise<Pon
 }
 
 export async function classifyRobinhoodLaunch(tokenAddress: string): Promise<LaunchClassification> {
+  const trusted = await getVerifiedRobinhoodLaunchpad(tokenAddress).catch(()=>null);
+  if (trusted) return trusted.launchType;
   const token = normalize(tokenAddress);
 
   if (recentPonsTokens.has(token)) return 'PONS';

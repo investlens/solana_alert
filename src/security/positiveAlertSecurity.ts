@@ -1,4 +1,4 @@
-export type LaunchClassification = 'PONS' | 'CUSTOM' | 'UNKNOWN';
+export type LaunchClassification = 'PONS' | 'FLAP' | 'CUSTOM' | 'UNKNOWN';
 export type VerifiedLiquidityState = 'LOCKED' | 'BURNED' | 'UNLOCKED' | 'UNKNOWN';
 
 export type PositiveAlertSecurityDecision = {
@@ -73,13 +73,13 @@ export function evaluatePositiveAlertSecurity(args: {
   launchType: LaunchClassification;
   raw?: Record<string, unknown> | null;
 }): PositiveAlertSecurityDecision {
-  if (args.launchType === 'PONS') {
+  if (args.launchType === 'PONS' || args.launchType === 'FLAP') {
     return {
       allowed: true,
-      launchType: 'PONS',
+      launchType: args.launchType,
       liquidityState: 'UNKNOWN',
       liquidityVerified: false,
-      reason: 'PONS_EXISTING_SECURITY_PATH',
+      reason: `${args.launchType}_EXISTING_SECURITY_PATH`,
     };
   }
 

@@ -14,7 +14,7 @@ export function buildPremiumTokenNotification(args:{
   state:PremiumState; symbol?:string|null; name?:string|null; address:string; chain?:string|null; observedAt?:string|number|Date|null;
   age?:string|null; market:NotificationMarketContext; evidence?:CoreDecisionMetricContext|null; volumeMultiple?:number|null; move?:number|null; peakMove?:number|null;
   retainedPeakPercent?:number|null; boostTotal?:number|null; boostIncrement?:number|null; devLaunches?:number|null; devBurnPercent?:number|null; risk?:string|null; confidence?:number|null;
-  buys5m?:number|null; sells5m?:number|null; move1h?:number|null; source?:string|null; telegramType?:string; launchSource?:'PONS'|'CUSTOM'|'UNKNOWN'|null; socials?:{twitter?:string|null;telegram?:string|null};
+  buys5m?:number|null; sells5m?:number|null; move1h?:number|null; source?:string|null; telegramType?:string; launchSource?:'PONS'|'FLAP'|'CUSTOM'|'UNKNOWN'|null; socials?:{twitter?:string|null;telegram?:string|null};
   insightTitle:string; insight:string[]; statusTitle:string; status:string; displayIntent?:'ENTRY'|'MOMENTUM_UPDATE'|'RECOVERY_WATCH'|'WATCH'|'AVOID'|'EXIT';
   comparison?:{previous:number;current:number;changePct:number}; entryAction?:'BUY'|'CHECK_ENTRY'; structureContext?:string|null;
 }) {
@@ -47,7 +47,7 @@ export function buildPremiumTokenNotification(args:{
       : args.name
         ? `<b>${escapeHtml(args.name)}</b> · Symbol unavailable`
         : '<b>Symbol unavailable</b>';
-    const launchLabel = args.launchSource === 'PONS' ? 'PONS'
+    const launchLabel = args.launchSource === 'PONS' || args.launchSource === 'FLAP' ? args.launchSource
       : args.launchSource === 'CUSTOM' ? 'CUSTOM'
       : 'UNVERIFIED';
     const marketLines = [

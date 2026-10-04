@@ -1,7 +1,7 @@
 import { recordFeedDelivery } from './feedDeliveryHealth.js';
 import { discloseRobinhoodKeyStats } from './alertKeyStatsService.js';
 import { routeBoostSecurity } from '../chains/robinhood/boostSecurityRouter.js';
-import { isVerifiedPonsLaunch } from '../chains/robinhood/ponsLaunchState.js';
+import { getVerifiedRobinhoodLaunchpad } from '../chains/robinhood/trustedLaunchpad.js';
 import { withOwnershipDisclosure, type OwnershipDisclosure } from '../ui/ownershipDisclosure.js';
 import { decorateDexPaidAlert, discloseAlertDexPaid } from './alertDexPaidDisclosure.js';
 import { discloseRobinhoodOwnership } from './alertOwnershipService.js';
@@ -162,10 +162,11 @@ export async function deliverAlphaSemanticEvent(args: {
   }
 
   if (dependencies === productionDependencies && args.event.type === 'BOOST' && args.event.chain.toLowerCase() === 'robinhood') {
-    const trusted = await isVerifiedPonsLaunch(args.event.assetId).catch(() => false);
+    const origin = await getVerifiedRobinhoodLaunchpad(args.event.assetId).catch(() => null);
+    const trusted = origin !== null;
     const safety = await routeBoostSecurity({tokenAddress:args.event.assetId, verifiedTrustedLaunchpad:trusted, requireExplicitSellability:true});
     if (!safety.allowed) { console.warn('[AlphaSemanticDelivery] Boost sellability blocked', {reason:safety.reason}); return {delivered:0,failed:0}; }
-    launchType = trusted ? 'PONS' : 'CUSTOM';
+    launchType = origin?.launchType ?? 'CUSTOM';
   }
   let paidOwnership: OwnershipDisclosure | null = null;
   let paidCreator: string | null = null;
@@ -226,7 +227,7 @@ export async function deliverAlphaSemanticEvent(args: {
       : await discloseAlertDexPaid(deliveryMessage, deliveryButtons ?? [], args.event.assetId);
     deliveryMessage = card.text; deliveryButtons = card.buttons;
   }
-  if (dependencies === productionDependencies && args.event.chain.toLowerCase() === 'robinhood' && !isUndelayedRiskEvent(args.event.type)) deliveryMessage = await discloseRobinhoodKeyStats(deliveryMessage,args.event.assetId,false,['DEX_PAID','BOOST'].includes(args.event.type)?(launchType==='PONS'?'Trusted PONS route':'Verified flags · not a guarantee'):undefined);
+  if (dependencies === productionDependencies && args.event.chain.toLowerCase() === 'robinhood' && !isUndelayedRiskEvent(args.event.type)) deliveryMessage = await discloseRobinhoodKeyStats(deliveryMessage,args.event.assetId,false,['DEX_PAID','BOOST'].includes(args.event.type)?(launchType==='PONS'||launchType==='FLAP'?`Trusted ${launchType} route`:'Verified flags · not a guarantee'):undefined);
   const renderedCharacters = deliveryMessage.length;
   const renderedBytes = Buffer.byteLength(deliveryMessage, 'utf8');
   let delivered = 0; let failed = 0; let accepted = 0;

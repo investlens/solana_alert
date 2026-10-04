@@ -13,7 +13,7 @@ import { editTelegramMessage, sendTelegramWithMessageId } from '../../services/t
 import { config } from '../../config.js';
 import { getDeliverableUsers } from '../../core/delivery.js';
 import { runtimeDeliverableUsers } from '../../services/runtimeSubscriberRegistry.js';
-import { isVerifiedPonsLaunch } from './ponsLaunchState.js';
+import { getVerifiedRobinhoodLaunchpad } from './trustedLaunchpad.js';
 import { getRobinhoodTokenSocials } from './tokenMetadata.js';
 import { getRobinhoodMarketSnapshot } from './market.js';
 import { observeBoostCanonicalEvent, boostCanonicalTitle } from './boostCanonicalEvent.js';
@@ -236,11 +236,12 @@ export function buildBoostActions(args: {
 
 function boostRawSecurityEvidence(args: {
   verifiedPons: boolean;
+  trustedLaunchType?: 'PONS'|'FLAP';
   liquidityStatus?: 'LOCKED' | 'BURNED' | 'UNLOCKED' | 'UNKNOWN' | null;
 }) {
   return {
-    launchSource: args.verifiedPons ? 'PONS' : 'UNKNOWN',
-    ...(args.verifiedPons ? {} : {
+    launchSource: args.trustedLaunchType ?? (args.verifiedPons ? 'PONS' : 'UNKNOWN'),
+    ...(args.verifiedPons || args.trustedLaunchType ? {} : {
       liquiditySafetyStatus: args.liquidityStatus ?? 'UNKNOWN',
       liquiditySafetyVerified: args.liquidityStatus === 'LOCKED' || args.liquidityStatus === 'BURNED',
     }),
@@ -271,6 +272,7 @@ export async function enrichDeliveredBoostAlert(args: {
   totalBoostAmount: number;
   boostAmount: number;
   verifiedPons: boolean;
+  trustedLaunchType?: 'PONS'|'FLAP';
   securityReason: string;
   baseSymbol?: string | null;
   baseName?: string | null;
@@ -305,10 +307,10 @@ export async function enrichDeliveredBoostAlert(args: {
     state, symbol, name, address: args.tokenAddress, chain: 'robinhood', market: marketContext,
     evidence: await boostDeveloperEvidence(args.tokenAddress, pons?.creator), socials: { twitter: socials.twitter || pons?.twitter, telegram: socials.telegram || pons?.telegram },
     telegramType: await getTelegramPreviewType(socials.telegram || pons?.telegram || ''),
-    launchSource: args.verifiedPons ? 'PONS' : 'UNKNOWN',
+    launchSource: args.trustedLaunchType ?? (args.verifiedPons ? 'PONS' : 'UNKNOWN'),
     boostTotal: args.totalBoostAmount, boostIncrement: args.boostAmount, risk: 'UNKNOWN',
-    insightTitle: 'WHY NOW', insight: [`${args.canonicalTitle} verified after security gate`, args.securityReason],
-    statusTitle: 'Security', status: args.verifiedPons ? 'Verified PONS origin · market risks apply' : 'Sellability checked · LP protection unverified', displayIntent: 'WATCH',
+    insightTitle: 'WHY NOW', insight: [`${args.canonicalTitle} observed`, args.securityReason],
+    statusTitle: 'Security', status: args.trustedLaunchType ? `Verified ${args.trustedLaunchType} origin · market risks apply` : args.verifiedPons ? 'Verified PONS origin · market risks apply' : 'Sellability checked · LP protection unverified', displayIntent: 'WATCH',
   });
   message = await discloseRobinhoodOwnership(message, args.tokenAddress, pons?.creator, market?.pairAddress ?? pons?.curveAddress);
   const tokenUrl = args.verifiedPons
@@ -323,7 +325,7 @@ export async function enrichDeliveredBoostAlert(args: {
     xUrl: socials.twitter, telegramUrl: socials.telegram,
   });
   const deliveries = await loadDeliveredBoostMessages(args.eventId).catch(() => []);
-  message = await discloseRobinhoodKeyStats(message,args.tokenAddress,false,args.verifiedPons?'Trusted PONS route':'Verified sellability flags');
+  message = await discloseRobinhoodKeyStats(message,args.tokenAddress,false,args.trustedLaunchType?`Trusted ${args.trustedLaunchType} route`:args.verifiedPons?'Trusted PONS route':'Verified sellability flags');
   const card = await discloseAlertDexPaid(message, buttons, args.tokenAddress);
   const edits = await Promise.allSettled(deliveries.map(delivery =>
     editTelegramMessage(delivery.telegramId, delivery.messageId, card.text, card.buttons)));
@@ -408,8 +410,10 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
   const canonical = observeBoostCanonicalEvent(boostTotals, tokenKey, boost.totalAmount, boost.amount);
   if (!canonical) return false;
 
-  const verifiedPons = await isVerifiedPonsLaunch(boost.tokenAddress);
-  const security = await routeBoostSecurity({ tokenAddress: boost.tokenAddress, verifiedTrustedLaunchpad: verifiedPons, requireExplicitSellability: true });
+  const origin = await getVerifiedRobinhoodLaunchpad(boost.tokenAddress);
+  const trustedLaunchType = origin?.launchType;
+  const verifiedPons = trustedLaunchType === 'PONS';
+  const security = await routeBoostSecurity({ tokenAddress: boost.tokenAddress, verifiedTrustedLaunchpad: origin !== null, requireExplicitSellability: true });
   console.log('[RobinhoodBoostObserver] BOOST_SECURITY_DECISION', {
     token: tokenKey, eventType: canonical.type, route: security.route,
     allowed: security.allowed, reason: security.reason, cached: security.cached,
@@ -433,7 +437,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
   const socials = initialEnrichment.socials;
   const symbol = market?.symbol || metadata.symbol || pons?.symbol || null;
   const name = market?.name || metadata.name || pons?.name || null;
-  const securityReason = verifiedPons ? 'Verified PONS origin; trusted launchpad fast path.' : security.reason;
+  const securityReason = trustedLaunchType ? `Verified ${trustedLaunchType} origin; trusted launchpad fast path.` : security.reason;
   const eventId = `${tokenKey}:${canonical.type}:${canonical.currentTotal}`;
   const rawSnapshot = {
     symbol, name, tokenAddress: boost.tokenAddress,
@@ -449,7 +453,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
       volume5m: market.volume5mUsd ?? null,
       chartUrl: market.chartUrl ?? null,
     } : {}),
-    ...boostRawSecurityEvidence({ verifiedPons, liquidityStatus: security.liquidity?.status }),
+    ...boostRawSecurityEvidence({ verifiedPons, trustedLaunchType, liquidityStatus: security.liquidity?.status }),
   };
 
   // Persist first when the database is healthy, but never let persistence/entry-price capture
@@ -501,13 +505,13 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
     state, symbol, name, address: boost.tokenAddress, chain: 'robinhood', market: marketContext,
     evidence: await boostDeveloperEvidence(boost.tokenAddress, pons?.creator), socials: { twitter: socials.twitter || pons?.twitter, telegram: socials.telegram || pons?.telegram },
     telegramType: await getTelegramPreviewType(socials.telegram || pons?.telegram || ''),
-    launchSource: verifiedPons ? 'PONS' : 'UNKNOWN',
+    launchSource: trustedLaunchType ?? 'UNKNOWN',
     boostTotal: canonical.currentTotal, boostIncrement: canonical.boostAdded, risk: 'UNKNOWN',
-    insightTitle: 'WHY NOW', insight: [`${boostCanonicalTitle(canonical)} verified after security gate`, securityReason],
+    insightTitle: 'WHY NOW', insight: [`${boostCanonicalTitle(canonical)} observed`, securityReason],
     statusTitle: 'Security',
     status: security.liquidity?.status && security.liquidity.status !== 'UNKNOWN'
       ? `LP ${security.liquidity.status}`
-      : verifiedPons ? 'Verified PONS origin · market risks apply' : 'Sellability checked · LP protection unverified',
+      : trustedLaunchType ? `Verified ${trustedLaunchType} origin · market risks apply` : 'Sellability checked · LP protection unverified',
     displayIntent: 'WATCH',
   });
   baseMessage = await discloseRobinhoodOwnership(baseMessage, boost.tokenAddress, pons?.creator, market?.pairAddress ?? pons?.curveAddress);
@@ -554,7 +558,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
   }
 
   if (sharedDeliveryUnavailable && accepted === 0 && !sendStarted) {
-    baseMessage = await discloseRobinhoodKeyStats(baseMessage,boost.tokenAddress,false,verifiedPons?'Trusted PONS route':'Verified sellability flags',security.liquidity?.status);
+    baseMessage = await discloseRobinhoodKeyStats(baseMessage,boost.tokenAddress,false,trustedLaunchType?`Trusted ${trustedLaunchType} route`:'Verified sellability flags',security.liquidity?.status);
     const fallbackCard = await discloseAlertDexPaid(baseMessage, baseButtons, boost.tokenAddress);
     sendStarted = true; // Conservative: retain claim even if fallback fails before acceptance.
     const fallbackDelivered = await deliverAdminBoostFallback({
@@ -590,6 +594,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
         totalBoostAmount: canonical.currentTotal,
         boostAmount: canonical.boostAdded,
         verifiedPons,
+        trustedLaunchType,
         securityReason,
         baseSymbol: symbol,
         baseName: name,
