@@ -7,7 +7,7 @@ export type TelegramPreviewType = 'Group' | 'Channel' | 'Personal account' | 'Ty
 export type PonsPublicContext = {
   name: string; symbol: string; creator: string; decimals: number; totalSupplyRaw: bigint;
   logo?: string | null; curveAddress?: string | null; priceUsd?: number | null; fdvUsd: number | null; twitter: string | null; telegram: string | null;
-  phase?: number | null; venue?: string | null;
+  phase?: number | null; venue?: string | null; poolId?: string | null;
 };
 
 // Read server-rendered public metadata, never credentials or social-profile APIs.
@@ -31,6 +31,7 @@ export function parsePonsPublicContext(html: string, token: string, factory: str
       return { name: d.name, symbol: d.symbol.replace(/^\$+/, ''), creator: d.deployer,
         phase: Number.isInteger(d.phase) && d.phase >= 0 ? d.phase : null,
         venue: typeof d.venue === 'string' ? d.venue : null,
+        poolId: /^0x(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$/.test(d.poolId ?? '') ? d.poolId : null,
         curveAddress: /^0x[a-fA-F0-9]{40}$/.test(d.curve ?? d.curveAddress ?? '') ? (d.curve ?? d.curveAddress) : null,
         logo: typeof d.logo === 'string' ? d.logo : null, decimals: d.decimals, totalSupplyRaw: supply,
         priceUsd: typeof price === 'number' && price > 0 && typeof quoteUsd === 'number' && quoteUsd > 0 && Number.isFinite(price * quoteUsd) ? price * quoteUsd : null,

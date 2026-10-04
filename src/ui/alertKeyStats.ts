@@ -3,6 +3,7 @@ export type AlertKeyStats = {
   price?: number|null; marketCap?: number|null; fdv?:number|null; liquidity?:number|null;
   volume5m?:number|null; volume24h?:number|null; move5m?:number|null; move1h?:number|null;
   buys?:number|null;sells?:number|null;pairCreatedAt?:number|null; supply?:string|null;
+  authoritativeVenue?: boolean;
   preBond?:boolean; sellability?:string|null; lp?:string|null; source?:string|null; checkedAt?:string|null; dexPaid?:string|null; symbol?:string|null; name?:string|null;
 };
 const n=(v:unknown):v is number=>typeof v==='number'&&Number.isFinite(v);
@@ -11,7 +12,11 @@ const movement=(v:unknown)=>n(v)?`${v>=0?'+':''}${v.toFixed(2)}%`:'Unavailable';
 // Complete missing fields without overwriting already verified valuation/ownership.
 // Render once per token before fan-out; no fetches or persistence in this helper.
 export function withAlertKeyStats(text:string, stats:AlertKeyStats):string {
-  const clean=text.replace(/\n*<b>KEY STATS<\/b>\n[\s\S]*?(?=\n\n|$)/g,'');
+  let clean=text.replace(/\n*<b>KEY STATS<\/b>\n[\s\S]*?(?=\n\n|$)/g,'');
+  if (stats.authoritativeVenue) clean=clean.split('\n').filter(line=>{
+    const plain=line.replace(/<[^>]+>/g,'').replace(/^[^A-Za-z0-9]+/,'');
+    return !/^(?:Price\s|Market cap\s|MC\s|FDV\s|Liquidity\s|LP liquidity\s|5m volume\s|Vol(?:ume)?\s*·?\s*(?:5m|24h)\s|Move\s*·?\s*(?:5m|1h)\s|Trades\s*·?\s*5m\s|Buy \/ sell\s|Pair age\s|LP status\s|Source .*Checked|DEXScreener\s*·\s*Checked)/i.test(plain);
+  }).join('\n');
   const plain=clean.replace(/<[^>]+>/g,'');
   const lines:string[]=[];
   const add=(pattern:RegExp,label:string,value:string)=>{if(!pattern.test(plain))lines.push(`${label} <b>${escapeAlphaHtml(value)}</b>`);};
