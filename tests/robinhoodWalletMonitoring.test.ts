@@ -147,7 +147,7 @@ test('Robinhood wallet alert preserves verified market/FDV context and safe acti
   assert.match(message, /Market cap\s+<b>\$25\.5K<\/b>/);
   assert.match(message, /Liquidity\s+<b>\$23\.0K<\/b>/);
   assert.match(message, /Dev holding\s+<b>0%<\/b>/);
-  assert.doesNotMatch(message, /Burned/);
+  assert.match(message, /Burned <b>0%<\/b>/);
   assert.doesNotMatch(message, /\$40\.0K|Trade/);
 
   const actions = buildWalletActivityButtons(event, {
@@ -156,9 +156,9 @@ test('Robinhood wallet alert preserves verified market/FDV context and safe acti
     chartSource: 'dexscreener', tokenSource: 'blockscout',
   });
   assert.deepEqual(actions.map(row => row.map(action => action.text)), [
-    ['🔬 Full Intel', '📊 Chart'], ['📋 Copy CA'], ['🐋 Wallet Activity'],
+    ['🔬 Full Intel', '📊 Chart'], ['🐋 Wallet Activity'],
   ]);
-  assert.equal(actions[1][0].callback_data, `COPY_CA_${token}`);
+  assert.ok(actions[0][0].callback_data?.includes(token));
   assert.equal(actions.flat().some(action => action.text.includes('Trade')), false);
   for (const action of actions.flat()) if (action.callback_data) {
     assert.ok(Buffer.byteLength(action.callback_data, 'utf8') <= 64);

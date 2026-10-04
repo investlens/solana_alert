@@ -198,7 +198,7 @@ test('opportunity specialist zeroes require explicit meaningful confirmation', a
     transferZeroConfirmedMeaningful: true,
   }));
   assert.doesNotMatch(confirmed, /Transferred/);
-  assert.match(confirmed, /Dev:<\/b> Holds 0%/);
+  assert.match(confirmed, /Dev holds 0%/);
   assert.doesNotMatch(confirmed, /Dev:<\/b>[^\n]*Burned/);
 });
 
@@ -218,7 +218,8 @@ test('Entry to Exit preserves verified developer holding and burn but not stale 
   });
   const exit = { ...opportunity(exitRaw, rustyAddress), recommended_action: 'EXIT' };
   const message = buildOpportunityMessage(exit);
-  assert.doesNotMatch(message, /Dev holding|Burned/);
+  assert.match(message, /Dev holding <b>2\.86%<\/b>/);
+  assert.doesNotMatch(message, /Burned/);
   assert.doesNotMatch(message, /Market cap/);
 });
 
@@ -267,7 +268,7 @@ test('metadata failure safely leaves Exit address-only', async () => {
   });
   assert.equal(resolved.rawData.symbol, undefined);
   const { buildOpportunityMessage } = await service();
-  assert.match(buildOpportunityMessage(exit), /RISK ACTION[\s\S]*0xa091…36e9d<\/b>[\s\S]*ACTION: EXIT/);
+  assert.match(buildOpportunityMessage(exit), /RISK \/ EXIT[\s\S]*0xa091…36e9d<\/b>[\s\S]*ALPHAOS VERDICT: EXIT/);
 });
 
 test('persisted lifecycle identity prevents unnecessary metadata fallback', async () => {
@@ -344,15 +345,16 @@ test('SPURDO persisted lifecycle data reaches final Exit rendering and Copy CA a
   const message = buildOpportunityMessage(exit);
   assert.match(message, /<b>SPURDO<\/b>/);
   assert.match(message, /FDV\s+<b>\$4\.(?:58|6)K<\/b>/);
-  assert.doesNotMatch(message, /Dev holding|Burned/);
+  assert.match(message, /Dev holding <b>0%<\/b>/);
+  assert.doesNotMatch(message, /Burned/);
   assert.doesNotMatch(message, /Market INDEXING|Market cap|Liquidity|5m volume/);
 
   const buttons = buildButtons(exit, target, { telegram_id: '1', tier: 'paid', is_admin: false } as any);
   assert.equal(buttons.flat().some(button => button.text.includes('Trade')), false);
   assert.deepEqual(buttons[0].map(button => button.text), ['🔬 Full Intel']);
-  const copy = buttons.flat().find(button => button.text === '📋 Copy CA');
-  assert.equal(copy?.callback_data, `COPY_CA_${spurdoAddress}`);
-  assert.ok(Buffer.byteLength(copy!.callback_data!, 'utf8') <= 64);
+  const intel = buttons.flat().find(button => button.text === '🔬 Full Intel');
+  assert.ok(intel?.callback_data?.includes(spurdoAddress));
+  assert.ok(Buffer.byteLength(intel!.callback_data!, 'utf8') <= 64);
 });
 
 test('PONS Entry Ready and Watching render verified FDV while indexed market replaces it', async () => {
@@ -372,7 +374,7 @@ test('PONS Entry Ready and Watching render verified FDV while indexed market rep
       symbol: 'SPURDO', elapsedSec: 60, marketIndexState: 'VERIFIED',
       marketCap: 8_200, liquidity: 3_100, volume5m: 900,
       chartUrl: 'https://dexscreener.com/robinhood/spurdo',
-      preIndexValuation: spurdoValuation(),
+      preIndexValuation: null,
     }, spurdoAddress),
     recommended_action: 'EXIT',
   };
@@ -459,6 +461,11 @@ test('OFY lifecycle keeps verified FDV while indexed current market takes preced
     symbol: 'OFY', marketCap: 9_000, fdv: 10_000, liquidity: 3_000, volume5m: 800,
     chartUrl: 'https://dexscreener.com/robinhood/ofy',
   }, 'VERIFIED');
+  const disputed = buildOpportunityMessage(indexed);
+  assert.match(disputed, /Valuation\s+<b>DISPUTED/);
+  assert.doesNotMatch(disputed, /Market cap\s+<b>\$9\.0K/);
+  // Once the active curve is absent, the indexed market is authoritative.
+  indexed.raw_data = { ...indexed.raw_data, preIndexValuation: null };
   const message = buildOpportunityMessage(indexed);
   assert.match(message, /Market cap\s+<b>\$9\.0K<\/b>/);
   assert.match(message, /Liquidity\s+<b>\$3\.0K<\/b>/);

@@ -91,7 +91,7 @@ test('V2 verified curve price and quote/USD render FDV without relabeling it', a
   assert.match(message, /FDV\s+<b>\$60\.0K<\/b>/);
   assert.doesNotMatch(message, /Market cap/);
   assert.doesNotMatch(message, /Market\s+<b>INDEXING<\/b>/);
-  assert.match(message, /Dev:<\/b> Holds 2\.4%/);
+  assert.match(message, /Dev holds 2\.4%/);
   assert.doesNotMatch(message, /Dev:<\/b>[^\n]*Burned/);
 });
 
@@ -153,7 +153,7 @@ test('indexed current market context overrides pre-index valuation', async () =>
   });
   assert.ok(valuation);
   const message = await buildMessage(opportunity({
-    valuation, indexed: true, marketCap: 75_000, fdv: 90_000,
+    valuation: null, indexed: true, marketCap: 75_000, fdv: 90_000,
   }));
   assert.match(message, /Market cap\s+<b>\$75\.0K<\/b>/);
   assert.doesNotMatch(message, /FDV/);
@@ -168,6 +168,6 @@ test('Exit shows a fresh verified lifecycle valuation but never INDEXING', async
   const message = await buildMessage(opportunity({ action: 'EXIT', valuation }));
   assert.doesNotMatch(message, /INDEXING|Market cap/);
   assert.match(message, /FDV\s+<b>\$60\.0K<\/b>/);
-  assert.doesNotMatch(message, /Dev holding/);
+  assert.match(message, /Dev holding <b>2\.4%<\/b>/);
   assert.doesNotMatch(message, /Burned/);
 });

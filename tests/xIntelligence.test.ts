@@ -110,7 +110,7 @@ test('Admin X management is bounded, database-backed, and manual accounts defaul
 
 test('X preference defaults OFF and no discovery poller starts with the application', async () => {
   assert.equal(defaultStrategyEnabledForUser('X_REPUTED_MENTION'), false);
-  assert.equal(defaultStrategyEnabledForUser('DEX_PAID'), false);
+  assert.equal(defaultStrategyEnabledForUser('DEX_PAID'), true);
   assert.equal(defaultStrategyEnabledForUser('PONS_BREAKOUT'), true);
   const [index, ingestion, migration] = await Promise.all([
     readFile(new URL('../src/main.ts', import.meta.url), 'utf8'),

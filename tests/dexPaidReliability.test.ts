@@ -41,13 +41,13 @@ test('DEX Paid semantic identity is deterministic and cannot collide with BOOST'
   assert.equal(dexPaid.lifecycle_action, 'OBSERVE'); assert.equal(dexPaid.semantic_event_type, 'DEX_PAID');
 });
 
-test('DEX Paid remains NORMAL priority and uses immutable semantic event plus shared durable delivery', async () => {
+test('DEX Paid uses HIGH promotion priority with immutable events and durable delivery', async () => {
   const [scanner, observer, delivery] = await Promise.all([
     readFile(new URL('../src/chains/robinhood/security/dexPaidScanner.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/chains/robinhood/robinhoodObserver.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/services/alphaSemanticDeliveryService.ts', import.meta.url), 'utf8'),
   ]);
-  assert.match(scanner, /caller: 'robinhood_dex_paid', priority: 'NORMAL'/);
+  assert.match(scanner, /caller: 'robinhood_dex_paid',[\s\S]*?priority: 'HIGH'/);
   assert.match(observer, /persistOrLoadAlphaSemanticEventRecord\(\{[\s\S]{0,160}type: 'DEX_PAID'/);
   assert.match(observer, /deliverAlphaSemanticEvent\(\{ event:[\s\S]{0,180}type: 'DEX_PAID'/);
   assert.ok(observer.indexOf('processRobinhoodDexPaidDiscoverySlice(discovery.tokens)') <
