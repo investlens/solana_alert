@@ -1,5 +1,6 @@
 import { recordFeedDelivery } from './feedDeliveryHealth.js';
-import { discloseRobinhoodKeyStats } from './alertKeyStatsService.js';
+import { buildDexPaidEventCard } from '../ui/dexPaidCard.js';
+import { discloseRobinhoodKeyStats, cachedRobinhoodAlertStats } from './alertKeyStatsService.js';
 import { routeBoostSecurity } from '../chains/robinhood/boostSecurityRouter.js';
 import { getVerifiedRobinhoodLaunchpad } from '../chains/robinhood/trustedLaunchpad.js';
 import { withOwnershipDisclosure, type OwnershipDisclosure } from '../ui/ownershipDisclosure.js';
@@ -228,6 +229,13 @@ export async function deliverAlphaSemanticEvent(args: {
     deliveryMessage = card.text; deliveryButtons = card.buttons;
   }
   if (dependencies === productionDependencies && args.event.chain.toLowerCase() === 'robinhood' && !isUndelayedRiskEvent(args.event.type)) deliveryMessage = await discloseRobinhoodKeyStats(deliveryMessage,args.event.assetId,false,['DEX_PAID','BOOST'].includes(args.event.type)?(launchType==='PONS'||launchType==='FLAP'?`Trusted ${launchType} route`:args.event.type==='DEX_PAID'?'See sellability disclosure':'Verified flags · not a guarantee'):undefined);
+  if (dependencies === productionDependencies && args.event.type==='DEX_PAID' && args.event.chain==='robinhood') {
+    const raw=args.event.rawSnapshot ?? getEphemeralSemanticEventEvidence(args.event.eventIdentity);
+    const card=buildDexPaidEventCard({text:deliveryMessage,token:args.event.assetId,launchType,
+      stats:cachedRobinhoodAlertStats(args.event.assetId),securityNote:paidSecurityNote,buttons:deliveryButtons??[],
+      paymentTimestamp:typeof raw?.paymentTimestamp==='number'?raw.paymentTimestamp:null});
+    deliveryMessage=card.text;deliveryButtons=card.buttons;
+  }
   const renderedCharacters = deliveryMessage.length;
   const renderedBytes = Buffer.byteLength(deliveryMessage, 'utf8');
   let delivered = 0; let failed = 0; let accepted = 0;
