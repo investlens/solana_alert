@@ -69,7 +69,7 @@ export async function readVolumeBreakout(network: string, token: string, pool: s
     let cached = history.get(key);
     if (!cached) {
       const boundary = Math.floor(Date.now() / 86400000) * 86400;
-      const data = await json(`${base}/ohlcv/day?aggregate=1&limit=7&before_timestamp=${boundary - 1}&currency=usd&token=base&include_empty_intervals=true`);
+      const data = await json(`${base}/ohlcv/day?aggregate=1&limit=7&before_timestamp=${boundary - 1}&currency=usd&token=base&include_empty_intervals=false`);
       const average = completedWeekAverage(data?.data?.attributes?.ohlcv_list, Date.now(), snapshot.pairCreatedAt);
       if (history.size >= 100) history.delete(history.keys().next().value!);
       cached = { average, expires: Date.now() + (average == null ? 10 * 60000 : 3600000) };

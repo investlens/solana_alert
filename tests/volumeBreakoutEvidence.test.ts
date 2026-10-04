@@ -40,7 +40,7 @@ test('historical lookup reuses hourly baseline, rejects HTTP errors and respects
  const candles=Array.from({length:7},(_,i)=>[(b-(i+1)*day)/1000,1,2,0.5,1.1,5000]);
  const p=structuredClone(payload);p.data.attributes.pool_created_at=new Date(b-10*day).toISOString();
  globalThis.fetch=async(input)=>{
-  if(String(input).includes('/ohlcv/')) { dailyCalls++;assert.match(String(input),/token=base/);return new Response(JSON.stringify({data:{attributes:{ohlcv_list:candles}}})); }
+  if(String(input).includes('/ohlcv/')) { dailyCalls++;assert.match(String(input),/token=base/);assert.match(String(input),/include_empty_intervals=false/);return new Response(JSON.stringify({data:{attributes:{ohlcv_list:candles}}})); }
   return new Response(JSON.stringify(p));
  };
  try {
