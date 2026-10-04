@@ -3,7 +3,7 @@ import { discloseRobinhoodKeyStats } from '../../services/alertKeyStatsService.j
 import { discloseRobinhoodOwnership } from '../../services/alertOwnershipService.js';
 import { discloseAlertDexPaid } from '../../services/alertDexPaidDisclosure.js';
 import { enabledLiveRecipients } from '../../services/liveAlertPreferences.js';
-import { getSharedJson, setSharedJson, claimSharedDelivery } from '../../services/sharedJsonCache.js';
+import { getWatchCheckpoint, setWatchCheckpoint, claimSharedDelivery } from '../../services/sharedJsonCache.js';
 import { waitForRecipientDelivery, recordDeliveryAccepted } from '../../services/recipientDeliveryTiming.js';
 import { recordCompactAlert } from '../../services/compactAlertOutcomes.js';
 import { recordLaunchSocialEligibility } from './alertEligibilityState.js';
@@ -500,9 +500,9 @@ async function boundedSocialMafiaContext<T>(work: Promise<T>, milliseconds: numb
 export async function saveSocialWatchCheckpoint(): Promise<void> {
   const items = [...queue, ...processing.values()].filter(item => item.launchpad.id === 'PONS')
     .slice(0, MAX_QUEUE).map(({ launch, createdAt, nextAt, attempt, eligibility }) => ({ launch, createdAt, nextAt, attempt, eligibility }));
-  await setSharedJson('alphaos:watch:social:v1', items, new Date().toISOString(), SCREEN_LIFETIME_MS);
+  await setWatchCheckpoint('alphaos:watch:social:v1', items, new Date().toISOString(), SCREEN_LIFETIME_MS);
 }
-export async function restoreSocialWatchCheckpoint(load = () => getSharedJson<Array<Omit<QueuedLaunch, 'launchpad'>>>('alphaos:watch:social:v1')): Promise<void> {
+export async function restoreSocialWatchCheckpoint(load = () => getWatchCheckpoint<Array<Omit<QueuedLaunch, 'launchpad'>>>('alphaos:watch:social:v1')): Promise<void> {
   if (!enabled()) return;
   const saved = await load();
   if (!Array.isArray(saved?.value)) return;

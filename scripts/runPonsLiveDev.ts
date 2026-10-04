@@ -8,6 +8,7 @@ import { pollPonsLiveLaunchesOnce, supabasePonsLiveDetectorStorage } from '../sr
 import { createPonsLiveLaunchRouter } from '../src/chains/robinhood/ponsLiveLaunchRouter.js';
 import { replayPonsLiveLaunch, supabasePonsLiveReplaySource } from '../src/chains/robinhood/ponsLiveReplay.js';
 import { parsePonsLiveDevMode, ponsLivePollInterval, runPonsLivePollingLoop } from '../src/chains/robinhood/ponsLivePollingLoop.js';
+import { watchCheckpointRecovery } from '../src/services/watchCheckpointRecovery.js';
 import { collectPonsTokenOutcomes, createProductionPonsOutcomeSource, formatPonsOutcomeSummary } from '../src/chains/robinhood/ponsTokenOutcomeCollector.js';
 import { createBufferedPonsLiveStorage } from '../src/chains/robinhood/ponsBufferedLiveStorage.js';
 
@@ -115,7 +116,9 @@ if (mode.kind === 'ONCE') {
   const storage = dbWritesEnabled ? createBufferedPonsLiveStorage(supabasePonsLiveDetectorStorage) : recoveryMemoryStorage;
   console.log(`[PonsLive] mode=SHADOW dryRun=true realTrades=0 liveStateWrites=${dbWritesEnabled ? 'enabled' : 'disabled-memory-checkpoint'}`);
   startPonsOutcomeCollectionLoop();
-  await Promise.all([restoreSocialWatchCheckpoint(), restoreSetupWatchCheckpoint()]);
+  const socialCheckpoint = watchCheckpointRecovery(restoreSocialWatchCheckpoint, saveSocialWatchCheckpoint, 'social');
+  const setupCheckpoint = watchCheckpointRecovery(restoreSetupWatchCheckpoint, saveSetupWatchCheckpoint, 'setup');
+  await Promise.all([socialCheckpoint(), setupCheckpoint()]);
   let checkpointAt = 0;
   await runPonsLivePollingLoop({
     pollIntervalMs: ponsLivePollInterval(),
@@ -123,10 +126,10 @@ if (mode.kind === 'ONCE') {
       const result = await pollPonsLiveLaunchesOnce(robinhoodResilientScannerRpc as never, storage as never, route, { retry: liveRetry });
       if (Date.now() - checkpointAt >= 30_000) {
         checkpointAt = Date.now();
-        await Promise.all([saveSocialWatchCheckpoint(), saveSetupWatchCheckpoint()]);
+        await Promise.all([socialCheckpoint(), setupCheckpoint()]);
       }
       return result;
     },
   });
-  await Promise.all([saveSocialWatchCheckpoint(), saveSetupWatchCheckpoint()]);
+  await Promise.all([socialCheckpoint(), setupCheckpoint()]);
 }
