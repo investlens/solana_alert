@@ -1,7 +1,8 @@
 import { getSharedJson, setSharedJson } from './sharedJsonCache.js';
 import { escapeTelegramHtml as esc } from '../ui/escapeHtml.js';
 
-export type DeliveryStage = 'ENABLED' | 'MUTED' | 'PREFERENCES_UNAVAILABLE' | 'ACCEPTED' | 'PROCESSING_FAILED';
+export type DeliveryStage = 'ENABLED' | 'MUTED' | 'PREFERENCES_UNAVAILABLE' | 'ACCEPTED' | 'PROCESSING_FAILED'
+  | 'DISCOVERED' | 'EVALUATED' | 'DATA_UNAVAILABLE' | 'CONDITION_WAIT' | 'RISK_REJECTED' | 'QUALIFIED';
 export type FeedHealthSnapshot = { startedAt: number; observedAt: number; feeds: Record<string, Partial<Record<DeliveryStage, number>>> };
 const startedAt = Date.now();
 const feeds: FeedHealthSnapshot['feeds'] = {};
@@ -40,7 +41,7 @@ export function localFeedHealth(now = Date.now()): FeedHealthSnapshot {
   return { startedAt, observedAt: lastObserved, feeds: structuredClone(feeds) };
 }
 export function renderFeedHealth(rows: Array<{ name: string; snapshot: FeedHealthSnapshot | null }>, now = Date.now()): string {
-  const lines = ['📡 <b>ALERT DELIVERY HEALTH</b>', 'Recipient attempts since each worker restart · Cache snapshots', ''];
+  const lines = ['📡 <b>ALERT DELIVERY HEALTH</b>', 'Screening and recipient counters since each worker restart · Cache snapshots', ''];
   for (const { name, snapshot } of rows) {
     lines.push(`<b>${esc(name)}</b>`);
     if (!snapshot || !Number.isFinite(snapshot.observedAt) || now < snapshot.observedAt || now - snapshot.observedAt > 3_600_000) {
@@ -51,10 +52,11 @@ export function renderFeedHealth(rows: Array<{ name: string; snapshot: FeedHealt
     for (const [feed, row] of Object.entries(snapshot.feeds).slice(0, 16)) {
       if (lines.join('\n').length > 3000) { lines.push('Additional feed counters omitted from this compact view.'); break; }
       lines.push(`${esc(feed.replace(/_/g, ' '))}: eligible ${row.ENABLED ?? 0} · muted ${row.MUTED ?? 0} · preference errors ${row.PREFERENCES_UNAVAILABLE ?? 0} · accepted ${row.ACCEPTED ?? 0} · processing errors ${row.PROCESSING_FAILED ?? 0}`);
+      if (row.EVALUATED || row.DISCOVERED) lines.push(`Screening: discovered ${row.DISCOVERED ?? 0} · evaluated ${row.EVALUATED ?? 0} · data unavailable ${row.DATA_UNAVAILABLE ?? 0} · waiting ${row.CONDITION_WAIT ?? 0} · risk rejects ${row.RISK_REJECTED ?? 0} · qualified ${row.QUALIFIED ?? 0}`);
     }
     lines.push('');
   }
-  lines.push('Eligible does not mean sent; dedup and scheduling can intervene.', 'Accepted means Telegram accepted the send. No snapshot does not mean no qualifying tokens.');
+  lines.push('Screening counters count checks, not unique tokens. Eligible does not mean sent; dedup and scheduling can intervene.', 'Accepted means Telegram accepted the send. No snapshot does not mean no qualifying tokens.');
   return lines.join('\n');
 }
 export async function getFeedHealthText(): Promise<string> {

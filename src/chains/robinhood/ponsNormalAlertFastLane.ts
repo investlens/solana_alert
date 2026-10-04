@@ -273,6 +273,7 @@ function schedulePreIndexRecheck(launch: PonsLaunch): void {
   const token = tokenKey(launch);
   if (!token || preIndexCandidates.has(token) || preIndexAlerted.has(token) || preIndexCandidates.size >= PREINDEX_MAX) return;
   preIndexCandidates.add(token);
+  recordFeedDelivery('PONS_CURVE_MOMENTUM', 'DISCOVERED');
 
   const launchedAt = Date.parse(launch.block_timestamp);
   const ageMs = Number.isFinite(launchedAt) ? Math.max(0, Date.now() - launchedAt) : 0;
@@ -283,6 +284,7 @@ function schedulePreIndexRecheck(launch: PonsLaunch): void {
     void (async () => {
       const baseline = await readPonsV2Curve(launch);
       if (!baseline || baseline.graduated) {
+        recordFeedDelivery('PONS_CURVE_MOMENTUM', baseline?.graduated ? 'CONDITION_WAIT' : 'DATA_UNAVAILABLE');
         preIndexCandidates.delete(token);
         if (!baseline && Number.isFinite(launchedAt) && Date.now()-launchedAt < PREINDEX_WATCH_TTL_MS) {
           const retry=setTimeout(()=>schedulePreIndexRecheck(launch),120_000); retry.unref();
@@ -294,11 +296,13 @@ function schedulePreIndexRecheck(launch: PonsLaunch): void {
           let retired = false;
           try {
             const second = await readPonsV2Curve(launch);
+            recordFeedDelivery('PONS_CURVE_MOMENTUM', 'EVALUATED');
             if (!second || second.graduated) { retired = Boolean(second?.graduated); return; }
             const quoteGrowthPct = Number((second.quoteReserve - baseline.quoteReserve) * 10_000n / baseline.quoteReserve) / 100;
             const tokenReserveChangePct = Number((second.tokenReserve - baseline.tokenReserve) * 10_000n / baseline.tokenReserve) / 100;
             const upward = quoteGrowthPct >= PONS_CURVE_MIN_QUOTE_GROWTH_PCT && tokenReserveChangePct < 0;
             if (!upward) {
+              recordFeedDelivery('PONS_CURVE_MOMENTUM', 'CONDITION_WAIT');
               console.log(`[PonsFastLane] MATURE_TREND_REJECT token=${token} quoteGrowthPct=${quoteGrowthPct.toFixed(2)} tokenReservePct=${tokenReserveChangePct.toFixed(2)}`);
               return;
             }
@@ -311,6 +315,7 @@ function schedulePreIndexRecheck(launch: PonsLaunch): void {
             // or that the dev burned supply. Unknown/zero holding is not enough evidence.
             const devSafe = devBurned || (devHolding != null && devHolding > 0 && !devMoved);
             if (!devSafe) {
+              recordFeedDelivery('PONS_CURVE_MOMENTUM', devFlow.evidenceStatus === 'COMPLETE' ? 'RISK_REJECTED' : 'DATA_UNAVAILABLE');
               console.log(`[PonsFastLane] MATURE_TREND_REJECT_DEV token=${token} holdingPct=${devHolding ?? 'unknown'} burnedPct=${devFlow.confirmedDevBurnPercent ?? 0} movedPct=${devFlow.otherDevTransferPercent ?? 0}`);
               return;
             }
@@ -341,6 +346,7 @@ function schedulePreIndexRecheck(launch: PonsLaunch): void {
               '<i>Market/dump risk still applies · AlphaOS</i>',
             ].join('\n');
             const socials = await getRobinhoodTokenSocials(token);
+            recordFeedDelivery('PONS_CURVE_MOMENTUM', 'QUALIFIED');
             const delivery = await directTelegramRecipients(text, token, socials, true, false, {chain:'robinhood', token, feed:'PONS_CURVE_MOMENTUM', price:Number(second.quoteReserve)/Number(second.tokenReserve), pair:launch.curve_address, unit:'ETH_RESERVE_RATIO', creator:launch.deployer_address, creatorSource:'PONS_FACTORY_EVENT'});
             preIndexAlerted.add(token);
             console.log(`[PonsFastLane] MATURE_CURVE_ALERT_SENT token=${token} ageMin=${ageMin} quoteGrowthPct=${quoteGrowthPct.toFixed(2)} delivered=${delivery.delivered} failed=${delivery.failed}`);
