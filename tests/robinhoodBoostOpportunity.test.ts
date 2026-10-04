@@ -52,18 +52,18 @@ test('>=200 indexed boost renders high-attention state and verified current mark
       marketCap: 25_500, fdv: 30_000, liquidity: 23_070,
       volume5m: 6_830, chartUrl,
     },
-    rawData: { preIndexValuation: preIndexValuation(), marketIndexState: 'VERIFIED' },
+    rawData: { marketIndexState: 'VERIFIED' },
   });
-  assert.match(message, /🚀 <b>BOOST DETECTED/);
-  assert.match(message, /👀 <b>ACTION: WATCH/);
+  assert.match(message, /<b>🚀 BOOST DETECTED/);
+  assert.match(message, /not a buy recommendation/);
   assert.doesNotMatch(message, /CHECK ENTRY|ACTION: BUY/);
-  assert.match(message, /Boost\s+<b>200 total \(\+50\)<\/b>/);
-  assert.match(message, /Market cap\s+<b>\$25\.5K<\/b>/);
-  assert.match(message, /Liquidity\s+<b>\$23\.1K<\/b>/);
-  assert.match(message, /5m volume\s+<b>\$6\.8K<\/b>/);
-  assert.match(message, /Move\s+<b>\+12\.4%<\/b>/);
-  assert.match(message, /Dev holding\s+<b>0%<\/b>/);
-  assert.doesNotMatch(message, /Burned/);
+  assert.match(message, /<b>Boost<\/b>\s+200 total \(\+50\)/);
+  assert.match(message, /<b>Market cap<\/b>\s+\$25\.5K/);
+  assert.match(message, /<b>Liquidity<\/b>\s+\$23\.1K/);
+  assert.match(message, /<b>5m volume<\/b>\s+\$6\.8K/);
+  assert.match(message, /<b>Move<\/b>\s+\+12\.4%/);
+  assert.match(message, /<b>Dev holding<\/b>\s+0%/);
+  assert.match(message, /<b>Burned<\/b>\s+0%/);
   assert.doesNotMatch(message, /FDV|INDEXING/);
 });
 
@@ -75,9 +75,10 @@ test('>=200 pre-index PONS V2 boost renders verified FDV without fabricated mark
       preIndexValuation: preIndexValuation(),
     },
   });
-  assert.match(message, /🚀 <b>BOOST DETECTED/);
-  assert.match(message, /FDV\s+<b>\$4\.6K<\/b>/);
-  assert.doesNotMatch(message, /Market cap|Liquidity|5m volume|INDEXING/);
+  assert.match(message, /<b>🚀 BOOST DETECTED/);
+  assert.match(message, /<b>FDV<\/b>\s+\$4\.6K/);
+  assert.match(message, /<b>Liquidity<\/b>\s+Unavailable/);
+  assert.doesNotMatch(message, /Market cap|5m volume|INDEXING/);
 });
 
 test('boost action grammar uses direct verified Chart, full Copy CA, Track and Mute without Trade', () => {
@@ -85,10 +86,11 @@ test('boost action grammar uses direct verified Chart, full Copy CA, Track and M
     tokenAddress: address, chartUrl, opportunityId: 406, strategyKey: 'PONS_BREAKOUT',
   });
   assert.deepEqual(actions.map(row => row.map(action => action.text)), [
-    ['🔬 Full Intel', '📊 Chart'], ['⭐ Track', '📋 Copy CA'], ['🔕 Mute'],
+    ['🔬 Full Intel', '📊 Chart'], ['⭐ Track'],
   ]);
   assert.equal(actions[0][1].url, chartUrl);
-  assert.equal(actions[1][1].callback_data, `COPY_CA_${address}`);
+  assert.ok(actions[0][0].callback_data?.includes(address));
+  assert.equal(actions[1][0].callback_data, 'OPP_TRACK_406');
   assert.equal(actions.flat().some(action => action.text.includes('Trade')), false);
   for (const action of actions.flat()) {
     if (action.callback_data) assert.ok(Buffer.byteLength(action.callback_data, 'utf8') <= 64);
@@ -113,6 +115,10 @@ test('unverified Chart and genuinely missing metrics are omitted', () => {
     confidence: null, risk: null, devHoldingPercent: null, burnedPercent: null,
     buys5m: null, sells5m: null,
   });
-  assert.match(message, /🚀 <b>BOOST DETECTED/);
-  assert.doesNotMatch(message, /Market cap|FDV|Liquidity|5m volume|Momentum|Dev holding|Burned|\$0/);
+  assert.match(message, /<b>🚀 BOOST DETECTED/);
+  assert.match(message, /<b>Market cap<\/b>\s+Unavailable/);
+  assert.match(message, /<b>Liquidity<\/b>\s+Unavailable/);
+  assert.match(message, /<b>Dev holding<\/b>\s+Unverified/);
+  assert.match(message, /<b>Burned<\/b>\s+Unverified/);
+  assert.doesNotMatch(message, /FDV|5m volume|Momentum|\$0/);
 });

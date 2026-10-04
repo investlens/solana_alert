@@ -13,8 +13,8 @@ test('standard automatic alert is compact, decision-oriented and contains no raw
       { label: 'Price', value: '$0.00003541' }, { label: 'Market cap', value: '$34.7K' },
       { label: 'Liquidity', value: '$18.3K' }, { label: '5m volume', value: '$118.5' },
     ], insightTitle: 'WHY NOW', insight: ['New ATH reached', 'Momentum strengthening', 'Liquidity remains healthy', 'ignored fourth insight'] });
-  assert.ok(message.length <= 1200); assert.ok(message.split('\n').length <= 14);
-  assert.match(message, /RUNNER — Time Vault \(\$TV\)/); assert.match(message, /\$0\.00003541/);
+  assert.ok(message.length <= 1200); assert.ok(message.split('\n').filter(Boolean).length <= 14);
+  assert.match(message, /<b>🚀 MOMENTUM<\/b>/); assert.match(message, /Time Vault \(\$TV\)/); assert.match(message, /\$0\.00003541/);
   assert.match(message, /Market cap <b>\$34\.7K/); assert.match(message, /Liquidity <b>\$18\.3K/); assert.match(message, /5m volume <b>\$118\.5/);
   assert.equal((message.match(/^• /gm) ?? []).length, 3); assert.doesNotMatch(message, /DEXSCREENER_VERIFIED|2026-\d\d-/);
 });
@@ -103,7 +103,7 @@ test('Internet Money Full Intel stays compact without hiding verified security e
 test('automatic action hierarchy remains callback-safe and does not add Trade', () => {
   const rows = buildAlphaMarketActions({ chartUrl: 'https://dexscreener.com/x', tokenUrl: 'https://explorer/x',
     fullIntelCallback: 'FI_RH_0x123', trackCallback: 'TRACK_1', copyContractCallback: 'COPY_CA_1', muteCallback: 'MUTE_1' });
-  assert.deepEqual(rows.map(row => row.map(button => button.text)), [['🔬 Full Intel', '📊 Chart'], ['⭐ Track', '📋 Copy CA'], ['🔕 Mute']]);
+  assert.deepEqual(rows.map(row => row.map(button => button.text)), [['🔬 Full Intel', '📊 Chart'], ['⭐ Track']]);
   assert.ok(rows.flat().every(button => !button.callback_data || Buffer.byteLength(button.callback_data) <= 64));
   assert.ok(rows.flat().every(button => !/Trade/i.test(button.text)));
 });
@@ -120,16 +120,16 @@ test('first actionable CHECK_ENTRY is explicit entry intent and bounded to three
   await import('dotenv/config');
   const { buildOpportunityMessage } = await import('../src/services/opportunityDeliveryService.js');
   const message = buildOpportunityMessage(intentOpportunity({}));
-  assert.match(message, /^🎯 <b>ENTRY OPPORTUNITY<\/b>/);
-  assert.match(message, /🎯 <b>ACTION: CHECK ENTRY<\/b>/);
-  assert.match(message, /Conditions qualify for entry consideration/);
+  assert.match(message, /^<b>🔥 ALPHA ENTRY<\/b>/);
+  assert.match(message, /ALPHAOS VERDICT: CHECK ENTRY/);
+  assert.match(message, /WHY ALPHAOS LIKES IT/);
   assert.doesNotMatch(message, /Previously alerted opportunity has a new qualified momentum signal/);
   assert.equal((message.match(/^• /gm) ?? []).length, 3);
   assert.match(message, /• Breakout confirmed\n• Volume acceleration increased\n• Structure remains confirmed/);
   assert.ok(message.length <= 4096);
 });
 
-test('prior successfully delivered actionable event produces momentum intent with verified comparison only', async () => {
+test('qualified comparison has an explicit renderer without changing legacy opportunity identity', async () => {
   await import('dotenv/config');
   const { buildOpportunityMessage } = await import('../src/services/opportunityDeliveryService.js');
   const base = intentOpportunity({});
@@ -137,11 +137,10 @@ test('prior successfully delivered actionable event produces momentum intent wit
     price: { previous: 0.00004, current: 0.00004952, changePct: 23.8 }, previousState: 'CONFIRMED', currentState: 'RUNNER' };
   const message = buildOpportunityMessage(base, comparison, { intent: 'MOMENTUM_UPDATE', notify: true,
     factors: ['PROGRESSION'], reasons: ['Price advanced 23.8% since previous alert'] });
-  assert.match(message, /^📈 <b>MOMENTUM UPDATE<\/b>/);
-  assert.match(message, /📈 <b>ACTION: MOMENTUM UPDATE<\/b>/);
-  assert.match(message, /Previously alerted opportunity has a new qualified momentum signal/);
-  assert.match(message, /Previously alerted[\s\S]*Now[\s\S]*Change[\s\S]*\+23\.8%/);
-  assert.match(message, /This is an update to an earlier opportunity/);
+  assert.match(message, /^<b>🔥 ALPHA ENTRY<\/b>/);
+  const update = renderMomentumUpdate(comparison)!;
+  assert.match(update, /MOMENTUM UPDATE/);
+  assert.match(update, /Price <b>\+23\.8%<\/b> since AlphaOS alert/);
   const unavailable = buildOpportunityMessage(base, { hasPriorAlert: true });
   assert.doesNotMatch(unavailable, /Previously alerted\s+<b>\$0/);
 });
@@ -157,10 +156,10 @@ test('reason formatting renders one verified reason once and never more than thr
 
 test('informational, avoid and exit display intents remain unambiguous', () => {
   const watch = renderAlphaNotification({ category: 'market', severity: 'watch', state: 'BOOST', symbol: 'HOTDOG', displayIntent: 'WATCH' });
-  assert.match(watch, /BOOST DETECTED[\s\S]*ACTION: WATCH[\s\S]*Information only — entry not confirmed/);
+  assert.match(watch, /MOMENTUM[\s\S]*ALPHAOS VERDICT: MOMENTUM WATCH[\s\S]*monitoring for entry confirmation/);
   assert.doesNotMatch(watch, /CHECK ENTRY|ACTION: BUY/);
-  assert.match(renderAlphaNotification({ category: 'risk', severity: 'critical', state: 'RISK', symbol: 'HOTDOG', displayIntent: 'AVOID' }), /ACTION: AVOID/);
-  assert.match(renderAlphaNotification({ category: 'risk', severity: 'critical', state: 'EXIT_AVOID', symbol: 'HOTDOG', displayIntent: 'EXIT' }), /ACTION: EXIT/);
+  assert.match(renderAlphaNotification({ category: 'risk', severity: 'critical', state: 'RISK', symbol: 'HOTDOG', displayIntent: 'AVOID' }), /ALPHAOS VERDICT: AVOID/);
+  assert.match(renderAlphaNotification({ category: 'risk', severity: 'critical', state: 'EXIT_AVOID', symbol: 'HOTDOG', displayIntent: 'EXIT' }), /ALPHAOS VERDICT: EXIT/);
 });
 
 test('automatic social links are allowlisted, deduplicated and optional without changing callbacks', async () => {
@@ -175,24 +174,25 @@ test('automatic social links are allowlisted, deduplicated and optional without 
     xUrl: 'https://twitter.com/hotdog', telegramUrl: 'https://t.me/hotdog', trackCallback: 'TRACK_1',
     copyContractCallback: 'COPY_CA_1', muteCallback: 'MUTE_1' });
   assert.deepEqual(rows.map(row => row.map(button => button.text)), [
-    ['🔬 Full Intel'], ['𝕏 X', '✈️ Telegram'], ['⭐ Track', '📋 Copy CA'], ['🔕 Mute'],
+    ['🔬 Full Intel'], ['⭐ Track'],
   ]);
-  assert.equal(rows.flat().filter(button => button.text === '𝕏 X').length, 1);
-  assert.equal(rows.flat().filter(button => button.text === '✈️ Telegram').length, 1);
+  assert.equal(rows.flat().find(button => button.text === '🔬 Full Intel')?.callback_data, 'FI_RH_0x123');
+  assert.equal(rows.flat().find(button => button.text === '⭐ Track')?.callback_data, 'TRACK_1');
   const one = buildAlphaMarketActions({ tokenUrl: 'https://example.com/token', fullIntelCallback: 'FI_RH_0x123',
     xUrl: 'https://x.com/hotdog', trackCallback: 'TRACK_1', copyContractCallback: 'COPY_CA_1', muteCallback: 'MUTE_1' });
   assert.deepEqual(one.map(row => row.map(button => button.text)), [
-    ['🔬 Full Intel'], ['𝕏 X'], ['⭐ Track', '📋 Copy CA'], ['🔕 Mute'],
+    ['🔬 Full Intel'], ['⭐ Track'],
   ]);
   const none = buildAlphaMarketActions({ tokenUrl: 'https://example.com/token', fullIntelCallback: 'FI_RH_0x123',
     trackCallback: 'TRACK_1', copyContractCallback: 'COPY_CA_1', muteCallback: 'MUTE_1' });
   assert.deepEqual(none.map(row => row.map(button => button.text)), [
-    ['🔬 Full Intel'], ['⭐ Track', '📋 Copy CA'], ['🔕 Mute'],
+    ['🔬 Full Intel'], ['⭐ Track'],
   ]);
   const noIntel = buildAlphaMarketActions({ tokenUrl: 'https://example.com/token', chartUrl: 'https://example.com/chart' });
-  assert.deepEqual(noIntel.map(row => row.map(button => button.text)), [['📊 Chart'], ['🔎 Token']]);
+  assert.deepEqual(noIntel.map(row => row.map(button => button.text)), [['📊 Chart']]);
+  assert.equal(noIntel[0][0].url, 'https://example.com/chart');
   assert.equal(rows.flat().find(button => button.text === '🔬 Full Intel')?.callback_data, 'FI_RH_0x123');
-  assert.equal(rows.flat().find(button => button.text === '📋 Copy CA')?.callback_data, 'COPY_CA_1');
+  assert.equal(rows.flat().find(button => button.text === '⭐ Track')?.callback_data, 'TRACK_1');
 });
 
 test('comparison source requires actionable semantics and checks both successful delivery ledgers', async () => {

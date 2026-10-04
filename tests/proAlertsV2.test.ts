@@ -116,8 +116,8 @@ test('DEX Paid and Boost remain informational WATCH with event-specific presenta
     structureContext: 'Structure: severe drawdown from prior verified level' });
   const boost = renderAlphaNotification({ category: 'market', severity: 'watch', state: 'BOOST', symbol: 'X', displayIntent: 'WATCH' });
   const major = renderAlphaNotification({ category: 'market', severity: 'watch', state: 'MAJOR_BOOST', symbol: 'X', displayIntent: 'WATCH' });
-  assert.match(dex, /^💎 <b>DEX PAID<\/b>/); assert.match(dex, /ACTION: WATCH/); assert.match(dex, /severe drawdown/);
-  assert.match(boost, /^🚀 <b>BOOST DETECTED<\/b>/); assert.match(major, /^🔥🚀 <b>MAJOR BOOST<\/b>/);
+  assert.match(dex, /^<b>💎 DEX PAID EARLY<\/b>/); assert.match(dex, /ALPHAOS VERDICT: EARLY WATCH/); assert.match(dex, /severe drawdown/);
+  assert.match(boost, /^<b>🚀 MOMENTUM<\/b>/); assert.match(major, /^<b>🚀 MOMENTUM<\/b>/);
   assert.doesNotMatch(`${dex}${boost}${major}`, /CHECK ENTRY|ACTION: MOMENTUM/);
 });
 
@@ -126,7 +126,7 @@ test('verified developer values render on one compact line with observed-history
     market: { symbol: 'DEV', name: null, address: '0xabc', price: null, marketCap: null, fdv: null, liquidity: null, volume5m: null, chartUrl: null },
     evidence: { devHoldingPercent: 7.8, devHoldingEvidence: 'VERIFIED', burnedPercent: 20, burnEvidence: 'VERIFIED' },
     devBurnPercent: 3.2, devLaunches: 4, insightTitle: 'WHY NOW', insight: ['Verified'], statusTitle: 'STATUS', status: 'Qualified' });
-  assert.match(message, /Dev:<\/b> Holds 7\.8% · Burned 3\.2% · 4 observed launches/);
+  assert.match(message, /Dev holds 7\.8% · Dev burned 3\.2% · 4 observed creator launches/);
   assert.doesNotMatch(message, /lifetime|prior launches|Dev: Unknown/i);
 });
 

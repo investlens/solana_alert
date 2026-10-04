@@ -51,9 +51,8 @@ test('BUILDING renders enriched verified pre-index context and mature PONS actio
   assert.match(result.message, /🧠 <b>STRUCTURE<\/b>/);
   assert.match(result.message, /⏳ <b>STATUS<\/b>/);
   assert.deepEqual(result.actions.map(row => row.map(action => action.text)),
-    [['🔬 Full Intel'], ['⭐ Track', '📋 Copy CA'], ['🔕 Mute']]);
-  assert.equal(result.actions.flat().find(action => action.text === '📋 Copy CA')?.callback_data,
-    `COPY_CA_${address}`);
+    [['🔬 Full Intel'], ['⭐ Track']]);
+  assert.ok(result.actions[0][0].callback_data?.includes(address));
   assert.equal(result.actions.flat().some(action => /Trade/.test(action.text)), false);
   for (const action of result.actions.flat()) {
     if (action.callback_data) assert.ok(Buffer.byteLength(action.callback_data, 'utf8') <= 64);
@@ -61,7 +60,7 @@ test('BUILDING renders enriched verified pre-index context and mature PONS actio
 });
 
 test('indexed market replaces pre-index FDV and exposes only a verified direct chart', () => {
-  const result = build({ marketIndexState: 'VERIFIED', marketCap: 18_400, fdv: 21_000,
+  const result = build({ marketIndexState: 'VERIFIED', preIndexValuation: null, marketCap: 18_400, fdv: 21_000,
     liquidity: 11_600, volume5m: 7_200, chartUrl: 'https://dexscreener.com/robinhood/pair' });
   assert.match(result.message, /💵 Market cap\s+<b>\$18\.4K<\/b>/);
   assert.match(result.message, /💧 Liquidity\s+<b>\$11\.6K<\/b>/);
@@ -78,7 +77,7 @@ test('indexed market replaces pre-index FDV and exposes only a verified direct c
       chartUrl: 'https://dexscreener.com/robinhood/pair' },
   });
   assert.deepEqual(withVerifiedRoute.actions.map(row => row.map(action => action.text)),
-    [['🔬 Full Intel', '📊 Chart'], ['📋 Copy CA']]);
+    [['🔬 Full Intel', '📊 Chart']]);
 });
 
 test('meaningless names and provenance-only risk are omitted while valid risk renders', () => {
@@ -160,10 +159,10 @@ test('PONS CHECK_ENTRY renders the premium OPPORTUNITY category without changing
       liquidity: 12_000, volume5m: 8_000, devHoldingPercent: 1.15,
       devHoldingEvidence: 'VERIFIED', totalBurnPercent: 0, burnEvidence: 'VERIFIED' },
   });
-  assert.match(message, /🎯 <b>ENTRY OPPORTUNITY/);
-  assert.match(message, /🎯 <b>ACTION: CHECK ENTRY/);
-  assert.match(message, /📈 <b>WHY NOW<\/b>/);
+  assert.match(message, /<b>🔥 ALPHA ENTRY/);
+  assert.match(message, /ALPHAOS VERDICT: CHECK ENTRY/);
+  assert.match(message, /WHY ALPHAOS LIKES IT/);
   assert.match(message, /Volume and price structure remain constructive/);
-  assert.match(message, /🧠 <b>AlphaOS:<\/b> OPPORTUNITY/);
+  assert.match(message, /🧠 <b>ALPHAOS VERDICT: CHECK ENTRY/);
   assert.doesNotMatch(message, /ROI|Trade/);
 });

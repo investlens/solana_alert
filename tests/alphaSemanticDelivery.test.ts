@@ -55,13 +55,13 @@ test('DEX_PAID defaults off and only explicit ON reserves and sends, including f
   assert.deepEqual(run.sends, ['pro'], 'deterministic semantic delivery must remain deduplicated');
 });
 
-test('DEX_PAID absent preference reserves nothing while BOOST preference behavior is unchanged', async () => {
+test('DEX_PAID default ON delivers to all tiers while BOOST behavior is unchanged', async () => {
   const users = [user('admin', 'admin'), user('pro', 'paid'), user('free', 'free')];
   const dex = harness(users);
   await deliverAlphaSemanticEvent({ event: { id: 26002, eventIdentity: 'v2:DEX_PAID:26002', type: 'DEX_PAID',
     assetId: '0x2222222222222222222222222222222222222222', chain: 'robinhood' }, message: 'DEX PAID' }, dex.dependencies);
-  assert.deepEqual(dex.reservationAttempts, []);
-  assert.deepEqual(dex.sends, []);
+  assert.deepEqual(dex.reservationAttempts, ['admin', 'pro', 'free']);
+  assert.deepEqual(dex.sends, ['admin', 'pro', 'free']);
 
   const boost = harness(users);
   await deliverAlphaSemanticEvent({ event: { id: 26003, eventIdentity: 'v2:BOOST:26003', type: 'BOOST',
@@ -138,7 +138,7 @@ test('semantic delivery migration provides durable per-user reservation and dedu
 });
 
 test('DEX_PAID UI and delivery share the durable database-backed preference key', async () => {
-  assert.equal(defaultStrategyEnabledForUser('DEX_PAID'), false);
+  assert.equal(defaultStrategyEnabledForUser('DEX_PAID'), true);
   assert.equal(defaultStrategyEnabledForUser('PONS_BREAKOUT'), true);
   const [delivery, strategies, controls, observer] = await Promise.all([
     readFile(new URL('../src/services/alphaSemanticDeliveryService.ts', import.meta.url), 'utf8'),

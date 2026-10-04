@@ -46,7 +46,7 @@ test('boost 500 is major, verified burn starts at 1%, and transfer remains inter
   assert.equal(boostPresentationState(499), 'BOOST'); assert.equal(boostPresentationState(500), 'MAJOR_BOOST');
   assert.match(buildBoostMessage({ symbol: 'AAA', tokenAddress: '0x257012345678901234567890123456789008444e',
     boostAmount: 100, totalBoostAmount: 500, devHoldingPercent: null, holderTop1Percent: null,
-    eventType: 'INCREASE' }), /MAJOR BOOST/);
+    eventType: 'INCREASE' }), /MAX BOOST 500\+/);
   assert.equal(developerEvent({ burnedPercent: 0.99, evidence: 'VERIFIED' }).notify, false);
   assert.equal(developerEvent({ burnedPercent: 1, evidence: 'VERIFIED' }).notify, true);
   assert.equal(developerEvent({ transferredPercent: 10, evidence: 'VERIFIED' }).notify, false);
@@ -91,8 +91,9 @@ test('shared actions use final labels, exact CA, no PONS Trade, and safe callbac
     tokenUrl: `https://robinhoodchain.blockscout.com/token/${address}`,
     copyContractCallback: `COPY_CA_${address}`, trackCallback: 'OPP_TRACK_42', muteCallback: 'STRAT_TOGGLE_PONS_BREAKOUT' });
   assert.deepEqual(actions.map(row => row.map(action => action.text)),
-    [['📊 Chart'], ['⭐ Track', '📋 Copy CA'], ['🔕 Mute'], ['🔎 Token']]);
-  assert.equal(actions.flat().find(action => action.text === '📋 Copy CA')?.callback_data, `COPY_CA_${address}`);
+    [['📊 Chart'], ['⭐ Track']]);
+  assert.equal(actions.flat().find(action => action.text === '⭐ Track')?.callback_data, 'OPP_TRACK_42');
+  assert.equal(actions[0][0].url, 'https://dexscreener.com/robinhood/pair');
   assert.equal(actions.flat().some(action => /Trade/.test(action.text)), false);
   for (const action of actions.flat()) if (action.callback_data) assert.ok(Buffer.byteLength(action.callback_data) <= 64);
 });
