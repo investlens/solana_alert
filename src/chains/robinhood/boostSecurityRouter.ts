@@ -104,7 +104,7 @@ export async function routeBoostSecurity(args: {
     allowed: true,
     route: 'TRUSTED_LAUNCHPAD',
     liquidity: null,
-    reason: 'verified trusted launchpad origin; launchpad guarantees applied',
+    reason: 'verified approved launchpad origin; separate security screening bypassed by policy, market risks remain',
     cached: false,
   };
 

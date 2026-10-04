@@ -30,9 +30,9 @@ test('origin rejects mismatched contract and unapproved factory', () => {
 test('Boost delivery and DEX paid use V2-aware provenance and not the V1-only view', async () => {
   for (const path of ['src/services/alphaSemanticDeliveryService.ts','src/chains/robinhood/security/dexPaidAlertSafetyGate.ts']) {
     const source = await readFile(path,'utf8');
-    assert.ok(source.includes('isVerifiedPonsLaunch'));
+    assert.ok(source.includes('getVerifiedRobinhoodLaunchpad'));
     assert.ok(!source.includes('getPonsLaunchState'));
   }
   const source = await readFile('src/services/alphaSemanticDeliveryService.ts','utf8');
-  assert.equal(source.match(/const trusted = await isVerifiedPonsLaunch/g)?.length,1,'verify once before fanout, not once per user');
+  assert.equal(source.match(/const origin = await getVerifiedRobinhoodLaunchpad/g)?.length,1,'verify once before fanout, not once per user');
 });
