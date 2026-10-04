@@ -3,7 +3,7 @@ import { getSharedJson, setSharedJson } from './sharedJsonCache.js';
 
 export const LIVE_ALERT_FEEDS = [
   {key:'RH_BOOST', chain:'Robinchain / PONS', name:'Boost', description:'New or increased token promotion.'},
-  {key:'DEX_PAID', chain:'Robinchain / PONS', name:'DEX Paid', description:'Verified DexScreener payment; qualifying checks apply.'},
+  {key:'DEX_PAID', chain:'Robinchain / PONS', name:'DEX Paid', description:'New DexScreener payment event; no market-cap/token-age limit.'},
   {key:'RH_SOCIAL_MAFIA', chain:'Robinchain / PONS', name:'Social Mafia', description:'Verified launchpad and exact contract publication on X.'},
   {key:'RH_PROTOCOL_DISCOVERY', chain:'Robinchain / PONS', name:'Protocol Discovery', description:'Protocol-named PONS projects with X + Telegram links.'},
   {key:'RH_TRADE_SETUP', chain:'Robinchain / PONS', name:'Trade Setup', description:'Confirmed recovery with fresh creator evidence.'},

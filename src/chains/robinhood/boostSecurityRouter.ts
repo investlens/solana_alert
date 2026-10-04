@@ -29,7 +29,7 @@ function burnLikeLpHolder(holder: Record<string, unknown>): boolean {
     || tag.includes('burn') || tag.includes('dead') || tag.includes('null address') || tag.includes('black hole');
 }
 
-async function fetchCustomLiquidityProtection(tokenAddress: string): Promise<BoostLiquidityDecision> {
+async function fetchCustomLiquidityProtection(tokenAddress: string, requireExplicitSellability = false): Promise<BoostLiquidityDecision> {
   const url = `https://api.gopluslabs.io/api/v1/token_security/4663?contract_addresses=${encodeURIComponent(tokenAddress)}`;
   try {
     const response = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(4_000) });
@@ -52,6 +52,8 @@ async function fetchCustomLiquidityProtection(tokenAddress: string): Promise<Boo
       status: 'UNLOCKED',
       reason: 'HARD BLOCK: sell restriction flag; holders may be unable to exit',
     };
+    if (requireExplicitSellability && (String(security.is_honeypot) !== '0' || String(security.cannot_sell_all) !== '0'))
+      return {allowed:false,status:'UNKNOWN',reason:'Explicit honeypot and sell-restriction evidence unavailable'};
 
     const holders = Array.isArray(security.lp_holders) ? security.lp_holders as Record<string, unknown>[] : [];
     if (!holders.length) return { allowed: false, status: 'UNKNOWN', reason: 'security/LP data unavailable: no independently verified LP-holder evidence' };
@@ -96,6 +98,7 @@ async function fetchCustomLiquidityProtection(tokenAddress: string): Promise<Boo
 export async function routeBoostSecurity(args: {
   tokenAddress: string;
   verifiedTrustedLaunchpad: boolean;
+  requireExplicitSellability?: boolean;
 }): Promise<BoostSecurityGateDecision> {
   if (args.verifiedTrustedLaunchpad) return {
     allowed: true,
@@ -105,12 +108,12 @@ export async function routeBoostSecurity(args: {
     cached: false,
   };
 
-  const key = normalize(args.tokenAddress);
+  const key = normalize(args.tokenAddress) + (args.requireExplicitSellability ? ':explicit-sellability' : '');
   const now = Date.now();
   const prior = cache.get(key);
   if (prior && prior.expiresAt > now) return { ...prior.value, cached: true };
 
-  const liquidity = await fetchCustomLiquidityProtection(args.tokenAddress);
+  const liquidity = await fetchCustomLiquidityProtection(args.tokenAddress, args.requireExplicitSellability);
   const warning = liquidity.allowed && liquidity.status === 'UNLOCKED';
   const value: BoostSecurityGateDecision = {
     allowed: liquidity.allowed,

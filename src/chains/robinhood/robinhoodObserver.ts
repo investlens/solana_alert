@@ -2158,17 +2158,17 @@ export async function processRobinhoodDexPaidSignal(token: RobinhoodDiscoveredTo
       orderTypes: dexPaid.orderTypes, orderStatuses: dexPaid.orderStatuses, chartUrl,
       price: marketContext.price, priceProvenance: market ? 'DEXSCREENER_VERIFIED_BASE_PAIR' : null,
       marketCap: marketContext.marketCap, fdv: marketContext.fdv, liquidity: marketContext.liquidity,
-      volume5m: marketContext.volume5m, pairCreatedAt: market?.pairCreatedAt ?? null,
+      volume5m: marketContext.volume5m, pairCreatedAt: market?.pairCreatedAt ?? null, pairAddress: market?.pairAddress ?? null,
       devHoldingPercent: evidence.devHoldingPercent, devHoldingEvidence: evidence.devHoldingEvidence },
   });
   const result = await deliverAlphaSemanticEvent({ event: { id: semanticEvent.id,
-    eventIdentity: semanticEvent.event_identity, type: 'DEX_PAID', assetId: token.tokenAddress, chain: 'robinhood' },
+    eventIdentity: semanticEvent.event_identity, type: 'DEX_PAID', assetId: token.tokenAddress, chain: 'robinhood', rawSnapshot: semanticEvent.raw_snapshot },
     message: buildPremiumTokenNotification({ state: 'DEX_PAID', symbol: marketContext.symbol, name: marketContext.name,
       address: token.tokenAddress, market: marketContext, evidence, age,
       insightTitle: 'VERIFIED EVENT', insight: ['A verified Dex visibility payment was detected.', `Payment age · ${Math.max(0, Math.floor((Date.now() - (dexPaid.latestPaymentTimestamp! < 10_000_000_000 ? dexPaid.latestPaymentTimestamp! * 1000 : dexPaid.latestPaymentTimestamp!)) / 60_000))}m · Checked now`],
-      statusTitle: '💎 STATUS', status: 'Dex Paid confirmed · evaluate live market conditions.' }),
+      statusTitle: '💎 STATUS', status: 'Promotion payment confirmed · research event, not a buy signal.' }),
     buttons: buildAlphaMarketActions({ chartUrl, tokenUrl: buildExplorerUrl(token.tokenAddress),
-      fullIntelCallback: `FI_RH_${token.tokenAddress}`, copyContractCallback: `COPY_CA_${token.tokenAddress}` }) });
+      fullIntelCallback: `FI_RH_${token.tokenAddress}`, copyContractCallback: `COPY_CA_${token.tokenAddress}` }), preserveMessage: true });
   if (result.delivered > 0) dexPaymentAttempts.set(attemptKey,{payment:dexPaid.latestPaymentTimestamp!,nextAt:Date.now()+10*60_000});
   recordDexPaidCheck(result.delivered > 0 ? 'TELEGRAM_ACCEPTED' : result.failed > 0 ? 'DELIVERY_FAILURE' : 'NO_DELIVERY');
   console.log('[RobinhoodObserver] DEX PAID semantic delivery:', { token: token.tokenAddress,
