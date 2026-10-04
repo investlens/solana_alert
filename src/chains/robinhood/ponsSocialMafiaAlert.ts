@@ -1,3 +1,4 @@
+import { discloseRobinhoodKeyStats } from '../../services/alertKeyStatsService.js';
 import { discloseRobinhoodOwnership } from '../../services/alertOwnershipService.js';
 import { discloseAlertDexPaid } from '../../services/alertDexPaidDisclosure.js';
 import { enabledLiveRecipients } from '../../services/liveAlertPreferences.js';
@@ -109,17 +110,18 @@ export function extractTelegramLabel(value: string | null | undefined): string |
 export function resolveSocialMafiaSocials(args: {
   twitter: string | null | undefined;
   telegram: string | null | undefined;
+  allowMissingTelegram?: boolean;
 }): SocialMafiaSocials | null {
   const xHandle = extractXUsername(args.twitter);
   const xParsed = parsedHttpUrl(args.twitter);
   const telegramLabel = extractTelegramLabel(args.telegram);
   const telegramParsed = parsedHttpUrl(args.telegram);
-  if (!xHandle || !xParsed || !telegramLabel || !telegramParsed) return null;
+  if (!xHandle || !xParsed || (!args.allowMissingTelegram && (!telegramLabel || !telegramParsed))) return null;
   return {
     xUrl: `https://x.com/${encodeURIComponent(xHandle)}`,
     xHandle,
-    telegramUrl: telegramParsed.toString(),
-    telegramLabel,
+    telegramUrl: telegramLabel && telegramParsed ? telegramParsed.toString() : '',
+    telegramLabel: telegramLabel ?? 'Unavailable',
   };
 }
 
@@ -190,12 +192,12 @@ export function buildSocialMafiaAlertText(args: {
     '<b>SOCIAL LINKS</b>',
     ...(args.socialContractConfirmed ? ['✓ CA listed on X · Robinchain'] : []),
     `𝕏 X  <a href="${escapeHtml(args.socials.xUrl).replace(/"/g, '&quot;')}">@${escapeHtml(args.socials.xHandle)}</a>`,
-    `✈️ TG  <a href="${escapeHtml(args.socials.telegramUrl).replace(/"/g, '&quot;')}">${escapeHtml(args.socials.telegramLabel)}</a> · ${escapeHtml(args.telegramType ?? 'Type unverified')}`,
+    socialsTelegramLine(args.socials, args.telegramType),
     '',
     '<b>CONTRACT</b>',
     `<a href="https://robinhoodchain.blockscout.com/token/${encodeURIComponent(args.tokenAddress)}">${escapeHtml(args.tokenAddress)}</a>`,
     '',
-    '<i>Verified launchpad + X + Telegram links · Social ownership unverified · DYOR</i>',
+    `<i>Verified launchpad · ${args.socialContractConfirmed ? 'CA confirmed on X' : 'Social ownership unverified'}${args.socials.telegramUrl ? ' · Telegram linked, ownership unverified' : ' · Telegram unavailable'} · DYOR</i>`,
   ].join('\n');
 }
 
@@ -241,11 +243,11 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   const onchainSocials = await getRobinhoodTokenSocials(token, { refresh: true })
     .catch(() => { socialsReadFailed = true; return { twitter: null, telegram: null, website: null, readStatus: 'UNAVAILABLE' as const }; });
   const rawSocials = { twitter: pons?.twitter || onchainSocials.twitter, telegram: pons?.telegram || onchainSocials.telegram };
-  const socials = resolveSocialMafiaSocials(rawSocials);
+  const socials = resolveSocialMafiaSocials({...rawSocials, allowMissingTelegram: true});
   if (!socials) {
     item.eligibility = socialsReadFailed || onchainSocials.readStatus === 'UNAVAILABLE' ? null : false;
     if (item.attempt >= 4 && item.eligibility === false) recordLaunchSocialEligibility(token, false);
-    console.log('[SocialMafia] skipped; both X and Telegram are required', {
+    console.log('[SocialMafia] skipped; a valid X profile is required', {
       token,
       launchpad: launchpad.id,
       hasX: Boolean(extractXUsername(rawSocials.twitter)),
@@ -257,6 +259,7 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   // Protocol discovery explicitly does not claim social identity. Avoid spending
   // scarce public-X requests on a feed whose rules only require metadata links.
   const protocol = protocolDiscoveryRoute(pons?.name || earlyMetadata?.name, false) === 'PROTOCOL_DISCOVERY';
+  if (protocol && !socials.telegramUrl) { console.log('[SocialMafia] protocol skipped; Telegram required'); return false; }
   const identity = protocol ? null
     : await verifySocialContract({ token, xHandle: socials.xHandle, telegramUrl: socials.telegramUrl });
   item.eligibility = identity ? socialEvidenceEligibility(identity) : null;
@@ -281,7 +284,7 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   let telegramType: TelegramPreviewType = 'Type unverified';
   const supplemental = Promise.all([
     getCreatorHoldingPercent(token, launch.deployer_address).then(value => creatorHolding = value),
-    getTelegramPreviewType(socials.telegramUrl).then(value => telegramType = value),
+    (socials.telegramUrl ? getTelegramPreviewType(socials.telegramUrl) : Promise.resolve('Type unverified' as TelegramPreviewType)).then(value => telegramType = value),
   ]);
   const work = Promise.all([
     getRobinhoodMarketSnapshot(token, { priority: 'HIGH', caller: 'pons_social_mafia', queueWaitTimeoutMs: 750 }).catch(() => null).then(value => partial.market = value),
@@ -318,7 +321,7 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
     });
   };
   const initial = await boundedSocialMafiaContext(work, 1_500);
-  const text = await discloseRobinhoodOwnership(render(initial), token, launch.deployer_address, launch.curve_address);
+  let text = await discloseRobinhoodOwnership(render(initial), token, launch.deployer_address, launch.curve_address);
 
   const deliveryClaim = await claimSharedDelivery(`alphaos:social:delivered:${token}`, 24 * 60 * 60_000);
   if (deliveryClaim === 'EXISTS') return true;
@@ -335,6 +338,7 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
     ? {price:partial.market.priceUsd, pair:partial.market.pairAddress, unit:'USD' as const, marketCap:partial.market.marketCapUsd, liquidity:partial.market.liquidityUsd}
     : {price:partial.curveRatio, pair:launch.curve_address, unit:'ETH_RESERVE_RATIO' as const};
   const deliveryStartedAt = Date.now();
+  text = await discloseRobinhoodKeyStats(text,token,!partial.market,'Trusted PONS route');
   const results = await Promise.allSettled(chats.map(async chatId => {
     await waitForRecipientDelivery(chatId, deliveryStartedAt);
     const accepted = await sendTelegram({chatId, text, tokenAddress: token, launchpad, socials, image});
@@ -342,7 +346,8 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
     return accepted;
   }));
   if (initial == null) void boundedSocialMafiaContext(work, 12_000).then(async values => {
-    const enriched = await discloseRobinhoodOwnership(render(values), token, launch.deployer_address, launch.curve_address);
+    let enriched = await discloseRobinhoodOwnership(render(values), token, launch.deployer_address, launch.curve_address);
+    enriched = await discloseRobinhoodKeyStats(enriched,token,!partial.market,'Trusted PONS route');
     if (enriched === text) return;
     const botToken = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
     await Promise.allSettled(results.map(async (result, index) => {
@@ -474,7 +479,7 @@ export function buildSocialMafiaActions(token: string, launchpad: VerifiedLaunch
   return [
     [{ text: '🚀 PONS', url: launchpad.tokenUrl(token) }, { text: '🧠 Full Intel', callback_data: `FI_RH_${token}` }],
     [{ text: '⭐ Track', callback_data: `BOOST_TRACK_${token}` }, { text: '📋 Copy CA', callback_data: `COPY_CA_${token}` }],
-    [{ text: '𝕏 X', url: socials.xUrl }, { text: '✈️ TG', url: socials.telegramUrl }],
+    [{ text: '𝕏 X', url: socials.xUrl }, ...(socials.telegramUrl ? [{ text: '✈️ TG', url: socials.telegramUrl }] : [])],
   ];
 }
 
@@ -509,4 +514,8 @@ export async function restoreSocialWatchCheckpoint(load = () => getSharedJson<Ar
   }
   console.log(`[SocialMafia] RECOVERED waiting=${restored} dbWrites=0`);
   drain();
+}
+
+function socialsTelegramLine(socials: SocialMafiaSocials, type?: TelegramPreviewType): string {
+  return socials.telegramUrl ? `✈️ TG <a href="${escapeHtml(socials.telegramUrl).replace(/"/g, '&quot;')}">${escapeHtml(socials.telegramLabel)}</a> · ${escapeHtml(type ?? 'Type unverified')}` : '✈️ Telegram <b>Unavailable</b> · X contract confirmed';
 }

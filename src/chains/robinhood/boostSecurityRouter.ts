@@ -16,7 +16,7 @@ export type BoostSecurityGateDecision = {
 
 type CachedGate = { expiresAt: number; value: BoostSecurityGateDecision };
 const cache = new Map<string, CachedGate>();
-const SAFE_TTL_MS = 5 * 60_000;
+const SAFE_TTL_MS = 30_000;
 const BLOCKED_TTL_MS = 60_000;
 
 function normalize(value: string): string { return value.trim().toLowerCase(); }
@@ -56,7 +56,7 @@ async function fetchCustomLiquidityProtection(tokenAddress: string, requireExpli
       return {allowed:false,status:'UNKNOWN',reason:'Explicit honeypot and sell-restriction evidence unavailable'};
 
     const holders = Array.isArray(security.lp_holders) ? security.lp_holders as Record<string, unknown>[] : [];
-    if (!holders.length) return { allowed: false, status: 'UNKNOWN', reason: 'security/LP data unavailable: no independently verified LP-holder evidence' };
+    if (!holders.length) return { allowed: true, status: 'UNKNOWN', reason: 'Sellability checks passed · LP protection unverified; liquidity may be removable. Validate before investing.' };
 
     let protectedPct = 0, burnedPct = 0, unlockedPct = 0;
     for (const holder of holders) {
@@ -126,6 +126,7 @@ export async function routeBoostSecurity(args: {
       : `custom security blocked: ${liquidity.reason}`,
     cached: false,
   };
+  if (cache.size >= 200 && !cache.has(key)) cache.delete(cache.keys().next().value!);
   cache.set(key, { expiresAt: now + (value.allowed ? SAFE_TTL_MS : BLOCKED_TTL_MS), value });
   return value;
 }

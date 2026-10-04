@@ -25,6 +25,9 @@ export type ChainMarketSnapshot = {
   liquidityUsd: number;
 
   volume5mUsd: number;
+  volume5mReported?: boolean;
+  volume24hUsd?: number;
+  priceChange5m?: number;
 
   buys5m: number;
   sells5m: number;
