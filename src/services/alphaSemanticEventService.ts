@@ -13,6 +13,9 @@ export type AlphaSemanticEventRecord = {
 };
 
 type EphemeralEvidence = { rawSnapshot: Record<string, unknown>; cachedAt: number };
+export class SemanticPersistenceDeferredError extends Error {
+  constructor() { super('Semantic event persistence deferred by database governor'); }
+}
 const EPHEMERAL_EVIDENCE_TTL_MS = 6 * 60 * 60 * 1000;
 const ephemeralEvidence = new Map<string, EphemeralEvidence>();
 
@@ -76,7 +79,7 @@ export async function persistAlphaSemanticEventRecord(args: { identity: string; 
   const criticalTypes = new Set(['DEV_SELL','VERIFIED_BURN','LIQUIDITY_REMOVAL','LIQUIDITY_RISK','RISK_EXIT_ALERT','PONS_PROVEN_DEV_LAUNCH']);
   const workClass = criticalTypes.has(canonicalType) ? 'CRITICAL' : 'BACKGROUND';
   const result = await runDatabaseWork(workClass, () => supabase.from('alpha_alert_events').upsert(event, { onConflict: 'event_identity', ignoreDuplicates: true }).select('id,event_identity').maybeSingle());
-  if (!result) return null;
+  if (!result) throw new SemanticPersistenceDeferredError();
   const { data, error } = result;
   if (error) throw error;
   return data ? { id: Number(data.id), event_identity: String(data.event_identity) } : null;
@@ -94,7 +97,7 @@ export async function persistOrLoadAlphaSemanticEventRecord(args: { identity: st
     if (error) throw error;
     return { id: Number(data.id), event_identity: String(data.event_identity) };
   } catch (error) {
-    if (!isTransientDatabaseError(error)) throw error;
+    if (!(error instanceof SemanticPersistenceDeferredError) && !isTransientDatabaseError(error)) throw error;
     const rawSnapshot = structuredClone(args.rawSnapshot);
     ephemeralEvidence.set(eventIdentity, { rawSnapshot, cachedAt: Date.now() });
     console.warn('[AlphaSemanticEvent] Persistence unavailable; using transient in-memory event identity.', { eventIdentity, type: canonicalType, assetId: args.assetId, reason: error instanceof Error ? error.message : String(error) });
