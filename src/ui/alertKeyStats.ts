@@ -3,7 +3,7 @@ export type AlertKeyStats = {
   price?: number|null; marketCap?: number|null; fdv?:number|null; liquidity?:number|null;
   volume5m?:number|null; volume24h?:number|null; move5m?:number|null; move1h?:number|null;
   buys?:number|null;sells?:number|null;pairCreatedAt?:number|null; supply?:string|null;
-  chartUrl?: string|null; twitter?:string|null; telegram?:string|null; authoritativeVenue?: boolean;
+  creator?:string|null; chartUrl?: string|null; twitter?:string|null; telegram?:string|null; authoritativeVenue?: boolean;
   preBond?:boolean; sellability?:string|null; lp?:string|null; source?:string|null; checkedAt?:string|null; dexPaid?:string|null; symbol?:string|null; name?:string|null;
 };
 const n=(v:unknown):v is number=>typeof v==='number'&&Number.isFinite(v);
