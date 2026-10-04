@@ -12,3 +12,7 @@ test('prebond reserve is not fabricated DEX liquidity and project text is escape
  const card=withAlertKeyStats('Alert',{preBond:true,source:'<bad>',checkedAt:'01:00:00',sellability:'Trusted PONS route'});
  assert.match(card,/Bonding curve · no DEX LP/);assert.match(card,/&lt;bad&gt;/);assert.match(card,/Validate the contract/);
 });
+test('long age and supply are compact and equal FDV is not duplicated',()=>{
+ const card=withAlertKeyStats('Alert',{marketCap:11980,fdv:11980,pairCreatedAt:Date.now()-1266*60000,supply:'998,724,442.2'});
+ assert.match(card,/21h 6m/);assert.match(card,/998.72M/);assert.doesNotMatch(card,/FDV/);
+});

@@ -12,6 +12,10 @@ test('unknown never becomes zero; verified zero remains visible',()=>{
  assert.match(withOwnershipDisclosure('alert',unknown),/Dev holding  <b>Unavailable/);
  assert.match(withOwnershipDisclosure('alert',{...unknown,devPercent:0}),/0.00%/);
 });
+test('small holdings are not rounded to zero and zero does not imply sale or burn',()=>{
+ assert.match(withOwnershipDisclosure('alert',{...unknown,devPercent:0.001}),/&lt;0.01%/);
+ assert.match(withOwnershipDisclosure('alert',{...unknown,devPercent:0}),/sale, transfer or burn not established/);
+});
 test('ownership enrichment remains one section and retains existing measured developer value',()=>{
  const initial=withOwnershipDisclosure('alert\n👨‍💻 Dev holding  <b>10%<\/b>\n\n<b>CONTRACT</b>\n0xabc',unknown);
  const updated=withOwnershipDisclosure(initial,{devPercent:12,top10Percent:50,top10Coverage:'INDEXED_SAMPLE'});

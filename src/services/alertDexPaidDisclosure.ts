@@ -22,7 +22,8 @@ export function decorateDexPaidAlert(text: string, buttons: AlphaNotificationAct
   }
   const rows: AlphaNotificationAction[][]=[];
   for(let i=0;i<actions.length;i+=2) rows.push(actions.slice(i,i+2));
-  return {text:cleanAlertCard(message),buttons:cleanAlertButtons(rows)!};
+  const rendered = cleanAlertCard(message);
+  return {text:rendered,buttons:cleanAlertButtons(rows,rendered)!};
 }
 export function createAlertDexPaidReader(scan = scanRobinhoodDexPaid, now = Date.now) {
   const cache = new Map<string,{status:AlertDexPaidStatus;expires:number}>();

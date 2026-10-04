@@ -53,7 +53,7 @@ export function buildAlphaReportUrl(tokenMint: string, context?: { engine?: stri
 async function sendTelegramRequest(chatId: string, text: string, buttons?: InlineButton[][]): Promise<number | null> {
   if (!chatId) return null;
   text = cleanAlertCard(text);
-  if (/<code>/.test(text)) buttons = cleanAlertButtons(buttons);
+  if (/<code>/.test(text)) buttons = cleanAlertButtons(buttons, text);
 
   const body: Record<string, unknown> = {
     chat_id: chatId,
@@ -110,7 +110,7 @@ export async function editTelegramMessage(chatId: string, messageId: number, tex
   buttons?: InlineButton[][]): Promise<void> {
   if (!chatId || !Number.isFinite(messageId)) return;
   text = cleanAlertCard(text);
-  if (/<code>/.test(text)) buttons = cleanAlertButtons(buttons);
+  if (/<code>/.test(text)) buttons = cleanAlertButtons(buttons, text);
   if (config.dryRun) {
     console.log(`\n--- EDIT MESSAGE ${messageId} TO ${chatId} ---\n${text}\nButtons: ${JSON.stringify(buttons ?? [])}\n---------------------------\n`);
     return;
