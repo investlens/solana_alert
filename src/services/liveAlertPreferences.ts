@@ -1,3 +1,4 @@
+import { recordFeedDelivery } from './feedDeliveryHealth.js';
 import { getUserStrategyPreferences, setUserStrategyEnabled } from './strategyService.js';
 import { getSharedJson, setSharedJson } from './sharedJsonCache.js';
 
@@ -21,7 +22,7 @@ const pending = new Map<string,Promise<Preferences>>();
 const failedUntil = new Map<string,number>();
 export function isLiveFeedKey(key:string): key is LiveFeedKey { return LIVE_ALERT_FEEDS.some(feed=>feed.key===key); }
 export function resolveLivePreferences(stored:Map<string,boolean>): Preferences {
-  return Object.fromEntries(LIVE_ALERT_FEEDS.map(feed=>[feed.key,stored.get(feed.key) ?? feed.key!=='DEX_PAID'])) as Preferences;
+  return Object.fromEntries(LIVE_ALERT_FEEDS.map(feed=>[feed.key,stored.get(feed.key) ?? true])) as Preferences;
 }
 function remember(user:string,value:Preferences) {
   local.delete(user);local.set(user,{value,at:Date.now()});
@@ -42,7 +43,8 @@ export async function liveAlertPreferences(user:string):Promise<Preferences> {
   })();pending.set(user,work);try{return await work;}finally{pending.delete(user);}
 }
 export async function liveFeedEnabled(user:string,key:LiveFeedKey):Promise<boolean> {
-  try{return (await liveAlertPreferences(user))[key];}catch{return false;}
+  try { const enabled=(await liveAlertPreferences(user))[key]; recordFeedDelivery(key,enabled?'ENABLED':'MUTED'); return enabled; }
+  catch { recordFeedDelivery(key,'PREFERENCES_UNAVAILABLE'); return false; }
 }
 const changing = new Set<string>();
 export async function toggleLiveFeed(user:string,key:LiveFeedKey):Promise<boolean> {
