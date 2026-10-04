@@ -35,3 +35,13 @@ export function ponsVenueStats(token:string,context:PonsPublicContext|null,gradu
     move5m:m.priceChange5m,move1h:m.priceChange1h,buys:m.trades5mReported?m.buys5m:null,sells:m.trades5mReported?m.sells5m:null,
     pairCreatedAt:m.pairCreatedAt,source:'DEXScreener · PONS-mapped graduated pool',checkedAt};
 }
+export function ponsV1VenueStats(token: string, pool: string, pairs: DexScreenerPair[]): AlertKeyStats {
+  const m = robinhoodMarketSnapshotFromPairs(token, pairs.filter(pair => pair.chainId === 'robinhood'
+    && pair.baseToken?.address?.toLowerCase() === token.toLowerCase()
+    && pair.pairAddress?.toLowerCase() === pool.toLowerCase()));
+  if (!m) return {authoritativeVenue:true,source:'PONS V1 mapped DEX pool pending',checkedAt:new Date().toISOString().slice(11,19)};
+  return {authoritativeVenue:true,preBond:false,price:m.priceUsd,marketCap:m.marketCapUsd>0?m.marketCapUsd:null,fdv:m.fdvUsd,
+    liquidity:m.liquidityUsd,volume5m:m.volume5mReported?m.volume5mUsd:null,volume24h:m.volume24hUsd,
+    move5m:m.priceChange5m,move1h:m.priceChange1h,buys:m.trades5mReported?m.buys5m:null,sells:m.trades5mReported?m.sells5m:null,
+    pairCreatedAt:m.pairCreatedAt,source:'DEXScreener · PONS V1 mapped pool',checkedAt:new Date(m.timestamp).toISOString().slice(11,19)};
+}

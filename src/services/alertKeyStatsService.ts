@@ -1,14 +1,15 @@
-import { getIndexedVerifiedPonsLaunch } from '../chains/robinhood/ponsLaunchState.js';
-import { getVerifiedPonsPublicContext } from '../chains/robinhood/ponsPublicContext.js';
+import { getIndexedVerifiedPonsLaunch, getPonsLaunchState } from '../chains/robinhood/ponsLaunchState.js';
+import { getVerifiedPonsPublicContext, getPonsV1PoolMapping } from '../chains/robinhood/ponsPublicContext.js';
 import { withAlertKeyStats, type AlertKeyStats } from '../ui/alertKeyStats.js';
 import { getRobinhoodMarketSnapshot } from '../chains/robinhood/market.js';
 import { readResearchTokenSupply, formatResearchSupply } from './researchTokenSupply.js';
 import { fetchRobinhoodPairs } from '../chains/robinhood/market.js';
-import { confirmedCurveGraduation, ponsVenueStats } from './ponsAlertVenue.js';
+import { confirmedCurveGraduation, ponsVenueStats, ponsV1VenueStats } from './ponsAlertVenue.js';
 const cache=new Map<string,{at:number;value:AlertKeyStats}>();
 const pending=new Map<string,Promise<AlertKeyStats>>();
 let started=0,windowAt=0;
 export async function discloseRobinhoodKeyStats(text:string,token:string,preBond=false,sellability?:string,lp?:string):Promise<string>{
+  const ponsHint=preBond || /Trusted PONS|Verified PONS|PONS · Robinchain/i.test(sellability??text);
   const key=token.toLowerCase();let value=cache.get(key);
   if(!value||Date.now()-value.at>30000){
     if(Date.now()-windowAt>=60000){windowAt=Date.now();started=0;}
@@ -16,8 +17,22 @@ export async function discloseRobinhoodKeyStats(text:string,token:string,preBond
     if(!work&&pending.size<2&&started<10){
       started++;
       const venue=async()=>{
-        const launch=await getIndexedVerifiedPonsLaunch(token);
+        let launch=await getIndexedVerifiedPonsLaunch(token);
+        // Older launches may predate our index. Reuse the bounded cached factory
+        // read, without a second database lookup or broad event-log replay.
+        if (!launch && ponsHint) {
+          const direct = await getPonsLaunchState(token,{skipIndexedLookup:true}).catch(()=>null);
+          if (direct?.exists && direct.token.toLowerCase()===token.toLowerCase()) {
+            launch={exists:true,token:direct.token,deployer:direct.deployer,generation:'v1'};
+          }
+        }
         if(!launch)return null;
+        if (launch.generation === 'v1' && launch.deployer) {
+          const pool = await getPonsV1PoolMapping(token, launch.deployer);
+          if (!pool) return ponsVenueStats(token,null,null,[]);
+          const pairs = await fetchRobinhoodPairs(token,{priority:'NORMAL',caller:'alert_pons_venue',queueWaitTimeoutMs:750}).catch(()=>[]);
+          return ponsV1VenueStats(token,pool,pairs);
+        }
         const c=await getVerifiedPonsPublicContext(token);
         if(!c || (launch.deployer && c.creator.toLowerCase()!==launch.deployer.toLowerCase()))return ponsVenueStats(token,null,null,[]);
         const graduated=c.curveAddress?await confirmedCurveGraduation(token,c.curveAddress):null;
@@ -38,7 +53,6 @@ export async function discloseRobinhoodKeyStats(text:string,token:string,preBond
     }
     if(work){let timer:ReturnType<typeof setTimeout>|undefined;try{const stats=await Promise.race([work,new Promise<null>(resolve=>{timer=setTimeout(()=>resolve(null),2500);})]);if(stats)value={at:Date.now(),value:stats};}finally{if(timer)clearTimeout(timer);}}
   }
-  const ponsHint=preBond || /Trusted PONS|Verified PONS|PONS · Robinchain/i.test(sellability??text);
   const stats=ponsHint && !value?.value.authoritativeVenue ? {authoritativeVenue:true,supply:value?.value.supply,source:'PONS venue data pending',checkedAt:new Date().toISOString().slice(11,19)} : value?.value ?? {};
   return withAlertKeyStats(text,{...stats,preBond:stats.authoritativeVenue?stats.preBond:preBond,sellability,lp});
 }
