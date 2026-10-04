@@ -1,9 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parsePonsPublicContext, classifyTelegramPreview } from '../src/chains/robinhood/ponsPublicContext.js';
+import { parsePonsPublicContext, parsePonsV1PoolMapping, classifyTelegramPreview } from '../src/chains/robinhood/ponsPublicContext.js';
 const token = '0x1111111111111111111111111111111111111111';
 const factory = '0x2222222222222222222222222222222222222222';
 const creator = '0x3333333333333333333333333333333333333333';
+test('V1 direct-pool mapping accepts the legacy page shape but rejects identity and curve conflicts', () => {
+  const pool = '0x6675aD01Adb2cA3c2f2793A4842E648e6C112bF7';
+  const render = (overrides = {}) => `<script>self.__next_f.push(${JSON.stringify([1, '18:' + JSON.stringify({initialDetails:{token,deployer:creator,pool,...overrides}}) + '\n'])})</script>`;
+  assert.equal(parsePonsV1PoolMapping(render(),token,creator),pool);
+  assert.equal(parsePonsV1PoolMapping(render({token:factory}),token,creator),null);
+  assert.equal(parsePonsV1PoolMapping(render({deployer:factory}),token,creator),null);
+  assert.equal(parsePonsV1PoolMapping(render({pool:'0x'+'0'.repeat(40)}),token,creator),null);
+  assert.equal(parsePonsV1PoolMapping(render({venue:'curve',curveAddress:factory}),token,creator),null);
+  assert.equal(parsePonsV1PoolMapping('<html>blocked</html>',token,creator),null);
+});
 function page(address = token) {
   const record = { initialDetails: { token: address, factory, deployer: creator, name: 'AXIL', symbol: '$$AXIL',
     phase: 0, venue: 'curve', decimals: 18, totalSupplyWei: '1000000000000000000000000000', socials: { twitter: 'https://x.com/axil', telegram: 'https://t.me/axil_coin' } }, initialPriceQuote: 1.664e-8, quoteUsd: 228.38 };

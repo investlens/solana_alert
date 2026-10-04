@@ -50,6 +50,32 @@ export function parsePonsPublicContext(html: string, token: string, factory: str
 
 const pageCache = new Map<string, { expires: number; html: string | null }>();
 const pageInflight = new Map<string, Promise<string | null>>();
+// V1 launches go straight to a pool; their page has no V2 factory/curve fields.
+// Caller must separately establish V1 provenance. The page supplies mapping only.
+export function parsePonsV1PoolMapping(html: string, token: string, creator: string): string | null {
+  const chunks: string[] = [];
+  for (const match of html.matchAll(/self\.__next_f\.push\((.*?)\)<\/script>/gs)) {
+    try { const value = JSON.parse(match[1]); if (typeof value[1] === 'string') chunks.push(value[1]); } catch {}
+  }
+  const visit = (value: any): string | null => {
+    if (!value || typeof value !== 'object') return null;
+    const d = value.initialDetails;
+    if (d?.token?.toLowerCase?.() === token.toLowerCase() && d?.deployer?.toLowerCase?.() === creator.toLowerCase()
+      && /^0x[a-fA-F0-9]{40}$/.test(d.pool ?? '') && !/^0x0{40}$/i.test(d.pool)
+      && d.venue !== 'curve' && !d.curve && !d.curveAddress) return d.pool;
+    for (const child of Object.values(value)) { const result = visit(child); if (result) return result; }
+    return null;
+  };
+  for (const line of chunks.join('').split('\n')) {
+    try { const result = visit(JSON.parse(line.slice(line.indexOf(':') + 1))); if (result) return result; } catch {}
+  }
+  return null;
+}
+export async function getPonsV1PoolMapping(token: string, creator: string): Promise<string | null> {
+  if (![token, creator].every(value => /^0x[a-fA-F0-9]{40}$/.test(value))) return null;
+  const html = await publicHtml(`https://www.ponsfamily.com/launchpad/${token}`);
+  return html ? parsePonsV1PoolMapping(html, token, creator) : null;
+}
 async function publicHtml(url: string): Promise<string | null> {
   const cached = pageCache.get(url);
   if (cached && cached.expires > Date.now()) return cached.html;

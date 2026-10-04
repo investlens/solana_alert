@@ -66,7 +66,7 @@ async function indexedFactoryForToken(token: Address): Promise<Address | null> {
   }
 }
 
-export async function getIndexedVerifiedPonsLaunch(tokenAddress: string): Promise<{exists:true;token:string;deployer:string|null}|null> {
+export async function getIndexedVerifiedPonsLaunch(tokenAddress: string): Promise<{exists:true;token:string;deployer:string|null;generation:'v1'|'v2'}|null> {
   const token = getAddress(tokenAddress);
   try {
     const { data, error } = await supabase
@@ -81,7 +81,8 @@ export async function getIndexedVerifiedPonsLaunch(tokenAddress: string): Promis
     if (!isApprovedPonsOrigin(token, data?.token_address, data?.factory_address)) return null;
     const deployer = typeof data?.deployer_address === 'string' && /^0x[a-f0-9]{40}$/i.test(data.deployer_address)
       && !/^0x0{40}$/i.test(data.deployer_address) ? data.deployer_address : null;
-    return {exists:true,token,deployer};
+    const generation = getPonsFactoryDeployments().find(factory => factory.address.toLowerCase() === data!.factory_address.toLowerCase())!.generation;
+    return {exists:true,token,deployer,generation};
   } catch (error) {
     console.warn('[PonsLaunchState] indexed PONS provenance lookup failed', {
       token,
