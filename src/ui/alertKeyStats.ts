@@ -34,6 +34,17 @@ export function withAlertKeyStats(text:string, stats:AlertKeyStats):string {
   const supply=Number(stats.supply?.replace(/,/g,''));
   const compactSupply=stats.supply && Number.isFinite(supply) && supply>=1000 ? (supply/(supply>=1e9?1e9:supply>=1e6?1e6:1e3)).toLocaleString('en-US',{maximumFractionDigits:2})+(supply>=1e9?'B':supply>=1e6?'M':'K') : stats.supply;
   add(/Total supply/i,'Total supply',compactSupply??'Unavailable');
+  // A pending authoritative venue is one missing snapshot, not ten separate
+  // failures. Keep independently measured supply and all risk disclosures.
+  const venuePending = stats.authoritativeVenue && /pending/i.test(stats.source ?? '')
+    && ![stats.price, stats.marketCap, stats.fdv, stats.liquidity, stats.volume5m, stats.volume24h].some(n);
+  if (venuePending) {
+    const supplyLine = lines.find(line => line.startsWith('Total supply '));
+    lines.length = 0;
+    lines.push('Market data <b>Pending venue confirmation</b>',
+      'Price, valuation, liquidity, volume, movements, trades and age are not confirmed.');
+    if (supplyLine) lines.push(supplyLine);
+  }
   add(/Sellability\s/i,'Sellability',stats.sellability??'Unverified');
   add(/LP (?:lock )?status\s/i,'LP lock status',stats.preBond?'Bonding curve':!stats.lp || stats.lp==='Unverified'?'Not independently checked':stats.lp);
   add(/Dex Paid|DEX Paid|DEX PAID DETECTED/i,'DEX Paid',stats.dexPaid??'Unavailable');

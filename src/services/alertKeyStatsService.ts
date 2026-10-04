@@ -39,6 +39,6 @@ export async function discloseRobinhoodKeyStats(text:string,token:string,preBond
     if(work){let timer:ReturnType<typeof setTimeout>|undefined;try{const stats=await Promise.race([work,new Promise<null>(resolve=>{timer=setTimeout(()=>resolve(null),2500);})]);if(stats)value={at:Date.now(),value:stats};}finally{if(timer)clearTimeout(timer);}}
   }
   const ponsHint=preBond || /Trusted PONS|Verified PONS|PONS · Robinchain/i.test(sellability??text);
-  const stats=ponsHint && !value?.value.authoritativeVenue ? {authoritativeVenue:true,source:'PONS venue data pending',checkedAt:new Date().toISOString().slice(11,19)} : value?.value ?? {};
+  const stats=ponsHint && !value?.value.authoritativeVenue ? {authoritativeVenue:true,supply:value?.value.supply,source:'PONS venue data pending',checkedAt:new Date().toISOString().slice(11,19)} : value?.value ?? {};
   return withAlertKeyStats(text,{...stats,preBond:stats.authoritativeVenue?stats.preBond:preBond,sellability,lp});
 }
