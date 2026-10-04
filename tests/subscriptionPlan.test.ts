@@ -9,6 +9,7 @@ import {
   paidAccessIsCurrent,
   publicSubscriptionStatusText,
   subscriptionsEnabled,
+  isClosedPaymentEntry,
 } from '../src/product/subscriptionPlan.js';
 import {
   accessProfileForUser,
@@ -37,6 +38,16 @@ test('AlphaOS subscription commercial terms stay locked', () => {
   assert.equal(ALPHAOS_SUBSCRIPTION_PLAN.deliveryDelaySeconds.pro, 5);
   assert.equal(ALPHAOS_SUBSCRIPTION_PLAN.deliveryDelaySeconds.free, 30);
   assert.equal(ALPHAOS_SUBSCRIPTION_PLAN.paymentRail, 'ROBINHOOD_CHAIN_NATIVE_EQUIVALENT');
+});
+
+test('obsolete payment entry stays closed independently of member access flag', () => {
+  for(const flag of ['false','true']) withSubscriptionFlag(flag,()=>{
+    for(const callback of ['PREMIUM_PLANS','MEMBERSHIP_PLANS','PLAN_15','PLAN_30','SUBMIT_PLAN_15','SUBMIT_PLAN_30','PAYMENT_STATUS']) assert.equal(isClosedPaymentEntry(callback,''),true);
+    for(const command of ['/plans','/upgrade','/upgrade@AlphaOSBot',' /plans@AlphaOSBot ']) assert.equal(isClosedPaymentEntry('',command),true);
+    for(const entry of ['MAIN_MENU','ALERT_SETTINGS','FULL_INTEL']) assert.equal(isClosedPaymentEntry(entry,''),false);
+    assert.equal(isClosedPaymentEntry('','/scan 0xabc'),false);
+    assert.equal(isClosedPaymentEntry('','/upgrader'),false);
+  });
 });
 
 test('paid subscriptions fail closed by default', () => {

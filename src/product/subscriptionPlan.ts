@@ -59,3 +59,10 @@ export function assertPaymentCollectionReady(): never {
   assertSubscriptionsEnabled();
   throw new Error('Payment collection is closed: the AlphaOS payment rail has not been validated.');
 }
+
+// Access launch and payment readiness are independent. The obsolete SOL UI must
+// remain unreachable even if current-member Pro access is enabled.
+export function isClosedPaymentEntry(callback: string, text: string): boolean {
+  return /^(?:PREMIUM_PLANS|MEMBERSHIP_PLANS|PLAN_15|PLAN_30|SUBMIT_PLAN_15|SUBMIT_PLAN_30|PAYMENT_STATUS)$/.test(callback)
+    || /^(?:\/plans|\/upgrade)(?:@\S+)?(?:\s|$)/i.test(text.trim());
+}

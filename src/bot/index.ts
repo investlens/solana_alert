@@ -3,7 +3,7 @@ import { alphaosFeatureGuide, alphaosHomeText } from '../product/featureGuide.js
 import { Markup, Telegraf } from 'telegraf';
 import { config } from '../config.js';
 import { getContextAccess } from './accessControl.js';
-import { ALPHAOS_SUBSCRIPTION_PLAN, subscriptionsEnabled } from '../product/subscriptionPlan.js';
+import { ALPHAOS_SUBSCRIPTION_PLAN, subscriptionsEnabled, isClosedPaymentEntry, publicSubscriptionStatusText } from '../product/subscriptionPlan.js';
 import { rememberRuntimeSubscriber } from '../services/runtimeSubscriberRegistry.js';
 import { intelligenceMenu, mainAlphaMenu, tradingMenu } from './menus.js';
 import { registerAddressScreening } from './addressScreening.js';
@@ -38,11 +38,12 @@ function dormantMembershipText(): string {
   return [
     '✦ <b>ALPHAOS ACCESS</b>',
     '',
-    '<b>Free</b> · Current testing access while production validation is completed.',
+    subscriptionsEnabled() ? '<b>Free</b> · Core alerts and research. Pro tools require active membership.' : '<b>Free</b> · Current testing access while production validation is completed.',
     '',
     `<b>Pro launch plan</b> · $${ALPHAOS_SUBSCRIPTION_PLAN.intro.priceUsdEquivalent} equivalent for the first ${ALPHAOS_SUBSCRIPTION_PLAN.intro.accessDays} days, then $${ALPHAOS_SUBSCRIPTION_PLAN.renewal.priceUsdEquivalent} equivalent every ${ALPHAOS_SUBSCRIPTION_PLAN.renewal.accessDays} days.`,
     '',
-    'Payments are <b>not open yet</b>. AlphaOS will enable Pro only after the core alert set passes production validation.',
+    'Payments are <b>not open yet</b>.',
+    publicSubscriptionStatusText(),
   ].join('\n');
 }
 
@@ -71,18 +72,11 @@ export function createBot() {
     return next();
   });
 
-  // Keep the legacy payment flow unreachable until AlphaOS explicitly enables
-  // subscriptions after the production release gate. This prevents users from
-  // seeing or acting on the old SOL-denominated plan while the new Robinhood
-  // Chain native-equivalent billing rail is still dormant.
+  // Membership access does not enable the unvalidated legacy SOL payment UI.
   bot.use(async (ctx, next) => {
-    if (subscriptionsEnabled()) return next();
-
     const callback = String((ctx.callbackQuery as any)?.data ?? '');
     const text = String((ctx.message as any)?.text ?? '').trim();
-    const blockedCallback = /^(?:PREMIUM_PLANS|MEMBERSHIP_PLANS|PLAN_15|PLAN_30|SUBMIT_PLAN_15|SUBMIT_PLAN_30|PAYMENT_STATUS)$/.test(callback);
-    const blockedCommand = /^(?:\/plans|\/upgrade)(?:@\S+)?(?:\s|$)/i.test(text);
-    if (!blockedCallback && !blockedCommand) return next();
+    if (!isClosedPaymentEntry(callback, text)) return next();
 
     if (callback) await ctx.answerCbQuery?.('Pro payments are not open yet').catch(() => {});
     await ctx.reply(dormantMembershipText(), {

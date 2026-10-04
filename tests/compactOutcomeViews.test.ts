@@ -17,8 +17,20 @@ test('creator totals include losses and exclude missing samples from winner shar
 });
 test('feed report includes negative results, pending and bounded coverage rather than winner-only proof',()=>{
  const text=renderCompactFeedView({state:'ready',value:[{day:'2026-10-02',chain:'arc',feed:'<BOOST>',tracked:7,winners:1,failed:2,neutral:1,incomplete:1,excluded:4}]});
- assert.match(text,/Winners 1 · Failed 2 · Neutral 1/);assert.match(text,/Pending 2/);assert.match(text,/Excluded admissions 4/);assert.match(text,/&lt;BOOST&gt;/);assert.match(text,/best effort/);
+ assert.match(text,/Winners 1 · Failed 2 · Other 1/);assert.match(text,/Pending 2/);assert.match(text,/Excluded admissions 4/);assert.match(text,/&lt;BOOST&gt;/);assert.match(text,/best effort/);
  assert.match(renderCompactFeedView({state:'ready',value:[]}),/No assessed outcomes yet/);
+});
+test('other price outcomes disclose losses and thin liquidity rather than imply neutrality',()=>{
+ const row:OutcomeSession={chain:'robinhood',token,feed:'BOOST',price_unit:'USD',baseline_price:100,baseline_liquidity:10000,outcome:'NEUTRAL',samples:[{status:'MEASURED',price:65,liquidity:6500},{status:'MEASURED',price:80,liquidity:6000},{status:'MEASURED',price:51,liquidity:4.31}]};
+ const text=renderCompactTokenView('robinhood',token,{state:'ready',value:row});
+ assert.match(text,/OTHER · neither outcome threshold met/);assert.match(text,/-49\.0%/);
+ assert.match(text,/below the alert baseline/);assert.match(text,/\$4\.31/);
+ assert.match(text,/-100\.0%/);assert.match(text,/Quoted price may not be executable/);
+ assert.doesNotMatch(text,/Status.*NEUTRAL/);
+ const unavailable=renderCompactTokenView('arc',token,{state:'ready',value:{...row,samples:[{status:'UNAVAILABLE',price:null,liquidity:null}]}});
+ assert.match(unavailable,/liquidity  Unavailable/);assert.doesNotMatch(unavailable,/\$0\.00|Thin or sharply/);
+ const curve=renderCompactTokenView('robinhood',token,{state:'ready',value:{...row,price_unit:'ETH_RESERVE_RATIO'}});
+ assert.doesNotMatch(curve,/sampled liquidity/);
 });
 test('address validation and output escape prevent cross-chain invalid lookups and HTML injection',()=>{
  assert.equal(validOutcomeAddress('arc',token),true);assert.equal(validOutcomeAddress('other',token),false);assert.equal(validOutcomeAddress('solana',token),false);
