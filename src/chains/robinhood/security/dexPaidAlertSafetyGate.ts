@@ -1,5 +1,5 @@
 import { recentDexPayment } from '../dexPaidWatchState.js';
-import { isVerifiedPonsLaunch } from '../ponsLaunchState.js';
+import { getIndexedVerifiedPonsLaunch, isVerifiedPonsLaunch } from '../ponsLaunchState.js';
 import { routeBoostSecurity, type BoostSecurityGateDecision } from '../boostSecurityRouter.js';
 import { scanRobinhoodDexPaid, type RobinhoodDexPaidResult } from './dexPaidScanner.js';
 type GateCheck = {key:string;passed:boolean;detail:string};
@@ -53,5 +53,6 @@ export function createDexPaidEventGate(deps:Dependencies) {
 export const evaluateDexPaidAlertSafety=createDexPaidEventGate({paid:scanRobinhoodDexPaid,
   // V2 origin is independently verifiable without the V1-only launch-state view.
   // Creator enrichment is optional and must not turn an approved origin into CUSTOM.
-  launch:async token=>await isVerifiedPonsLaunch(token)?{exists:true,token,deployer:null}:null,
+  launch:async token=>(await getIndexedVerifiedPonsLaunch(token))
+    ?? (await isVerifiedPonsLaunch(token)?{exists:true,token,deployer:null}:null),
   custom:token=>routeBoostSecurity({tokenAddress:token,verifiedTrustedLaunchpad:false,requireExplicitSellability:true}),now:Date.now});

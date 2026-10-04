@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { isApprovedPonsOrigin, isVerifiedPonsLaunch } from '../src/chains/robinhood/ponsLaunchState.js';
+import { getIndexedVerifiedPonsLaunch, isApprovedPonsOrigin, isVerifiedPonsLaunch } from '../src/chains/robinhood/ponsLaunchState.js';
 import { supabase } from '../src/services/supabase.js';
 import { routeBoostSecurity } from '../src/chains/robinhood/boostSecurityRouter.js';
 
@@ -10,11 +10,13 @@ const factory = '0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e';
 test('actual missed V2 indexed origin routes trusted without a V1 view or honeypot provider', async () => {
   const original = supabase.from;
   const builder = { select: () => builder, eq: () => builder, ilike: () => builder,
-    limit: () => builder, maybeSingle: async () => ({ data: {token_address: token, factory_address: factory}, error: null }) };
+    limit: () => builder, abortSignal: () => builder, maybeSingle:async()=>({ data: {token_address: token, factory_address: factory,
+      deployer_address:'0x82f55f91d68b248021c64fbe5ccd931f999bbd51'}, error: null }) };
   supabase.from = (() => builder) as unknown as typeof original;
   try {
     const verified = await isVerifiedPonsLaunch(token);
     assert.equal(verified, true);
+    assert.equal((await getIndexedVerifiedPonsLaunch(token))?.deployer,'0x82f55f91d68b248021c64fbe5ccd931f999bbd51');
     const decision = await routeBoostSecurity({tokenAddress:token, verifiedTrustedLaunchpad:verified, requireExplicitSellability:true});
     assert.equal(decision.allowed, true);
     assert.equal(decision.route, 'TRUSTED_LAUNCHPAD');
