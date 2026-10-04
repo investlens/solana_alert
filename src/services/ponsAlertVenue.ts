@@ -16,11 +16,12 @@ export async function confirmedCurveGraduation(token:string,curve:string):Promis
 }
 export function ponsVenueStats(token:string,context:PonsPublicContext|null,graduated:boolean|null,pairs:DexScreenerPair[]):AlertKeyStats {
   const checkedAt=new Date().toISOString().slice(11,19);
-  const unavailable:AlertKeyStats={authoritativeVenue:true,source:'PONS venue data pending',checkedAt};
+  const metadata={name:context?.name,symbol:context?.symbol,twitter:context?.twitter,telegram:context?.telegram};
+  const unavailable:AlertKeyStats={...metadata,authoritativeVenue:true,source:'PONS venue data pending',checkedAt};
   if(!context || graduated==null) return unavailable;
   if(!graduated){
     if(context.venue!=='curve'||context.phase!==0)return unavailable;
-    return {authoritativeVenue:true,preBond:true,price:context.priceUsd,marketCap:null,fdv:context.fdvUsd,
+    return {...metadata,authoritativeVenue:true,preBond:true,price:context.priceUsd,marketCap:null,fdv:context.fdvUsd,
       source:'PONS bonding-curve snapshot · FDV, not circulating market cap',checkedAt};
   }
   // Official exact-contract pool mapping + on-chain graduation. Never choose a
@@ -30,7 +31,7 @@ export function ponsVenueStats(token:string,context:PonsPublicContext|null,gradu
     &&p.pairAddress?.toLowerCase()===context.poolId!.toLowerCase());
   const m=robinhoodMarketSnapshotFromPairs(token,matching);
   if(!m)return {...unavailable,source:'Graduated · mapped DEX pool pending'};
-  return {authoritativeVenue:true,preBond:false,price:m.priceUsd,marketCap:m.marketCapUsd>0?m.marketCapUsd:null,fdv:m.fdvUsd,
+  return {name:m.name,symbol:m.symbol,chartUrl:m.chartUrl,authoritativeVenue:true,preBond:false,price:m.priceUsd,marketCap:m.marketCapUsd>0?m.marketCapUsd:null,fdv:m.fdvUsd,
     liquidity:m.liquidityUsd,volume5m:m.volume5mReported?m.volume5mUsd:null,volume24h:m.volume24hUsd,
     move5m:m.priceChange5m,move1h:m.priceChange1h,buys:m.trades5mReported?m.buys5m:null,sells:m.trades5mReported?m.sells5m:null,
     pairCreatedAt:m.pairCreatedAt,source:'DEXScreener · PONS-mapped graduated pool',checkedAt};
@@ -40,7 +41,7 @@ export function ponsV1VenueStats(token: string, pool: string, pairs: DexScreener
     && pair.baseToken?.address?.toLowerCase() === token.toLowerCase()
     && pair.pairAddress?.toLowerCase() === pool.toLowerCase()));
   if (!m) return {authoritativeVenue:true,source:'PONS V1 mapped DEX pool pending',checkedAt:new Date().toISOString().slice(11,19)};
-  return {authoritativeVenue:true,preBond:false,price:m.priceUsd,marketCap:m.marketCapUsd>0?m.marketCapUsd:null,fdv:m.fdvUsd,
+  return {name:m.name,symbol:m.symbol,chartUrl:m.chartUrl,authoritativeVenue:true,preBond:false,price:m.priceUsd,marketCap:m.marketCapUsd>0?m.marketCapUsd:null,fdv:m.fdvUsd,
     liquidity:m.liquidityUsd,volume5m:m.volume5mReported?m.volume5mUsd:null,volume24h:m.volume24hUsd,
     move5m:m.priceChange5m,move1h:m.priceChange1h,buys:m.trades5mReported?m.buys5m:null,sells:m.trades5mReported?m.sells5m:null,
     pairCreatedAt:m.pairCreatedAt,source:'DEXScreener · PONS V1 mapped pool',checkedAt:new Date(m.timestamp).toISOString().slice(11,19)};

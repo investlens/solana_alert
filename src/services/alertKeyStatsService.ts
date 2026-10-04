@@ -17,7 +17,18 @@ export async function discloseRobinhoodKeyStats(text:string,token:string,preBond
     if(!work&&pending.size<2&&started<10){
       started++;
       const venue=async()=>{
-        let launch=await getIndexedVerifiedPonsLaunch(token);
+        let launch=await getIndexedVerifiedPonsLaunch(token).catch(()=>null);
+        // A verified V2 origin can exist before the durable launch index catches up.
+        // Reuse exact-contract public metadata before the V1-only fallback.
+        const publicContext=ponsHint ? await getVerifiedPonsPublicContext(token).catch(()=>null) : null;
+        if(publicContext && (!launch?.deployer || publicContext.creator.toLowerCase()===launch.deployer.toLowerCase())) {
+          // Identity/supply remain useful even when the on-chain venue read hits its deadline.
+          if(cache.size>=100)cache.delete(cache.keys().next().value!);
+          cache.set(key,{at:Date.now(),value:{...ponsVenueStats(token,publicContext,null,[]),supply:formatResearchSupply(publicContext)}});
+          const graduated=publicContext.curveAddress ? await confirmedCurveGraduation(token,publicContext.curveAddress):null;
+          const pairs=graduated===true&&publicContext.poolId ? await fetchRobinhoodPairs(token,{priority:'NORMAL',caller:'alert_pons_venue',queueWaitTimeoutMs:750}).catch(()=>[]):[];
+          return {...ponsVenueStats(token,publicContext,graduated,pairs),supply:formatResearchSupply(publicContext)};
+        }
         // Older launches may predate our index. Reuse the bounded cached factory
         // read, without a second database lookup or broad event-log replay.
         if (!launch && ponsHint) {
@@ -48,7 +59,7 @@ export async function discloseRobinhoodKeyStats(text:string,token:string,preBond
         const m=market.status==='fulfilled'?market.value:null;
         const s=supply.status==='fulfilled'?supply.value:null;
         const c=context.status==='fulfilled'?context.value:null;
-        const stats:AlertKeyStats=c?{...c,supply:s?formatResearchSupply(s):c.supply}:{price:m?.priceUsd||null,marketCap:m?.marketCapUsd||null,fdv:m?.fdvUsd||null,liquidity:m?.liquidityUsd||null,
+        const stats:AlertKeyStats=c?{...c,supply:s?formatResearchSupply(s):c.supply}:{name:m?.name,symbol:m?.symbol,chartUrl:m?.chartUrl,price:m?.priceUsd||null,marketCap:m?.marketCapUsd||null,fdv:m?.fdvUsd||null,liquidity:m?.liquidityUsd||null,
           volume5m:m?.volume5mReported?m.volume5mUsd:null,volume24h:m?.volume24hUsd,move5m:m?.priceChange5m,move1h:m?.priceChange1h,
           buys:m?.trades5mReported?m.buys5m:null,sells:m?.trades5mReported?m.sells5m:null,pairCreatedAt:m?.pairCreatedAt,
           supply:s?formatResearchSupply(s):null,source:m?'DEXScreener'+(s?' / on-chain supply':''):s?'On-chain supply':null,
@@ -61,4 +72,10 @@ export async function discloseRobinhoodKeyStats(text:string,token:string,preBond
   }
   const stats=ponsHint && !value?.value.authoritativeVenue ? {authoritativeVenue:true,supply:value?.value.supply,source:'PONS venue data pending',checkedAt:new Date().toISOString().slice(11,19)} : value?.value ?? {};
   return withAlertKeyStats(text,{...stats,preBond:stats.authoritativeVenue?stats.preBond:preBond,sellability,lp});
+}
+
+// Read only; the bounded enrichment above owns provider work and expiry.
+export function cachedRobinhoodAlertStats(token:string):AlertKeyStats|null {
+ const saved=cache.get(token.toLowerCase());
+ return saved && Date.now()-saved.at<=30000 ? {...saved.value}:null;
 }
