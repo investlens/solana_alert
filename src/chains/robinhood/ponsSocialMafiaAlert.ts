@@ -1,3 +1,4 @@
+import { recordFeedDelivery } from '../../services/feedDeliveryHealth.js';
 import { discloseRobinhoodKeyStats } from '../../services/alertKeyStatsService.js';
 import { discloseRobinhoodOwnership } from '../../services/alertOwnershipService.js';
 import { discloseAlertDexPaid } from '../../services/alertDexPaidDisclosure.js';
@@ -363,6 +364,8 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   const delivered = results.filter(result => result.status === 'fulfilled' && result.value != null).length;
   void recordCompactAlert({chain:'robinhood', token, feed:route, ...baseline, creator:launch.deployer_address, creatorSource:'PONS_FACTORY_EVENT'}, delivered);
   const failed = results.length - delivered;
+  const feed = route === 'PROTOCOL_DISCOVERY' ? 'RH_PROTOCOL_DISCOVERY' : 'RH_SOCIAL_MAFIA';
+  recordFeedDelivery(feed,'ACCEPTED',delivered); recordFeedDelivery(feed,'PROCESSING_FAILED',failed);
   const admin = String(process.env.ADMIN_TELEGRAM_ID ?? process.env.OWNER_CHAT_ID ?? '').trim();
   const adminResult = results[chats.indexOf(admin)];
   const adminDelivery = adminResult?.status === 'fulfilled' ? adminResult.value : null;

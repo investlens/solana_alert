@@ -31,6 +31,7 @@ export function renderPositionCheck(check: PositionCheck): string {
     ] : ['Holder concentration  <b>Unable to assess</b>']),
     ...(check.creator ? [
       `Creator holding  <b>${check.creator.holding.toFixed(2)}%</b>`,
+      `Creator balance observed ${new Date(check.creator.at).toISOString().slice(11,19)} UTC · On-chain balance / total supply`,
       check.creator.change == null ? 'Holding change  <b>No comparison baseline yet</b>'
         : `Change since ${check.creator.baselineKind === 'ALERT' ? 'setup alert' : 'first recorded check'}  <b>${check.creator.change >= 0 ? '+' : ''}${check.creator.change.toFixed(2)} percentage points</b>`,
       ...(check.creator.baselineAt != null ? [`Baseline ${new Date(check.creator.baselineAt).toISOString().slice(11, 19)} UTC`] : []),

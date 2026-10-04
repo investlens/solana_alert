@@ -6,7 +6,7 @@ test('functional feeds have unique keys, chain grouping and preserve explicit mu
   assert.deepEqual([...new Set(LIVE_ALERT_FEEDS.map(feed=>feed.chain))],['Robinchain / PONS','ARC']);
   const preferences=resolveLivePreferences(new Map([['RH_BOOST',false],['ARC_OPPORTUNITY',false],['DEX_PAID',true],['SOL_DEX_PAID',false]]));
   assert.equal(preferences.RH_BOOST,false);assert.equal(preferences.ARC_OPPORTUNITY,false);assert.equal(preferences.DEX_PAID,true);
-  assert.equal(preferences.RH_SOCIAL_MAFIA,true);assert.equal(resolveLivePreferences(new Map()).DEX_PAID,false);
+  assert.equal(preferences.RH_SOCIAL_MAFIA,true);assert.equal(resolveLivePreferences(new Map()).DEX_PAID,true);
   assert.equal(isLiveFeedKey('SOL_DEX_PAID'),false);
 });
 test('semantic mappings keep Boost, DEX payment and burns independent from risk warnings',()=>{

@@ -1,3 +1,4 @@
+import { recordRejectedCandidate } from '../../services/rejectedCandidateReview.js';
 import {
   supabase,
 } from '../../services/supabase.js';
@@ -145,6 +146,7 @@ export type SaveRobinhoodRejectionArgs = {
 };
 
 export async function saveRobinhoodRejection(args: SaveRobinhoodRejectionArgs): Promise<string | null> {
+  recordRejectedCandidate({chain:'robinhood',token:args.tokenAddress,pair:args.pairAddress ?? '',price:args.priceAtDecision ?? 0,reason:`${args.rejectionStage}: ${args.rejectionReason}`});
   if (!dbBackgroundWorkEnabled()) {
     logDbRecoveryBypass('rejection', args.tokenAddress);
     return null;

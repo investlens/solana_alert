@@ -2,7 +2,7 @@ import { resolveCreatorIdentity } from './verifiedCreatorIdentity.js';
 import { getPonsLaunchState } from '../chains/robinhood/ponsLaunchState.js';
 import { reuseRobinhoodDevTokenFlow } from '../chains/robinhood/security/devTokenFlowScanner.js';
 import { scanRobinhoodHolderRisk } from '../chains/robinhood/security/holderRiskScanner.js';
-import { getCreatorHoldingPercent } from '../chains/robinhood/ponsPublicContext.js';
+import { getCreatorHoldingEvidence } from '../chains/robinhood/ponsPublicContext.js';
 import { withOwnershipDisclosure, type OwnershipDisclosure } from '../ui/ownershipDisclosure.js';
 
 const empty = (): OwnershipDisclosure => ({ devPercent: null, top10Percent: null, top10Coverage: 'UNAVAILABLE' });
@@ -29,15 +29,18 @@ export async function robinhoodOwnership(token: string, creator?: string | null,
             factory: address => getPonsLaunchState(address, {requireCompleteFactoryVerification: true}),
             history: async address => (await reuseRobinhoodDevTokenFlow(address)).deployerAddress,
           });
-          const value = identity ? await getCreatorHoldingPercent(token, identity) : null;
-          partial.get(key)!.devPercent = value; return value;
+          const value = identity ? await getCreatorHoldingEvidence(token, identity) : null;
+          Object.assign(partial.get(key)!,{devPercent:value?.percent ?? null,devObservedAt:value?.observedAt,devBlock:value?.block}); return value;
         })(),
         pool ? scanRobinhoodHolderRisk(token, { poolAddress: pool, timeoutMs: 1_500 }).then(result => {
-          if (result.sampledWallets.length) { partial.get(key)!.top10Percent = result.top10Pct; partial.get(key)!.top10Coverage = 'INDEXED_SAMPLE'; }
+          if (result.sampledWallets.length) { partial.get(key)!.top10Percent = result.top10Pct; partial.get(key)!.top10Coverage = 'INDEXED_SAMPLE'; partial.get(key)!.top10ObservedAt=result.scannedAt; }
           return result;
         }) : Promise.reject(new Error('Pool identity unavailable for holder exclusions')),
       ]);
-      return { devPercent: dev.status === 'fulfilled' ? dev.value : null,
+      return { devPercent: dev.status === 'fulfilled' ? dev.value?.percent ?? null : null,
+        devObservedAt:dev.status === 'fulfilled' ? dev.value?.observedAt : undefined,
+        devBlock:dev.status === 'fulfilled' ? dev.value?.block : undefined,
+        top10ObservedAt:holders.status === 'fulfilled' ? holders.value.scannedAt : undefined,
         top10Percent: holders.status === 'fulfilled' && holders.value.sampledWallets.length ? holders.value.top10Pct : null,
         top10Coverage: holders.status === 'fulfilled' && holders.value.sampledWallets.length ? 'INDEXED_SAMPLE' as const : 'UNAVAILABLE' as const };
     })().then(value => {

@@ -84,7 +84,9 @@ export function renderCompactFeedView(result:OutcomeRead<FeedDay[]>):string {
  for(const r of result.value){const key=`${r.chain} · ${r.feed.replace(/_/g,' ')}`;const v=totals.get(key)??{tracked:0,winners:0,failed:0,neutral:0,incomplete:0,excluded:0};for(const k of Object.keys(v) as (keyof typeof v)[]) v[k]+=count(r[k]);totals.set(key,v);}
  for(const [key,r] of [...totals].slice(0,8)){lines.push(`<b>${esc(key)}</b>`,`Tracked ${r.tracked} · Pending ${Math.max(0,r.tracked-r.winners-r.failed-r.neutral-r.incomplete)}`,`Winners ${r.winners} · Failed ${r.failed} · Neutral ${r.neutral}`,`Incomplete ${r.incomplete} · Excluded admissions ${r.excluded}`,'');}
  if(totals.size>8||result.value.length===128) lines.push('Display is capped; this is a partial report.');
- lines.push('Excluded counts are best effort. Missing data is not a loss.','First admitted feed owns attribution; repeat boosts reuse it.','Winner: ≥+25% at 6h, sampled low ≥−30%.','Failed: 6h ≤−50% or sampled low ≤−80%.','Sampled outcomes · Not executable trade returns.');return lines.join('\n');
+ lines.push('Coverage: admitted, delivered alerts only; rejected/unseen tokens are not measured.',
+ 'Three checkpoints cannot establish true ATH or maximum drawdown. Fees, gas and slippage excluded.',
+ 'Excluded counts are best effort. Missing data is not a loss.','First admitted feed owns attribution; repeat boosts reuse it.','Winner: ≥+25% at 6h, sampled low ≥−30%.','Failed: 6h ≤−50% or sampled low ≤−80%.','Sampled outcomes · Not executable trade returns.');return lines.join('\n');
 }
 export function getCompactTrackingHealth():Promise<OutcomeRead<{active:number;overdue:number}>> {
  return cachedRead('health',async()=>{const {supabase}=await import('./supabase.js');

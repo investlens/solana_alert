@@ -1,3 +1,4 @@
+import { removeAlertedCandidate } from './rejectedCandidateReview.js';
 import { governedDexScreenerJson } from './dexscreenerRequestGovernor.js';
 
 export const compactOutcomesEnabled = () => String(process.env.ALPHA_COMPACT_OUTCOMES_ENABLED ?? 'true').toLowerCase() === 'true';
@@ -26,6 +27,7 @@ function exclude(args: CompactAlertBaseline) {
 
 // Best effort after confirmed Telegram acceptance. Never retry or delay alert delivery.
 export async function recordCompactAlert(args: CompactAlertBaseline, accepted: number): Promise<void> {
+  if (accepted > 0) removeAlertedCandidate(args.chain,args.token);
   if (!compactOutcomesEnabled() || accepted <= 0 || !['solana','robinhood','arc'].includes(args.chain)) return;
   const now = Date.now(); const key = `${args.chain}:${args.chain === 'solana' ? args.token : args.token.toLowerCase()}`;
   for (const [k, expires] of seen) if (expires < now) seen.delete(k);
