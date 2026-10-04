@@ -23,5 +23,7 @@ test('explicit sell safety passes but does not bypass other market or contract g
   const safe = arcBoostSafetyFromEvidence({is_honeypot:'0',cannot_sell_all:'0'});
   assert.equal(assessArcForAlert(market, safe).alertable, true);
   assert.equal(assessArcForAlert({...market,liquidityUsd:null}, safe).alertable, false);
-  assert.equal(assessArcForAlert({...market,hooks:'0x0000000000000000000000000000000000000001'}, safe).alertable, false);
+  const hooked=assessArcForAlert({...market,hooks:'0x0000000000000000000000000000000000000001'},safe);
+  assert.equal(hooked.alertable,true);assert.ok(hooked.security.warnings.includes('UNVERIFIED_V4_HOOK_HIGH_RISK'));
+  assert.equal(assessArcForAlert({...market,hooks:'0x0000000000000000000000000000000000000001'}).alertable,false);
 });

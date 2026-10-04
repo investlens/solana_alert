@@ -116,6 +116,8 @@ export function polishArcTelegramPresentation(text: string, buttons?: ArcInlineB
   buttons?: ArcInlineButton[][];
 } {
   const originalText = text;
+  const keyStats = text.match(/<b>KEY STATS<\/b>\n[\s\S]*?(?=\n\n|$)/)?.[0];
+  if (keyStats) text = text.replace(keyStats, '');
   const ownership = text.match(/<b>OWNERSHIP<\/b>\n[\s\S]*?(?=\n\n|$)/)?.[0];
   if (ownership) text = text.replace(ownership, '');
   let polished = text;
@@ -123,9 +125,11 @@ export function polishArcTelegramPresentation(text: string, buttons?: ArcInlineB
   else if (text.includes('BOOST DETECTED · ARC')) polished = compactArcBoost(text);
   else if (text.includes('AlphaOS · ARC SUPPLY BURN')) polished = compactArcBurn(text);
   else return { text: originalText, buttons };
+  if (keyStats) polished = polished.includes('<b>CONTRACT</b>') ? polished.replace('<b>CONTRACT</b>',keyStats+'\n\n<b>CONTRACT</b>') : polished+'\n\n'+keyStats;
   if (ownership) {
     polished = polished.replace(/^.*Dev holding[^\n]*\n?/gmi, '');
     polished = polished.includes('<b>CONTRACT</b>') ? polished.replace('<b>CONTRACT</b>', ownership + '\n\n<b>CONTRACT</b>') : polished + '\n\n' + ownership;
   }
+  if (!polished.includes('Validate the contract, ownership and liquidity before investing.')) polished += '\n<i>Validate the contract, ownership and liquidity before investing.</i>';
   return { text: polished, buttons: normalizeArcButtons(buttons) };
 }

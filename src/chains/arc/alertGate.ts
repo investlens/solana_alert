@@ -23,6 +23,11 @@ export function assessArcForAlert(token: ArcMarketEnrichment, sellSafety?: ArcBo
     externalRiskFlag: null,
   });
 
+  if (sellSafety?.allowed === true && security.reasons.includes('UNVERIFIED_V4_HOOK')) {
+    security.reasons = security.reasons.filter(reason=>reason !== 'UNVERIFIED_V4_HOOK');
+    security.warnings.unshift('UNVERIFIED_V4_HOOK_HIGH_RISK');
+    security.allowAlert = security.reasons.length === 0;
+  }
   if (sellSafety?.allowed !== true) {
     security.reasons.push('SELLABILITY_UNVERIFIED');
     security.allowAlert = false;

@@ -3,12 +3,13 @@ import { getSharedJson, setSharedJson } from './sharedJsonCache.js';
 
 export const LIVE_ALERT_FEEDS = [
   {key:'RH_BOOST', chain:'Robinchain / PONS', name:'Boost', description:'New or increased token promotion.'},
-  {key:'DEX_PAID', chain:'Robinchain / PONS', name:'DEX Paid', description:'Verified DexScreener payment; qualifying checks apply.'},
+  {key:'DEX_PAID', chain:'Robinchain / PONS', name:'DEX Paid', description:'New DexScreener payment event; no market-cap/token-age limit.'},
   {key:'RH_SOCIAL_MAFIA', chain:'Robinchain / PONS', name:'Social Mafia', description:'Verified launchpad and exact contract publication on X.'},
   {key:'RH_PROTOCOL_DISCOVERY', chain:'Robinchain / PONS', name:'Protocol Discovery', description:'Protocol-named PONS projects with X + Telegram links.'},
-  {key:'RH_TRADE_SETUP', chain:'Robinchain / PONS', name:'Trade Setup', description:'Confirmed recovery with fresh creator evidence.'},
+  {key:'RH_TRADE_SETUP', chain:'Robinchain / PONS', name:'Trade Setup', description:'Confirmed recovery or breakout with fresh creator evidence.'},
   {key:'RH_MOMENTUM', chain:'Robinchain / PONS', name:'PONS Momentum', description:'Qualified curve or indexed-market momentum and follow-ups.'},
   {key:'RH_SUPPLY_BURN', chain:'Robinchain / PONS', name:'Supply Burn', description:'Verified burn meeting the feed checks.'},
+  {key:'ARC_DEX_PAID', chain:'ARC', name:'DEX Paid', description:'Fresh promotion payment; mandatory sellability evidence.'},
   {key:'ARC_BOOST', chain:'ARC', name:'Boost', description:'Promotion with mandatory sellability evidence.'},
   {key:'ARC_OPPORTUNITY', chain:'ARC', name:'Opportunity', description:'Market conditions with mandatory sellability evidence.'},
   {key:'ARC_SUPPLY_BURN', chain:'ARC', name:'Supply Burn', description:'Verified burn with mandatory sellability evidence.'},
