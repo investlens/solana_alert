@@ -1,3 +1,4 @@
+import { considerRobinhoodVolumeBreakout } from './volumeBreakoutSetup.js';
 import { config } from '../../config.js';
 import { recordOpportunity } from '../../core/opportunityRegistry.js';
 import { assessTokenIntelligence, type IntelligenceObservation, type TokenIntelligenceState } from '../../intelligence/tokenIntelligenceState.js';
@@ -164,6 +165,7 @@ async function scanToken(entry: ExistingTokenUniverseEntry) {
     .find(raw => raw.confirmedDevSell === true || raw.criticalSecurity === true || raw.liquidityCritical === true) ?? {};
   const market = await getRobinhoodMarketSnapshot(entry.token, { priority: 'BACKGROUND', caller: 'existing_token_scanner', queueWaitTimeoutMs: EXISTING_TOKEN_SCANNER_QUEUE_WAIT_MS });
   if (!market) { recordDexScreenerCallerOutcome('existing_token_scanner', 'BACKGROUND', 'NO_USABLE_PAIR'); throw new ExistingTokenNoUsablePairError(); }
+  void considerRobinhoodVolumeBreakout(market).catch(() => console.warn('[VolumeBreakout] CHECK_FAILED'));
   const observedAt = new Date(market.timestamp).toISOString();
   const minimumSeparationSeconds = entry.tier === 'HOT' ? config.existingTokenHotScanSeconds : config.existingTokenWarmScanSeconds;
   if (!existingTokenObservationIsSeparated(prior.observations, observedAt, minimumSeparationSeconds)) return { candidate: false, qualified: false, emitted: false };
