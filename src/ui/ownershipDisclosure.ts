@@ -17,11 +17,12 @@ export function withOwnershipDisclosure(text: string, evidence: OwnershipDisclos
   const clean = text.replace(/\n?<b>OWNERSHIP<\/b>\n[^]*?(?=\n\n|$)/g, '').replace(/^.*(?:Dev holding|Dev Holding|Creator holding not verified)[^\n]*\n?/gmi, '')
     .replace(/Dev holds \d+(?:\.\d+)?%/gi, effectiveDev == null ? 'Dev holding unavailable' : `Dev holds ${effectiveDev.toFixed(2)}%`);
   const lines = ['<b>OWNERSHIP</b>',
-    `👨‍💻 Dev holding  <b>${effectiveDev == null ? 'Unavailable' : effectiveDev.toFixed(2) + '%'}</b>`,
+    `👨‍💻 Dev holding  <b>${effectiveDev == null ? 'Unavailable' : effectiveDev > 0 && effectiveDev < 0.005 ? '&lt;0.01%' : effectiveDev.toFixed(2) + '%'}</b>`,
     `👥 Top 10${evidence.top10Coverage === 'INDEXED_SAMPLE' ? ' · indexed sample' : evidence.top10Coverage === 'PROVIDER_REPORTED' ? ' · provider wallet sample' : ''}  <b>${top == null ? 'Unavailable' : top.toFixed(2) + '%'}</b>`,
     ...(dev != null && Number.isFinite(evidence.devObservedAt) ? [`Dev observed ${new Date(evidence.devObservedAt!).toISOString().slice(11,19)} UTC${evidence.devBlock ? ' · on-chain block '+evidence.devBlock.replace(/[^0-9]/g,'') : ' · provider reported'}`] : []),
     ...(top != null && Number.isFinite(evidence.top10ObservedAt) ? [`Holder sample observed ${new Date(evidence.top10ObservedAt!).toISOString().slice(11,19)} UTC`] : []),
     ...(effectiveDev != null && effectiveDev >= 10 ? ['⚠️ Concentrated dev holding · potential sell pressure'] : []),
+    ...(effectiveDev === 0 ? ['Creator wallet balance only · sale, transfer or burn not established'] : []),
   ].join('\n');
   const contractMarker = clean.indexOf('<b>CONTRACT</b>');
   const marker = contractMarker >= 0 ? contractMarker : clean.indexOf('<code>');
