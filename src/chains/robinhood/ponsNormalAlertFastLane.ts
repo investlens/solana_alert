@@ -5,6 +5,8 @@ import { discloseRobinhoodOwnership } from '../../services/alertOwnershipService
 import { enabledLiveRecipients } from '../../services/liveAlertPreferences.js';
 import { waitForRecipientDelivery, recordDeliveryAccepted } from '../../services/recipientDeliveryTiming.js';
 import { recordCompactAlert, type CompactAlertBaseline } from '../../services/compactAlertOutcomes.js';
+import { buildAlphaosAlertCard } from '../../ui/alphaosAlertCard.js';
+import { telegramCaptionLength } from '../../ui/alphaosPhotoDelivery.js';
 import { sendAlphaosPhotoAlert } from '../../ui/alphaosPhotoDelivery.js';
 import { decodeFunctionResult, encodeFunctionData, parseAbi } from 'viem';
 import type { PonsLaunch } from './ponsHistoricalLaunchScanner.js';
@@ -166,11 +168,11 @@ function refreshRecipientsInBackground(): void {
   })();
 }
 
-async function sendTelegram(chatId: string, text: string, tokenAddress: string, socials?: RobinhoodTokenSocials, preBond = false, setupControls = false, baseline?: CompactAlertBaseline): Promise<void> {
+async function sendTelegram(chatId: string, text: string, tokenAddress: string, socials?: RobinhoodTokenSocials, preBond = false, setupControls = false, baseline?: CompactAlertBaseline, image: Buffer | null = null): Promise<void> {
   const botToken = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
   if (!botToken || !chatId) throw new Error('missing Telegram configuration');
   const keyboard = setupControls ? [
-    [{ text: '🚀 PONS', url: `https://www.ponsfamily.com/launchpad/${tokenAddress}` }, { text: '🧠 Full Intel', callback_data: `FI_RH_${tokenAddress}` }],
+    [{ text: preBond ? '🚀 PONS' : '📈 Chart', url: preBond ? `https://www.ponsfamily.com/launchpad/${tokenAddress}` : `https://dexscreener.com/robinhood/${baseline?.pair ?? tokenAddress}` }, { text: '🧠 Full Intel', callback_data: `FI_RH_${tokenAddress}` }],
     [{ text: '⭐ Track', callback_data: `BOOST_TRACK_${tokenAddress}` }, { text: '📋 Copy CA', callback_data: `COPY_CA_${tokenAddress}` }],
   ] : [
     [preBond ? { text: '🚀 PONS', url: `https://www.ponsfamily.com/launchpad/${encodeURIComponent(tokenAddress)}` }
@@ -182,7 +184,7 @@ async function sendTelegram(chatId: string, text: string, tokenAddress: string, 
   ].filter(row => row.length > 0);
   const card = await discloseAlertDexPaid(text, keyboard, tokenAddress);
   if (setupControls) {
-    await sendAlphaosPhotoAlert({ botToken, chatId, text: card.text, image: null, keyboard: card.buttons }); return;
+    await sendAlphaosPhotoAlert({ botToken, chatId, text: card.text, image, keyboard: card.buttons }); return;
   }
   const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
@@ -192,7 +194,7 @@ async function sendTelegram(chatId: string, text: string, tokenAddress: string, 
   if (!res.ok) throw new Error(`Telegram ${res.status}: ${await res.text().catch(() => '')}`);
 }
 
-export async function directTelegramRecipients(text: string, tokenAddress: string, socials?: RobinhoodTokenSocials, preBond = false, setupControls = false, baseline?: CompactAlertBaseline): Promise<{ delivered: number; failed: number }> {
+export async function directTelegramRecipients(text: string, tokenAddress: string, socials?: RobinhoodTokenSocials, preBond = false, setupControls = false, baseline?: CompactAlertBaseline, options?: { skipKeyStats?: boolean }): Promise<{ delivered: number; failed: number }> {
   ensureAdminRecipient();
   refreshRecipientsInBackground();
   if (setupControls && recipientRefreshInFlight) {
@@ -202,11 +204,13 @@ export async function directTelegramRecipients(text: string, tokenAddress: strin
   if (!recipients.length) return {delivered:0,failed:0};
 
   text = await discloseRobinhoodOwnership(text, tokenAddress, baseline?.creator, baseline?.pair);
-  text = await discloseRobinhoodKeyStats(text,tokenAddress,preBond,'Trusted PONS route');
+  if (!options?.skipKeyStats) text = await discloseRobinhoodKeyStats(text,tokenAddress,preBond,'Trusted PONS route');
+  const image = options?.skipKeyStats && telegramCaptionLength(text) <= 1024
+    ? await buildAlphaosAlertCard({ symbol: text.match(/\(\$([^)<]+)\)/)?.[1], category: 'VOLUME BREAKOUT', chainLabel: 'ROBINCHAIN', badge: 'RESEARCH WATCH', footer: 'Pool volume activity does not establish trading safety.' }).catch(() => null) : null;
   const deliveryStartedAt = Date.now();
   const results = await Promise.allSettled(recipients.map(async chatId => {
     await waitForRecipientDelivery(chatId, deliveryStartedAt);
-    const accepted = await sendTelegram(chatId, text, tokenAddress, socials, preBond, setupControls);
+    const accepted = await sendTelegram(chatId, text, tokenAddress, socials, preBond, setupControls, baseline, image);
     recordDeliveryAccepted(chatId, deliveryStartedAt, `pons:${setupControls ? 'setup' : 'normal'}:${tokenAddress}`);
     return accepted;
   }));
