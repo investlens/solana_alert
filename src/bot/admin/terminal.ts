@@ -1,3 +1,5 @@
+import { rejectedReviewText } from '../../services/rejectedCandidateReview.js';
+import { getFeedHealthText } from '../../services/feedDeliveryHealth.js';
 import { getCompactFeedView, renderCompactFeedView, getCompactTrackingHealth } from '../../services/compactOutcomeViews.js';
 import type { Telegraf } from 'telegraf';
 
@@ -71,7 +73,7 @@ function terminalKeyboard() {
           callback_data: 'ADMIN_TERMINAL_PERFORMANCE',
         },
         {
-          text: '⚡ API Health',
+          text: '📡 Alert Health',
           callback_data: 'ADMIN_TERMINAL_HEALTH',
         },
       ],
@@ -86,6 +88,10 @@ function terminalKeyboard() {
         },
       ],
       [
+        {
+          text: '🔬 Rejected Review',
+          callback_data: 'ADMIN_REJECTED_REVIEW',
+        },
         {
           text: '🏠 Home',
           callback_data: 'MAIN_MENU',
@@ -1183,6 +1189,12 @@ bot.action(
     },
   );
 
+  bot.action('ADMIN_REJECTED_REVIEW', async ctx => {
+    if (await rejectNonAdminAction(ctx)) return;
+    await ctx.answerCbQuery();
+    await ctx.reply(await rejectedReviewText(), {parse_mode:'HTML', reply_markup:backToTerminalKeyboard()});
+  });
+
   bot.action(
     'ADMIN_TERMINAL_HEALTH',
     async (ctx) => {
@@ -1193,20 +1205,9 @@ bot.action(
       await ctx.answerCbQuery();
 
       try {
-        const stats = await getTerminalStats();
-
+        const health = await getFeedHealthText();
         await ctx.reply(
-          [
-            '⚡ <b>ALPHAOS API HEALTH</b>',
-            '━━━━━━━━━━━━━━━━━━',
-            '',
-            `DexScreener: <b>${stats.apiStatus.dexScreener}</b>`,
-            `Helius: <b>${stats.apiStatus.helius}</b>`,
-            `Bitquery: <b>${stats.apiStatus.bitquery}</b>`,
-            `Pump.fun: <b>${stats.apiStatus.pumpfun}</b>`,
-            '',
-            '⚠️ Service values currently reflect the latest known state.',
-          ].join('\n'),
+          health,
           {
             parse_mode: 'HTML',
             reply_markup:

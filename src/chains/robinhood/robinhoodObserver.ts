@@ -1,3 +1,4 @@
+import { runRejectedCandidateReview } from '../../services/rejectedCandidateReview.js';
 import { recentDexPayment } from './dexPaidWatchState.js';
 import { recordDexPaidCheck } from './dexPaidDiagnostics.js';
 import { renderAlphaNotification } from '../../ui/alphaNotification.js';
@@ -2446,6 +2447,7 @@ export function startRobinhoodObserver():
   observerInterval =
     setInterval(
       () => {
+        void runRejectedCandidateReview();
         void refreshRobinhoodObserver();
         void scanVerifiedRobinhoodBurns();
       },

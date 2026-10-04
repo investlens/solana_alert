@@ -101,18 +101,22 @@ export async function getTelegramPreviewType(url: string): Promise<TelegramPrevi
 }
 
 const abi = parseAbi(['function balanceOf(address) view returns (uint256)', 'function totalSupply() view returns (uint256)']);
-export async function getCreatorHoldingPercent(token: string, creator: string): Promise<number | null> {
+export async function getCreatorHoldingEvidence(token: string, creator: string, blockTag?: `0x${string}`): Promise<{percent:number;block:string;observedAt:number} | null> {
   try {
     // Both values come from the same block; identity alone cannot prove holdings.
-    const block = await requestRobinhoodRpcResilient({ method: 'eth_blockNumber', params: [] });
+    const block = blockTag ?? await requestRobinhoodRpcResilient({ method: 'eth_blockNumber', params: [] });
     const call = (data: string) => requestRobinhoodRpcResilient({ method: 'eth_call', params: [{ to: token, data }, block] });
     const [balance, supply] = await Promise.all([
       call(encodeFunctionData({ abi, functionName: 'balanceOf', args: [creator as Address] })),
       call(encodeFunctionData({ abi, functionName: 'totalSupply' })),
     ]);
     const b = BigInt(String(balance)); const s = BigInt(String(supply));
-    return s > 0n && b <= s ? Number(b * 1_000_000n / s) / 10_000 : null;
+    return s > 0n && b >= 0n && b <= s ? {percent:Number(b * 1_000_000n / s) / 10_000,block:BigInt(String(block)).toString(),observedAt:Date.now()} : null;
   } catch { return null; }
+}
+
+export async function getCreatorHoldingPercent(token: string, creator: string, blockTag?: `0x${string}`): Promise<number | null> {
+  return (await getCreatorHoldingEvidence(token,creator,blockTag))?.percent ?? null;
 }
 
 // Call only after independent PONS provenance verification; website data never establishes provenance.

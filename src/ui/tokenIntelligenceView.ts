@@ -129,6 +129,7 @@ export function tokenIntelligenceButtons(intel: TokenIntel, supportedCurve = fal
   market.push({ text: '🔎 Explorer', url: `https://robinhoodchain.blockscout.com/token/${intel.tokenAddress}` });
   rows.push(market);
   if (/^0x[a-fA-F0-9]{40}$/.test(intel.tokenAddress)) rows.push([...(supportedCurve ? [{ text: '🎯 Curve Estimate', callback_data: `PC_RH_0.01_${intel.tokenAddress}` }] : []), { text: '📋 Copy CA', callback_data: `COPY_CA_${intel.tokenAddress}` }]);
+  rows.push([{text:'🔗 Wallet Links · Pro',callback_data:`WL_RH_${intel.tokenAddress}`}]);
   rows.push([{ text: '🎯 Readiness · Pro', callback_data: `TR_RH_${intel.tokenAddress}` }, { text: 'My Monitors', callback_data: 'DM_HOME' }]);
   return rows;
 }

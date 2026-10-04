@@ -42,7 +42,7 @@ export async function renderIntelligenceHome(ctx: any) {
   await editOrReply(ctx, [
     '🧠 <b>INTELLIGENCE</b>', '',
     'Understand what is moving, who is involved, and how prior calls performed.', '',
-    'Your access includes the full Intelligence workspace.',
+    'Choose an available tool below. Pro tools follow your membership access.\n\nScan a token → Full Intel → Wallet Links for observed developer-transfer relationships.\nVerified PONS pre-bond tokens also offer Curve Estimate with selectable ETH budgets.',
   ].join('\n'), intelligenceMenu(access).reply_markup);
 }
 

@@ -31,9 +31,9 @@ const userPreferenceCache = new Map<string, boolean>();
 const preferenceKey = (telegramId: string, strategyKey: string) => `${telegramId}:${strategyKey}`;
 
 export function defaultStrategyEnabledForUser(strategyKey: string): boolean {
-  // Explicit opt-in strategies stay off when a user has no durable preference row.
-  // Core always-on semantic alerts such as BOOST remain fail-open for continuity.
-  return strategyKey !== DEX_PAID_STRATEGY_KEY && strategyKey !== X_REPUTED_MENTION_STRATEGY_KEY;
+  // Core promotion feeds default on; explicit user mutes remain authoritative.
+  // Reputed X mentions remain opt-in.
+  return strategyKey !== X_REPUTED_MENTION_STRATEGY_KEY;
 }
 
 export async function getEnabledStrategies(): Promise<StrategyDefinition[]> {

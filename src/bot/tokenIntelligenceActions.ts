@@ -1,3 +1,4 @@
+import { getWalletLinkResearch, renderWalletLinkResearch } from '../services/walletLinkResearch.js';
 import { getCompactTokenView, getCompactCreatorView, renderCompactTokenView, renderCompactCreatorView } from '../services/compactOutcomeViews.js';
 import type { Telegraf } from 'telegraf';
 import { requireCapability } from './accessControl.js';
@@ -29,6 +30,14 @@ export function registerTokenIntelligenceActions(bot: Telegraf<any>) {
     } catch {
       await ctx.reply('Position Check is unavailable or busy. Please try again shortly.').catch(() => {});
     } finally { activeReplies.delete(key); }
+  });
+  bot.action(/^WL_RH_(0x[a-fA-F0-9]{40})$/, async ctx => {
+    if (!await requireCapability(ctx,'intelligence.creators','INTELLIGENCE_CENTER')) return;
+    await ctx.answerCbQuery('Checking observed wallet relationships…').catch(()=>{});
+    const key=`links:${ctx.from?.id}`; if(activeReplies.has(key)) return; activeReplies.add(key);
+    try { await ctx.reply(renderWalletLinkResearch(await getWalletLinkResearch(ctx.match[1])),{parse_mode:'HTML',link_preview_options:{is_disabled:true},reply_markup:{inline_keyboard:[[{text:'🧠 Full Intel',callback_data:`FI_RH_${ctx.match[1]}`}]]}}); }
+    catch { await ctx.reply('Wallet-link research is busy or unavailable. Please retry shortly.').catch(()=>{}); }
+    finally { activeReplies.delete(key); }
   });
   bot.action(/^COPY_CA_(0x[a-fA-F0-9]{40})$/, async ctx => {
     const token = String(ctx.match[1]);

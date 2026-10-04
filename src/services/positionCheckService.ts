@@ -39,6 +39,10 @@ type Baseline = { creator: string; holding: number; at: number };
 const baselines = new Map<string, Baseline>();
 const cache = new Map<string, PositionCheck>();
 const pending = new Map<string, Promise<PositionCheck>>();
+let admissionMinute = 0, admissions = 0;
+export function freshPositionBaseline(row: Baseline | undefined, now = Date.now()): Baseline | undefined {
+  return row && Number.isFinite(row.at) && row.at <= now && now-row.at <= 3_600_000 ? row : undefined;
+}
 export async function hasCachedPonsCurve(token: string): Promise<boolean> {
   if (!/^0x[a-f0-9]{40}$/i.test(token)) return false;
   const marker = (await getSharedJson<{ factory: string; token?: string; curveAddress?: string; creator?: string }>(`alphaos:pons:verified:${token.toLowerCase()}`))?.value;
@@ -52,7 +56,12 @@ export async function getPositionCheck(token: string, size: PositionSize): Promi
   token = token.toLowerCase(); const key = `${token}:${size}`;
   const cached = cache.get(key); if (cached && Date.now() - cached.checkedAt < 15_000) return cached;
   const inFlight = pending.get(key); if (inFlight) return inFlight;
-  if (pending.size >= 3) throw Error('Position checks are busy; try again shortly');
+  if (pending.size >= 2) throw Error('Position checks are busy; try again shortly');
+  const minute = Math.floor(Date.now()/60_000);
+  if (admissionMinute !== minute) { admissionMinute=minute; admissions=0; }
+  if (admissions >= 10) throw Error('Position check budget reached; try again shortly');
+  admissions++;
+  for (const [token,row] of baselines) if (!freshPositionBaseline(row)) baselines.delete(token);
   const run = analyze(token, size); pending.set(key, run);
   try { const result = await run; if (cache.size >= 50) cache.delete(cache.keys().next().value!); cache.set(key, result); return result; }
   finally { pending.delete(key); }
@@ -78,7 +87,7 @@ async function analyze(token: string, size: PositionSize): Promise<PositionCheck
     const [state, holders, holding, curveBalance] = await Promise.allSettled([
       getPonsV2CurveState(curve, block),
       metadataPromise.then(metadata => scanRobinhoodHolderRisk(token, { poolAddress: curve, metadata, signal, timeoutMs: 3_000 })),
-      getCreatorHoldingPercent(token, creator),
+      getCreatorHoldingPercent(token, creator, block),
       requestRobinhoodRpcResilient<`0x${string}`>({ method: 'eth_getBalance', params: [curve, block] }),
     ]);
     if (signal.aborted) return;
@@ -107,7 +116,7 @@ async function analyze(token: string, size: PositionSize): Promise<PositionCheck
         excluded: holders.value.excludedHolderCount, at: holders.value.scannedAt };
     }
     if (holding.status === 'fulfilled' && holding.value != null && Number.isFinite(holding.value) && holding.value >= 0 && holding.value <= 100) {
-      const firstCheck = baselines.get(token);
+      const firstCheck = freshPositionBaseline(baselines.get(token));
       const previous = validSetup && validSetup.holding != null && Number.isFinite(validSetup.holding)
         ? { creator: validSetup.creator, holding: validSetup.holding, at: validSetup.at } : firstCheck;
       result.creator = { wallet: creator, holding: holding.value, change: previous?.creator.toLowerCase() === creator.toLowerCase() ? holding.value - previous.holding : null,

@@ -1,3 +1,4 @@
+import { recordFeedDelivery } from './feedDeliveryHealth.js';
 import { discloseRobinhoodKeyStats } from './alertKeyStatsService.js';
 import { routeBoostSecurity } from '../chains/robinhood/boostSecurityRouter.js';
 import { getPonsLaunchState } from '../chains/robinhood/ponsLaunchState.js';
@@ -302,7 +303,7 @@ export async function deliverAlphaSemanticEvent(args: {
       if (reason.includes('403')) await dependencies.blocked(user.telegram_id);
       console.error('[AlphaSemanticDelivery] Delivery failed:', { alertEventId: args.event.id,
         semanticEventType: args.event.type, recipientCount: users.length, renderedCharacters, renderedBytes,
-        telegramErrorCategory: reason.includes('text is too long') ? 'MESSAGE_TOO_LONG' : reason.includes('403') ? 'RECIPIENT_BLOCKED' : 'SEND_FAILED',
+        telegramErrorCategory: reason.includes('text is too long') ? 'MESSAGE_TOO_LONG' : reason.includes('403') ? 'RECIPIENT_BLOCKED' : 'PROCESSING_FAILED',
         telegramId: user.telegram_id, sent: result.sent, reason });
     } catch (error) {
       failed += 1;
@@ -312,6 +313,10 @@ export async function deliverAlphaSemanticEvent(args: {
         semanticEventType: args.event.type, telegramId: user.telegram_id,
         reason: error instanceof Error ? error.message : String(error) });
     }
+  }
+  if (dependencies === productionDependencies) {
+    const feed = semanticLiveFeed(args.event.type,args.event.chain);
+    if (feed) { recordFeedDelivery(feed,'ACCEPTED',accepted); recordFeedDelivery(feed,'PROCESSING_FAILED',failed); }
   }
   if (ephemeralMode && delivered > 0) void recordRecoveryAlertAudit(args.event, delivered);
   if (dependencies === productionDependencies && isPositiveSemanticEvent(args.event.type)) {

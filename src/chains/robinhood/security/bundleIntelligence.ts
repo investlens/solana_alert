@@ -163,9 +163,10 @@ export async function scanRobinhoodBundleIntelligence(
     if (movement.status === 'UNKNOWN') return unknown(token, 'developer transfer history unavailable');
 
     const holderByWallet = new Map(holders.map((holder) => [normalized(holder.wallet), holder]));
-    const nonBurnDestinations = movement.destinations.filter((wallet) => {
+    const excludedDestinations = new Set([ZERO_ADDRESS, DEAD_ADDRESS, normalized(options.poolAddress), normalized(PONS_CONTRACTS.locker), normalized(PONS_CONTRACTS.positionManager)]);
+    const nonBurnDestinations = [...new Set(movement.destinations.map(normalized))].filter((wallet) => {
       const key = normalized(wallet);
-      return key !== ZERO_ADDRESS && key !== DEAD_ADDRESS;
+      return !excludedDestinations.has(key);
     });
 
     const connectedCurrent = nonBurnDestinations
@@ -186,40 +187,40 @@ export async function scanRobinhoodBundleIntelligence(
     // designed to catch before a DEX-paid alert is actionable.
     if (directSpreadCount >= 5 && movedPct != null && movedPct >= 10) {
       score += 90;
-      reasons.push(`deployer spread ${movedPct.toFixed(1)}% of supply across ${directSpreadCount} wallets`);
+      reasons.push(`developer transferred ${movedPct.toFixed(1)}% overall; ${directSpreadCount} non-system destinations observed`);
     } else if (directSpreadCount >= 3 && movedPct != null && movedPct >= 8) {
       score += 80;
-      reasons.push(`deployer spread ${movedPct.toFixed(1)}% of supply across ${directSpreadCount} wallets`);
+      reasons.push(`developer transferred ${movedPct.toFixed(1)}% overall; ${directSpreadCount} non-system destinations observed`);
     } else if (directSpreadCount >= 2 && movedPct != null && movedPct >= 5) {
       score += 45;
-      reasons.push(`deployer distributed ${movedPct.toFixed(1)}% of supply across ${directSpreadCount} wallets`);
+      reasons.push(`developer transferred ${movedPct.toFixed(1)}% overall; ${directSpreadCount} non-system destinations observed`);
     }
 
     // If dev-linked destinations are still major holders, measure their combined
     // current control rather than treating each wallet as independent.
     if (connectedCurrent.length >= 3 && connectedCurrentSupplyPct >= 10) {
       score += 50;
-      reasons.push(`${connectedCurrent.length} dev-linked holders still control ${connectedCurrentSupplyPct.toFixed(1)}% combined`);
+      reasons.push(`${connectedCurrent.length} observed developer-transfer recipients hold ${connectedCurrentSupplyPct.toFixed(1)}% combined`);
     } else if (connectedCurrent.length >= 2 && connectedCurrentSupplyPct >= 8) {
       score += 30;
-      reasons.push(`${connectedCurrent.length} dev-linked holders control ${connectedCurrentSupplyPct.toFixed(1)}% combined`);
+      reasons.push(`${connectedCurrent.length} observed developer-transfer recipients hold ${connectedCurrentSupplyPct.toFixed(1)}% combined`);
     }
 
     // Symmetric large positions can indicate deliberate wallet splitting. This is
     // supporting evidence only; it cannot independently produce a HIGH verdict.
     if (similar.count >= 6 && similar.combinedPct >= 18) {
       score += 35;
-      reasons.push(`${similar.count} similarly-sized wallets control ${similar.combinedPct.toFixed(1)}% combined`);
+      reasons.push(`${similar.count} similarly-sized sampled wallets hold ${similar.combinedPct.toFixed(1)}% combined`);
     } else if (similar.count >= 5 && similar.combinedPct >= 15) {
       score += 25;
-      reasons.push(`${similar.count} similarly-sized wallets control ${similar.combinedPct.toFixed(1)}% combined`);
+      reasons.push(`${similar.count} similarly-sized sampled wallets hold ${similar.combinedPct.toFixed(1)}% combined`);
     }
 
     score = Math.max(0, Math.min(100, score));
     const level: RobinhoodBundleIntelligenceResult['level'] =
       score >= 70 ? 'HIGH' : score >= 40 ? 'MEDIUM' : 'LOW';
 
-    if (!reasons.length) reasons.push('no coordinated deployer-to-holder distribution pattern detected');
+    if (!reasons.length) reasons.push('no qualifying developer-transfer concentration found in this sample; shared ownership unverified');
 
     const result: RobinhoodBundleIntelligenceResult = {
       tokenAddress: token,

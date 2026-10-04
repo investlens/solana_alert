@@ -1,3 +1,4 @@
+import { recordFeedDelivery } from '../../services/feedDeliveryHealth.js';
 import { discloseRobinhoodKeyStats } from '../../services/alertKeyStatsService.js';
 import { discloseAlertDexPaid } from '../../services/alertDexPaidDisclosure.js';
 import { discloseRobinhoodOwnership } from '../../services/alertOwnershipService.js';
@@ -219,6 +220,8 @@ export async function directTelegramRecipients(text: string, tokenAddress: strin
     failed += 1;
     console.warn(`[PonsFastLane] TELEGRAM_FAILED token=${tokenAddress} recipient=${recipients[index]} reason=${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
   });
+  recordFeedDelivery(setupControls ? 'RH_TRADE_SETUP' : 'RH_MOMENTUM','ACCEPTED',delivered);
+  recordFeedDelivery(setupControls ? 'RH_TRADE_SETUP' : 'RH_MOMENTUM','PROCESSING_FAILED',failed);
   if (delivered === 0) throw new Error(`Telegram delivery failed for all ${failed} recipients`);
   if (baseline) void recordCompactAlert(baseline, delivered);
   return { delivered, failed };
