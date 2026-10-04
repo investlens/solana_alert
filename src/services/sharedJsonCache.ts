@@ -24,3 +24,33 @@ export async function runSharedAtomic(script: string, keys: string[], args: stri
   return Promise.race([redis.eval(script, { keys, arguments: args }),
     new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Shared monitoring deadline')), 750))]);
 }
+
+// Checkpoints must distinguish a missing key from a failed read. Otherwise a
+// restart can overwrite recoverable watches after a transient Redis timeout.
+export async function getWatchCheckpoint<T>(key: string): Promise<{value:T;fetchedAt:string}|null> {
+  const redis = await getClient(1500);
+  if (!redis) throw new Error('Watch checkpoint store unavailable');
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const raw = await Promise.race([redis.get(key), new Promise<never>((_, reject) => {
+      timeout = setTimeout(() => reject(new Error('Watch checkpoint read timeout')), 1500);
+    })]);
+    if (raw === null) { console.log(`[WatchCheckpoint] MISSING key=${key}`); return null; }
+    if (typeof raw !== 'string') throw new Error('Invalid watch checkpoint response');
+    const parsed = JSON.parse(raw) as {value:T;fetchedAt:string};
+    if (!parsed?.fetchedAt || parsed.value === undefined) throw new Error('Invalid watch checkpoint');
+    return parsed;
+  } finally { if (timeout) clearTimeout(timeout); }
+}
+
+export async function setWatchCheckpoint(key: string, value: unknown, fetchedAt: string, ttlMs: number): Promise<void> {
+  const redis = await getClient(1500);
+  if (!redis || ttlMs <= 0) throw new Error('Watch checkpoint store unavailable');
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const result = await Promise.race([redis.set(key, JSON.stringify({value, fetchedAt}), {PX: ttlMs}), new Promise<never>((_, reject) => {
+      timeout = setTimeout(() => reject(new Error('Watch checkpoint write timeout')), 1500);
+    })]);
+    if (result !== 'OK') throw new Error('Watch checkpoint write not acknowledged');
+  } finally { if (timeout) clearTimeout(timeout); }
+}

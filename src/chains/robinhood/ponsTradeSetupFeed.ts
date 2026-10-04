@@ -1,6 +1,6 @@
 import { compactOutcomesEnabled } from '../../services/compactAlertOutcomes.js';
 import { launchSocialEligibility } from './alertEligibilityState.js';
-import { setSharedJson, getSharedJson, claimSharedDelivery } from '../../services/sharedJsonCache.js';
+import { setSharedJson, setWatchCheckpoint, getWatchCheckpoint, claimSharedDelivery } from '../../services/sharedJsonCache.js';
 import { PONS_CONTRACTS } from './ponsContracts.js';
 import type { PonsLaunch } from './ponsHistoricalLaunchScanner.js';
 import { isVerifiedSocialMafiaLaunch, resolveSocialMafiaSocials } from './ponsSocialMafiaAlert.js';
@@ -223,16 +223,17 @@ export function tradeSetupSchedulingStateForTests() { return { candidates: [...c
 export function resetTradeSetupSchedulingForTests() { if (timer) clearInterval(timer); timer = null; candidates.clear(); deferredAdmissions.clear(); outcomes.clear(); lastRotationAt = 0; }
 
 export async function saveSetupWatchCheckpoint(): Promise<void> {
-  await setSharedJson('alphaos:watch:setup:v1', {
+  await setWatchCheckpoint('alphaos:watch:setup:v1', {
     candidates: [...candidates.values()].slice(0, MAX_CANDIDATES),
     deferred: [...deferredAdmissions.values()].slice(0, 50),
   }, new Date().toISOString(), MAX_AGE);
 }
-export async function restoreSetupWatchCheckpoint(load = () => getSharedJson<{ candidates: Candidate[]; deferred: PonsLaunch[] }>('alphaos:watch:setup:v1')): Promise<void> {
+export async function restoreSetupWatchCheckpoint(load = () => getWatchCheckpoint<{ candidates: Candidate[]; deferred: PonsLaunch[] }>('alphaos:watch:setup:v1')): Promise<void> {
   if (String(process.env.PONS_TRADE_SETUP_ENABLED ?? 'true').toLowerCase() !== 'true') return;
   const saved = await load();
   if (!saved?.value) return;
   for (const item of (Array.isArray(saved.value.candidates) ? saved.value.candidates : []).slice(0, MAX_CANDIDATES)) {
+    if (candidates.size >= MAX_CANDIDATES) break;
     if (!item?.launch || !isTradeSetupLaunchAdmissible(item.launch, Date.now(), MAX_AGE)) continue;
     const token = item.launch.token_address.toLowerCase();
     if (!candidates.has(token)) {
@@ -243,6 +244,7 @@ export async function restoreSetupWatchCheckpoint(load = () => getSharedJson<{ c
     }
   }
   for (const launch of (Array.isArray(saved.value.deferred) ? saved.value.deferred : []).slice(0, 50)) {
+    if (deferredAdmissions.size >= 50) break;
     if (launch && isTradeSetupLaunchAdmissible(launch, Date.now(), MAX_AGE) && !candidates.has(launch.token_address.toLowerCase()))
       deferredAdmissions.set(launch.token_address.toLowerCase(), launch);
   }
