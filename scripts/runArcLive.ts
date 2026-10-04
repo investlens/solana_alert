@@ -1,3 +1,5 @@
+import { recordFeedDelivery } from '../src/services/feedDeliveryHealth.js';
+import { recordRejectedCandidate, runRejectedCandidateReview } from '../src/services/rejectedCandidateReview.js';
 import { withAlertKeyStats, type AlertKeyStats } from '../src/ui/alertKeyStats.js';
 import { readResearchTokenSupply, formatResearchSupply } from '../src/services/researchTokenSupply.js';
 import { createArcDexPaidWatch } from '../src/chains/arc/dexPaidWatch.js';
@@ -236,8 +238,8 @@ async function broadcastArcAlert(text: string, buttons: any[][], outcomeToken?: 
   if (!sellSafety.allowed) throw new Error(`ARC sellability blocked: ${sellSafety.reason}`);
   const stats = await arcAlertStats(outcomeToken,expectedPool);
   if (feed==='ARC_DEX_PAID') text = text.replace('Promotion payment confirmed',`${String(stats.name??'Token name unavailable').replace(/[<>&]/g,'')} (${String(stats.symbol??'Symbol unavailable').replace(/[<>&]/g,'')})\nPromotion payment confirmed`);
-  text = withAlertKeyStats(text,{...stats,sellability:'Verified honeypot/sell-restriction flags',lp:'Unverified',dexPaid:feed==='ARC_DEX_PAID'?'Yes · payment confirmed':undefined});
-  text = withOwnershipDisclosure(text, {devPercent: sellSafety.devHoldingPercent ?? null,
+  text = withAlertKeyStats(text,{...stats,sellability:'Provider flags passed · execution unverified',lp:'Unverified',dexPaid:feed==='ARC_DEX_PAID'?'Yes · payment confirmed':undefined});
+  text = withOwnershipDisclosure(text, {devPercent: sellSafety.devHoldingPercent ?? null, devObservedAt:sellSafety.observedAt,top10ObservedAt:sellSafety.observedAt,
     top10Percent: sellSafety.top10Percent ?? null, top10Coverage: sellSafety.top10Percent == null ? 'UNAVAILABLE' : 'PROVIDER_REPORTED'});
   if (outcomeToken && /^0x[a-fA-F0-9]{40}$/.test(outcomeToken)) buttons = [...buttons, [{text:'⭐ Track',callback_data:`OUT_ARC_${outcomeToken}`}]];
   const recipients = await enabledLiveRecipients(await getArcRecipients(), feed);
@@ -258,9 +260,10 @@ async function broadcastArcAlert(text: string, buttons: any[][], outcomeToken?: 
       if (recipients[index] === ALERT_CHAT_ID) adminMessageId = result.value;
     } else {
       failed += 1;
-      console.warn('[ArcLive] RECIPIENT_SEND_FAILED', { recipient: recipients[index], reason: result.reason instanceof Error ? result.reason.message : String(result.reason) });
+      console.warn('[ArcLive] RECIPIENT_PROCESSING_FAILED', { recipient: recipients[index], reason: result.reason instanceof Error ? result.reason.message : String(result.reason) });
     }
   });
+  recordFeedDelivery(feed,'ACCEPTED',deliveredCount); recordFeedDelivery(feed,'PROCESSING_FAILED',failed);
   if (!deliveredCount) throw new Error(`ARC Telegram delivery failed for all ${failed} recipients`);
   return { delivered: deliveredCount, failed, adminMessageId };
 }
@@ -417,14 +420,14 @@ async function processMarketRetries(): Promise<void> {
         continue;
       }
       await deliverArcAlert(market, assessment.security.warnings).catch(error => {
-        console.error('[ArcLive] ALERT_SEND_FAILED', { assetId: market.assetId, error });
+        console.error('[ArcLive] ALERT_PROCESSING_FAILED', { assetId: market.assetId, error });
       });
     }
   }
 }
 
 type ArcBoost = { chainId?: string; tokenAddress?: string; amount?: number; totalAmount?: number };
-type ArcBoostSecurity = { allowed: boolean; reason: string; devHoldingPercent?: number | null; top10Percent?: number | null };
+type ArcBoostSecurity = { allowed: boolean; reason: string; devHoldingPercent?: number | null; top10Percent?: number | null; observedAt?: number };
 
 async function fetchArcBoosts(): Promise<Array<{tokenAddress:string;amount:number;totalAmount:number}>> {
   try {
@@ -471,7 +474,8 @@ async function checkArcBoostSecurity(tokenAddress: string): Promise<ArcBoostSecu
   const pending = arcSellSafetyPending.get(key);
   if (pending) return pending;
   if (arcSellSafetyPending.size >= 2) return { allowed: false, reason: 'sellability check busy' };
-  const work = loadArcSellSafety(tokenAddress).then(result => {
+  const work = loadArcSellSafety(tokenAddress).then(raw => {
+    const result = {...raw, observedAt:Date.now()};
     if (arcSellSafetyCache.size >= 100) arcSellSafetyCache.delete(arcSellSafetyCache.keys().next().value!);
     arcSellSafetyCache.set(key, { at: Date.now(), result });
     return result;
@@ -482,8 +486,10 @@ async function checkArcBoostSecurity(tokenAddress: string): Promise<ArcBoostSecu
 async function assessArcWithSellSafety(market: Parameters<typeof assessArcForAlert>[0]) {
   const preliminary = assessArcForAlert(market);
   // Spend no security request on candidates already blocked by market or contract gates.
-  if (preliminary.security.reasons.some(reason => reason !== 'SELLABILITY_UNVERIFIED' && reason !== 'UNVERIFIED_V4_HOOK')) return preliminary;
-  return assessArcForAlert(market, await checkArcBoostSecurity(market.assetId));
+  const marketBlocked = preliminary.security.reasons.some(reason => reason !== 'SELLABILITY_UNVERIFIED' && reason !== 'UNVERIFIED_V4_HOOK');
+  const final = marketBlocked ? preliminary : assessArcForAlert(market, await checkArcBoostSecurity(market.assetId));
+  if (!final.alertable) recordRejectedCandidate({chain:'arc',token:market.assetId,pair:market.poolId ?? '',price:market.priceUsd ?? 0,reason:final.security.reasons.join(' | ')});
+  return final;
 }
 
 function arcBoostIdentity(tokenAddress: string, totalAmount: number): string {
@@ -576,7 +582,7 @@ async function deliverArcBoost(boost: {tokenAddress:string;amount:number;totalAm
     console.log('[ArcBoost] ALERT_SENT', { token:key, totalBoost:boost.totalAmount, eventType, messageId:delivery.adminMessageId, delivered:delivery.delivered, failed:delivery.failed });
     return true;
   } catch (error) {
-    console.error('[ArcBoost] ALERT_SEND_FAILED', { token:key, totalBoost:boost.totalAmount, eventType, error });
+    console.error('[ArcBoost] ALERT_PROCESSING_FAILED', { token:key, totalBoost:boost.totalAmount, eventType, error });
     return false;
   }
 }
@@ -618,6 +624,7 @@ async function main() {
   while (true) {
     await new Promise(resolve => setTimeout(resolve, POLL_MS));
     try {
+    void runRejectedCandidateReview();
     await processMarketRetries();
     await processArcBoosts();
     await arcDexPaid.tick();
@@ -693,7 +700,7 @@ async function arcAlertStats(token:string,expectedPool?:string):Promise<AlertKey
  const pairs=pairRead.status==='fulfilled'&&Array.isArray(pairRead.value.value)?pairRead.value.value:[];
  const pair=pairs.filter(p=>p?.chainId==='arc'&&String(p?.baseToken?.address).toLowerCase()===token.toLowerCase()&&(!expectedPool||String(p.pairAddress).toLowerCase()===expectedPool.toLowerCase())).sort((a,b)=>(arcMarketNumber(b?.liquidity?.usd)??0)-(arcMarketNumber(a?.liquidity?.usd)??0))[0];
  const supply=supplyRead.status==='fulfilled'?supplyRead.value:null;
- const value:AlertKeyStats={symbol:pair?.baseToken?.symbol??null,name:pair?.baseToken?.name??null,price:arcMarketNumber(pair?.priceUsd),marketCap:arcMarketNumber(pair?.marketCap),fdv:arcMarketNumber(pair?.fdv),liquidity:arcMarketNumber(pair?.liquidity?.usd),volume5m:arcMarketNumber(pair?.volume?.m5),volume24h:arcMarketNumber(pair?.volume?.h24),move5m:arcSignedNumber(pair?.priceChange?.m5),move1h:arcSignedNumber(pair?.priceChange?.h1),buys:arcMarketNumber(pair?.txns?.m5?.buys),sells:arcMarketNumber(pair?.txns?.m5?.sells),pairCreatedAt:arcMarketNumber(pair?.pairCreatedAt),supply:supply?formatResearchSupply(supply):null,source:pair?'DEXScreener'+(supply?' / on-chain supply':''):supply?'On-chain supply':null,checkedAt:new Date().toISOString().slice(11,19)};
+ const value:AlertKeyStats={symbol:pair?.baseToken?.symbol??null,name:pair?.baseToken?.name??null,price:arcMarketNumber(pair?.priceUsd),marketCap:arcMarketNumber(pair?.marketCap),fdv:arcMarketNumber(pair?.fdv),liquidity:arcMarketNumber(pair?.liquidity?.usd),volume5m:arcMarketNumber(pair?.volume?.m5),volume24h:arcMarketNumber(pair?.volume?.h24),move5m:arcSignedNumber(pair?.priceChange?.m5),move1h:arcSignedNumber(pair?.priceChange?.h1),buys:arcMarketNumber(pair?.txns?.m5?.buys),sells:arcMarketNumber(pair?.txns?.m5?.sells),pairCreatedAt:arcMarketNumber(pair?.pairCreatedAt),supply:supply?formatResearchSupply(supply):null,source:pair?'DEXScreener'+(supply?' / on-chain supply':''):supply?'On-chain supply':null,checkedAt:pair&&pairRead.status==='fulfilled'?new Date(pairRead.value.fetchedAt).toISOString().slice(11,19):supply?new Date(supply.checkedAt).toISOString().slice(11,19):null};
  if(arcStatsCache.size>=100)arcStatsCache.delete(arcStatsCache.keys().next().value!);arcStatsCache.set(token.toLowerCase()+':'+(expectedPool??''),{at:Date.now(),value});return value;
 }
 function arcSignedNumber(value:unknown):number|null{if(value==null||value==='')return null;const n=Number(value);return Number.isFinite(n)?n:null;}
