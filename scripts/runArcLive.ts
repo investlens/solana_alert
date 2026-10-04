@@ -1,3 +1,7 @@
+import { withAlertKeyStats, type AlertKeyStats } from '../src/ui/alertKeyStats.js';
+import { readResearchTokenSupply, formatResearchSupply } from '../src/services/researchTokenSupply.js';
+import { createArcDexPaidWatch } from '../src/chains/arc/dexPaidWatch.js';
+import { governedDexScreenerJson } from '../src/services/dexscreenerRequestGovernor.js';
 import { withOwnershipDisclosure } from '../src/ui/ownershipDisclosure.js';
 import { enabledLiveRecipients, type LiveFeedKey } from '../src/services/liveAlertPreferences.js';
 import { arcMarketNumber } from '../src/chains/arc/market.js';
@@ -225,11 +229,14 @@ async function getArcRecipients(): Promise<string[]> {
   return [...recipientCache];
 }
 
-async function broadcastArcAlert(text: string, buttons: any[][], outcomeToken?: string, feed:LiveFeedKey = 'ARC_OPPORTUNITY'): Promise<{delivered:number;failed:number;adminMessageId:number|null}> {
+async function broadcastArcAlert(text: string, buttons: any[][], outcomeToken?: string, feed:LiveFeedKey = 'ARC_OPPORTUNITY', expectedPool?:string): Promise<{delivered:number;failed:number;adminMessageId:number|null}> {
   // Final gate covers normal, boost and burn sends, including future callers.
   if (!outcomeToken) throw new Error('ARC alert lacks token identity for sellability check');
   const sellSafety = await checkArcBoostSecurity(outcomeToken);
   if (!sellSafety.allowed) throw new Error(`ARC sellability blocked: ${sellSafety.reason}`);
+  const stats = await arcAlertStats(outcomeToken,expectedPool);
+  if (feed==='ARC_DEX_PAID') text = text.replace('Promotion payment confirmed',`${String(stats.name??'Token name unavailable').replace(/[<>&]/g,'')} (${String(stats.symbol??'Symbol unavailable').replace(/[<>&]/g,'')})\nPromotion payment confirmed`);
+  text = withAlertKeyStats(text,{...stats,sellability:'Verified honeypot/sell-restriction flags',lp:'Unverified',dexPaid:feed==='ARC_DEX_PAID'?'Yes · payment confirmed':undefined});
   text = withOwnershipDisclosure(text, {devPercent: sellSafety.devHoldingPercent ?? null,
     top10Percent: sellSafety.top10Percent ?? null, top10Coverage: sellSafety.top10Percent == null ? 'UNAVAILABLE' : 'PROVIDER_REPORTED'});
   if (outcomeToken && /^0x[a-fA-F0-9]{40}$/.test(outcomeToken)) buttons = [...buttons, [{text:'⭐ Track',callback_data:`OUT_ARC_${outcomeToken}`}]];
@@ -325,7 +332,7 @@ async function deliverArcAlert(market: Awaited<ReturnType<typeof enrichArcMarket
     ],
   ].filter(row => row.length > 0);
 
-  const delivery = await broadcastArcAlert(text, buttons, market.assetId);
+  const delivery = await broadcastArcAlert(text, buttons, market.assetId, 'ARC_OPPORTUNITY', market.poolId);
   void recordCompactAlert({chain:'arc', token:market.assetId, feed:'ARC_OPPORTUNITY', price:market.priceUsd, pair:market.poolId, marketCap:market.marketCapUsd, liquidity:market.liquidityUsd}, delivery.delivered);
   delivered.add(key);
   console.log('[ArcLive] ALERT_SENT', { assetId: market.assetId, symbol: market.symbol, messageId: delivery.adminMessageId, delivered: delivery.delivered, failed: delivery.failed });
@@ -475,7 +482,7 @@ async function checkArcBoostSecurity(tokenAddress: string): Promise<ArcBoostSecu
 async function assessArcWithSellSafety(market: Parameters<typeof assessArcForAlert>[0]) {
   const preliminary = assessArcForAlert(market);
   // Spend no security request on candidates already blocked by market or contract gates.
-  if (preliminary.security.reasons.some(reason => reason !== 'SELLABILITY_UNVERIFIED')) return preliminary;
+  if (preliminary.security.reasons.some(reason => reason !== 'SELLABILITY_UNVERIFIED' && reason !== 'UNVERIFIED_V4_HOOK')) return preliminary;
   return assessArcForAlert(market, await checkArcBoostSecurity(market.assetId));
 }
 
@@ -578,6 +585,7 @@ async function processArcBoosts(): Promise<void> {
   if (Date.now() - lastArcBoostPollAt < ARC_BOOST_POLL_MS) return;
   lastArcBoostPollAt = Date.now();
   const boosts = await fetchArcBoosts();
+  for (const boost of boosts) arcDexPaid.seed(boost.tokenAddress);
   if (!arcBoostBaselineReady) {
     let persisted = 0;
     for (const boost of boosts) {
@@ -612,6 +620,7 @@ async function main() {
     try {
     await processMarketRetries();
     await processArcBoosts();
+    await arcDexPaid.tick();
     const current = await getArcBlockNumber();
     if (current <= last) continue;
 
@@ -621,6 +630,7 @@ async function main() {
     await processArcBurns(fromBlock, toBlock);
     const pools = await discoverArcV4Pools(fromBlock, toBlock);
     const candidates = pools.map(normalizeArcPoolCandidate).filter((x): x is NonNullable<typeof x> => Boolean(x));
+    for (const candidate of candidates) arcDexPaid.seed(candidate.assetId);
 
     console.log('[ArcLive] scan', { fromBlock: fromBlock.toString(), toBlock: toBlock.toString(), poolsDetected: pools.length, launchCandidates: candidates.length });
 
@@ -671,6 +681,30 @@ async function main() {
     }
   }
 }
+
+
+
+const arcStatsCache = new Map<string,{at:number,value:AlertKeyStats}>();
+async function arcAlertStats(token:string,expectedPool?:string):Promise<AlertKeyStats>{
+ const prior=arcStatsCache.get(token.toLowerCase()+':'+(expectedPool??''));if(prior&&Date.now()-prior.at<30000)return prior.value;
+ const [pairRead,supplyRead]=await Promise.allSettled([
+ governedDexScreenerJson<any[]>({url:`https://api.dexscreener.com/token-pairs/v1/arc/${token}`,caller:'arc_alert_stats',endpoint:'ARC_TOKEN_PAIRS',priority:'NORMAL',cacheKey:`arc-alert-pairs:${token.toLowerCase()}`,cacheTtlMs:30000,queueWaitTimeoutMs:750,httpTimeoutMs:2000}),
+ readResearchTokenSupply(token,'arc')]);
+ const pairs=pairRead.status==='fulfilled'&&Array.isArray(pairRead.value.value)?pairRead.value.value:[];
+ const pair=pairs.filter(p=>p?.chainId==='arc'&&String(p?.baseToken?.address).toLowerCase()===token.toLowerCase()&&(!expectedPool||String(p.pairAddress).toLowerCase()===expectedPool.toLowerCase())).sort((a,b)=>(arcMarketNumber(b?.liquidity?.usd)??0)-(arcMarketNumber(a?.liquidity?.usd)??0))[0];
+ const supply=supplyRead.status==='fulfilled'?supplyRead.value:null;
+ const value:AlertKeyStats={symbol:pair?.baseToken?.symbol??null,name:pair?.baseToken?.name??null,price:arcMarketNumber(pair?.priceUsd),marketCap:arcMarketNumber(pair?.marketCap),fdv:arcMarketNumber(pair?.fdv),liquidity:arcMarketNumber(pair?.liquidity?.usd),volume5m:arcMarketNumber(pair?.volume?.m5),volume24h:arcMarketNumber(pair?.volume?.h24),move5m:arcSignedNumber(pair?.priceChange?.m5),move1h:arcSignedNumber(pair?.priceChange?.h1),buys:arcMarketNumber(pair?.txns?.m5?.buys),sells:arcMarketNumber(pair?.txns?.m5?.sells),pairCreatedAt:arcMarketNumber(pair?.pairCreatedAt),supply:supply?formatResearchSupply(supply):null,source:pair?'DEXScreener'+(supply?' / on-chain supply':''):supply?'On-chain supply':null,checkedAt:new Date().toISOString().slice(11,19)};
+ if(arcStatsCache.size>=100)arcStatsCache.delete(arcStatsCache.keys().next().value!);arcStatsCache.set(token.toLowerCase()+':'+(expectedPool??''),{at:Date.now(),value});return value;
+}
+function arcSignedNumber(value:unknown):number|null{if(value==null||value==='')return null;const n=Number(value);return Number.isFinite(n)?n:null;}
+const arcDexPaid=createArcDexPaidWatch({
+ security:checkArcBoostSecurity,
+ send:async(token,paymentAt)=>{
+  const text=['💎 <b>DEX PAID DETECTED · ARC</b>','Promotion payment confirmed · research event',`Payment age ${Math.max(0,Math.floor((Date.now()-paymentAt)/1000))}s`,'<b>RISK</b>','LP protection, creator history and linked-wallet risks remain unverified.','<b>CONTRACT</b>',`<code>${token}</code>`,'Paid promotion does not establish trading quality.'].join('\n');
+  const result=await broadcastArcAlert(text,[[{text:'💎 DexScreener',url:`https://dexscreener.com/arc/${token}`},{text:'🔎 Explorer',url:`https://explorer.arc.io/address/${token}`}]],token,'ARC_DEX_PAID');
+  console.log('[ArcDexPaid] SENT',{delivered:result.delivered,failed:result.failed});
+ }
+});
 
 main().catch(error => {
   console.error('[ArcLive] fatal', error);

@@ -20,9 +20,9 @@ export type ArcSecurityDecision = {
   warnings: string[];
 };
 
-const MIN_LIQUIDITY_USD = Number(process.env.ARC_MIN_LIQUIDITY_USD ?? 10_000);
-const MIN_VOLUME_5M_USD = Number(process.env.ARC_MIN_VOLUME_5M_USD ?? 5_000);
-const MIN_BUYS_5M = Number(process.env.ARC_MIN_BUYS_5M ?? 25);
+const MIN_LIQUIDITY_USD = Number(process.env.ARC_MIN_LIQUIDITY_USD ?? 2_500);
+const MIN_VOLUME_5M_USD = Number(process.env.ARC_MIN_VOLUME_5M_USD ?? 1_000);
+const MIN_BUYS_5M = Number(process.env.ARC_MIN_BUYS_5M ?? 10);
 const MAX_TOP_HOLDER_PCT = Number(process.env.ARC_MAX_TOP_HOLDER_PCT ?? 25);
 const MAX_DEPLOYER_PCT = Number(process.env.ARC_MAX_DEPLOYER_PCT ?? 15);
 
