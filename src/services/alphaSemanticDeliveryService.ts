@@ -260,7 +260,7 @@ export async function deliverAlphaSemanticEvent(args: {
           if (dependencies === productionDependencies) recordDeliveryAccepted(user, deliveryStartedAt, args.event.eventIdentity, isUndelayedRiskEvent(args.event.type));
           delivered += 1; accepted += 1;
           args.onTelegramAccepted?.(user);
-          console.log('[AlphaSemanticDelivery] Ephemeral Telegram accepted during DB outage.', {
+          console.log('[AlphaSemanticDelivery] Telegram accepted via bounded persistence fallback.', {
             eventIdentity: args.event.eventIdentity,
             semanticEventType: args.event.type,
             telegramId: user.telegram_id,

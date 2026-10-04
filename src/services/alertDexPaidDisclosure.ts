@@ -1,3 +1,4 @@
+import { cleanAlertCard, cleanAlertButtons } from '../ui/alertCardLayout.js';
 import { scanRobinhoodDexPaid } from '../chains/robinhood/security/dexPaidScanner.js';
 import type { AlphaNotificationAction } from '../ui/alphaNotification.js';
 export type AlertDexPaidStatus = 'PAID' | 'NOT_PAID' | 'UNKNOWN';
@@ -21,7 +22,7 @@ export function decorateDexPaidAlert(text: string, buttons: AlphaNotificationAct
   }
   const rows: AlphaNotificationAction[][]=[];
   for(let i=0;i<actions.length;i+=2) rows.push(actions.slice(i,i+2));
-  return {text:message,buttons:rows};
+  return {text:cleanAlertCard(message),buttons:cleanAlertButtons(rows)!};
 }
 export function createAlertDexPaidReader(scan = scanRobinhoodDexPaid, now = Date.now) {
   const cache = new Map<string,{status:AlertDexPaidStatus;expires:number}>();

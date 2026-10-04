@@ -1,3 +1,5 @@
+import { resolveCreatorIdentity } from './verifiedCreatorIdentity.js';
+import { getPonsLaunchState } from '../chains/robinhood/ponsLaunchState.js';
 import { reuseRobinhoodDevTokenFlow } from '../chains/robinhood/security/devTokenFlowScanner.js';
 import { scanRobinhoodHolderRisk } from '../chains/robinhood/security/holderRiskScanner.js';
 import { getCreatorHoldingPercent } from '../chains/robinhood/ponsPublicContext.js';
@@ -23,7 +25,10 @@ export async function robinhoodOwnership(token: string, creator?: string | null,
     work = (async () => {
       const [dev, holders] = await Promise.allSettled([
         (async () => {
-          const identity = creator || (await reuseRobinhoodDevTokenFlow(token)).deployerAddress;
+          const identity = await resolveCreatorIdentity(token, creator, {
+            factory: address => getPonsLaunchState(address, {requireCompleteFactoryVerification: true}),
+            history: async address => (await reuseRobinhoodDevTokenFlow(address)).deployerAddress,
+          });
           const value = identity ? await getCreatorHoldingPercent(token, identity) : null;
           partial.get(key)!.devPercent = value; return value;
         })(),

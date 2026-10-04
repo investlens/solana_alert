@@ -1,7 +1,9 @@
+import { cleanAlertCard } from '../ui/alertCardLayout.js';
 import { telegramCaptionLength } from '../ui/alphaosPhotoDelivery.js';
 export async function deliverResearchCard(ctx: any, args: {
   image: Buffer | null; caption: string; keyboard: unknown; refresh: boolean;
 }): Promise<void> {
+  args = {...args, caption: cleanAlertCard(args.caption)};
   const options = {parse_mode:'HTML', reply_markup:args.keyboard};
   const asText = !args.image || telegramCaptionLength(args.caption) > 1024;
   if (args.refresh) {

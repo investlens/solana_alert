@@ -1,3 +1,4 @@
+import { cleanAlertCard } from './alertCardLayout.js';
 export type AlphaNotificationCategory = 'opportunity' | 'wallet' | 'creator' | 'smart-money' | 'market' | 'risk' | 'execution' | 'system';
 export type AlphaNotificationSeverity = 'info' | 'watch' | 'positive' | 'warning' | 'critical' | 'success';
 export type AlphaNotificationState = 'ENTRY_READY' | 'OPPORTUNITY' | 'VOLUME_IGNITION' | 'DEX_PAID' | 'BOOST' | 'MAJOR_BOOST' | 'DEV_BURN' | 'DEV_SOLD' | 'CRITICAL_RISK' | 'BUILDING' | 'RUNNER' | 'WATCHING' | 'BOOSTED_OPPORTUNITY' | 'EXIT_AVOID' | 'WALLET_BUY' | 'WALLET_SELL' | 'WALLET_LAUNCH' | 'WALLET_MOVE' | 'CREATOR_EVENT' | 'RISK' | 'EXECUTED' | 'FAILED' | 'PAUSED' | 'RESUMED' | 'POSITION_UPDATE';
@@ -59,6 +60,6 @@ export function renderAlphaNotification(alert:AlphaNotification):string {
   if(alert.observedAt!=null)lines.push(`<i>${escapeAlphaHtml(observedLabel(alert.observedAt))}</i>`);
   if(alert.displayIntent==='WATCH')lines.push(alert.state==='DEX_PAID'?'<i>Paid promotion does not establish trading quality.</i>':'<i>AlphaOS is monitoring for entry confirmation.</i>');
   if(alert.access==='FREE')lines.push('','<i>Free intelligence may be delayed.</i>');
-  const rendered=lines.join('\n'); if(rendered.length>TELEGRAM_MESSAGE_LIMIT)throw new Error('Alpha notification exceeds Telegram message limit after bounded rendering'); return rendered;
+  const rendered=cleanAlertCard(lines.join('\n')); if(rendered.length>TELEGRAM_MESSAGE_LIMIT)throw new Error('Alpha notification exceeds Telegram message limit after bounded rendering'); return rendered;
 }
 export function burnEvidenceMetric(burnedAmount:number|null|undefined):AlphaNotificationMetric { if(burnedAmount==null||!Number.isFinite(burnedAmount))return{label:'Burn',value:'Data unavailable'}; return{label:'Burn',value:burnedAmount===0?'0 confirmed':`${burnedAmount.toLocaleString()} confirmed`}; }
