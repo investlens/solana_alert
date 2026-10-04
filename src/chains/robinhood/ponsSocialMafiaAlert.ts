@@ -260,18 +260,22 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   // Protocol discovery explicitly does not claim social identity. Avoid spending
   // scarce public-X requests on a feed whose rules only require metadata links.
   const protocol = protocolDiscoveryRoute(pons?.name || earlyMetadata?.name, false) === 'PROTOCOL_DISCOVERY';
-  if (protocol && !socials.telegramUrl) { console.log('[SocialMafia] protocol skipped; Telegram required'); return false; }
+  const healthFeed = protocol ? 'PROTOCOL_DISCOVERY' : 'SOCIAL_MAFIA';
+  recordFeedDelivery(healthFeed, 'EVALUATED');
+  if (protocol && !socials.telegramUrl) { recordFeedDelivery(healthFeed, 'CONDITION_WAIT'); console.log('[SocialMafia] protocol skipped; Telegram required'); return false; }
   const identity = protocol ? null
     : await verifySocialContract({ token, xHandle: socials.xHandle, telegramUrl: socials.telegramUrl });
   item.eligibility = identity ? socialEvidenceEligibility(identity) : null;
   const route = protocol ? 'PROTOCOL_DISCOVERY' : protocolDiscoveryRoute(pons?.name || earlyMetadata?.name, identity?.confirmed === true);
   if (!route) {
+    recordFeedDelivery(healthFeed, item.eligibility === null ? 'DATA_UNAVAILABLE' : 'CONDITION_WAIT');
     if (item.attempt >= 4 && item.eligibility === false) recordLaunchSocialEligibility(token, false);
     console.log('[SocialMafia] suppressed; social contract not confirmed', { token, reason: identity?.reason ?? 'PROTOCOL_SOCIAL_OWNERSHIP_UNVERIFIED' });
     return false;
   }
 
   if (!protocol) recordLaunchSocialEligibility(token, identity?.confirmed === true);
+  recordFeedDelivery(healthFeed, 'QUALIFIED');
 
   // Independent on-chain identity and verified valuation; never require a DEX index.
   const partial: {

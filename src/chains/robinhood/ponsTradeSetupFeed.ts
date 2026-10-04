@@ -7,14 +7,16 @@ import { isVerifiedSocialMafiaLaunch, resolveSocialMafiaSocials } from './ponsSo
 import { directTelegramRecipients, readPonsV2Curve } from './ponsNormalAlertFastLane.js';
 import { getCreatorHoldingPercent, getPonsPublicContext } from './ponsPublicContext.js';
 import { scanRobinhoodDevTokenFlow } from './security/devTokenFlowScanner.js';
-import { advanceSetupTrend, creatorSetupEligible, emptySetupTrend, type SetupTrend } from './tradeSetupEvidence.js';
+import { advanceSetupTrend, creatorSetupVerdict, emptySetupTrend, type SetupTrend } from './tradeSetupEvidence.js';
+import { readSetupMarket, type SetupMarketEvidence } from './setupMarketEvidence.js';
+import { recordFeedDelivery } from '../../services/feedDeliveryHealth.js';
 
 const MIN_AGE = 30 * 60_000;
 const MAX_AGE = 120 * 60_000;
 const INTERVAL = 60_000;
 const MAX_CANDIDATES = 20;
 const MAX_CHECKS_PER_CYCLE = 10;
-type Candidate = { launch: PonsLaunch; launchedAt: number; trend: SetupTrend; screenAfter: number };
+type Candidate = { launch: PonsLaunch; launchedAt: number; trend: SetupTrend; screenAfter: number; lastCheckedAt?: number; source?: 'CURVE' | 'DEX'; pair?: string };
 const candidates = new Map<string, Candidate>();
 const deferredAdmissions = new Map<string, PonsLaunch>();
 // Forward observations include losses. They are reference-price research,
@@ -26,13 +28,17 @@ let lastRotationAt = 0;
 console.log(`[TradeSetup] READY enabled=${String(process.env.PONS_TRADE_SETUP_ENABLED ?? 'true').toLowerCase() === 'true'} launchpad=PONS mode=RESEARCH_WATCH minAgeMin=30 maxCandidates=${MAX_CANDIDATES} dbWrites=0`);
 const html = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-export function buildTradeSetupText(args: { token: string; symbol: string; name: string; age: number; holding: number | null; burned: number | null; recovery: number; depth: number; lowEth: number; fdvUsd: number | null; creator: string; xUrl: string | null; tgUrl: string | null; at: number; kind?: 'RECOVERY' | 'BREAKOUT' }): string {
+export function buildTradeSetupText(args: { token: string; symbol: string; name: string; age: number; holding: number | null; burned: number | null; recovery: number; depth: number; lowEth: number; fdvUsd: number | null; creator: string; xUrl: string | null; tgUrl: string | null; at: number; kind?: 'RECOVERY' | 'BREAKOUT'; market?: SetupMarketEvidence }): string {
   return [
     '🎯 <b>AlphaOS · TRADE SETUP WATCH</b>',
     `<b>${html(args.symbol.slice(0, 24))}</b> · ${html(args.name.slice(0, 64))}`,
-    'PONS · Robinchain · Pre-bond', '',
+    `PONS · Robinchain · ${args.market?.source === 'DEX' ? 'DEX market' : 'Pre-bond'}`, '',
     '<b>CONFIRMED EVIDENCE</b>',
-    `FDV  <b>${args.fdvUsd != null && Number.isFinite(args.fdvUsd) ? '$' + args.fdvUsd.toLocaleString('en-US', { maximumFractionDigits: 0 }) : 'Unavailable'}</b> · PONS page snapshot`,
+    ...(args.market?.source === 'DEX' ? [
+      `Price  <b>$${args.market.price.toPrecision(6)}</b>`,
+      `Market cap  <b>${args.market.marketCap == null ? 'Unavailable' : '$' + args.market.marketCap.toLocaleString('en-US', { maximumFractionDigits: 0 })}</b>`,
+      `FDV  <b>${args.market.fdv == null ? 'Unavailable' : '$' + args.market.fdv.toLocaleString('en-US', { maximumFractionDigits: 0 })}</b> · DEXScreener snapshot`,
+    ] : [`FDV  <b>${args.fdvUsd != null && Number.isFinite(args.fdvUsd) ? '$' + args.fdvUsd.toLocaleString('en-US', { maximumFractionDigits: 0 }) : 'Unavailable'}</b> · PONS page snapshot`]),
     `Launch age  <b>${Math.floor(args.age)}m</b>`,
     'Social identity  <b>Not verified for this market setup</b>',
     `${args.kind === 'BREAKOUT' ? 'Confirmed breakout from observed base' : 'Recovery from observed low'}  <b>+${args.recovery.toFixed(1)}%</b>`,
@@ -42,11 +48,11 @@ export function buildTradeSetupText(args: { token: string; symbol: string; name:
     'Creator transfers  <b>None in scanned evidence</b>',
     `<a href="https://robinhoodchain.blockscout.com/address/${html(args.creator)}">Creator wallet</a>${args.xUrl ? ` · <a href="${html(args.xUrl)}">X</a>` : ''}${args.tgUrl ? ` · <a href="${html(args.tgUrl)}">Telegram</a>` : ''}`, '',
     '<b>EXECUTION &amp; RISK</b>',
-    `Curve quote reserve  <b>${args.depth.toFixed(4)} ETH</b>`,
+    args.market?.source === 'DEX' ? `DEX liquidity  <b>$${args.depth.toLocaleString('en-US', { maximumFractionDigits: 0 })}</b>` : `Curve quote reserve  <b>${args.depth.toFixed(4)} ETH</b>`,
     'Reserve is not a size-specific sell quote.',
     'Holder concentration / linked wallets  <b>Unavailable</b>',
     'Exit quote / slippage  <b>Not verified</b>',
-    `Observed low / invalidation reference  <b>${args.lowEth.toPrecision(6)} ETH/token</b>`,
+    `Observed low / invalidation reference  <b>${args.lowEth.toPrecision(6)} ${args.market?.source === 'DEX' ? 'USD/token' : 'ETH/token'}</b>`,
     'Setup fails below that low or if creator moves tokens.',
     'Entry, position size and exit require your own execution check.', '',
     `<code>${html(args.token)}</code>`,
@@ -55,7 +61,7 @@ export function buildTradeSetupText(args: { token: string; symbol: string; name:
   ].join('\n');
 }
 
-async function tick(): Promise<void> {
+async function tick(readMarket = readSetupMarket): Promise<void> {
   if (running) return;
   running = true;
   try {
@@ -83,19 +89,28 @@ async function tick(): Promise<void> {
         console.log(`[TradeSetup] ROTATED reason=NO_PULLBACK candidates=${candidates.size} pending=${deferredAdmissions.size}`);
       }
     }
-    const checks = [...candidates].sort((a,b) => (a[1].trend.previous?.at ?? 0) - (b[1].trend.previous?.at ?? 0)).filter(([,item]) => Date.now() - item.launchedAt >= MIN_AGE).slice(0, MAX_CHECKS_PER_CYCLE);
+    // Observe before maturity, but never alert before maturity. Fairness uses
+    // attempted checks so an unavailable provider cannot monopolise the budget.
+    const checks = [...candidates].sort((a,b) => (a[1].lastCheckedAt ?? 0) - (b[1].lastCheckedAt ?? 0)).slice(0, MAX_CHECKS_PER_CYCLE);
     for (const [token, item] of candidates) if (Date.now() - item.launchedAt > MAX_AGE) candidates.delete(token);
     for (const [token, item] of checks) {
       const now = Date.now();
       if (now - item.launchedAt > MAX_AGE) { candidates.delete(token); continue; }
-      if (now - item.launchedAt < MIN_AGE) continue;
+      item.lastCheckedAt = now;
       try {
-        const curve = await readPonsV2Curve(item.launch);
-        if (!curve) { Object.assign(item.trend, emptySetupTrend()); continue; }
-        if (curve.graduated) { candidates.delete(token); console.log(`[TradeSetup] STOP token=${token} reason=GRADUATED`); continue; }
-        const price = Number(curve.quoteReserve) / Number(curve.tokenReserve);
-        const depth = Number(curve.quoteReserve) / 1e18;
-        if (!advanceSetupTrend(item.trend, { at: Date.now(), price, quoteDepth: depth })) {
+        const market = await readMarket(item.launch, item.source);
+        recordFeedDelivery('TRADE_SETUP_WATCH', 'EVALUATED');
+        if (!market) { recordFeedDelivery('TRADE_SETUP_WATCH', 'DATA_UNAVAILABLE'); console.log(`[TradeSetup] DEFER token=${token} reason=MARKET_UNAVAILABLE`); continue; }
+        if (item.source && (item.source !== market.source || item.pair !== market.pair)) {
+          item.trend = emptySetupTrend();
+          console.log(`[TradeSetup] SOURCE_TRANSITION token=${token} source=${market.source} confirmationReset=true`);
+        }
+        item.source = market.source; item.pair = market.pair;
+        const { price, depth } = market;
+        const confirmed = advanceSetupTrend(item.trend, { at: market.at, price, quoteDepth: depth });
+        if (now - item.launchedAt < MIN_AGE) { item.trend.confirmations = 0; item.trend.rising = 0; continue; }
+        if (!confirmed) {
+          recordFeedDelivery('TRADE_SETUP_WATCH', 'CONDITION_WAIT');
           console.log(`[TradeSetup] WAIT token=${token} reason=${item.trend.dip ? 'RECOVERY_NOT_CONFIRMED' : 'NO_OBSERVED_PULLBACK'} confirmations=${item.trend.confirmations}`); continue;
         }
         if (Date.now() < item.screenAfter) continue;
@@ -107,29 +122,33 @@ async function tick(): Promise<void> {
           scanRobinhoodDevTokenFlow(token, item.launch.deployer_address),
           getCreatorHoldingPercent(token, item.launch.deployer_address),
         ]);
-        if (!creatorSetupEligible({ status: flow.evidenceStatus, holding, burned: flow.confirmedDevBurnPercent,
-          moved: flow.otherDevTransferPercent, scannedAt: flow.scannedAt }, Date.now())) {
-          console.log(`[TradeSetup] BLOCK token=${token} reason=CREATOR_EVIDENCE`); continue;
+        const creatorVerdict = creatorSetupVerdict({ status: flow.evidenceStatus, holding, burned: flow.confirmedDevBurnPercent,
+          moved: flow.otherDevTransferPercent, scannedAt: flow.scannedAt }, Date.now());
+        if (creatorVerdict !== 'ELIGIBLE') {
+          recordFeedDelivery('TRADE_SETUP_WATCH', creatorVerdict);
+          if (creatorVerdict === 'DATA_UNAVAILABLE') item.screenAfter = Date.now() + 60_000;
+          console.log(`[TradeSetup] BLOCK token=${token} reason=CREATOR_${creatorVerdict}`); continue;
         }
         // Re-read after enrichment: never send a setup that fell below its low
         // while social/creator checks were running.
-        const final = await readPonsV2Curve(item.launch);
-        if (!final || final.graduated || Date.now() - item.launchedAt > MAX_AGE
+        const final = await readMarket(item.launch, item.source);
+        if (!final || final.source !== market.source || final.pair !== market.pair || Date.now() - item.launchedAt > MAX_AGE
           || Date.now() - item.trend.previous!.at > 90_000) continue;
-        const finalPrice = Number(final.quoteReserve) / Number(final.tokenReserve);
-        if (!Number.isFinite(finalPrice) || finalPrice < price || final.quoteReserve < curve.quoteReserve) continue;
+        const finalPrice = final.price;
+        if (!Number.isFinite(finalPrice) || finalPrice < price || final.depth < depth) continue;
         const text = buildTradeSetupText({ token, symbol: context.symbol, name: context.name,
           age: (Date.now() - item.launchedAt) / 60_000, holding, burned: flow.confirmedDevBurnPercent,
-          recovery: (finalPrice / item.trend.low - 1) * 100, depth: Number(final.quoteReserve) / 1e18, lowEth: item.trend.low * 10 ** context.decimals / 1e18, fdvUsd: context.fdvUsd, creator: context.creator, xUrl: socials?.xUrl ?? null, tgUrl: socials?.telegramUrl ?? null, at: Date.now(), kind: item.trend.setupKind });
+          recovery: (finalPrice / item.trend.low - 1) * 100, depth: final.depth, lowEth: final.source === 'DEX' ? item.trend.low : item.trend.low * 10 ** context.decimals / 1e18, fdvUsd: context.fdvUsd, creator: context.creator, xUrl: socials?.xUrl ?? null, tgUrl: socials?.telegramUrl ?? null, at: Date.now(), kind: item.trend.setupKind, market: final });
         const claim = await claimSharedDelivery(`alphaos:setup:delivered:${token}`, 24 * 60 * 60_000);
+        recordFeedDelivery('TRADE_SETUP_WATCH', 'QUALIFIED');
         if (claim === 'EXISTS') { candidates.delete(token); continue; }
         if (claim !== 'CLAIMED') continue;
         // Retire before sending: an ambiguous Telegram response must not resend
         // to recipients who may already have received the message.
         candidates.delete(token);
         await setSharedJson(`alphaos:setup:evidence:${token}`, { creator: context.creator, holding, rawLow: item.trend.low, curve: item.launch.curve_address, at: Date.now() }, new Date().toISOString(), 2 * 60 * 60_000);
-        const delivery = await directTelegramRecipients(text, token, { twitter: socials?.xUrl ?? null, telegram: socials?.telegramUrl ?? null, website: null }, true, true, {chain:'robinhood', token, feed:'TRADE_SETUP_WATCH', price:finalPrice, pair:item.launch.curve_address, unit:'ETH_RESERVE_RATIO', creator:item.launch.deployer_address, creatorSource:'PONS_FACTORY_EVENT'});
-        if (!compactOutcomesEnabled()) {
+        const delivery = await directTelegramRecipients(text, token, { twitter: socials?.xUrl ?? null, telegram: socials?.telegramUrl ?? null, website: null }, true, final.source === 'CURVE', {chain:'robinhood', token, feed:'TRADE_SETUP_WATCH', price:finalPrice, pair:final.pair, unit:final.source === 'DEX' ? 'USD' : 'ETH_RESERVE_RATIO', creator:item.launch.deployer_address, creatorSource:'PONS_FACTORY_EVENT'});
+        if (!compactOutcomesEnabled() && final.source === 'CURVE') {
         if (outcomes.size >= 20) outcomes.delete(outcomes.keys().next().value!);
         outcomes.set(token, { launch: item.launch, price: finalPrice, at: Date.now(), checked: Date.now(), min: finalPrice, max: finalPrice });
         }
@@ -170,6 +189,7 @@ export function queuePonsTradeSetup(launch: PonsLaunch): void {
   const launchedAt = Date.parse(launch.block_timestamp);
   const token = launch.token_address.toLowerCase();
   if (!isTradeSetupLaunchAdmissible(launch, Date.now()) || candidates.has(token)) return;
+  recordFeedDelivery('TRADE_SETUP_WATCH', 'DISCOVERED');
   if (candidates.size >= MAX_CANDIDATES) {
     if (deferredAdmissions.size < 50) deferredAdmissions.set(token, launch);
     console.log(`[TradeSetup] DEFERRED candidates=${candidates.size} pending=${deferredAdmissions.size} token=${token}`); return;
@@ -197,7 +217,7 @@ export function isTradeSetupLaunchAdmissible(launch: PonsLaunch, now: number, ma
     && Number.isFinite(age) && age >= 0 && age <= maxAge;
 }
 
-export async function tickTradeSetupForTests() { await tick(); }
+export async function tickTradeSetupForTests(readMarket?: typeof readSetupMarket) { await tick(readMarket); }
 
 export function tradeSetupSchedulingStateForTests() { return { candidates: [...candidates.keys()], deferred: [...deferredAdmissions.keys()] }; }
 export function resetTradeSetupSchedulingForTests() { if (timer) clearInterval(timer); timer = null; candidates.clear(); deferredAdmissions.clear(); outcomes.clear(); lastRotationAt = 0; }
@@ -217,7 +237,9 @@ export async function restoreSetupWatchCheckpoint(load = () => getSharedJson<{ c
     const token = item.launch.token_address.toLowerCase();
     if (!candidates.has(token)) {
       // Restart requires fresh consecutive observations; never reuse stale confirmation.
-      candidates.set(token, { launch: item.launch, launchedAt: Date.parse(item.launch.block_timestamp), trend: recoveredSetupTrend(item.trend), screenAfter: 0 });
+      const source = item.source === 'DEX' ? 'DEX' : 'CURVE';
+      const pair = source === 'DEX' && typeof item.pair === 'string' && /^0x[a-f0-9]{40}$/i.test(item.pair) ? item.pair : item.launch.curve_address!;
+      candidates.set(token, { launch: item.launch, launchedAt: Date.parse(item.launch.block_timestamp), trend: source === 'DEX' && pair === item.launch.curve_address ? emptySetupTrend() : recoveredSetupTrend(item.trend), source, pair, screenAfter: 0 });
     }
   }
   for (const launch of (Array.isArray(saved.value.deferred) ? saved.value.deferred : []).slice(0, 50)) {

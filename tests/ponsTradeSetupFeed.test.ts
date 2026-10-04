@@ -39,6 +39,14 @@ test('setup card escapes project text and distinguishes FDV, reserves and execut
   assert.doesNotMatch(noSocials, /href="null"|>X<|>Telegram</);
 });
 
+test('graduated setup card never labels USD liquidity or price as ETH reserves', () => {
+  const text = buildTradeSetupText({token:address,symbol:'TEST',name:'Test',age:40,holding:1,burned:null,recovery:4,depth:10000,lowEth:0.001,fdvUsd:999,creator:address,xUrl:null,tgUrl:null,at:now,
+    market:{source:'DEX',pair:address,price:0.0011,depth:10000,at:now,marketCap:50000,fdv:60000}});
+  assert.match(text,/DEX market/); assert.match(text,/Market cap.*\$50,000/);
+  assert.match(text,/FDV.*\$60,000/); assert.match(text,/USD\/token/);
+  assert.doesNotMatch(text,/ETH\/token|Pre-bond|Curve quote reserve|PONS page snapshot/);
+});
+
 test('missing social identity does not discard market candidates or exceed queue limits', () => {
   resetTradeSetupSchedulingForTests();
   const live = { ...launch, block_timestamp: new Date().toISOString() };
@@ -67,13 +75,40 @@ test('already admitted deferred launches survive the five-minute ingress limit w
     assert.equal(isTradeSetupLaunchAdmissible(live, clock), false);
     for (const token of tokens.slice(0, 20)) recordLaunchSocialEligibility(token, false);
     recordLaunchSocialEligibility(tokens[20], true);
-    await tickTradeSetupForTests();
+    await tickTradeSetupForTests(async () => null);
     assert.equal(tradeSetupSchedulingStateForTests().candidates.length, 20);
     assert.ok(tradeSetupSchedulingStateForTests().candidates.includes(tokens[20]));
     assert.equal(tradeSetupSchedulingStateForTests().deferred.length, 1);
     queuePonsTradeSetup({ ...live, token_address: '0x' + 'f'.repeat(40) });
     assert.equal(tradeSetupSchedulingStateForTests().candidates.length, 20);
   } finally { Date.now = originalNow; resetTradeSetupSchedulingForTests(); }
+});
+
+test('observes launch history before 30m without entering enrichment or delivery', async () => {
+  resetTradeSetupSchedulingForTests();
+  const live = { ...launch, block_timestamp: new Date().toISOString() };
+  queuePonsTradeSetup(live);
+  let reads = 0;
+  await tickTradeSetupForTests(async value => {
+    reads++;
+    return { price: 1, depth: 1, at: Date.now(), source: 'CURVE', pair: value.curve_address!, marketCap: null, fdv: null };
+  });
+  assert.equal(reads, 1);
+  assert.equal(tradeSetupSchedulingStateForTests().candidates.length, 1);
+  resetTradeSetupSchedulingForTests();
+});
+
+test('unavailable market reads rotate fairly within ten-check budget', async () => {
+  resetTradeSetupSchedulingForTests();
+  const original = Date.now; let clock = original(); Date.now = () => clock;
+  try {
+    for (let i=1; i<=20; i++) queuePonsTradeSetup({ ...launch, token_address: '0x'+i.toString(16).padStart(40,'0'), block_timestamp:new Date(clock).toISOString() });
+    const seen: string[] = [];
+    const read = async (value: PonsLaunch) => { seen.push(value.token_address); return null; };
+    await tickTradeSetupForTests(read); assert.equal(seen.length, 10);
+    clock += 60_000;
+    await tickTradeSetupForTests(read); assert.equal(new Set(seen).size, 20);
+  } finally { Date.now=original; resetTradeSetupSchedulingForTests(); }
 });
 
 test('checkpoint recovery accepts only unexpired verified launches and discards stale trend confirmations', async () => {

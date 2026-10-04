@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { advanceSetupTrend, creatorSetupEligible, emptySetupTrend } from '../src/chains/robinhood/tradeSetupEvidence.js';
+import { advanceSetupTrend, creatorSetupEligible, creatorSetupVerdict, emptySetupTrend } from '../src/chains/robinhood/tradeSetupEvidence.js';
 
 test('breakout needs spaced price and reserve growth, and is labelled separately', () => {
   const state = emptySetupTrend();
@@ -35,4 +35,23 @@ test('creator gating rejects missing transfer evidence, stale scans and actual m
     assert.equal(creatorSetupEligible({ ...valid, ...change }, 2_000), false);
   }
   assert.equal(creatorSetupEligible({ ...valid, holding: 0, burned: 1 }, 2_000), true);
+});
+
+test('provider gaps preserve an observed pullback but discard old confirmations', () => {
+  const state = emptySetupTrend();
+  advanceSetupTrend(state, {at:0,price:100,quoteDepth:10});
+  advanceSetupTrend(state, {at:60_000,price:90,quoteDepth:9});
+  advanceSetupTrend(state, {at:120_000,price:92,quoteDepth:9.1});
+  assert.equal(advanceSetupTrend(state,{at:400_000,price:93,quoteDepth:9.2}),false);
+  assert.equal(state.peak,100); assert.equal(state.low,90); assert.equal(state.confirmations,0);
+  assert.equal(advanceSetupTrend(state,{at:460_000,price:94,quoteDepth:9.3}),false);
+  assert.equal(advanceSetupTrend(state,{at:520_000,price:95,quoteDepth:9.4}),true);
+});
+test('creator evidence distinguishes provider gaps from observed transfer risk without relaxing eligibility',()=>{
+  const args={status:'COMPLETE',holding:2,burned:0,moved:0,scannedAt:1000};
+  assert.equal(creatorSetupVerdict(args,2000),'ELIGIBLE');
+  assert.equal(creatorSetupVerdict({...args,moved:null},2000),'DATA_UNAVAILABLE');
+  assert.equal(creatorSetupVerdict({...args,scannedAt:-100000},2000),'DATA_UNAVAILABLE');
+  assert.equal(creatorSetupVerdict({...args,moved:5},2000),'RISK_REJECTED');
+  assert.equal(creatorSetupVerdict({...args,holding:0},2000),'RISK_REJECTED');
 });
