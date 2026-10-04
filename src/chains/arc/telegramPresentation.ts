@@ -26,7 +26,7 @@ function compactArcOpportunity(text: string): string {
     '',
     '<b>RISK COVERAGE</b>',
     'Market activity detected · Security incomplete',
-    ...warnings.slice(0, 2).map(item => `⚠️ ${item}`),
+    ...warnings.map(item => `⚠️ ${item}`),
     '',
     ca ? '<b>CONTRACT</b>' : '',
     ca ? `<code>${ca}</code>` : '',
