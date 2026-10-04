@@ -2,7 +2,8 @@ import { discloseRobinhoodKeyStats } from '../../services/alertKeyStatsService.j
 import { discloseRobinhoodOwnership } from '../../services/alertOwnershipService.js';
 import { enabledLiveRecipients } from '../../services/liveAlertPreferences.js';
 import { waitForRecipientDelivery, recordDeliveryAccepted } from '../../services/recipientDeliveryTiming.js';
-import { claimBoostDelivery, markBoostDeliveryAccepted } from '../../services/boostDeliveryGuard.js';
+import { claimBoostDelivery, markBoostDeliveryAccepted, releaseUnsentBoostClaim } from '../../services/boostDeliveryGuard.js';
+import { randomUUID } from 'node:crypto';
 import { boostVerificationDue, recordBoostSecurityBlock, type BoostVerificationRetry } from './alertEligibilityState.js';
 import { getVerifiedPonsPublicContext, getCreatorHoldingPercent, getTelegramPreviewType } from './ponsPublicContext.js';
 import { reuseRobinhoodDevTokenFlow } from './security/devTokenFlowScanner.js';
@@ -524,7 +525,8 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
     telegramUrl: socials.telegram,
   });
 
-  const claim = await claimBoostDelivery(boost.tokenAddress, boost.totalAmount);
+  const claimOwner = randomUUID();
+  const claim = await claimBoostDelivery(boost.tokenAddress, boost.totalAmount, undefined, claimOwner);
   if (claim !== 'CLAIMED') {
     console.log('[RobinhoodBoostObserver] BOOST_DELIVERY_GUARD', { token: tokenKey, totalBoost: boost.totalAmount, state: claim });
     if (claim === 'EXISTS') boostTotals.set(tokenKey, boost.totalAmount);
@@ -536,9 +538,11 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
   }
   let delivered = 0;
   let accepted = 0;
+  let sendStarted = false;
   let sharedDeliveryUnavailable = false;
   try {
     const result = await deliverAlphaSemanticEvent({ event: semanticEvent, message: baseMessage, buttons: baseButtons, preserveMessage: true,
+      onSendStarted: () => { sendStarted = true; },
       onTelegramAccepted: () => { accepted += 1; recordAcceptedAdminBoostNotification(boost.tokenAddress, boost.totalAmount); },
     });
     delivered = result.delivered;
@@ -549,9 +553,10 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
     });
   }
 
-  if (sharedDeliveryUnavailable && accepted === 0) {
+  if (sharedDeliveryUnavailable && accepted === 0 && !sendStarted) {
     baseMessage = await discloseRobinhoodKeyStats(baseMessage,boost.tokenAddress,false,verifiedPons?'Trusted PONS route':'Verified sellability flags',security.liquidity?.status);
     const fallbackCard = await discloseAlertDexPaid(baseMessage, baseButtons, boost.tokenAddress);
+    sendStarted = true; // Conservative: retain claim even if fallback fails before acceptance.
     const fallbackDelivered = await deliverAdminBoostFallback({
       tokenAddress: boost.tokenAddress,
       totalBoostAmount: boost.totalAmount,
@@ -593,6 +598,9 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
       }));
     })();
     return true;
+  }
+  if (await releaseUnsentBoostClaim(boost.tokenAddress, boost.totalAmount, claimOwner, sendStarted)) {
+    console.log('[RobinhoodBoostObserver] Unsent boost claim released for retry', { token: tokenKey, totalBoost: boost.totalAmount });
   }
   return false;
 }

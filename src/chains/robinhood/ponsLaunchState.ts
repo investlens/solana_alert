@@ -56,7 +56,7 @@ async function indexedFactoryForToken(token: Address): Promise<Address | null> {
       .maybeSingle();
     if (error) throw error;
     const factoryAddress = String(data?.factory_address ?? '').trim();
-    return factoryAddress ? getAddress(factoryAddress) : null;
+    return factoryAddress && isApprovedPonsOrigin(token, token, factoryAddress) ? getAddress(factoryAddress) : null;
   } catch (error) {
     console.warn('[PonsLaunchState] indexed factory lookup failed; using active factory fallback', {
       token,
@@ -66,25 +66,35 @@ async function indexedFactoryForToken(token: Address): Promise<Address | null> {
   }
 }
 
-async function indexedPonsLaunchExists(token: Address): Promise<boolean> {
+export async function getIndexedVerifiedPonsLaunch(tokenAddress: string): Promise<{exists:true;token:string;deployer:string|null}|null> {
+  const token = getAddress(tokenAddress);
   try {
     const { data, error } = await supabase
       .from('pons_launches')
-      .select('token_address')
+      .select('token_address,factory_address,deployer_address')
       .eq('chain', 'robinhood')
       .eq('protocol', 'pons')
       .ilike('token_address', token.toLowerCase())
       .limit(1)
-      .maybeSingle();
+      .abortSignal(AbortSignal.timeout(1500)).maybeSingle();
     if (error) throw error;
-    return Boolean(data?.token_address);
+    if (!isApprovedPonsOrigin(token, data?.token_address, data?.factory_address)) return null;
+    const deployer = typeof data?.deployer_address === 'string' && /^0x[a-f0-9]{40}$/i.test(data.deployer_address)
+      && !/^0x0{40}$/i.test(data.deployer_address) ? data.deployer_address : null;
+    return {exists:true,token,deployer};
   } catch (error) {
     console.warn('[PonsLaunchState] indexed PONS provenance lookup failed', {
       token,
       reason: error instanceof Error ? error.message : String(error),
     });
-    return false;
+    return null;
   }
+}
+
+export function isApprovedPonsOrigin(token: string, evidenceToken: unknown, factory: unknown): boolean {
+  return typeof evidenceToken === 'string' && evidenceToken.toLowerCase() === token.toLowerCase()
+    && typeof factory === 'string' && getPonsFactoryDeployments().some(deployment =>
+      deployment.enabled && deployment.address.toLowerCase() === factory.toLowerCase());
 }
 
 const eventVerificationCache = new Map<string, { value: boolean; expiresAt: number }>();
@@ -156,8 +166,8 @@ export async function isVerifiedPonsLaunch(tokenAddress: string): Promise<boolea
   const shared = await getSharedJson<{ factory?: string; protocolVersion?: string }>(
     `alphaos:pons:verified:${token.toLowerCase()}`,
   );
-  if (shared) return true;
-  if (await indexedPonsLaunchExists(token)) return true;
+  if (shared && isApprovedPonsOrigin(token, token, shared.value.factory)) return true;
+  if (await getIndexedVerifiedPonsLaunch(token)) return true;
   try {
     if ((await getPonsLaunchState(tokenAddress)).exists) return true;
   } catch {

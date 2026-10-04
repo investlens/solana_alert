@@ -1,5 +1,5 @@
 import { supabase } from './supabase.js';
-import { claimSharedDelivery } from './sharedJsonCache.js';
+import { claimSharedDelivery, runSharedAtomic } from './sharedJsonCache.js';
 
 const CLAIM_TTL_MS = 30 * 24 * 60 * 60_000;
 export function boostDeliveryIdentities(token: string, total: number): string[] {
@@ -24,12 +24,24 @@ async function previouslyAccepted(token: string, total: number): Promise<boolean
 // expiring claim per eligible token/total. No discovery rows or new DB tables.
 export async function claimBoostDelivery(token: string, total: number, dependencies = {
   previouslyAccepted, claim: claimSharedDelivery,
-}): Promise<'CLAIMED' | 'EXISTS' | 'UNAVAILABLE'> {
+}, owner = 'claimed'): Promise<'CLAIMED' | 'EXISTS' | 'UNAVAILABLE'> {
   if (!/^0x[a-f0-9]{40}$/i.test(token) || !Number.isSafeInteger(total) || total <= 0) return 'UNAVAILABLE';
   try {
     if (await dependencies.previouslyAccepted(token, total)) return 'EXISTS';
-    return await dependencies.claim(`alphaos:delivery:robinhood:boost:${token.toLowerCase()}:${total}`, CLAIM_TTL_MS);
+    return await dependencies.claim(`alphaos:delivery:robinhood:boost:${token.toLowerCase()}:${total}`, CLAIM_TTL_MS, owner);
   } catch { return 'UNAVAILABLE'; }
+}
+
+// Release only our own claim, only with positive proof that no send was invoked.
+// Legacy static claims and any ambiguous/accepted send are never released.
+export async function releaseUnsentBoostClaim(token: string, total: number, owner: string,
+  sendStarted: boolean, atomic = runSharedAtomic): Promise<boolean> {
+  if (sendStarted || owner === 'claimed' || !owner || !/^0x[a-f0-9]{40}$/i.test(token)
+    || !Number.isSafeInteger(total) || total <= 0) return false;
+  try {
+    return Number(await atomic("if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end",
+      [`alphaos:delivery:robinhood:boost:${token.toLowerCase()}:${total}`], [owner])) === 1;
+  } catch { return false; }
 }
 
 export async function markBoostDeliveryAccepted(eventIdentity: string, rawSnapshot: Record<string, unknown>): Promise<void> {
