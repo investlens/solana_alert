@@ -79,7 +79,7 @@ export function buildPremiumTokenNotification(args:{
       ['<b>STATS</b>', ...marketLines.filter(Boolean), ...activity].join('\n'),
       ['<b>RISK</b>', `🧭 Launch: <b>${launchLabel}</b>`,
         ...(args.evidence?.devHoldingEvidence !== 'VERIFIED' ? ['Creator holding not verified.'] : []),
-        unlockedLpWarning ? '⚠️ LP unlocked · <b>HIGH RUG RISK</b>' : `🛡 ${escapeHtml(args.status)}`,
+        unlockedLpWarning ? '⚠️ LP unlocked · <b>HIGH RUG RISK</b>' : `🛡 ${escapeHtml(args.status === 'VERIFIED' ? (args.launchSource === 'PONS' ? 'PONS launch verified · other risks unverified' : 'Sellability flags checked · other risks unverified') : args.status)}`,
         ...(unlockedLpWarning ? ['No sell-restriction flag reported'] : []),
       ].join('\n'),
       socials.length ? `<b>SOCIALS</b>\n${socials.join(' · ')}` : 'Socials: Not listed',

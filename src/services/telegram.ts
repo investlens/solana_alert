@@ -1,3 +1,4 @@
+import { cleanAlertCard, cleanAlertButtons } from '../ui/alertCardLayout.js';
 import { buildAlphaosAlertCard } from '../ui/alphaosAlertCard.js';
 import { sendAlphaosPhotoAlert, telegramCaptionLength } from '../ui/alphaosPhotoDelivery.js';
 import { config } from '../config.js';
@@ -51,6 +52,8 @@ export function buildAlphaReportUrl(tokenMint: string, context?: { engine?: stri
 
 async function sendTelegramRequest(chatId: string, text: string, buttons?: InlineButton[][]): Promise<number | null> {
   if (!chatId) return null;
+  text = cleanAlertCard(text);
+  if (/<code>/.test(text)) buttons = cleanAlertButtons(buttons);
 
   const body: Record<string, unknown> = {
     chat_id: chatId,
@@ -106,6 +109,8 @@ export async function sendTelegramWithMessageId(chatId: string, text: string,
 export async function editTelegramMessage(chatId: string, messageId: number, text: string,
   buttons?: InlineButton[][]): Promise<void> {
   if (!chatId || !Number.isFinite(messageId)) return;
+  text = cleanAlertCard(text);
+  if (/<code>/.test(text)) buttons = cleanAlertButtons(buttons);
   if (config.dryRun) {
     console.log(`\n--- EDIT MESSAGE ${messageId} TO ${chatId} ---\n${text}\nButtons: ${JSON.stringify(buttons ?? [])}\n---------------------------\n`);
     return;
