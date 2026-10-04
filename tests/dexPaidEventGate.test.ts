@@ -41,3 +41,22 @@ test('verified sellability allows missing LP evidence with a warning, but sellin
   }
  }finally{globalThis.fetch=prior;clearBoostSecurityRouterCacheForTests();}
 });
+
+ test('DEX policy warns for unknown data, blocks confirmed honeypots, and leaves BOOST fail-closed',async()=>{
+ const original=globalThis.fetch;
+ try {
+  for(const [payload,allowed] of [[{},true],[{is_honeypot:'0'},true],[{is_honeypot:'1'},false],[{cannot_sell_all:'1'},false],[{is_honeypot:'0',cannot_sell_all:'0'},true]] as const){
+   clearBoostSecurityRouterCacheForTests();
+   globalThis.fetch=(async()=>new Response(JSON.stringify({result:{[token]:payload}}))) as typeof fetch;
+   const dex=await routeBoostSecurity({tokenAddress:token,verifiedTrustedLaunchpad:false,requireExplicitSellability:true,allowUnknownSellability:true});
+   assert.equal(dex.allowed,allowed);
+   if(allowed&&!("cannot_sell_all" in payload))assert.equal(dex.sellabilityVerified,false);
+   if(!("cannot_sell_all" in payload)&&!("is_honeypot" in payload))assert.equal((await routeBoostSecurity({tokenAddress:token,verifiedTrustedLaunchpad:false,requireExplicitSellability:true})).allowed,false);
+  }
+  clearBoostSecurityRouterCacheForTests();globalThis.fetch=async()=>{throw Error('provider timeout');};
+  const warning=await routeBoostSecurity({tokenAddress:token,verifiedTrustedLaunchpad:false,requireExplicitSellability:true,allowUnknownSellability:true});
+  assert.equal(warning.allowed,true);assert.equal(warning.sellabilityVerified,false);
+  const gate=createDexPaidEventGate({paid:async()=>paid,launch:async()=>null,custom:async()=>warning,now:()=>now});
+  assert.match((await gate(token)).securityNote!,/Sellability unverified/);
+ }finally{globalThis.fetch=original;clearBoostSecurityRouterCacheForTests();}
+});
