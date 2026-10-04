@@ -1,3 +1,4 @@
+import { discloseRobinhoodKeyStats } from '../../services/alertKeyStatsService.js';
 import { discloseRobinhoodOwnership } from '../../services/alertOwnershipService.js';
 import { enabledLiveRecipients } from '../../services/liveAlertPreferences.js';
 import { waitForRecipientDelivery, recordDeliveryAccepted } from '../../services/recipientDeliveryTiming.js';
@@ -306,7 +307,7 @@ export async function enrichDeliveredBoostAlert(args: {
     launchSource: args.verifiedPons ? 'PONS' : 'UNKNOWN',
     boostTotal: args.totalBoostAmount, boostIncrement: args.boostAmount, risk: 'UNKNOWN',
     insightTitle: 'WHY NOW', insight: [`${args.canonicalTitle} verified after security gate`, args.securityReason],
-    statusTitle: 'Security', status: 'VERIFIED', displayIntent: 'WATCH',
+    statusTitle: 'Security', status: args.verifiedPons ? 'Verified PONS origin · market risks apply' : 'Sellability checked · LP protection unverified', displayIntent: 'WATCH',
   });
   message = await discloseRobinhoodOwnership(message, args.tokenAddress, pons?.creator, market?.pairAddress ?? pons?.curveAddress);
   const tokenUrl = args.verifiedPons
@@ -321,6 +322,7 @@ export async function enrichDeliveredBoostAlert(args: {
     xUrl: socials.twitter, telegramUrl: socials.telegram,
   });
   const deliveries = await loadDeliveredBoostMessages(args.eventId).catch(() => []);
+  message = await discloseRobinhoodKeyStats(message,args.tokenAddress,false,args.verifiedPons?'Trusted PONS route':'Verified sellability flags');
   const card = await discloseAlertDexPaid(message, buttons, args.tokenAddress);
   const edits = await Promise.allSettled(deliveries.map(delivery =>
     editTelegramMessage(delivery.telegramId, delivery.messageId, card.text, card.buttons)));
@@ -406,7 +408,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
   if (!canonical) return false;
 
   const verifiedPons = await isVerifiedPonsLaunch(boost.tokenAddress);
-  const security = await routeBoostSecurity({ tokenAddress: boost.tokenAddress, verifiedTrustedLaunchpad: verifiedPons });
+  const security = await routeBoostSecurity({ tokenAddress: boost.tokenAddress, verifiedTrustedLaunchpad: verifiedPons, requireExplicitSellability: true });
   console.log('[RobinhoodBoostObserver] BOOST_SECURITY_DECISION', {
     token: tokenKey, eventType: canonical.type, route: security.route,
     allowed: security.allowed, reason: security.reason, cached: security.cached,
@@ -504,7 +506,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
     statusTitle: 'Security',
     status: security.liquidity?.status && security.liquidity.status !== 'UNKNOWN'
       ? `LP ${security.liquidity.status}`
-      : 'VERIFIED',
+      : verifiedPons ? 'Verified PONS origin · market risks apply' : 'Sellability checked · LP protection unverified',
     displayIntent: 'WATCH',
   });
   baseMessage = await discloseRobinhoodOwnership(baseMessage, boost.tokenAddress, pons?.creator, market?.pairAddress ?? pons?.curveAddress);
@@ -548,6 +550,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
   }
 
   if (sharedDeliveryUnavailable && accepted === 0) {
+    baseMessage = await discloseRobinhoodKeyStats(baseMessage,boost.tokenAddress,false,verifiedPons?'Trusted PONS route':'Verified sellability flags',security.liquidity?.status);
     const fallbackCard = await discloseAlertDexPaid(baseMessage, baseButtons, boost.tokenAddress);
     const fallbackDelivered = await deliverAdminBoostFallback({
       tokenAddress: boost.tokenAddress,

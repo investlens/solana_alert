@@ -43,7 +43,7 @@ export function createDexPaidEventGate(deps:Dependencies) {
       if(!custom.allowed)base.reasons.push(custom.reason);
       base.securityNote=custom.liquidity?.status==='UNLOCKED'
         ? '⚠️ LP unlocked · liquidity can be removed. Honeypot/sell-restriction checks passed.'
-        : 'Honeypot/sell-restriction checks passed · payment does not establish trading quality.';
+        : custom.liquidity?.status === 'UNKNOWN' ? 'Sellability checks passed · LP protection unverified; validate before investing.' : 'Honeypot/sell-restriction checks passed · payment does not establish trading quality.';
       return base;
     }catch(error){base.reasons.push(`EVENT_GATE_UNAVAILABLE: ${error instanceof Error?error.message:String(error)}`);return base;}
   };

@@ -2,9 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { advanceSetupTrend, creatorSetupEligible, emptySetupTrend } from '../src/chains/robinhood/tradeSetupEvidence.js';
 
-test('rising launch prices alone never count as reversal', () => {
+test('breakout needs spaced price and reserve growth, and is labelled separately', () => {
   const state = emptySetupTrend();
-  [100, 104, 108, 112].forEach((price, i) => assert.equal(advanceSetupTrend(state, { at: i * 60_000, price, quoteDepth: price }), false));
+  assert.equal(advanceSetupTrend(state,{at:0,price:100,quoteDepth:10}),false);
+  assert.equal(advanceSetupTrend(state,{at:60000,price:102,quoteDepth:10.1}),false);
+  assert.equal(advanceSetupTrend(state,{at:120000,price:104,quoteDepth:10.4}),true);
+  assert.equal(state.setupKind,'BREAKOUT');
+  const flatDepth=emptySetupTrend();
+  [100,104,108].forEach((price,i)=>assert.equal(advanceSetupTrend(flatDepth,{at:i*60000,price,quoteDepth:10}),false));
 });
 test('pullback requires two spaced recoveries and rising reserve evidence', () => {
   const state = emptySetupTrend();

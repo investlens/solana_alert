@@ -12,7 +12,8 @@ import { advanceSetupTrend, creatorSetupEligible, emptySetupTrend, type SetupTre
 const MIN_AGE = 30 * 60_000;
 const MAX_AGE = 120 * 60_000;
 const INTERVAL = 60_000;
-const MAX_CANDIDATES = 10;
+const MAX_CANDIDATES = 20;
+const MAX_CHECKS_PER_CYCLE = 10;
 type Candidate = { launch: PonsLaunch; launchedAt: number; trend: SetupTrend; screenAfter: number };
 const candidates = new Map<string, Candidate>();
 const deferredAdmissions = new Map<string, PonsLaunch>();
@@ -25,7 +26,7 @@ let lastRotationAt = 0;
 console.log(`[TradeSetup] READY enabled=${String(process.env.PONS_TRADE_SETUP_ENABLED ?? 'true').toLowerCase() === 'true'} launchpad=PONS mode=RESEARCH_WATCH minAgeMin=30 maxCandidates=${MAX_CANDIDATES} dbWrites=0`);
 const html = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-export function buildTradeSetupText(args: { token: string; symbol: string; name: string; age: number; holding: number | null; burned: number | null; recovery: number; depth: number; lowEth: number; fdvUsd: number | null; creator: string; xUrl: string | null; tgUrl: string | null; at: number }): string {
+export function buildTradeSetupText(args: { token: string; symbol: string; name: string; age: number; holding: number | null; burned: number | null; recovery: number; depth: number; lowEth: number; fdvUsd: number | null; creator: string; xUrl: string | null; tgUrl: string | null; at: number; kind?: 'RECOVERY' | 'BREAKOUT' }): string {
   return [
     '🎯 <b>AlphaOS · TRADE SETUP WATCH</b>',
     `<b>${html(args.symbol.slice(0, 24))}</b> · ${html(args.name.slice(0, 64))}`,
@@ -34,8 +35,8 @@ export function buildTradeSetupText(args: { token: string; symbol: string; name:
     `FDV  <b>${args.fdvUsd != null && Number.isFinite(args.fdvUsd) ? '$' + args.fdvUsd.toLocaleString('en-US', { maximumFractionDigits: 0 }) : 'Unavailable'}</b> · PONS page snapshot`,
     `Launch age  <b>${Math.floor(args.age)}m</b>`,
     'Social identity  <b>Not verified for this market setup</b>',
-    `Recovery from observed low  <b>+${args.recovery.toFixed(1)}%</b>`,
-    'Confirmation  <b>Two consecutive 60s reserve/price increases</b>',
+    `${args.kind === 'BREAKOUT' ? 'Confirmed breakout from observed base' : 'Recovery from observed low'}  <b>+${args.recovery.toFixed(1)}%</b>`,
+    'Confirmation  <b>Two consecutive spaced reserve/price increases</b>',
     `Dev holding  <b>${args.holding == null ? 'Unavailable' : `${args.holding.toFixed(2)}%`}</b>`,
     ...(args.burned != null && args.burned > 0 ? [`Verified dev burn  <b>${args.burned.toFixed(2)}%</b>`] : []),
     'Creator transfers  <b>None in scanned evidence</b>',
@@ -70,19 +71,21 @@ async function tick(): Promise<void> {
         admitCandidate(confirmed[1]);
       }
     }
-    // Rotate one inactive slot every five minutes, keeping the same work budget.
+    // Rotate one inactive slot every two minutes, keeping the same work budget.
     // Recovery candidates retain their history; newly promoted watches start fresh.
-    if (deferredAdmissions.size && candidates.size >= MAX_CANDIDATES && Date.now() - lastRotationAt >= 5 * 60_000) {
-      const inactive = [...candidates].find(([, item]) => Date.now() - item.launchedAt >= MIN_AGE && !item.trend.dip);
+    if (deferredAdmissions.size && candidates.size >= MAX_CANDIDATES && Date.now() - lastRotationAt >= 2 * 60_000) {
+      const inactive = [...candidates].find(([, item]) => Date.now() - item.launchedAt >= MIN_AGE && !item.trend.dip && (item.trend.rising ?? 0) === 0);
       const next = [...deferredAdmissions].find(([, launch]) => isTradeSetupLaunchAdmissible(launch, Date.now(), MAX_AGE));
       if (inactive && next) {
         candidates.delete(inactive[0]); deferredAdmissions.delete(next[0]);
-        deferredAdmissions.set(inactive[0], inactive[1].launch);
+        // Retire flat candidates instead of replaying their history from zero.
         admitCandidate(next[1]); lastRotationAt = Date.now();
         console.log(`[TradeSetup] ROTATED reason=NO_PULLBACK candidates=${candidates.size} pending=${deferredAdmissions.size}`);
       }
     }
-    for (const [token, item] of candidates) {
+    const checks = [...candidates].sort((a,b) => (a[1].trend.previous?.at ?? 0) - (b[1].trend.previous?.at ?? 0)).filter(([,item]) => Date.now() - item.launchedAt >= MIN_AGE).slice(0, MAX_CHECKS_PER_CYCLE);
+    for (const [token, item] of candidates) if (Date.now() - item.launchedAt > MAX_AGE) candidates.delete(token);
+    for (const [token, item] of checks) {
       const now = Date.now();
       if (now - item.launchedAt > MAX_AGE) { candidates.delete(token); continue; }
       if (now - item.launchedAt < MIN_AGE) continue;
@@ -117,7 +120,7 @@ async function tick(): Promise<void> {
         if (!Number.isFinite(finalPrice) || finalPrice < price || final.quoteReserve < curve.quoteReserve) continue;
         const text = buildTradeSetupText({ token, symbol: context.symbol, name: context.name,
           age: (Date.now() - item.launchedAt) / 60_000, holding, burned: flow.confirmedDevBurnPercent,
-          recovery: (finalPrice / item.trend.low - 1) * 100, depth: Number(final.quoteReserve) / 1e18, lowEth: item.trend.low * 10 ** context.decimals / 1e18, fdvUsd: context.fdvUsd, creator: context.creator, xUrl: socials?.xUrl ?? null, tgUrl: socials?.telegramUrl ?? null, at: Date.now() });
+          recovery: (finalPrice / item.trend.low - 1) * 100, depth: Number(final.quoteReserve) / 1e18, lowEth: item.trend.low * 10 ** context.decimals / 1e18, fdvUsd: context.fdvUsd, creator: context.creator, xUrl: socials?.xUrl ?? null, tgUrl: socials?.telegramUrl ?? null, at: Date.now(), kind: item.trend.setupKind });
         const claim = await claimSharedDelivery(`alphaos:setup:delivered:${token}`, 24 * 60 * 60_000);
         if (claim === 'EXISTS') { candidates.delete(token); continue; }
         if (claim !== 'CLAIMED') continue;
@@ -157,7 +160,7 @@ async function tick(): Promise<void> {
         if (now - outcome.at >= 60 * 60_000) outcomes.delete(token);
       } catch { /* Keep the bounded observation pending, never fabricate a zero. */ }
     }
-    console.log(`[TradeSetup] CYCLE candidates=${candidates.size} outcomes=${outcomes.size} max=${MAX_CANDIDATES} dbWrites=0`);
+    console.log(`[TradeSetup] CYCLE candidates=${candidates.size} outcomes=${outcomes.size} max=${MAX_CANDIDATES} checkBudget=${MAX_CHECKS_PER_CYCLE} dbWrites=0`);
     if (!candidates.size && !outcomes.size && !deferredAdmissions.size && timer) { clearInterval(timer); timer = null; }
   } finally { running = false; }
 }

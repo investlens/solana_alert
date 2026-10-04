@@ -1,3 +1,6 @@
+import { discloseRobinhoodKeyStats } from './alertKeyStatsService.js';
+import { routeBoostSecurity } from '../chains/robinhood/boostSecurityRouter.js';
+import { getPonsLaunchState } from '../chains/robinhood/ponsLaunchState.js';
 import { withOwnershipDisclosure, type OwnershipDisclosure } from '../ui/ownershipDisclosure.js';
 import { decorateDexPaidAlert, discloseAlertDexPaid } from './alertDexPaidDisclosure.js';
 import { discloseRobinhoodOwnership } from './alertOwnershipService.js';
@@ -121,7 +124,7 @@ export async function deliverAlphaSemanticEvent(args: {
 }, dependencies: SemanticDeliveryDependencies = productionDependencies): Promise<{ delivered: number; failed: number }> {
   const ephemeralMode = dependencies === productionDependencies && (args.event.ephemeral === true || args.event.id < 0);
   let launchType: LaunchClassification | null = null;
-  if (dependencies === productionDependencies && !(args.event.type === 'DEX_PAID' && args.event.chain.toLowerCase() === 'robinhood') && isPositiveSemanticEvent(args.event.type) &&
+  if (dependencies === productionDependencies && !(['DEX_PAID','BOOST'].includes(args.event.type) && args.event.chain.toLowerCase() === 'robinhood') && isPositiveSemanticEvent(args.event.type) &&
       ['robinhood', 'solana'].includes(args.event.chain.toLowerCase())) {
     let raw: Record<string, unknown> | null = args.event.rawSnapshot ??
       (ephemeralMode ? getEphemeralSemanticEventEvidence(args.event.eventIdentity) : null);
@@ -156,6 +159,13 @@ export async function deliverAlphaSemanticEvent(args: {
     }
   }
 
+  if (dependencies === productionDependencies && args.event.type === 'BOOST' && args.event.chain.toLowerCase() === 'robinhood') {
+    const launch = await getPonsLaunchState(args.event.assetId, {requireCompleteFactoryVerification:true}).catch(() => null);
+    const trusted = Boolean(launch?.exists && launch.token.toLowerCase() === args.event.assetId.toLowerCase());
+    const safety = await routeBoostSecurity({tokenAddress:args.event.assetId, verifiedTrustedLaunchpad:trusted, requireExplicitSellability:true});
+    if (!safety.allowed) { console.warn('[AlphaSemanticDelivery] Boost sellability blocked', {reason:safety.reason}); return {delivered:0,failed:0}; }
+    launchType = trusted ? 'PONS' : 'CUSTOM';
+  }
   let paidOwnership: OwnershipDisclosure | null = null;
   let paidCreator: string | null = null;
   let paidSecurityNote: string | null = null;
@@ -215,6 +225,7 @@ export async function deliverAlphaSemanticEvent(args: {
       : await discloseAlertDexPaid(deliveryMessage, deliveryButtons ?? [], args.event.assetId);
     deliveryMessage = card.text; deliveryButtons = card.buttons;
   }
+  if (dependencies === productionDependencies && args.event.chain.toLowerCase() === 'robinhood' && !isUndelayedRiskEvent(args.event.type)) deliveryMessage = await discloseRobinhoodKeyStats(deliveryMessage,args.event.assetId,false,['DEX_PAID','BOOST'].includes(args.event.type)?(launchType==='PONS'?'Trusted PONS route':'Verified flags · not a guarantee'):undefined);
   const renderedCharacters = deliveryMessage.length;
   const renderedBytes = Buffer.byteLength(deliveryMessage, 'utf8');
   let delivered = 0; let failed = 0; let accepted = 0;
@@ -230,7 +241,14 @@ export async function deliverAlphaSemanticEvent(args: {
 
       // DEX payment claims survive DB outages, restarts and concurrent workers.
       // Keep an ambiguous Telegram result claimed rather than risk a duplicate.
-      let paidOwnership: OwnershipDisclosure | null = null;
+      if (dependencies === productionDependencies && args.event.type === 'BOOST' && args.event.chain.toLowerCase() === 'robinhood') {
+    const launch = await getPonsLaunchState(args.event.assetId, {requireCompleteFactoryVerification:true}).catch(() => null);
+    const trusted = Boolean(launch?.exists && launch.token.toLowerCase() === args.event.assetId.toLowerCase());
+    const safety = await routeBoostSecurity({tokenAddress:args.event.assetId, verifiedTrustedLaunchpad:trusted, requireExplicitSellability:true});
+    if (!safety.allowed) { console.warn('[AlphaSemanticDelivery] Boost sellability blocked', {reason:safety.reason}); return {delivered:0,failed:0}; }
+    launchType = trusted ? 'PONS' : 'CUSTOM';
+  }
+  let paidOwnership: OwnershipDisclosure | null = null;
   if (dependencies === productionDependencies && args.event.type === 'DEX_PAID') {
         if (!await claimDexRecipient(args.event.eventIdentity, user.telegram_id)) continue;
       }

@@ -132,7 +132,7 @@ test('Social Mafia alert shows verified launchpad plus both communities', () => 
   assert.match(text, /TG\s+<a href="https:\/\/t.me\/projectalpha">@projectalpha<\/a>/);
   assert.match(text, /Market cap\s+<b>\$51\.8K<\/b>/);
   assert.match(text, /Dev holding\s+<b>4\.25%<\/b>/);
-  assert.match(text, /Verified launchpad \+ X \+ Telegram/);
+  assert.match(text, /Verified launchpad.*Telegram linked/);
 });
 
 test('screening waits 15 minutes, retries four times and rejects expired launches without RPC', async t => {
@@ -207,4 +207,11 @@ test('temporary social checkpoint restores only verified unexpired unique launch
     assert.equal(socialMafiaScreeningStatus().waiting,1);
     assert.equal(socialMafiaScreeningStatus().identityCount,1);
   } finally { resetPonsSocialMafiaForTests(); }
+});
+
+test('X-only Social Mafia requires explicit optional-Telegram route and has no empty TG button',()=>{
+ const socials=resolveSocialMafiaSocials({twitter:'https://x.com/projectalpha',telegram:null,allowMissingTelegram:true});
+ assert.ok(socials);assert.equal(socials.telegramUrl,'');
+ const text=buildSocialMafiaAlertText({tokenAddress:'0x'+'1'.repeat(40),launchpadLabel:'PONS',socials,socialContractConfirmed:true});
+ assert.match(text,/Telegram.*Unavailable|Telegram unavailable/);assert.match(text,/CA confirmed on X/);assert.doesNotMatch(text,/href=""/);
 });

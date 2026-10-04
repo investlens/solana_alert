@@ -35,7 +35,7 @@ export type DexScreenerPair = {
     h1?: number;
     h24?: number;
   };
-  priceChange?: { h1?: number | null; h24?: number | null };
+  priceChange?: { m5?: number | null; h1?: number | null; h24?: number | null };
 
   liquidity?: {
     usd?: number;
@@ -285,6 +285,9 @@ export async function getRobinhoodMarketSnapshot(
       pair.dexId,
 
     priceChange1h: pair.priceChange?.h1 != null && String(pair.priceChange.h1).trim() !== '' && Number.isFinite(Number(pair.priceChange.h1)) ? Number(pair.priceChange.h1) : undefined,
+    volume5mReported: typeof pair.volume?.m5 === 'number',
+    volume24hUsd: typeof pair.volume?.h24 === 'number' && Number.isFinite(pair.volume.h24) ? pair.volume.h24 : undefined,
+    priceChange5m: typeof pair.priceChange?.m5 === 'number' && Number.isFinite(pair.priceChange.m5) ? pair.priceChange.m5 : undefined,
     trades5mReported: typeof pair.txns?.m5?.buys === 'number' && typeof pair.txns?.m5?.sells === 'number',
     pairCreatedAt: Number.isFinite(Number(pair.pairCreatedAt)) && Number(pair.pairCreatedAt) > 0
       ? Number(pair.pairCreatedAt) : undefined,
@@ -310,6 +313,9 @@ export function robinhoodMarketSnapshotFromPairs(tokenAddress: string, pairs: De
     buys5m: finiteNumber(pair.txns?.m5?.buys), sells5m: finiteNumber(pair.txns?.m5?.sells),
     pairAddress: pair.pairAddress, dexId: pair.dexId,
     priceChange1h: pair.priceChange?.h1 != null && String(pair.priceChange.h1).trim() !== '' && Number.isFinite(Number(pair.priceChange.h1)) ? Number(pair.priceChange.h1) : undefined,
+    volume5mReported: typeof pair.volume?.m5 === 'number',
+    volume24hUsd: typeof pair.volume?.h24 === 'number' && Number.isFinite(pair.volume.h24) ? pair.volume.h24 : undefined,
+    priceChange5m: typeof pair.priceChange?.m5 === 'number' && Number.isFinite(pair.priceChange.m5) ? pair.priceChange.m5 : undefined,
     trades5mReported: typeof pair.txns?.m5?.buys === 'number' && typeof pair.txns?.m5?.sells === 'number',
     pairCreatedAt: Number.isFinite(Number(pair.pairCreatedAt)) && Number(pair.pairCreatedAt) > 0
       ? Number(pair.pairCreatedAt) : undefined,

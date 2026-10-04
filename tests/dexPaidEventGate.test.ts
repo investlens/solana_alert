@@ -30,3 +30,14 @@ test('custom event route requires explicit negative honeypot and sell restrictio
   }
  }finally{globalThis.fetch=prior;clearBoostSecurityRouterCacheForTests();}
 });
+
+test('verified sellability allows missing LP evidence with a warning, but selling restrictions block',async()=>{
+ const prior=globalThis.fetch;
+ try{
+  for(const [flags,allowed]of [[{is_honeypot:'0',cannot_sell_all:'0'},true],[{is_honeypot:'0',cannot_sell_all:'1'},false]]as const){
+   clearBoostSecurityRouterCacheForTests();globalThis.fetch=(async()=>new Response(JSON.stringify({result:{[token]:flags}}),{status:200}))as typeof fetch;
+   const result=await routeBoostSecurity({tokenAddress:token,verifiedTrustedLaunchpad:false,requireExplicitSellability:true});
+   assert.equal(result.allowed,allowed);if(allowed){assert.equal(result.liquidity?.status,'UNKNOWN');assert.match(result.reason,/LP protection unverified/);}
+  }
+ }finally{globalThis.fetch=prior;clearBoostSecurityRouterCacheForTests();}
+});

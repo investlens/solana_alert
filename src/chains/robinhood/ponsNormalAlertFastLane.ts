@@ -1,3 +1,4 @@
+import { discloseRobinhoodKeyStats } from '../../services/alertKeyStatsService.js';
 import { discloseAlertDexPaid } from '../../services/alertDexPaidDisclosure.js';
 import { discloseRobinhoodOwnership } from '../../services/alertOwnershipService.js';
 import { enabledLiveRecipients } from '../../services/liveAlertPreferences.js';
@@ -34,9 +35,10 @@ const retryAttempts = new Map<string, number>();
 const noPairRetries = new Set<string>();
 const NO_PAIR_RETRY_MS = Math.max(30_000, Math.min(120_000, Number(process.env.PONS_NO_PAIR_RETRY_MS ?? 45_000)));
 const PREINDEX_MAX = 10;
+const PREINDEX_WATCH_TTL_MS = 120 * 60_000;
 const PREINDEX_RECHECK_MS = Math.max(15_000, Number(process.env.PONS_CURVE_TREND_CONFIRM_MS ?? 30_000));
 const PONS_MIN_ALERT_AGE_MS = Math.max(5 * 60_000, Number(process.env.PONS_MIN_ALERT_AGE_MS ?? 30 * 60_000));
-const PONS_CURVE_MIN_QUOTE_GROWTH_PCT = Number(process.env.PONS_CURVE_MIN_QUOTE_GROWTH_PCT ?? 3);
+const PONS_CURVE_MIN_QUOTE_GROWTH_PCT = Number(process.env.PONS_CURVE_MIN_QUOTE_GROWTH_PCT ?? 1);
 const PONS_CURVE_STRONG_QUOTE_GROWTH_PCT = Number(process.env.PONS_CURVE_STRONG_QUOTE_GROWTH_PCT ?? 8);
 const PREINDEX_ABI = parseAbi([
   'function token() view returns (address)',
@@ -199,6 +201,7 @@ export async function directTelegramRecipients(text: string, tokenAddress: strin
   if (!recipients.length) return {delivered:0,failed:0};
 
   text = await discloseRobinhoodOwnership(text, tokenAddress, baseline?.creator, baseline?.pair);
+  text = await discloseRobinhoodKeyStats(text,tokenAddress,preBond,'Trusted PONS route');
   const deliveryStartedAt = Date.now();
   const results = await Promise.allSettled(recipients.map(async chatId => {
     await waitForRecipientDelivery(chatId, deliveryStartedAt);
@@ -278,13 +281,17 @@ function schedulePreIndexRecheck(launch: PonsLaunch): void {
       const baseline = await readPonsV2Curve(launch);
       if (!baseline || baseline.graduated) {
         preIndexCandidates.delete(token);
+        if (!baseline && Number.isFinite(launchedAt) && Date.now()-launchedAt < PREINDEX_WATCH_TTL_MS) {
+          const retry=setTimeout(()=>schedulePreIndexRecheck(launch),120_000); retry.unref();
+        }
         return;
       }
       setTimeout(() => {
         void (async () => {
+          let retired = false;
           try {
             const second = await readPonsV2Curve(launch);
-            if (!second || second.graduated) return;
+            if (!second || second.graduated) { retired = Boolean(second?.graduated); return; }
             const quoteGrowthPct = Number((second.quoteReserve - baseline.quoteReserve) * 10_000n / baseline.quoteReserve) / 100;
             const tokenReserveChangePct = Number((second.tokenReserve - baseline.tokenReserve) * 10_000n / baseline.tokenReserve) / 100;
             const upward = quoteGrowthPct >= PONS_CURVE_MIN_QUOTE_GROWTH_PCT && tokenReserveChangePct < 0;
@@ -306,7 +313,7 @@ function schedulePreIndexRecheck(launch: PonsLaunch): void {
             }
 
             const strong = quoteGrowthPct >= PONS_CURVE_STRONG_QUOTE_GROWTH_PCT;
-            const curveMarketCapEth = (Number(second.quoteReserve) / Number(second.tokenReserve)) * 1_000_000_000;
+            const curveQuoteReserveEth = Number(second.quoteReserve) / 1e18;
             const shortCa = token.length > 14 ? `${token.slice(0, 8)}…${token.slice(-6)}` : token;
             const ageMin = Number.isFinite(launchedAt) ? Math.max(30, Math.floor((Date.now() - launchedAt) / 60_000)) : 30;
             const text = [
@@ -318,7 +325,7 @@ function schedulePreIndexRecheck(launch: PonsLaunch): void {
               `🕒 Launch age       <b>${ageMin}m+</b>`,
               `📈 Fresh trend       <b>+${quoteGrowthPct.toFixed(2)}%</b>`,
               `🧮 Token reserve     <b>${tokenReserveChangePct.toFixed(2)}%</b>`,
-              `💰 Curve Market Cap  <b>${curveMarketCapEth.toFixed(3)} ETH</b>`,
+              `💧 Curve quote reserve  <b>${curveQuoteReserveEth.toFixed(4)} ETH</b>`,
               '',
               '🎯 <b>WHY ALPHAOS FLAGGED IT</b>',
               '✅ Survived the high-risk first 30 minutes',
@@ -336,6 +343,10 @@ function schedulePreIndexRecheck(launch: PonsLaunch): void {
             console.log(`[PonsFastLane] MATURE_CURVE_ALERT_SENT token=${token} ageMin=${ageMin} quoteGrowthPct=${quoteGrowthPct.toFixed(2)} delivered=${delivery.delivered} failed=${delivery.failed}`);
           } finally {
             preIndexCandidates.delete(token);
+            // One quiet confirmation window must not permanently discard a live launch.
+            if (!retired && !preIndexAlerted.has(token) && Number.isFinite(launchedAt) && Date.now() - launchedAt < PREINDEX_WATCH_TTL_MS) {
+              const retry = setTimeout(() => schedulePreIndexRecheck(launch), 120_000); retry.unref();
+            }
           }
         })();
       }, PREINDEX_RECHECK_MS);
