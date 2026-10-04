@@ -1,8 +1,8 @@
-export type ArcBoostSafety = { allowed: boolean; reason: string; devHoldingPercent?: number | null; top10Percent?: number | null };
+export type ArcBoostSafety = { allowed: boolean; reason: string; sellabilityBlocked?: boolean; sellabilityVerified?: boolean; devHoldingPercent?: number | null; top10Percent?: number | null };
 export function arcBoostSafetyFromEvidence(evidence: Record<string, unknown> | null | undefined): ArcBoostSafety {
   if (!evidence) return { allowed: false, reason: 'honeypot evidence unavailable' };
-  if (String(evidence.is_honeypot) === '1') return { allowed: false, reason: 'honeypot flag' };
-  if (String(evidence.cannot_sell_all) === '1') return { allowed: false, reason: 'cannot-sell flag' };
+  if (String(evidence.is_honeypot) === '1') return { allowed: false, sellabilityBlocked:true, reason: 'honeypot flag' };
+  if (String(evidence.cannot_sell_all) === '1') return { allowed: false, sellabilityBlocked:true, reason: 'cannot-sell flag' };
   if (String(evidence.is_honeypot) !== '0' || String(evidence.cannot_sell_all) !== '0')
     return { allowed: false, reason: 'honeypot/sell evidence incomplete' };
   // GoPlus percentages are fractions of supply. Owner is not necessarily creator.
@@ -18,7 +18,7 @@ export function arcBoostSafetyFromEvidence(evidence: Record<string, unknown> | n
   // Partial provider lists are explicitly labelled; never infer complete coverage.
   const top10Percent = portions.length && portions.every(p => p != null)
     ? portions.sort((a,b) => b! - a!).slice(0,10).reduce<number>((sum,p) => sum + p!, 0) : null;
-  return { allowed: true, reason: 'no honeypot/cannot-sell flag detected; LP check intentionally skipped for BOOST',
+  return { allowed: true, sellabilityVerified:true, reason: 'no honeypot/cannot-sell flag detected; LP check intentionally skipped for BOOST',
     devHoldingPercent: holding, top10Percent: top10Percent != null && top10Percent <= 100 ? top10Percent : null };
 }
 export async function processArcBoostObservation(totals: Map<string, number>, boost: { tokenAddress: string; totalAmount: number },
@@ -27,4 +27,10 @@ export async function processArcBoostObservation(totals: Map<string, number>, bo
   const key = boost.tokenAddress.toLowerCase(); const previous = totals.get(key);
   if (previous != null && boost.totalAmount <= previous) return;
   if (await deliver(previous == null ? 'NEW' : 'INCREASE')) totals.set(key, boost.totalAmount);
+}
+
+// DEX payments surface missing evidence as a warning; confirmed exit restrictions still block.
+export function arcDexPaidSafety<T extends ArcBoostSafety>(safety: T): T & ArcBoostSafety {
+ if(safety.allowed || safety.sellabilityBlocked)return safety;
+ return {...safety,allowed:true,sellabilityVerified:false,reason:'Sellability unverified: provider data unavailable or incomplete. Validate selling before investing.'};
 }
