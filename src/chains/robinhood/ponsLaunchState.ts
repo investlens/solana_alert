@@ -56,7 +56,7 @@ async function indexedFactoryForToken(token: Address): Promise<Address | null> {
       .maybeSingle();
     if (error) throw error;
     const factoryAddress = String(data?.factory_address ?? '').trim();
-    return factoryAddress ? getAddress(factoryAddress) : null;
+    return factoryAddress && isApprovedPonsOrigin(token, token, factoryAddress) ? getAddress(factoryAddress) : null;
   } catch (error) {
     console.warn('[PonsLaunchState] indexed factory lookup failed; using active factory fallback', {
       token,
@@ -70,14 +70,14 @@ async function indexedPonsLaunchExists(token: Address): Promise<boolean> {
   try {
     const { data, error } = await supabase
       .from('pons_launches')
-      .select('token_address')
+      .select('token_address,factory_address')
       .eq('chain', 'robinhood')
       .eq('protocol', 'pons')
       .ilike('token_address', token.toLowerCase())
       .limit(1)
       .maybeSingle();
     if (error) throw error;
-    return Boolean(data?.token_address);
+    return isApprovedPonsOrigin(token, data?.token_address, data?.factory_address);
   } catch (error) {
     console.warn('[PonsLaunchState] indexed PONS provenance lookup failed', {
       token,
@@ -85,6 +85,12 @@ async function indexedPonsLaunchExists(token: Address): Promise<boolean> {
     });
     return false;
   }
+}
+
+export function isApprovedPonsOrigin(token: string, evidenceToken: unknown, factory: unknown): boolean {
+  return typeof evidenceToken === 'string' && evidenceToken.toLowerCase() === token.toLowerCase()
+    && typeof factory === 'string' && getPonsFactoryDeployments().some(deployment =>
+      deployment.enabled && deployment.address.toLowerCase() === factory.toLowerCase());
 }
 
 const eventVerificationCache = new Map<string, { value: boolean; expiresAt: number }>();
@@ -156,7 +162,7 @@ export async function isVerifiedPonsLaunch(tokenAddress: string): Promise<boolea
   const shared = await getSharedJson<{ factory?: string; protocolVersion?: string }>(
     `alphaos:pons:verified:${token.toLowerCase()}`,
   );
-  if (shared) return true;
+  if (shared && isApprovedPonsOrigin(token, token, shared.value.factory)) return true;
   if (await indexedPonsLaunchExists(token)) return true;
   try {
     if ((await getPonsLaunchState(tokenAddress)).exists) return true;

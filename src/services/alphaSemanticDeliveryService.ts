@@ -1,7 +1,7 @@
 import { recordFeedDelivery } from './feedDeliveryHealth.js';
 import { discloseRobinhoodKeyStats } from './alertKeyStatsService.js';
 import { routeBoostSecurity } from '../chains/robinhood/boostSecurityRouter.js';
-import { getPonsLaunchState } from '../chains/robinhood/ponsLaunchState.js';
+import { isVerifiedPonsLaunch } from '../chains/robinhood/ponsLaunchState.js';
 import { withOwnershipDisclosure, type OwnershipDisclosure } from '../ui/ownershipDisclosure.js';
 import { decorateDexPaidAlert, discloseAlertDexPaid } from './alertDexPaidDisclosure.js';
 import { discloseRobinhoodOwnership } from './alertOwnershipService.js';
@@ -120,6 +120,7 @@ export async function deliverAlphaSemanticEvent(args: {
   event: UserFacingSemanticEvent; message: string; buttons?: InlineButton[][]; preserveMessage?: boolean;
   onFailure?: (error: unknown) => void;
   onTelegramAccepted?: (user: DeliverableUser) => void;
+  onSendStarted?: () => void;
   onRecipientFailure?: (user: DeliverableUser, error: unknown,
     stage: 'recipient_setup' | 'telegram_send' | 'delivery_completion') => void;
 }, dependencies: SemanticDeliveryDependencies = productionDependencies): Promise<{ delivered: number; failed: number }> {
@@ -161,8 +162,7 @@ export async function deliverAlphaSemanticEvent(args: {
   }
 
   if (dependencies === productionDependencies && args.event.type === 'BOOST' && args.event.chain.toLowerCase() === 'robinhood') {
-    const launch = await getPonsLaunchState(args.event.assetId, {requireCompleteFactoryVerification:true}).catch(() => null);
-    const trusted = Boolean(launch?.exists && launch.token.toLowerCase() === args.event.assetId.toLowerCase());
+    const trusted = await isVerifiedPonsLaunch(args.event.assetId).catch(() => false);
     const safety = await routeBoostSecurity({tokenAddress:args.event.assetId, verifiedTrustedLaunchpad:trusted, requireExplicitSellability:true});
     if (!safety.allowed) { console.warn('[AlphaSemanticDelivery] Boost sellability blocked', {reason:safety.reason}); return {delivered:0,failed:0}; }
     launchType = trusted ? 'PONS' : 'CUSTOM';
@@ -242,21 +242,14 @@ export async function deliverAlphaSemanticEvent(args: {
 
       // DEX payment claims survive DB outages, restarts and concurrent workers.
       // Keep an ambiguous Telegram result claimed rather than risk a duplicate.
-      if (dependencies === productionDependencies && args.event.type === 'BOOST' && args.event.chain.toLowerCase() === 'robinhood') {
-    const launch = await getPonsLaunchState(args.event.assetId, {requireCompleteFactoryVerification:true}).catch(() => null);
-    const trusted = Boolean(launch?.exists && launch.token.toLowerCase() === args.event.assetId.toLowerCase());
-    const safety = await routeBoostSecurity({tokenAddress:args.event.assetId, verifiedTrustedLaunchpad:trusted, requireExplicitSellability:true});
-    if (!safety.allowed) { console.warn('[AlphaSemanticDelivery] Boost sellability blocked', {reason:safety.reason}); return {delivered:0,failed:0}; }
-    launchType = trusted ? 'PONS' : 'CUSTOM';
-  }
-  let paidOwnership: OwnershipDisclosure | null = null;
-  if (dependencies === productionDependencies && args.event.type === 'DEX_PAID') {
+      if (dependencies === productionDependencies && args.event.type === 'DEX_PAID') {
         if (!await claimDexRecipient(args.event.eventIdentity, user.telegram_id)) continue;
       }
 
       if (ephemeralMode) {
         if (!claimEphemeralDelivery(args.event, user)) continue;
         try {
+          args.onSendStarted?.();
           const sendResult = await dependencies.send(user.telegram_id, deliveryMessage, deliveryButtons);
           if (dependencies === productionDependencies) recordDeliveryAccepted(user, deliveryStartedAt, args.event.eventIdentity, isUndelayedRiskEvent(args.event.type));
           delivered += 1; accepted += 1;
@@ -287,7 +280,7 @@ export async function deliverAlphaSemanticEvent(args: {
       const leaseToken = createLeaseToken();
       if (!await dependencies.reserve(args.event, user, leaseToken)) continue;
       const result = await deliverReservedTelegram({
-        send: () => dependencies.send(user.telegram_id, deliveryMessage, deliveryButtons),
+        send: () => { args.onSendStarted?.(); return dependencies.send(user.telegram_id, deliveryMessage, deliveryButtons); },
         complete: sendResult => dependencies.complete(args.event, user, leaseToken,
           Number.isFinite(Number(sendResult)) ? Number(sendResult) : null),
         release: () => dependencies.release(args.event, user, leaseToken),

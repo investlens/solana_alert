@@ -41,6 +41,17 @@ test('BOOST and MAJOR BOOST fan out once to Admin, Pro and Free while honoring m
   }
 });
 
+test('send-start callback proves attempt even when Telegram rejects, but not when reserve prevents send', async () => {
+  const run = harness([user('admin','admin')]);
+  const event = {id:98765,eventIdentity:'v2:BOOST:send-start',type:'BOOST',assetId:'0x1111111111111111111111111111111111111111',chain:'robinhood'};
+  let attempts=0;
+  run.dependencies.send=async()=>{throw Error('ambiguous Telegram timeout');};
+  await deliverAlphaSemanticEvent({event,message:'BOOST',onSendStarted:()=>{attempts++;}},run.dependencies);
+  assert.equal(attempts,1);
+  await deliverAlphaSemanticEvent({event,message:'BOOST',onSendStarted:()=>{attempts++;}},run.dependencies);
+  assert.equal(attempts,1,'no new attempt when reservation refuses delivery');
+});
+
 test('DEX_PAID honors explicit OFF and ON, including for Admin', async () => {
   const run = harness([user('admin', 'admin'), user('pro', 'paid'), user('free', 'free')], {
     admin: { DEX_PAID: false }, pro: { DEX_PAID: true }, free: { DEX_PAID: false },

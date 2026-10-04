@@ -1,5 +1,5 @@
 import { recentDexPayment } from '../dexPaidWatchState.js';
-import { getPonsLaunchState } from '../ponsLaunchState.js';
+import { isVerifiedPonsLaunch } from '../ponsLaunchState.js';
 import { routeBoostSecurity, type BoostSecurityGateDecision } from '../boostSecurityRouter.js';
 import { scanRobinhoodDexPaid, type RobinhoodDexPaidResult } from './dexPaidScanner.js';
 type GateCheck = {key:string;passed:boolean;detail:string};
@@ -12,7 +12,7 @@ export type DexPaidAlertSafetyResult = {
 };
 type Dependencies = {
   paid:(token:string)=>Promise<RobinhoodDexPaidResult>;
-  launch:(token:string)=>Promise<{exists:boolean;token:string;deployer:string}|null>;
+  launch:(token:string)=>Promise<{exists:boolean;token:string;deployer:string|null}|null>;
   custom:(token:string)=>Promise<BoostSecurityGateDecision>;
   now:()=>number;
 };
@@ -51,5 +51,7 @@ export function createDexPaidEventGate(deps:Dependencies) {
 // No market-cap, token-age, volume, dev-holding or bundle entry thresholds.
 // No per-check SQL security snapshots. Ownership is disclosed by the shared bounded renderer.
 export const evaluateDexPaidAlertSafety=createDexPaidEventGate({paid:scanRobinhoodDexPaid,
-  launch:token=>getPonsLaunchState(token,{requireCompleteFactoryVerification:true}),
+  // V2 origin is independently verifiable without the V1-only launch-state view.
+  // Creator enrichment is optional and must not turn an approved origin into CUSTOM.
+  launch:async token=>await isVerifiedPonsLaunch(token)?{exists:true,token,deployer:null}:null,
   custom:token=>routeBoostSecurity({tokenAddress:token,verifiedTrustedLaunchpad:false,requireExplicitSellability:true}),now:Date.now});
