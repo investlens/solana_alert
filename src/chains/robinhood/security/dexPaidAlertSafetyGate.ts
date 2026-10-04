@@ -41,7 +41,9 @@ export function createDexPaidEventGate(deps:Dependencies) {
       base.allowed=custom.allowed;base.launchType=launch?'CUSTOM':'UNKNOWN';
       base.checks.push({key:'CUSTOM_SELLABILITY',passed:custom.allowed,detail:custom.reason});
       if(!custom.allowed)base.reasons.push(custom.reason);
-      base.securityNote=custom.liquidity?.status==='UNLOCKED'
+      base.securityNote=custom.sellabilityVerified === false
+        ? '⚠️ Sellability unverified · security provider data unavailable or incomplete. Validate selling before investing.'
+        : custom.liquidity?.status==='UNLOCKED'
         ? '⚠️ LP unlocked · liquidity can be removed. Honeypot/sell-restriction checks passed.'
         : custom.liquidity?.status === 'UNKNOWN' ? 'Sellability checks passed · LP protection unverified; validate before investing.' : 'Honeypot/sell-restriction checks passed · payment does not establish trading quality.';
       return base;
@@ -54,4 +56,4 @@ export const evaluateDexPaidAlertSafety=createDexPaidEventGate({paid:scanRobinho
   // V2 origin is independently verifiable without the V1-only launch-state view.
   // Creator enrichment is optional and must not turn an approved origin into CUSTOM.
   launch:async token=>{const origin=await getVerifiedRobinhoodLaunchpad(token);return origin?{...origin,exists:true}:null;},
-  custom:token=>routeBoostSecurity({tokenAddress:token,verifiedTrustedLaunchpad:false,requireExplicitSellability:true}),now:Date.now});
+  custom:token=>routeBoostSecurity({tokenAddress:token,verifiedTrustedLaunchpad:false,requireExplicitSellability:true,allowUnknownSellability:true}),now:Date.now});

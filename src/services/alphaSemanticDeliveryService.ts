@@ -227,7 +227,7 @@ export async function deliverAlphaSemanticEvent(args: {
       : await discloseAlertDexPaid(deliveryMessage, deliveryButtons ?? [], args.event.assetId);
     deliveryMessage = card.text; deliveryButtons = card.buttons;
   }
-  if (dependencies === productionDependencies && args.event.chain.toLowerCase() === 'robinhood' && !isUndelayedRiskEvent(args.event.type)) deliveryMessage = await discloseRobinhoodKeyStats(deliveryMessage,args.event.assetId,false,['DEX_PAID','BOOST'].includes(args.event.type)?(launchType==='PONS'||launchType==='FLAP'?`Trusted ${launchType} route`:'Verified flags · not a guarantee'):undefined);
+  if (dependencies === productionDependencies && args.event.chain.toLowerCase() === 'robinhood' && !isUndelayedRiskEvent(args.event.type)) deliveryMessage = await discloseRobinhoodKeyStats(deliveryMessage,args.event.assetId,false,['DEX_PAID','BOOST'].includes(args.event.type)?(launchType==='PONS'||launchType==='FLAP'?`Trusted ${launchType} route`:args.event.type==='DEX_PAID'?'See sellability disclosure':'Verified flags · not a guarantee'):undefined);
   const renderedCharacters = deliveryMessage.length;
   const renderedBytes = Buffer.byteLength(deliveryMessage, 'utf8');
   let delivered = 0; let failed = 0; let accepted = 0;
