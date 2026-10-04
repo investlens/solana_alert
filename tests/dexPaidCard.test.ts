@@ -26,3 +26,11 @@ test('pending venue retains PONS identity and socials without inventing a market
  assert.equal(stats.name,'FreeRoll');assert.equal(stats.symbol,'ROLL');assert.equal(stats.twitter,context.twitter);
  assert.equal(stats.price,undefined);assert.equal(stats.chartUrl,undefined);
 });
+
+test('RPC deadline does not discard an exact-contract PONS reported curve quote',()=>{
+ const context={name:'ZEC MAP',symbol:'ZEC',creator:token,decimals:18,totalSupplyRaw:1000000000n*10n**18n,twitter:null,telegram:null,fdvUsd:5194,priceUsd:0.000005194,phase:0,venue:'curve'};
+ const stats=ponsVenueStats(token,context,null,[]);
+ assert.equal(stats.price,context.priceUsd);assert.equal(stats.fdv,context.fdvUsd);assert.equal(stats.creator,token);
+ assert.match(stats.source!,/reported.*unconfirmed/);assert.equal(stats.preBond,undefined);assert.equal(stats.marketCap,undefined);assert.equal(stats.liquidity,undefined);assert.equal(stats.chartUrl,undefined);
+ for(const invalid of [{...context,phase:1},{...context,venue:'dex'}])assert.equal(ponsVenueStats(token,invalid,null,[]).price,undefined);
+});

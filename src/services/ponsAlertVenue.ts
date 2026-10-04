@@ -16,9 +16,16 @@ export async function confirmedCurveGraduation(token:string,curve:string):Promis
 }
 export function ponsVenueStats(token:string,context:PonsPublicContext|null,graduated:boolean|null,pairs:DexScreenerPair[]):AlertKeyStats {
   const checkedAt=new Date().toISOString().slice(11,19);
-  const metadata={name:context?.name,symbol:context?.symbol,twitter:context?.twitter,telegram:context?.telegram};
+  const metadata={creator:context?.creator,name:context?.name,symbol:context?.symbol,twitter:context?.twitter,telegram:context?.telegram};
   const unavailable:AlertKeyStats={...metadata,authoritativeVenue:true,source:'PONS venue data pending',checkedAt};
-  if(!context || graduated==null) return unavailable;
+  if(!context) return unavailable;
+  if(graduated==null) {
+    // Public exact-contract quotes remain useful when the RPC venue read is slow.
+    // They are reported quotes, not confirmed execution or circulating valuation.
+    if(context.phase===0 && context.venue==='curve') return {...unavailable,
+      price:context.priceUsd,fdv:context.fdvUsd,source:'PONS reported curve quote · venue unconfirmed'};
+    return unavailable;
+  }
   if(!graduated){
     if(context.venue!=='curve'||context.phase!==0)return unavailable;
     return {...metadata,authoritativeVenue:true,preBond:true,price:context.priceUsd,marketCap:null,fdv:context.fdvUsd,

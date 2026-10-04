@@ -18,7 +18,7 @@ export function buildDexPaidEventCard(args:{text:string;token:string;launchType:
  `Payment <b>Confirmed</b>${age==null?'':` · ${age}m ago`}`,'',
  '<b>MARKET</b>',...new Set(metricLines),
  ...(stats?.preBond ? ['Bonding curve · no DEX market yet'] : !stats?.chartUrl ? ['Market snapshot pending · no confirmed DEX pair'] : []),
- ...(metricLines.length ? ['Other missing stats are not confirmed.'] : ['Price, valuation, liquidity and volume unavailable.']),
+ ...(metricLines.length && (stats?.price!=null || stats?.fdv!=null || stats?.marketCap!=null) ? ['Unreported volume and holder data remain unverified.'] : []),
  '', '<b>OWNERSHIP</b>',dev,top,
  ...(lines.some(line=>/Creator wallet balance only/.test(line)) ? ['Zero creator balance does not prove a sale or burn.']:[]),
  ...lines.filter(line=>/Concentrated dev holding/.test(line)),

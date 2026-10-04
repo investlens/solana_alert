@@ -211,6 +211,12 @@ export async function deliverAlphaSemanticEvent(args: {
   }
   if (launchType) deliveryMessage = labelLaunchType(deliveryMessage, launchType);
 
+  if(dependencies===productionDependencies && args.event.type==='DEX_PAID' && args.event.chain==='robinhood') {
+    deliveryMessage=await discloseRobinhoodKeyStats(deliveryMessage,args.event.assetId,false,
+      launchType==='PONS'||launchType==='FLAP'?`Trusted ${launchType} route`:'See sellability disclosure');
+    // Resolve the public exact-contract creator before starting ownership work.
+    paidCreator=paidCreator ?? cachedRobinhoodAlertStats(args.event.assetId)?.creator ?? null;
+  }
   const deliveryStartedAt = Date.now();
   const users = (await dependencies.getUsers()).sort((a, b) => recipientDelayMs(a, deliveryStartedAt) - recipientDelayMs(b, deliveryStartedAt));
   if (dependencies === productionDependencies && !deliveryMessage.includes('<b>OWNERSHIP</b>') && /^(robinhood|robinchain)$/i.test(args.event.chain ?? '')) {
