@@ -100,7 +100,10 @@ async function cycle() {
         failed += 1;
         console.warn('[DexPaidFastLane] candidate check failed', {
           token: candidate.token.tokenAddress,
-          reason: error instanceof Error ? error.message : String(error),
+          reason: error instanceof Error ? error.message.slice(0,240)
+            : typeof (error as {message?:unknown})?.message === 'string'
+              ? String((error as {message:string}).message).slice(0,240) : 'Unknown candidate-check error',
+          code: typeof (error as {code?:unknown})?.code === 'string' ? (error as {code:string}).code : undefined,
         });
       }
     }
