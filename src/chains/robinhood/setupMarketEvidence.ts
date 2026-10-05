@@ -1,4 +1,4 @@
-import { chooseBestRobinhoodPair, fetchRobinhoodPairs, type DexScreenerPair } from './market.js';
+import { chooseBestRobinhoodPair, fetchRobinhoodPairs, robinhoodPairFetchedAt, type DexScreenerPair } from './market.js';
 import type { PonsLaunch } from './ponsHistoricalLaunchScanner.js';
 import { readPonsV2Curve } from './ponsNormalAlertFastLane.js';
 
@@ -6,7 +6,9 @@ export type SetupMarketEvidence = {
   price: number; depth: number; at: number;
   source: 'CURVE' | 'DEX'; pair: string;
   marketCap: number | null; fdv: number | null;
+  volume5m?: number | null; volume24h?: number | null; buys5m?: number | null; sells5m?: number | null;
 };
+const nonnegative = (v: unknown): number | null => v != null && Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : null;
 export function setupDexEvidence(pairs: DexScreenerPair[], token: string, at: number): SetupMarketEvidence | null {
   const pair = chooseBestRobinhoodPair(pairs.filter(p => p.chainId === 'robinhood'), token);
   const price = Number(pair?.priceUsd); const depth = Number(pair?.liquidity?.usd);
@@ -14,7 +16,9 @@ export function setupDexEvidence(pairs: DexScreenerPair[], token: string, at: nu
     || !Number.isFinite(price) || price <= 0 || !Number.isFinite(depth) || depth <= 0) return null;
   const positive = (v: unknown) => v != null && Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : null;
   return { price, depth, at, source: 'DEX', pair: pair.pairAddress,
-    marketCap: positive(pair.marketCap), fdv: positive(pair.fdv) };
+    marketCap: positive(pair.marketCap), fdv: positive(pair.fdv),
+    volume5m: nonnegative(pair.volume?.m5), volume24h: nonnegative(pair.volume?.h24),
+    buys5m: nonnegative(pair.txns?.m5?.buys), sells5m: nonnegative(pair.txns?.m5?.sells) };
 }
 // At most one governed DEX fetch per observation after graduation. No discovery
 // poller or DB writes, and no ETH/USD comparisons across the source transition.
@@ -31,5 +35,6 @@ export async function readSetupMarket(launch: PonsLaunch, source?: 'CURVE' | 'DE
     }
   }
   const pairs = await fetchRobinhoodPairs(launch.token_address, { priority: 'BACKGROUND', caller: 'pons_setup_watch', queueWaitTimeoutMs: 500 });
-  return setupDexEvidence(pairs, launch.token_address, Date.now());
+  const fetchedAt = robinhoodPairFetchedAt(pairs);
+  return fetchedAt == null ? null : setupDexEvidence(pairs, launch.token_address, fetchedAt);
 }
