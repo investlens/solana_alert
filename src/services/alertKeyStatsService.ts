@@ -5,6 +5,8 @@ import { getRobinhoodMarketSnapshot } from '../chains/robinhood/market.js';
 import { readResearchTokenSupply, formatResearchSupply } from './researchTokenSupply.js';
 import { fetchRobinhoodPairs } from '../chains/robinhood/market.js';
 import { confirmedCurveGraduation, ponsVenueStats, ponsV1VenueStats } from './ponsAlertVenue.js';
+import { selectAlertMarket } from './alertMarketSelection.js';
+import type { ChainMarketSnapshot } from '../chains/shared/types.js';
 const cache=new Map<string,{at:number;value:AlertKeyStats}>();
 const pending=new Map<string,Promise<AlertKeyStats>>();
 let started=0,windowAt=0;
@@ -16,6 +18,18 @@ export async function discloseRobinhoodKeyStats(text:string,token:string,preBond
     let work=pending.get(key);
     if(!work&&pending.size<2&&started<10){
       started++;
+      let observedMarket:ChainMarketSnapshot|null=null;
+      let observedVenue:AlertKeyStats|null=preBond?{preBond:true,authoritativeVenue:true}:null;
+      const publish=(venue:AlertKeyStats|null)=>{
+        observedVenue=venue;
+        const stats=selectAlertMarket(token,venue,observedMarket);
+        if(cache.size>=100)cache.delete(cache.keys().next().value!);
+        cache.set(key,{at:Date.now(),value:stats});
+        return stats;
+      };
+      const marketWork=getRobinhoodMarketSnapshot(token,{priority:'NORMAL',caller:'alert_key_stats',queueWaitTimeoutMs:750}).then(m=>{
+        observedMarket=m;publish(observedVenue);return m;
+      });
       const venue=async()=>{
         // Independent reads start together; slow index lookups must not postpone the public page request.
         const publicWork=ponsHint ? getVerifiedPonsPublicContext(token).catch(()=>null) : Promise.resolve(null);
@@ -26,8 +40,7 @@ export async function discloseRobinhoodKeyStats(text:string,token:string,preBond
 
         if(publicContext && (!launch?.deployer || publicContext.creator.toLowerCase()===launch.deployer.toLowerCase())) {
           // Identity/supply remain useful even when the on-chain venue read hits its deadline.
-          if(cache.size>=100)cache.delete(cache.keys().next().value!);
-          cache.set(key,{at:Date.now(),value:{...ponsVenueStats(token,publicContext,null,[]),supply:formatResearchSupply(publicContext)}});
+          publish({...ponsVenueStats(token,publicContext,null,[]),supply:formatResearchSupply(publicContext)});
           const graduated=publicContext.curveAddress ? await confirmedCurveGraduation(token,publicContext.curveAddress):null;
           const pairs=graduated===true&&publicContext.poolId ? await fetchRobinhoodPairs(token,{priority:'NORMAL',caller:'alert_pons_venue',queueWaitTimeoutMs:750}).catch(()=>[]):[];
           return {...ponsVenueStats(token,publicContext,graduated,pairs),supply:formatResearchSupply(publicContext)};
@@ -55,14 +68,14 @@ export async function discloseRobinhoodKeyStats(text:string,token:string,preBond
       };
       const venueWork=venue().then(stats=>{
         // Slow independent supply reads must not hide an already verified market.
-        if(stats){if(cache.size>=100)cache.delete(cache.keys().next().value!);cache.set(key,{at:Date.now(),value:stats});}
+        if(stats)publish(stats);
         return stats;
       });
-      work=Promise.allSettled([getRobinhoodMarketSnapshot(token,{priority:'NORMAL',caller:'alert_key_stats',queueWaitTimeoutMs:750}),readResearchTokenSupply(token,'robinhood'),venueWork]).then(([market,supply,context])=>{
+      work=Promise.allSettled([marketWork,readResearchTokenSupply(token,'robinhood'),venueWork]).then(([market,supply,context])=>{
         const m=market.status==='fulfilled'?market.value:null;
         const s=supply.status==='fulfilled'?supply.value:null;
         const c=context.status==='fulfilled'?context.value:null;
-        const stats:AlertKeyStats=c?{...c,supply:s?formatResearchSupply(s):c.supply}:{name:m?.name,symbol:m?.symbol,chartUrl:m?.chartUrl,price:m?.priceUsd||null,marketCap:m?.marketCapUsd||null,fdv:m?.fdvUsd||null,liquidity:m?.liquidityUsd||null,
+        const stats:AlertKeyStats=ponsHint||c?{...selectAlertMarket(token,c??(preBond?{preBond:true,authoritativeVenue:true}:null),m),supply:s?formatResearchSupply(s):c?.supply}:{name:m?.name,symbol:m?.symbol,chartUrl:m?.chartUrl,price:m?.priceUsd||null,marketCap:m?.marketCapUsd||null,fdv:m?.fdvUsd||null,liquidity:m?.liquidityUsd||null,
           volume5m:m?.volume5mReported?m.volume5mUsd:null,volume24h:m?.volume24hUsd,move5m:m?.priceChange5m,move1h:m?.priceChange1h,
           buys:m?.trades5mReported?m.buys5m:null,sells:m?.trades5mReported?m.sells5m:null,pairCreatedAt:m?.pairCreatedAt,
           supply:s?formatResearchSupply(s):null,source:m?'DEXScreener'+(s?' / on-chain supply':''):s?'On-chain supply':null,
