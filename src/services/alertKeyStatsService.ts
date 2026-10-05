@@ -43,12 +43,12 @@ export async function discloseRobinhoodKeyStats(text:string,token:string,preBond
         if(!launch)return null;
         if (launch.generation === 'v1' && launch.deployer) {
           const pool = await getPonsV1PoolMapping(token, launch.deployer);
-          if (!pool) return ponsVenueStats(token,null,null,[]);
+          if (!pool) return {...ponsVenueStats(token,null,null,[]),creator:launch.deployer};
           const pairs = await fetchRobinhoodPairs(token,{priority:'NORMAL',caller:'alert_pons_venue',queueWaitTimeoutMs:750}).catch(()=>[]);
           return {...ponsV1VenueStats(token,pool,pairs),creator:launch.deployer};
         }
         const c=await getVerifiedPonsPublicContext(token);
-        if(!c || (launch.deployer && c.creator.toLowerCase()!==launch.deployer.toLowerCase()))return ponsVenueStats(token,null,null,[]);
+        if(!c || (launch.deployer && c.creator.toLowerCase()!==launch.deployer.toLowerCase()))return {...ponsVenueStats(token,null,null,[]),creator:launch.deployer};
         const graduated=c.curveAddress?await confirmedCurveGraduation(token,c.curveAddress):null;
         const pairs=graduated===true && c.poolId ? await fetchRobinhoodPairs(token,{priority:'NORMAL',caller:'alert_pons_venue',queueWaitTimeoutMs:750}).catch(()=>[]) : [];
         return {...ponsVenueStats(token,c,graduated,pairs),supply:formatResearchSupply(c)};

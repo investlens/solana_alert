@@ -41,3 +41,8 @@ test('no transfers means no movements observed in the window, not no history',as
  const r=await analyzeSupplyJourney(token,fixture([]).d);assert.equal(r.status,'WINDOW_COMPLETE');assert.equal(r.recipients.length,0);assert.match(renderSupplyJourney(r,'EVIDENCE'),/No creator transfers observed in this window/);
  assert.equal(supplyPercent(null,'100'),'Unavailable');assert.equal(supplyPercent('0','100'),'0.00%');
 });
+test('inconsistent combined balances cannot create holdings above total supply',async()=>{
+ const {d}=fixture();const rpc=d.rpc;
+ d.rpc=async<T>(method,params,signal)=>method==='eth_call'?((params[0] as any).data==='0x18160ddd'?'0x3e8':'0x3e7') as T:rpc<T>(method,params,signal);
+ const r=await analyzeSupplyJourney(token,d);assert.equal(r.status,'UNAVAILABLE');assert.equal(r.holding,null);assert.equal(r.recipients.length,0);
+});
