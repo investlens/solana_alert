@@ -6,8 +6,9 @@ export function needsVenueConfirmation(launch: LaunchVenue | undefined, raw: Rec
   const evidence = raw.marketEvidence;
   if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return true;
   const e = evidence as Record<string, unknown>;
-  return !(e.token === launch.token_address && e.chain === launch.chain && e.venueConfirmed === true
-    && typeof e.observedAt === 'string' && Number.isFinite(Date.parse(e.observedAt))
-    && ((e.venue === 'PONS_CURVE' && e.curveAddress === launch.curve_address)
-      || (e.venue === 'DEX' && e.graduated === true && typeof e.pairAddress === 'string' && e.pairAddress === raw.pairAddress)));
+  const same=(a:unknown,b:string)=>typeof a==='string' && (/^0x[0-9a-f]+$/i.test(b)?a.toLowerCase()===b.toLowerCase():a===b);
+  return !(same(e.token, launch.token_address) && e.chain === launch.chain && e.venueConfirmed === true
+    && typeof e.observedAt === 'string' && Number.isFinite(Date.parse(e.observedAt)) && Date.parse(e.observedAt) <= Date.now() + 60_000
+    && ((e.venue === 'PONS_CURVE' && same(e.curveAddress, launch.curve_address))
+      || (e.venue === 'DEX' && e.graduated === true && typeof e.pairAddress === 'string' && typeof raw.pairAddress === 'string' && same(e.pairAddress, raw.pairAddress))));
 }
