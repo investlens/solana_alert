@@ -1,4 +1,5 @@
 import { cleanAlertCard, cleanAlertButtons, type CardButton } from './alertCardLayout.js';
+import { withResearchDisclosure } from './researchDisclosure.js';
 // Telegram counts caption characters after HTML entities have been parsed.
 export function telegramCaptionLength(text: string): number {
   return text.replace(/<[^>]*>/g, '').replace(/&(?:amp|lt|gt|quot|apos|#\d+|#x[\da-f]+);/gi, entity => {
@@ -13,10 +14,10 @@ export type AlphaosDelivery = { messageId: number; photo: boolean };
 export async function sendAlphaosPhotoAlert(args: {
   botToken: string; chatId: string; text: string; keyboard: unknown; image: Buffer | null;
 }, request: typeof fetch = fetch): Promise<AlphaosDelivery> {
-  args = {...args, text: cleanAlertCard(args.text)};
+  args = {...args, text: withResearchDisclosure(cleanAlertCard(args.text))};
   if (Array.isArray(args.keyboard)) args.keyboard = cleanAlertButtons(args.keyboard as CardButton[][], args.text);
   const base = `https://api.telegram.org/bot${args.botToken}`;
-  if (args.image) {
+  if (args.image && telegramCaptionLength(args.text) <= 1024) {
     const form = new FormData();
     form.set('chat_id', args.chatId); form.set('caption', args.text); form.set('parse_mode', 'HTML');
     form.set('reply_markup', JSON.stringify({ inline_keyboard: args.keyboard }));
@@ -39,7 +40,7 @@ export async function sendAlphaosPhotoAlert(args: {
 }
 
 export function alphaosEnrichmentEdit(delivery: AlphaosDelivery, chatId: string, text: string, keyboard: unknown) {
-  text = cleanAlertCard(text);
+  text = withResearchDisclosure(cleanAlertCard(text));
   if (Array.isArray(keyboard)) keyboard = cleanAlertButtons(keyboard as CardButton[][], text);
   return { method: delivery.photo ? 'editMessageCaption' : 'editMessageText', body: {
     chat_id: chatId, message_id: delivery.messageId, ...(delivery.photo ? { caption: text } : { text, disable_web_page_preview: true }),
