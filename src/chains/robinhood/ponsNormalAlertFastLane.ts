@@ -1,3 +1,4 @@
+import { cleanTradeSetupCard } from '../../ui/tradeSetupCard.js';
 import { recordFeedDelivery } from '../../services/feedDeliveryHealth.js';
 import { discloseRobinhoodKeyStats } from '../../services/alertKeyStatsService.js';
 import { discloseAlertDexPaid } from '../../services/alertDexPaidDisclosure.js';
@@ -184,7 +185,7 @@ async function sendTelegram(chatId: string, text: string, tokenAddress: string, 
   ].filter(row => row.length > 0);
   const card = await discloseAlertDexPaid(text, keyboard, tokenAddress);
   if (setupControls) {
-    await sendAlphaosPhotoAlert({ botToken, chatId, text: card.text, image, keyboard: card.buttons }); return;
+    await sendAlphaosPhotoAlert({ botToken, chatId, text: cleanTradeSetupCard(card.text), image, keyboard: card.buttons }); return;
   }
   const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: 'POST', headers: { 'content-type': 'application/json' },

@@ -1,3 +1,4 @@
+import { tradeSetupDeliveryFlags } from '../../ui/tradeSetupCard.js';
 import { PostBondRecoveryShadow } from './postBondRecoveryShadow.js';
 import { compactOutcomesEnabled } from '../../services/compactAlertOutcomes.js';
 import { launchSocialEligibility } from './alertEligibilityState.js';
@@ -55,7 +56,7 @@ export function buildTradeSetupText(args: { token: string; symbol: string; name:
     'Reserve is not a size-specific sell quote.',
     'Holder concentration / linked wallets  <b>Unavailable</b>',
     'Exit quote / slippage  <b>Not verified</b>',
-    `Observed low / invalidation reference  <b>${args.lowEth.toPrecision(6)} ${args.market?.source === 'DEX' ? 'USD/token' : 'ETH/token'}</b>`,
+    `Observed low / invalidation reference  <b>${args.lowEth.toLocaleString('en-US', { maximumFractionDigits: 14 })} ${args.market?.source === 'DEX' ? 'USD/token' : 'ETH/token'}</b>`,
     'Setup fails below that low or if creator moves tokens.',
     'Entry, position size and exit require your own execution check.', '',
     `<code>${html(args.token)}</code>`,
@@ -156,7 +157,8 @@ async function tick(readMarket = readSetupMarket): Promise<void> {
         // to recipients who may already have received the message.
         candidates.delete(token);
         await setSharedJson(`alphaos:setup:evidence:${token}`, { creator: context.creator, holding, rawLow: item.trend.low, curve: item.launch.curve_address, at: Date.now() }, new Date().toISOString(), 2 * 60 * 60_000);
-        const delivery = await directTelegramRecipients(text, token, { twitter: socials?.xUrl ?? null, telegram: socials?.telegramUrl ?? null, website: null }, true, final.source === 'CURVE', {chain:'robinhood', token, feed:'TRADE_SETUP_WATCH', price:finalPrice, pair:final.pair, unit:final.source === 'DEX' ? 'USD' : 'ETH_RESERVE_RATIO', creator:item.launch.deployer_address, creatorSource:'PONS_FACTORY_EVENT'});
+        const routing = tradeSetupDeliveryFlags(final.source);
+        const delivery = await directTelegramRecipients(text, token, { twitter: socials?.xUrl ?? null, telegram: socials?.telegramUrl ?? null, website: null }, routing.preBond, routing.setupControls, {chain:'robinhood', token, feed:'TRADE_SETUP_WATCH', price:finalPrice, pair:final.pair, unit:final.source === 'DEX' ? 'USD' : 'ETH_RESERVE_RATIO', creator:item.launch.deployer_address, creatorSource:'PONS_FACTORY_EVENT'});
         if (!compactOutcomesEnabled() && final.source === 'CURVE') {
         if (outcomes.size >= 20) outcomes.delete(outcomes.keys().next().value!);
         outcomes.set(token, { launch: item.launch, price: finalPrice, at: Date.now(), checked: Date.now(), min: finalPrice, max: finalPrice });

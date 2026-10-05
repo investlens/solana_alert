@@ -20,7 +20,7 @@ export function withAlertKeyStats(text:string, stats:AlertKeyStats):string {
   const plain=clean.replace(/<[^>]+>/g,'');
   const lines:string[]=[];
   const add=(pattern:RegExp,label:string,value:string)=>{if(!pattern.test(plain))lines.push(`${label} <b>${escapeAlphaHtml(value)}</b>`);};
-  add(/(?:^|\n).*\bPrice\s/i,'Price',usd(stats.price));
+  add(/(?:^|\n)(?:[^A-Za-z0-9\n]*)(?:Token )?Price\s/i,'Price',usd(stats.price));
   add(/(?:Market cap|Market Cap|\bMC\s)/,'MC',usd(stats.marketCap));
   if(n(stats.fdv)&&stats.fdv>0 && (!n(stats.marketCap) || stats.marketCap !== stats.fdv))add(/\bFDV\s/,'FDV',usd(stats.fdv));
   add(/Liquidity|LP liquidity/i,'Liquidity',stats.preBond?'Bonding curve · no DEX LP':usd(stats.liquidity));
@@ -47,7 +47,7 @@ export function withAlertKeyStats(text:string, stats:AlertKeyStats):string {
   }
   add(/Sellability\s/i,'Sellability',stats.sellability??'Unverified');
   add(/LP (?:lock )?status\s/i,'LP lock status',stats.preBond?'Bonding curve':!stats.lp || stats.lp==='Unverified'?'Not independently checked':stats.lp);
-  add(/Dex Paid|DEX Paid|DEX PAID DETECTED/i,'DEX Paid',stats.dexPaid??'Unavailable');
+  add(/Dex Paid|DEX PAID DETECTED/i,'DEX Paid',stats.dexPaid??'Unavailable');
   if (!/SOCIALS|SOCIAL LINKS|href="https:\/\/(?:x.com|t.me)/i.test(clean)) lines.push('Socials <b>Unavailable</b>');
   if(!stats.source) lines.push('Source <b>Unavailable</b> · missing stats are not confirmed');
   if(stats.source&&stats.checkedAt)lines.push(`Source ${escapeAlphaHtml(stats.source)} · Checked ${escapeAlphaHtml(stats.checkedAt)} UTC`);
