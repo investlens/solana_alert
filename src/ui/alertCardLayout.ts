@@ -1,11 +1,13 @@
+import { RESEARCH_DISCLOSURE, withResearchDisclosure } from './researchDisclosure.js';
 export type CardButton = { text: string; url?: string; callback_data?: string };
 
 // Presentation only: preserve every metric, warning, URL and callback. No reads or writes.
 export function cleanAlertCard(text: string): string {
   let clean = text.replace(/\r\n/g, '\n').split('\n').map(line => line.trimEnd()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
   const title = clean.split('\n').find(line => line.trim()) ?? '';
-  const isCard = /<code>/.test(clean) && /ALPHA|ALERT|BOOST|OPPORTUNITY|BURN|TRADE|CONTRACT SCREEN|CREATOR|PROTOCOL|MOMENTUM|TREND|MONITOR|TOKEN|WALLET/i.test(title);
+  const isCard = /<code>/.test(clean) && /ALPHA|ALERT|BOOST|DEX PAID|SETUP|OPPORTUNITY|BURN|TRADE|CONTRACT SCREEN|CREATOR|PROTOCOL|MOMENTUM|TREND|MONITOR|TOKEN|WALLET/i.test(title);
   if (!isCard) return clean;
+  clean = clean.replace(RESEARCH_DISCLOSURE, '').trim();
   // An empty STATS heading must not capture the following RISK section.
   clean = clean.replace(/<b>STATS<\/b>\s*(?=<b>(?:RISK(?: COVERAGE)?|SAFETY|SECURITY|SOCIALS|SOCIAL LINKS|OWNERSHIP|CONTRACT)<\/b>)/g, '');
   // Merge the supplemental stats into one readable section; never truncate for a banner.
@@ -56,7 +58,7 @@ export function cleanAlertCard(text: string): string {
   if (footers.length) clean = clean.trimEnd() + '\n' + [...new Set(footers)].join('\n');
   clean = clean.replace(/(<a href="https:\/\/(?:x\.com|twitter\.com)\/([A-Za-z0-9_]{1,15})\/?">)X(<\/a>)/g, '$1@$2$3');
   clean = clean.replace(/<b>STATS<\/b>\s*(?=<b>RISK<\/b>)/g, '');
-  return clean.replace(/\n{3,}/g, '\n\n').replace(/\n\n(?=\n)/g, '\n\n').trim();
+  return withResearchDisclosure(clean.replace(/\n{3,}/g, '\n\n').replace(/\n\n(?=\n)/g, '\n\n').trim());
 }
 
 export function cleanAlertButtons<T extends CardButton>(rows: T[][] | undefined, text = ''): T[][] | undefined {
