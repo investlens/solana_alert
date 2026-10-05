@@ -2,6 +2,16 @@ import { addressKey, nonnegative, object, textValue, validDate } from './recorde
 import { mapRecordedOutcome } from './recorded-outcomes.ts';
 type Row = Record<string, unknown>;
 
+export function recordedOutcomeIdentity(row: Row): Row | null {
+  const raw = object(row.raw_data), token = textValue(row.asset_id), chain = textValue(row.chain);
+  if (!token || !chain) return null;
+  const embedded = textValue(raw.tokenAddress) ?? textValue(raw.token_address) ?? textValue(raw.address) ?? textValue(raw.token) ?? textValue(raw.mint);
+  if (embedded && (chain === 'solana' ? embedded !== token : addressKey(embedded) !== addressKey(token))) return null;
+  if (textValue(raw.chain) && raw.chain !== chain) return null;
+  return { chain, token_address: token, symbol: textValue(raw.symbol) ?? textValue(raw.token_symbol) ?? textValue(raw.tokenSymbol),
+    name: textValue(raw.name) ?? textValue(raw.token_name) ?? textValue(raw.tokenName) };
+}
+
 // Compact registrations happen only after Telegram acceptance. Match the specific
 // event, not merely its token: compact tracking deduplicates across later alerts.
 export function mapTrackedOutcome(event: Row, checkpoints: Row[], delivered: boolean, compact: Row[], identities: Row[], now = Date.now()) {
