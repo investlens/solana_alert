@@ -10,7 +10,9 @@ const secondary=process.env.SUPPLY_VALIDATION_SECONDARY_RPC_URL;
 if(!secondary||secondary===endpoint)throw Error('Set a distinct secondary RPC for independent comparison');
 const deadline = Date.now() + 40000;
 let calls = 0;
+let lastMethod='initialization';
 async function request<T>(url:string,method:string,params:unknown[],signal?:AbortSignal):Promise<T>{
+  lastMethod=method;
   if(++calls>60||Date.now()>=deadline)throw Error('Validation budget exhausted');
   const timeout=AbortSignal.timeout(Math.max(1,Math.min(5000,deadline-Date.now())));
   return createSupplyJourneyRpc(url)<T>(method,params,signal?AbortSignal.any([timeout,signal]):timeout);
@@ -61,8 +63,9 @@ try {
   console.log(JSON.stringify({ samples: samples.length, complete, logicalRpcCalls: calls,
     independentRpcComparison: 'PASSED', productionRouteLatency: 'REQUIRED' }));
   if (complete !== samples.length) process.exitCode = 1;
-} catch {
+} catch (error) {
   console.error(JSON.stringify({ status: 'LIVE_VALIDATION_BLOCKED', logicalRpcCalls: calls,
+    stage:lastMethod,reason:error instanceof Error?error.message.replace(/https?:\/\/\S+/g,'[endpoint]').slice(0,220):'Unknown failure',
     note: 'RPC inaccessible, invalid response or budget exceeded. No release approval.' }));
   process.exitCode = 1;
 }
