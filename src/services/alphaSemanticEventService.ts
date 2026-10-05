@@ -98,7 +98,8 @@ export async function persistOrLoadAlphaSemanticEventRecord(args: { identity: st
     return { id: Number(data.id), event_identity: String(data.event_identity) };
   } catch (error) {
     if (!(error instanceof SemanticPersistenceDeferredError) && !isTransientDatabaseError(error)) throw error;
-    const rawSnapshot = structuredClone(args.rawSnapshot);
+    const rawSnapshot = { ...structuredClone(args.rawSnapshot),
+      ...(args.symbol && !args.rawSnapshot.symbol ? { symbol: args.symbol } : {}) };
     ephemeralEvidence.set(eventIdentity, { rawSnapshot, cachedAt: Date.now() });
     console.warn('[AlphaSemanticEvent] Persistence unavailable; using transient in-memory event identity.', { eventIdentity, type: canonicalType, assetId: args.assetId, reason: error instanceof Error ? error.message : String(error) });
     return { id: stableEphemeralEventId(eventIdentity), event_identity: eventIdentity, ephemeral: true, raw_snapshot: rawSnapshot };

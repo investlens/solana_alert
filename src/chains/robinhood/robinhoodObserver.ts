@@ -2155,7 +2155,7 @@ export async function processRobinhoodDexPaidSignal(token: RobinhoodDiscoveredTo
   const semanticEvent = await persistOrLoadAlphaSemanticEventRecord({
     identity: `${token.tokenAddress.toLowerCase()}:${dexPaid.latestPaymentTimestamp}`,
     type: 'DEX_PAID', assetId: token.tokenAddress, chain: 'robinhood', intelligenceState: 'FORMING',
-    symbol: marketContext.symbol ?? token.symbol ?? null, rawSnapshot: { paymentTimestamp: dexPaid.latestPaymentTimestamp,
+    symbol: marketContext.symbol ?? token.symbol ?? null, rawSnapshot: { symbol: marketContext.symbol, name: marketContext.name, paymentTimestamp: dexPaid.latestPaymentTimestamp,
       orderTypes: dexPaid.orderTypes, orderStatuses: dexPaid.orderStatuses, chartUrl,
       price: marketContext.price, priceProvenance: market ? 'DEXSCREENER_VERIFIED_BASE_PAIR' : null,
       marketCap: marketContext.marketCap, fdv: marketContext.fdv, liquidity: marketContext.liquidity,
