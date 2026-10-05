@@ -144,7 +144,8 @@ export async function persistOrLoadAlphaSemanticEventRecord(args: {
     return { id: Number(data.id), event_identity: String(data.event_identity) };
   } catch (error) {
     if (!isTransientDatabaseError(error)) throw error;
-    const rawSnapshot = structuredClone(args.rawSnapshot);
+    const rawSnapshot = { ...structuredClone(args.rawSnapshot),
+      ...(args.symbol && !args.rawSnapshot.symbol ? { symbol: args.symbol } : {}) };
     ephemeralEvidence.set(eventIdentity, { rawSnapshot, cachedAt: Date.now() });
     console.warn('[AlphaSemanticEvent] Persistence unavailable; using transient in-memory event identity.', {
       eventIdentity,
