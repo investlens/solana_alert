@@ -1,0 +1,11 @@
+import AppShell from "@/components/layout/AppShell";
+const coverage = [
+ ["Market cap & price", "Venue dependent", "PONS curve data before bonding where confirmed; exact-token DEX observations afterward where available. FDV and market cap are distinct."],
+ ["Volume & movements", "Pair dependent", "DEX or supported venue snapshots. Missing values remain unknown, not zero."],
+ ["Dev holding & Top 10", "Partial", "Requires creator identification, supply and usable holder data. Blockscout access improves evidence, not universal coverage."],
+ ["Social ownership", "Restricted", "An X or Telegram URL is not ownership proof. Exact-contract verification can fail when public content is unreadable."],
+ ["Seven-day volume baseline", "Strict completeness", "Seven completed UTC days must be present. Missing days never become zero-volume days."],
+ ["ATH, fees & security", "Source dependent", "An observed peak is not an all-time high. No audit, fee or sellability claim is made without supporting evidence."],
+ ["Browser outcome history", "Sampled coverage", "Recorded Solana and Robinchain observations only. Includes recent declines where recorded; not a complete backtest or realised returns."],
+];
+export default function StatusPage() { return <AppShell><main className="premium-page"><div className="premium-container"><p className="premium-eyebrow">DATA TRANSPARENCY</p><h1 className="page-title">Confidence starts with provenance.</h1><p className="page-intro">This is a coverage guide, not a live infrastructure health monitor. Market and wallet data may be delayed, incomplete or unavailable.</p><div className="coverage-list">{coverage.map(([name, status, description]) => <section className="info-panel" key={name}><div className="section-heading"><h2>{name}</h2><span className="feature-status">{status}</span></div><p>{description}</p></section>)}</div><section className="info-panel"><h2>How the browser stays light</h2><p>Read-only stored research, bounded lists and manual refresh. No new candle database, image storage or background market polling is added by this website.</p><p>Always compare the observation timestamp with current venue data. A healthy application does not mean every data source is available.</p></section></div></main></AppShell>; }
