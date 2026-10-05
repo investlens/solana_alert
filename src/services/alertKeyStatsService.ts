@@ -8,19 +8,22 @@ import { confirmedCurveGraduation, ponsVenueStats, ponsV1VenueStats } from './po
 const cache=new Map<string,{at:number;value:AlertKeyStats}>();
 const pending=new Map<string,Promise<AlertKeyStats>>();
 let started=0,windowAt=0;
-export async function discloseRobinhoodKeyStats(text:string,token:string,preBond=false,sellability?:string,lp?:string):Promise<string>{
+export async function discloseRobinhoodKeyStats(text:string,token:string,preBond=false,sellability?:string,lp?:string,refresh=false):Promise<string>{
   const ponsHint=preBond || /Trusted PONS|Verified PONS|PONS · Robinchain/i.test(sellability??text);
   const key=token.toLowerCase();let value=cache.get(key);
-  if(!value||Date.now()-value.at>30000){
+  if(refresh||!value||Date.now()-value.at>30000){
     if(Date.now()-windowAt>=60000){windowAt=Date.now();started=0;}
     let work=pending.get(key);
     if(!work&&pending.size<2&&started<10){
       started++;
       const venue=async()=>{
-        let launch=await getIndexedVerifiedPonsLaunch(token).catch(()=>null);
+        // Independent reads start together; slow index lookups must not postpone the public page request.
+        const publicWork=ponsHint ? getVerifiedPonsPublicContext(token).catch(()=>null) : Promise.resolve(null);
+        const [indexedLaunch,publicContext]=await Promise.all([getIndexedVerifiedPonsLaunch(token).catch(()=>null),publicWork]);
+        let launch=indexedLaunch;
         // A verified V2 origin can exist before the durable launch index catches up.
         // Reuse exact-contract public metadata before the V1-only fallback.
-        const publicContext=ponsHint ? await getVerifiedPonsPublicContext(token).catch(()=>null) : null;
+
         if(publicContext && (!launch?.deployer || publicContext.creator.toLowerCase()===launch.deployer.toLowerCase())) {
           // Identity/supply remain useful even when the on-chain venue read hits its deadline.
           if(cache.size>=100)cache.delete(cache.keys().next().value!);
@@ -42,7 +45,7 @@ export async function discloseRobinhoodKeyStats(text:string,token:string,preBond
           const pool = await getPonsV1PoolMapping(token, launch.deployer);
           if (!pool) return ponsVenueStats(token,null,null,[]);
           const pairs = await fetchRobinhoodPairs(token,{priority:'NORMAL',caller:'alert_pons_venue',queueWaitTimeoutMs:750}).catch(()=>[]);
-          return ponsV1VenueStats(token,pool,pairs);
+          return {...ponsV1VenueStats(token,pool,pairs),creator:launch.deployer};
         }
         const c=await getVerifiedPonsPublicContext(token);
         if(!c || (launch.deployer && c.creator.toLowerCase()!==launch.deployer.toLowerCase()))return ponsVenueStats(token,null,null,[]);
