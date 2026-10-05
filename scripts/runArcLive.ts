@@ -3,6 +3,7 @@ import { recordRejectedCandidate, runRejectedCandidateReview } from '../src/serv
 import { withAlertKeyStats, type AlertKeyStats } from '../src/ui/alertKeyStats.js';
 import { readResearchTokenSupply, formatResearchSupply } from '../src/services/researchTokenSupply.js';
 import { createArcDexPaidWatch } from '../src/chains/arc/dexPaidWatch.js';
+import { consistentArcVolume5m, fetchArcBoostFeed } from '../src/chains/arc/boostFeed.js';
 import { governedDexScreenerJson } from '../src/services/dexscreenerRequestGovernor.js';
 import { withOwnershipDisclosure } from '../src/ui/ownershipDisclosure.js';
 import { enabledLiveRecipients, type LiveFeedKey } from '../src/services/liveAlertPreferences.js';
@@ -434,20 +435,13 @@ async function processMarketRetries(): Promise<void> {
   }
 }
 
-type ArcBoost = { chainId?: string; tokenAddress?: string; amount?: number; totalAmount?: number };
 type ArcBoostSecurity = { sellabilityBlocked?:boolean; sellabilityVerified?:boolean; allowed: boolean; reason: string; devHoldingPercent?: number | null; top10Percent?: number | null; observedAt?: number };
 
-async function fetchArcBoosts(): Promise<Array<{tokenAddress:string;amount:number;totalAmount:number}>> {
-  try {
-    const response = await fetch('https://api.dexscreener.com/token-boosts/latest/v1', { signal: AbortSignal.timeout(4_000) });
-    if (!response.ok) throw new Error(`DexScreener BOOST HTTP ${response.status}`);
-    const payload = await response.json() as ArcBoost[];
-    return (Array.isArray(payload) ? payload : []).filter(item =>
-      String(item.chainId ?? '').toLowerCase().includes('arc') && /^0x[a-fA-F0-9]{40}$/.test(String(item.tokenAddress ?? '')))
-      .map(item => ({ tokenAddress: String(item.tokenAddress), amount: Number(item.amount ?? 0), totalAmount: Number(item.totalAmount ?? 0) }));
-  } catch (error) {
+async function fetchArcBoosts() {
+  try { return await fetchArcBoostFeed(); }
+  catch (error) {
     console.warn('[ArcBoost] feed unavailable', { reason: error instanceof Error ? error.message : String(error) });
-    return [];
+    return null; // A failed read must never establish an empty startup baseline.
   }
 }
 
@@ -544,9 +538,9 @@ async function deliverArcBoost(boost: {tokenAddress:string;amount:number;totalAm
   let twitter: string | null = null;
   let telegram: string | null = null;
   try {
-    const response = await fetch(`https://api.dexscreener.com/token-pairs/v1/arc/${encodeURIComponent(boost.tokenAddress)}`, { signal: AbortSignal.timeout(3_000) });
-    if (response.ok) {
-      const pairs = await response.json() as any[];
+    const response = await governedDexScreenerJson<any[]>({url:`https://api.dexscreener.com/token-pairs/v1/arc/${encodeURIComponent(boost.tokenAddress)}`,caller:'arc_boost_metadata',endpoint:'ARC_TOKEN_PAIRS',cacheKey:`arc-alert-pairs:${boost.tokenAddress.toLowerCase()}`,cacheTtlMs:30000,queueWaitTimeoutMs:750,httpTimeoutMs:3000});
+    {
+      const pairs = response.value;
       const pair = Array.isArray(pairs) ? pairs.find(p => p?.chainId === 'arc' && String(p?.baseToken?.address ?? '').toLowerCase() === boost.tokenAddress.toLowerCase()) : null;
       symbol = String(pair?.baseToken?.symbol || symbol);
       name = pair?.baseToken?.name ? String(pair.baseToken.name) : null;
@@ -566,6 +560,7 @@ async function deliverArcBoost(boost: {tokenAddress:string;amount:number;totalAm
     `<b>${symbol}</b>${name ? ` · ${name}` : ''}`,
     `🔥 Boost  <b>${boost.totalAmount} total (+${boost.amount})</b>`,
     ...(marketCap != null ? [`💰 Market Cap  <b>${formatUsd(marketCap)}</b>`] : fdv != null ? [`💰 FDV  <b>${formatUsd(fdv)}</b>`] : []),
+    ...([twitter,telegram].some(Boolean)?['<b>SOCIALS</b>',...[twitter?`<a href="${twitter}">X</a>`:null,telegram?`<a href="${telegram}">Telegram</a>`:null].filter(Boolean)]:[]),
     '👤 Dev Holding  <b>Not available</b>',
     '',
     `<code>${boost.tokenAddress}</code>`,
@@ -593,6 +588,7 @@ async function processArcBoosts(): Promise<void> {
   if (Date.now() - lastArcBoostPollAt < ARC_BOOST_POLL_MS) return;
   lastArcBoostPollAt = Date.now();
   const boosts = await fetchArcBoosts();
+  if (boosts === null) return;
   for (const boost of boosts) arcDexPaid.seed(boost.tokenAddress);
   if (!arcBoostBaselineReady) {
     let persisted = 0;
@@ -702,7 +698,7 @@ async function arcAlertStats(token:string,expectedPool?:string):Promise<AlertKey
  const pairs=pairRead.status==='fulfilled'&&Array.isArray(pairRead.value.value)?pairRead.value.value:[];
  const pair=pairs.filter(p=>p?.chainId==='arc'&&String(p?.baseToken?.address).toLowerCase()===token.toLowerCase()&&(!expectedPool||String(p.pairAddress).toLowerCase()===expectedPool.toLowerCase())).sort((a,b)=>(arcMarketNumber(b?.liquidity?.usd)??0)-(arcMarketNumber(a?.liquidity?.usd)??0))[0];
  const supply=supplyRead.status==='fulfilled'?supplyRead.value:null;
- const value:AlertKeyStats={symbol:pair?.baseToken?.symbol??null,name:pair?.baseToken?.name??null,price:arcMarketNumber(pair?.priceUsd),marketCap:arcMarketNumber(pair?.marketCap),fdv:arcMarketNumber(pair?.fdv),liquidity:arcMarketNumber(pair?.liquidity?.usd),volume5m:arcMarketNumber(pair?.volume?.m5),volume24h:arcMarketNumber(pair?.volume?.h24),move5m:arcSignedNumber(pair?.priceChange?.m5),move1h:arcSignedNumber(pair?.priceChange?.h1),buys:arcMarketNumber(pair?.txns?.m5?.buys),sells:arcMarketNumber(pair?.txns?.m5?.sells),pairCreatedAt:arcMarketNumber(pair?.pairCreatedAt),supply:supply?formatResearchSupply(supply):null,source:pair?'DEXScreener'+(supply?' / on-chain supply':''):supply?'On-chain supply':null,checkedAt:pair&&pairRead.status==='fulfilled'?new Date(pairRead.value.fetchedAt).toISOString().slice(11,19):supply?new Date(supply.checkedAt).toISOString().slice(11,19):null};
+ const value:AlertKeyStats={symbol:pair?.baseToken?.symbol??null,name:pair?.baseToken?.name??null,price:arcMarketNumber(pair?.priceUsd),marketCap:arcMarketNumber(pair?.marketCap),fdv:arcMarketNumber(pair?.fdv),liquidity:arcMarketNumber(pair?.liquidity?.usd),volume5m:consistentArcVolume5m(pair?.volume?.m5,pair?.volume?.h24),volume24h:arcMarketNumber(pair?.volume?.h24),move5m:arcSignedNumber(pair?.priceChange?.m5),move1h:arcSignedNumber(pair?.priceChange?.h1),buys:arcMarketNumber(pair?.txns?.m5?.buys),sells:arcMarketNumber(pair?.txns?.m5?.sells),pairCreatedAt:arcMarketNumber(pair?.pairCreatedAt),supply:supply?formatResearchSupply(supply):null,source:pair?'DEXScreener'+(supply?' / on-chain supply':''):supply?'On-chain supply':null,checkedAt:pair&&pairRead.status==='fulfilled'?new Date(pairRead.value.fetchedAt).toISOString().slice(11,19):supply?new Date(supply.checkedAt).toISOString().slice(11,19):null};
  if(arcStatsCache.size>=100)arcStatsCache.delete(arcStatsCache.keys().next().value!);arcStatsCache.set(token.toLowerCase()+':'+(expectedPool??''),{at:Date.now(),value});return value;
 }
 function arcSignedNumber(value:unknown):number|null{if(value==null||value==='')return null;const n=Number(value);return Number.isFinite(n)?n:null;}
