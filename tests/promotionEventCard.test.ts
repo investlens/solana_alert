@@ -1,6 +1,14 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import { buildPromotionEventCard } from '../src/ui/promotionEventCard.js';
 const token='0x'+'a'.repeat(40);
+test('Boost and DEX cards retain creator links with unknown holdings and deduplicate identity',()=>{
+ const creator='0x'+'b'.repeat(40);
+ for(const kind of ['BOOST','DEX_PAID'] as const){
+  const card=buildPromotionEventCard({kind,token,launchType:'PONS',stats:{creator},securityNote:null,buttons:[],text:`Creator <a href="https://robinhoodchain.blockscout.com/address/${creator}">creator</a>\nDev holding <b>Unavailable</b>`});
+  assert.match(card.text,new RegExp('address/'+creator));assert.equal((card.text.match(/Creator <a/g)??[]).length,1);assert.match(card.text,/Dev holding <b>Unavailable/);
+  const fallback=buildPromotionEventCard({kind,token,launchType:'PONS',stats:null,securityNote:null,buttons:[],text:card.text});assert.match(fallback.text,new RegExp('address/'+creator));
+ }
+});
 test('Boost retains event facts, honest venue, ownership warnings and common four controls',()=>{
  const c=buildPromotionEventCard({kind:'BOOST',token,launchType:'PONS',stats:{name:'MochiOracle',symbol:'MOCHI',source:'PONS venue data pending'},securityNote:null,buttons:[],text:'🚀 BOOST DETECTED\n⚡ <b>Boost</b> 30 total (+30)\nDex Paid Yes\nDev holding <b>10.00%</b>\nTop 10 <b>Unavailable</b>\n⚠️ Concentrated dev holding · potential sell pressure'});
  assert.match(c.text,/30 total \(\+30\)/);assert.match(c.text,/Dex Paid Yes/);assert.match(c.text,/Trading venue unconfirmed/);assert.doesNotMatch(c.text,/no confirmed DEX pair|LP lock status/);assert.match(c.text,/10.00%/);assert.match(c.text,/Concentrated dev/);
