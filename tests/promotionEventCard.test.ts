@@ -27,3 +27,14 @@ test('Social Mafia card keeps identity evidence, key market stats and ownership 
  const card=buildPromotionEventCard({kind:'SOCIAL_MAFIA',token,launchType:'PONS',stats:{name:'Project',symbol:'PRO'},securityNote:null,buttons:[],text:'Contract evidence <b>Cross-linked Website</b>\nEvidence <a href="https://project.example/">View acknowledgement</a>\nPrice $0.01\nMC $100K\nLiquidity $12K\nVol · 5m $2K\nMove · 1h +8%\nDev holding 3%\nTop 10 28%'});
  assert.match(card.text,/SOCIAL MAFIA/);assert.match(card.text,/Cross-linked Website/);assert.match(card.text,/https:\/\/project.example/);assert.match(card.text,/MC \$100K/);assert.match(card.text,/Top 10 28%/);assert.doesNotMatch(card.text,/Boost purchase|Payment|Promotion event/);
 });
+
+test('combined legacy rows render once with market cap first and no false missing notices',()=>{
+ const card=buildPromotionEventCard({kind:'DEX_PAID',token,launchType:'UNKNOWN',stats:{price:0.0001424,marketCap:142500,liquidity:58500,volume5m:59200,volume24h:110350,pairCreatedAt:Date.now()-19*60000,supply:'1000000000'},securityNote:null,buttons:[],text:'Vol · 24h $110.35K\n💰 Price <b>$0.0001424</b> · Market cap <b>$142.5K</b>\n💧 Liquidity <b>$58.5K</b> · 📊 5m volume <b>$59.2K</b>'});
+ assert.match(card.text,/<b>MARKET<\/b>\nMC <b>\$142.5K<\/b>\nPrice/);
+ assert.equal((card.text.match(/142.5K/g)??[]).length,1);
+ assert.match(card.text,/Vol · 5m <b>\$59.2K/);assert.match(card.text,/Pair age <b>19m/);
+ assert.doesNotMatch(card.text,/Market cap <b>Unavailable|Not reported:.*5m volume/);
+ const legacy=buildPromotionEventCard({kind:'DEX_PAID',token,launchType:null,stats:null,securityNote:null,buttons:[],text:'💰 Price $0.1 · Market cap $100K\n💧 Liquidity $12K · 📊 5m volume $2K'});
+ assert.match(legacy.text,/<b>MARKET<\/b>\nMarket cap \$100K\nPrice/);
+ assert.doesNotMatch(legacy.text,/Not reported:.*5m volume|Market cap <b>Unavailable/);
+});

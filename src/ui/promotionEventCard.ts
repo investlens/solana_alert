@@ -1,6 +1,6 @@
 import { escapeAlphaHtml as esc } from './alphaNotification.js';
 import { cleanAlertButtons, type CardButton } from './alertCardLayout.js';
-import type { AlertKeyStats } from './alertKeyStats.js';
+import { withAlertKeyStats, type AlertKeyStats } from './alertKeyStats.js';
 export type PromotionCardArgs = {text:string;token:string;launchType:string|null;stats:AlertKeyStats|null;securityNote:string|null;buttons:CardButton[][];paymentTimestamp?:number|null;kind:'BOOST'|'DEX_PAID'|'SOCIAL_MAFIA'};
 export function buildPromotionEventCard(args:PromotionCardArgs) {
  const s=args.stats, lines=args.text.split('\n');
@@ -9,14 +9,28 @@ export function buildPromotionEventCard(args:PromotionCardArgs) {
  const compact=plain.match(/(?:^|\n)([^\n]+) \(\$([A-Za-z_][A-Za-z0-9_]{0,23})\)/);
  const name=s?.name ?? producer?.[2]?.trim() ?? compact?.[1]?.trim(),symbol=s?.symbol ?? producer?.[1]?.trim() ?? compact?.[2]?.trim();
  const identity=name ? `${esc(name)}${symbol?' ($'+esc(symbol)+')':''}` : 'Token identity pending';
- const metrics=lines.filter(l=>/^(?:Price|MC|Market cap|FDV|Liquidity|Vol · (?:5m|24h)|Move · (?:5m|1h)|Trades · 5m|Pair age|Total supply)\s/i.test(l.replace(/<[^>]+>/g,'').replace(/^[^A-Za-z]+/,''))&&!/Unavailable|not confirmed/i.test(l));
- const metricPlain=()=>metrics.map(l=>l.replace(/<[^>]+>/g,'').replace(/^[^A-Za-z]+/,'')).join('\n');
- if(!/^(?:MC|Market cap)\s/im.test(metricPlain())) {
-   const fdv=typeof s?.fdv==='number'&&Number.isFinite(s.fdv)&&s.fdv>0;
-   metrics.push('Market cap <b>Unavailable</b>'+(fdv?' · FDV shown; circulating supply unconfirmed':''));
+ // Normalize legacy combined rows before selecting one row per metric. Structured
+ // snapshot values take precedence; missing snapshot fields retain producer facts.
+ const metricRows = lines.flatMap(line=>line.split(/\s*·\s*(?=(?:[^A-Za-z<]*)(?:Market cap|MC|FDV|Liquidity|5m volume|Price)\s)/i))
+   .map(line=>line.replace(/^[^A-Za-z0-9<]+/,'').trim());
+ const snapshotRows=s?withAlertKeyStats('',s).split('\n'):[];
+ const definitions=[
+   [/^(?:MC|Market cap)\s/i,'market cap'],[/^FDV\s/i,'FDV'],[/^Price\s/i,'price'],
+   [/^(?:Liquidity|LP liquidity)\s/i,'liquidity'],[/^(?:Vol · 5m|5m volume)\s/i,'5m volume'],
+   [/^Vol · 24h\s/i,'24h volume'],[/^Move · 5m\s/i,'5m change'],[/^Move · 1h\s/i,'1h change'],
+   [/^Trades · 5m\s/i,'trades'],[/^Pair age\s/i,'pair age'],[/^Total supply\s/i,'supply']
+ ] as const;
+ const plainRow=(row:string)=>row.replace(/<[^>]+>/g,'').replace(/^[^A-Za-z0-9]+/,'');
+ const usable=(row:string)=>! /Unavailable|not confirmed/i.test(row);
+ const metrics:string[]=[], absent=new Set<string>();
+ for(const [pattern,label] of definitions){
+   const row=snapshotRows.find(row=>pattern.test(plainRow(row))&&usable(row))
+     ??metricRows.find(row=>pattern.test(plainRow(row))&&usable(row));
+   if(row)metrics.push(row);
+   else if(label==='market cap')metrics.push('Market cap <b>Unavailable</b>'+(typeof s?.fdv==='number'&&s.fdv>0?' · FDV shown; circulating supply unconfirmed':''));
+   else absent.add(label);
  }
- const missing=[[/^Price\s/im,'price'],[/^Liquidity\s/im,'liquidity'],[/^Vol · 5m\s/im,'5m volume'],[/^Vol · 24h\s/im,'24h volume'],[/^Move · 1h\s/im,'1h change'],[/^Total supply\s/im,'supply']] as const;
- const unavailable=missing.filter(([pattern])=>!pattern.test(metricPlain())).map(([,label])=>label);
+ const unavailable=['price','liquidity','5m volume','24h volume','1h change','supply'].filter(label=>absent.has(label));
  const dev=lines.find(l=>/Dev holding\s/i.test(l))??'Dev holding <b>Unavailable</b>';
  const top=lines.find(l=>/Top 10(?:\s| ·)/i.test(l))??'Top 10 <b>Unavailable</b>';
  const age=args.paymentTimestamp&&Number.isFinite(args.paymentTimestamp)?Math.max(0,Math.floor((Date.now()-(args.paymentTimestamp<1e10?args.paymentTimestamp*1000:args.paymentTimestamp))/60000)):null;
