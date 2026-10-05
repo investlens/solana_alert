@@ -9,3 +9,11 @@ test('measured decline recomputed from comparable prices',()=>{const row=mapReco
 test('real unchanged checkpoint can display zero',()=>assert.equal(mapRecordedOutcome(event,[{...point,current_price:'2'}],true,now).roiNow,0));
 for(const [label,patch] of [['wrong event',{alert_event_id:2}],['unavailable',{status:'UNAVAILABLE'}],['seeded',{measured_at:event.alerted_at}],['future',{measured_at:'2026-10-06T00:00:00Z'}],['missing provenance',{price_provenance:null}],['curve vs DEX',{price_provenance:'PONS_V2_CURVE_RESERVE_SPOT'}],['incomplete',{completeness:{}}],['boolean price',{current_price:true}]])test(`withhold ${label}`,()=>assert.equal(mapRecordedOutcome(event,[{...point,...patch}],true,now).roiNow,null));
 test('latest comparable observation wins, not array order',()=>assert.equal(mapRecordedOutcome(event,[{...point,current_price:3,measured_at:'2026-10-05T17:02:00Z'},point],true,now).roiNow,50));
+test('peak price includes its observation timestamp and is not invented without tracking',()=>{
+  const high={...point,current_price:4,measured_at:'2026-10-05T17:02:00Z'};
+  const row=mapRecordedOutcome(event,[point,high],true,now);
+  assert.equal(row.alertPrice,2); assert.equal(row.currentPrice,4); assert.equal(row.peakPrice,4);
+  assert.equal(Date.parse(row.peakObservedAt),Date.parse(high.measured_at));
+  const empty=mapRecordedOutcome(event,[],false,now);
+  assert.equal(empty.peakPrice,null); assert.equal(empty.peakObservedAt,null);
+});

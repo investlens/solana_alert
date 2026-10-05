@@ -24,10 +24,12 @@ export function mapRecordedOutcome(event: Row, checkpoints: Row[], delivered: bo
   // Recompute from comparable checkpoint prices; never trust seeded ROI or a mixed-venue peak.
   const prices = latest ? measured.map(row => nonnegative(row.current_price)).filter((n): n is number => n !== null && n > 0) : [];
   const peakPrice = prices.length && entry !== null ? Math.max(entry, ...prices) : null;
+  const peakRow = peakPrice === null ? undefined : measured.find(row => nonnegative(row.current_price) === peakPrice);
+  const peakObservedAt = peakPrice === null ? null : peakRow ? validDate(peakRow.measured_at, now) : alertedAt;
   const change = (price: number | null) => entry !== null && entry > 0 && price !== null ? (price/entry-1)*100 : null;
   const raw = object(event.raw_snapshot);
   return { id: `event-${id}`, token, chain, symbol: textValue(event.symbol) ?? textValue(raw.symbol) ?? `${token.slice(0,6)}…${token.slice(-4)}`,
-    name: textValue(event.token_name), alertPrice: entry, currentPrice, peakPrice,
+    name: textValue(event.token_name), alertPrice: entry, currentPrice, peakPrice, peakObservedAt,
     roiNow: change(currentPrice), roiHigh: change(peakPrice), alertedAt,
     alertType: textValue(event.semantic_event_type) ?? textValue(event.alert_type) ?? 'EVENT',
     measuredAt: latest ? validDate(latest.measured_at, now) : null,
