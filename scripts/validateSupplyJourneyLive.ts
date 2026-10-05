@@ -1,6 +1,6 @@
 /** Read-only smoke check. No database/cache writes or Telegram delivery. */
 import { parseAbiItem, toEventSelector, decodeEventLog } from 'viem';
-import { getPonsFactoryDeployments } from '../src/chains/robinhood/ponsContracts.js';
+import { getPonsFactoryDeployments, PONS_CONTRACTS } from '../src/chains/robinhood/ponsContracts.js';
 import { analyzeSupplyJourney, decodeJourneyTransfers } from '../src/services/supplyJourney.js';
 import {createSupplyJourneyRpc} from '../src/services/supplyJourneyRpc.js';
 
@@ -13,7 +13,7 @@ let calls = 0;
 let lastMethod='initialization';
 async function request<T>(url:string,method:string,params:unknown[],signal?:AbortSignal):Promise<T>{
   lastMethod=method;
-  if(++calls>60||Date.now()>=deadline)throw Error('Validation budget exhausted');
+  if(++calls>80||Date.now()>=deadline)throw Error('Validation budget exhausted');
   const timeout=AbortSignal.timeout(Math.max(1,Math.min(5000,deadline-Date.now())));
   return createSupplyJourneyRpc(url)<T>(method,params,signal?AbortSignal.any([timeout,signal]):timeout);
 }
@@ -30,9 +30,21 @@ try {
     fromBlock: '0x' + start.toString(16), toBlock: '0x' + end.toString(16), topics: [toEventSelector(abi)] }]);
   if (!Array.isArray(logs) || logs.length > 200) throw Error('Launch response exceeds validation cap');
   if(BigInt(await request<string>(secondary,'eth_chainId',[]))!==4663n)throw Error('Secondary wrong chain');
-  const samples = logs.filter(l => !l.removed && l.address?.toLowerCase() === factory.address.toLowerCase()).slice(0,2);
-  if (!samples.length) throw Error('No recent launches available; live coverage remains unvalidated');
+  const candidates=logs.filter(l=>!l.removed&&l.address?.toLowerCase()===factory.address.toLowerCase()).slice(-12).reverse();
+  if(!candidates.length)throw Error('No recent launches available; live coverage remains unvalidated');
+  let positive:any=null;
+  // A matching empty window does not validate the recipient-balance path.
+  for(const log of candidates){
+    const args=decodeEventLog({abi:[abi],data:log.data,topics:log.topics,strict:true}).args as {token:string;deployer:string;curve:string};
+    const from=end>511n?end-511n:0n;
+    const transferLogs=await rpc('eth_getLogs',[{address:args.token,fromBlock:'0x'+from.toString(16),toBlock:'0x'+end.toString(16),topics:['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef','0x'+args.deployer.slice(2).padStart(64,'0')]}]);
+    const excluded=new Set([args.curve,factory.address,args.deployer,PONS_CONTRACTS.swapRouter,PONS_CONTRACTS.positionManager,'0x'+'0'.repeat(40),'0x'+'0'.repeat(36)+'dead'].map(a=>a.toLowerCase()));
+    if(decodeJourneyTransfers(transferLogs,args.token.toLowerCase(),from,end).some(row=>BigInt(row.amount)>0n&&!excluded.has(row.to))){positive=log;break;}
+  }
+  if(!positive)throw Error('No live direct-recipient transfer found in bounded sample; positive coverage remains unvalidated');
+  const samples=[positive,...candidates.filter(log=>log.transactionHash!==positive.transactionHash)].slice(0,2);
   let complete = 0;
+  let positiveCoverage=false;
   for (const log of samples) {
     const decoded = decodeEventLog({ abi: [abi], data: log.data, topics: log.topics, strict: true });
     const args = decoded.args as { token: string; deployer: string; curve: string };
@@ -57,10 +69,11 @@ try {
       }
     }
     complete++;
+    positiveCoverage ||= result.recipients.length>0 && result.recipients.every(row=>row.balance!==null);
   }
   console.log(JSON.stringify({ samples: samples.length, complete, logicalRpcCalls: calls,
-    independentRpcComparison: 'PASSED', launchIdentitySource:'OFFICIAL_FACTORY_EVENT',productionRouteLatency: 'REQUIRED' }));
-  if (complete !== samples.length) process.exitCode = 1;
+    independentRpcComparison: 'PASSED',positiveRecipientCoverage:positiveCoverage, launchIdentitySource:'OFFICIAL_FACTORY_EVENT',productionRouteLatency: 'REQUIRED' }));
+  if (complete !== samples.length || !positiveCoverage) process.exitCode = 1;
 } catch (error) {
   console.error(JSON.stringify({ status: 'LIVE_VALIDATION_BLOCKED', logicalRpcCalls: calls,
     stage:lastMethod,reason:error instanceof Error?error.message.replace(/https?:\/\/\S+/g,'[endpoint]').slice(0,220):'Unknown failure',
