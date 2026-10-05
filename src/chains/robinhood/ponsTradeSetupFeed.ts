@@ -140,9 +140,14 @@ async function tick(readMarket = readSetupMarket): Promise<void> {
           age: (Date.now() - item.launchedAt) / 60_000, holding, burned: flow.confirmedDevBurnPercent,
           recovery: (finalPrice / item.trend.low - 1) * 100, depth: final.depth, lowEth: final.source === 'DEX' ? item.trend.low : item.trend.low * 10 ** context.decimals / 1e18, fdvUsd: context.fdvUsd, creator: context.creator, xUrl: socials?.xUrl ?? null, tgUrl: socials?.telegramUrl ?? null, at: Date.now(), kind: item.trend.setupKind, market: final });
         const claim = await claimSharedDelivery(`alphaos:setup:delivered:${token}`, 24 * 60 * 60_000);
-        recordFeedDelivery('TRADE_SETUP_WATCH', 'QUALIFIED');
         if (claim === 'EXISTS') { candidates.delete(token); continue; }
-        if (claim !== 'CLAIMED') continue;
+        if (claim !== 'CLAIMED') {
+          recordFeedDelivery('TRADE_SETUP_WATCH', 'DATA_UNAVAILABLE');
+          item.screenAfter = Date.now() + 60_000;
+          console.log(`[TradeSetup] DEFER token=${token} reason=DELIVERY_STORE_UNAVAILABLE`);
+          continue;
+        }
+        recordFeedDelivery('TRADE_SETUP_WATCH', 'QUALIFIED');
         // Retire before sending: an ambiguous Telegram response must not resend
         // to recipients who may already have received the message.
         candidates.delete(token);
