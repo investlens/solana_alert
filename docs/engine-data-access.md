@@ -8,6 +8,8 @@ Set `ROBINHOOD_BLOCKSCOUT_API_KEY` (or `BLOCKSCOUT_API_KEY`) as a secret on the 
 
 Official reference: https://github.com/blockscout/docs/blob/main/robinhood-api.mdx
 
+Valid explorer pages up to 2 MB are consumed with a streaming byte limit. Pages above the 250 KB cache-entry allowance are processed without being cached; all items and pagination metadata are preserved. Larger downloads are cancelled and remain unavailable rather than returning truncated history. The eight-entry cache, single-request concurrency and provider cooldowns are unchanged. No additional requests or database writes are introduced.
+
 ## Social evidence
 
 An unreadable X shell now uses reciprocal links previously observed on the actual X profile, just as a complete X outage already did. Links expire after one hour. Metadata alone never establishes X ownership. First-time inaccessible X profiles still cannot be verified without an accessible authoritative source. No API, bypass or invented proof is added.
