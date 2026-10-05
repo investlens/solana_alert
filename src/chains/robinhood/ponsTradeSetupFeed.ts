@@ -1,3 +1,4 @@
+import { PostBondRecoveryShadow } from './postBondRecoveryShadow.js';
 import { compactOutcomesEnabled } from '../../services/compactAlertOutcomes.js';
 import { launchSocialEligibility } from './alertEligibilityState.js';
 import { setSharedJson, setWatchCheckpoint, getWatchCheckpoint, claimSharedDelivery } from '../../services/sharedJsonCache.js';
@@ -11,6 +12,8 @@ import { advanceSetupTrend, creatorSetupVerdict, emptySetupTrend, type SetupTren
 import { readSetupMarket, type SetupMarketEvidence } from './setupMarketEvidence.js';
 import { recordFeedDelivery } from '../../services/feedDeliveryHealth.js';
 
+const recoveryShadow = new PostBondRecoveryShadow();
+const shadowEnabled = () => String(process.env.PONS_RECOVERY_SHADOW_ENABLED ?? 'true').toLowerCase() === 'true';
 const MIN_AGE = 30 * 60_000;
 const MAX_AGE = 120 * 60_000;
 const INTERVAL = 60_000;
@@ -101,6 +104,7 @@ async function tick(readMarket = readSetupMarket): Promise<void> {
         const market = await readMarket(item.launch, item.source);
         recordFeedDelivery('TRADE_SETUP_WATCH', 'EVALUATED');
         if (!market) { recordFeedDelivery('TRADE_SETUP_WATCH', 'DATA_UNAVAILABLE'); console.log(`[TradeSetup] DEFER token=${token} reason=MARKET_UNAVAILABLE`); continue; }
+        if (shadowEnabled()) for (const event of recoveryShadow.observe(token, market, now)) console.log('[RecoveryShadow] EVENT', event);
         if (item.source && (item.source !== market.source || item.pair !== market.pair)) {
           item.trend = emptySetupTrend();
           console.log(`[TradeSetup] SOURCE_TRANSITION token=${token} source=${market.source} confirmationReset=true`);
@@ -183,6 +187,10 @@ async function tick(readMarket = readSetupMarket): Promise<void> {
         console.log(`[TradeSetup] FORWARD_OBSERVATION token=${token} minutes=${Math.floor((now - outcome.at) / 60_000)} grossPricePct=${((price / outcome.price - 1) * 100).toFixed(2)} minPct=${((outcome.min / outcome.price - 1) * 100).toFixed(2)} maxPct=${((outcome.max / outcome.price - 1) * 100).toFixed(2)} fillAssumed=false feesSlippageIncluded=false`);
         if (now - outcome.at >= 60 * 60_000) outcomes.delete(token);
       } catch { /* Keep the bounded observation pending, never fabricate a zero. */ }
+    }
+    if (shadowEnabled()) {
+      for (const event of recoveryShadow.expire(Date.now())) console.log('[RecoveryShadow] EVENT', event);
+      console.log('[RecoveryShadow] SUMMARY', recoveryShadow.summary());
     }
     console.log(`[TradeSetup] CYCLE candidates=${candidates.size} outcomes=${outcomes.size} max=${MAX_CANDIDATES} checkBudget=${MAX_CHECKS_PER_CYCLE} dbWrites=0`);
     if (!candidates.size && !outcomes.size && !deferredAdmissions.size && timer) { clearInterval(timer); timer = null; }

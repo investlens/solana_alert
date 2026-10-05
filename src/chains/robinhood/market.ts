@@ -63,6 +63,10 @@ const QUOTE_USD_CACHE_MS = 60_000;
 // Short enough to preserve 15-second momentum cadence while eliminating overlapping worker fetches.
 export const ROBINHOOD_MARKET_CACHE_MS = 15_000;
 const pairFetchMetadata = new WeakMap<DexScreenerPair[], { fetchedAt: string; source: 'DEXSCREENER' }>();
+export function robinhoodPairFetchedAt(pairs: DexScreenerPair[]): number | null {
+  const at = Date.parse(pairFetchMetadata.get(pairs)?.fetchedAt ?? '');
+  return Number.isFinite(at) ? at : null;
+}
 const quoteUsdCache = new Map<string, { expiresAt: number; observation: QuoteUsdObservation }>();
 
 function finiteNumber(
