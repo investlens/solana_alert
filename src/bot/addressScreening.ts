@@ -125,6 +125,7 @@ export function registerAddressScreening(bot: Telegraf<any>, lookup = getAddress
         [{ text: '↻ Refresh', callback_data: `AR_${tag}_${address}` }, { text: '🧠 Full Intel', callback_data: `FI_RH_${address}` }],
         [explorer, ...(result.chart ? [{ text: '📊 Chart', url: result.chart }] : [])],
       ] };
+      if (!result.wallet && result.chain === 'robinhood') keyboard.inline_keyboard.push([{text:'🧬 Supply Journey',callback_data:`SJ_RH_${address}`}]);
       if (!result.wallet && result.chain === 'robinhood') keyboard.inline_keyboard.push([{ text: '🎯 Readiness · Pro', callback_data: `TR_RH_${address}` }, { text: 'My Monitors', callback_data: 'DM_HOME' }]);
       if (result.wallet) keyboard.inline_keyboard.push([{text:'📊 Creator Outcomes',callback_data:`CO_${tag}_${address}`}]);
       if (groupInvite) keyboard.inline_keyboard.push([{ text: '🔔 Get Private Alerts', url: `https://t.me/${username}` }]);

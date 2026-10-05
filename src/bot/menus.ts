@@ -46,6 +46,7 @@ export function mainAlphaMenu(access: AccessProfile) {
 export function intelligenceMenu(access: AccessProfile) {
   const rows: any[][] = [
     [Markup.button.callback('🔎 Research', 'INTEL_INVESTIGATIONS')],
+    [Markup.button.callback('🧬 Supply Journey', 'SJ_HELP')],
   ];
 
   if (hasCapability(access, 'intelligence.smartMoney')) {
