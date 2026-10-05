@@ -1,3 +1,30 @@
+const MAX_RESPONSE_BYTES = 2_000_000;
+const MAX_CACHE_ENTRY_BYTES = 250_000;
+
+// Explorer transaction pages include decoded calldata and can exceed the cache
+// allowance. Bound the downloaded body separately; never truncate history.
+async function boundedJsonBody(response: Response): Promise<{ body: string; bytes: number }> {
+  if (!response.body) return { body: '', bytes: 0 };
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const parts: string[] = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_RESPONSE_BYTES) {
+        await reader.cancel();
+        throw new Error('Blockscout response exceeds download budget');
+      }
+      parts.push(decoder.decode(value, { stream: true }));
+    }
+    parts.push(decoder.decode());
+    return { body: parts.join(''), bytes };
+  } finally { reader.releaseLock(); }
+}
+
 export function createExplorerJsonReader(options: {
   baseUrl: string; timeoutMs: number; apiKey?: string;
   fetcher?: typeof fetch; clock?: () => number;
@@ -40,12 +67,14 @@ export function createExplorerJsonReader(options: {
       }
       // Retain bounded JSON only; HTML/challenge responses are never cached.
       if (!(response.headers.get('content-type') ?? '').includes('json')) throw new Error('Blockscout non-JSON response');
-      const body = await response.text();
-      if (new TextEncoder().encode(body).byteLength > 250_000) throw new Error('Blockscout response exceeds cache budget');
+      const { body, bytes } = await boundedJsonBody(response);
       JSON.parse(body);
       const saved = new Response(body, { headers: { 'content-type': 'application/json' } });
-      if (cached.size >= 8) cached.delete(cached.keys().next().value!);
-      cached.set(path, { expires: clock() + 30_000, response: saved });
+      // Large valid pages are usable for this request but never retained in RAM.
+      if (bytes <= MAX_CACHE_ENTRY_BYTES) {
+        if (cached.size >= 8) cached.delete(cached.keys().next().value!);
+        cached.set(path, { expires: clock() + 30_000, response: saved });
+      }
       return saved;
     })();
     pending.set(path, work);

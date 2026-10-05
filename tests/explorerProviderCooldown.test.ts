@@ -1,6 +1,41 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createExplorerJsonReader } from '../src/services/explorerProviderCooldown.js';
+test('large transaction pages remain complete and coalesced without enlarging the cache', async () => {
+  let calls = 0;
+  const payload = { items: [{ hash: 'first', decoded_input: 'x'.repeat(300_000) }, { hash: 'last' }], next_page_params: { block_number: 123 } };
+  const reader = createExplorerJsonReader({ baseUrl: 'https://example.test', timeoutMs: 1000,
+    fetcher: async () => { calls++; return Response.json(payload); } });
+  const [a, b] = await Promise.all([reader.read('/transactions'), reader.read('/transactions')]);
+  assert.deepEqual(a, payload); assert.deepEqual(b, payload); assert.equal(calls, 1);
+  assert.deepEqual(await reader.read('/transactions'), payload); assert.equal(calls, 2);
+});
+
+test('oversized streamed bodies are cancelled before consumption and never cached', async () => {
+  let cancelled = 0, calls = 0, chunks = 0;
+  const reader = createExplorerJsonReader({ baseUrl: 'https://example.test', timeoutMs: 1000,
+    fetcher: async () => { calls++; return new Response(new ReadableStream<Uint8Array>({
+      pull(controller) { chunks++; controller.enqueue(new Uint8Array(600_000)); },
+      cancel() { cancelled++; },
+    }), { headers: { 'content-type': 'application/json' } }); } });
+  await assert.rejects(reader.read('/huge'), /download budget/);
+  assert.equal(cancelled, 1); assert.ok(chunks <= 5);
+  await assert.rejects(reader.read('/huge'), /download budget/); assert.equal(calls, 2);
+});
+
+test('stream decoding preserves split UTF-8 and malformed JSON is not cached', async () => {
+  const encoded = new TextEncoder().encode(JSON.stringify({ symbol: '🪙' }));
+  const reader = createExplorerJsonReader({ baseUrl: 'https://example.test', timeoutMs: 1000,
+    fetcher: async () => new Response(new ReadableStream<Uint8Array>({ start(controller) {
+      for (const byte of encoded) controller.enqueue(Uint8Array.of(byte)); controller.close();
+    } }), { headers: { 'content-type': 'application/json' } }) });
+  assert.deepEqual(await reader.read('/unicode'), { symbol: '🪙' });
+  let calls = 0;
+  const malformed = createExplorerJsonReader({ baseUrl: 'https://example.test', timeoutMs: 1000,
+    fetcher: async () => { calls++; return new Response('{bad', { headers: { 'content-type': 'application/json' } }); } });
+  await assert.rejects(malformed.read('/bad'), SyntaxError);
+  await assert.rejects(malformed.read('/bad'), SyntaxError); assert.equal(calls, 2);
+});
 test('403 opens one shared cooldown and allows a recovery probe after five minutes', async () => {
   let now = 1000, calls = 0;
   const reader = createExplorerJsonReader({ baseUrl: 'https://example.test', timeoutMs: 1000, clock: () => now,
