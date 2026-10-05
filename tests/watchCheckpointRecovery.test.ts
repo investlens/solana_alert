@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { watchCheckpointRecovery } from '../src/services/watchCheckpointRecovery.js';
+import { watchCheckpointRecovery, checkpointFailureReason } from '../src/services/watchCheckpointRecovery.js';
 
 test('failed recovery never overwrites watches and retries before saving', async () => {
   let reads = 0; let writes = 0;
@@ -20,4 +20,11 @@ test('failed save does not stop polling and is retried', async () => {
   const checkpoint = watchCheckpointRecovery(async () => { reads++; }, async () => { if (++writes === 1) throw new Error('write timeout'); }, 'test');
   await checkpoint(); await checkpoint();
   assert.equal(writes, 2); assert.equal(reads, 1);
+});
+
+test('checkpoint diagnostics classify failures without exposing credentials',()=>{
+ assert.equal(checkpointFailureReason(new Error('Watch checkpoint read timeout')),'STORE_TIMEOUT');
+ assert.equal(checkpointFailureReason(new Error('Watch checkpoint store unavailable')),'STORE_UNAVAILABLE');
+ assert.equal(checkpointFailureReason(new Error('Invalid watch checkpoint response')),'INVALID_CHECKPOINT');
+ assert.equal(checkpointFailureReason(new Error('redis://user:secret@private')),'RECOVERY_FAILED');
 });

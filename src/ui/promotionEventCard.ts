@@ -10,6 +10,13 @@ export function buildPromotionEventCard(args:PromotionCardArgs) {
  const name=s?.name ?? producer?.[2]?.trim() ?? compact?.[1]?.trim(),symbol=s?.symbol ?? producer?.[1]?.trim() ?? compact?.[2]?.trim();
  const identity=name ? `${esc(name)}${symbol?' ($'+esc(symbol)+')':''}` : 'Token identity pending';
  const metrics=lines.filter(l=>/^(?:Price|MC|Market cap|FDV|Liquidity|Vol · (?:5m|24h)|Move · (?:5m|1h)|Trades · 5m|Pair age|Total supply)\s/i.test(l.replace(/<[^>]+>/g,'').replace(/^[^A-Za-z]+/,''))&&!/Unavailable|not confirmed/i.test(l));
+ const metricPlain=()=>metrics.map(l=>l.replace(/<[^>]+>/g,'').replace(/^[^A-Za-z]+/,'')).join('\n');
+ if(!/^(?:MC|Market cap)\s/im.test(metricPlain())) {
+   const fdv=typeof s?.fdv==='number'&&Number.isFinite(s.fdv)&&s.fdv>0;
+   metrics.push('Market cap <b>Unavailable</b>'+(fdv?' · FDV shown; circulating supply unconfirmed':''));
+ }
+ const missing=[[/^Price\s/im,'price'],[/^Liquidity\s/im,'liquidity'],[/^Vol · 5m\s/im,'5m volume'],[/^Vol · 24h\s/im,'24h volume'],[/^Move · 1h\s/im,'1h change'],[/^Total supply\s/im,'supply']] as const;
+ const unavailable=missing.filter(([pattern])=>!pattern.test(metricPlain())).map(([,label])=>label);
  const dev=lines.find(l=>/Dev holding\s/i.test(l))??'Dev holding <b>Unavailable</b>';
  const top=lines.find(l=>/Top 10(?:\s| ·)/i.test(l))??'Top 10 <b>Unavailable</b>';
  const age=args.paymentTimestamp&&Number.isFinite(args.paymentTimestamp)?Math.max(0,Math.floor((Date.now()-(args.paymentTimestamp<1e10?args.paymentTimestamp*1000:args.paymentTimestamp))/60000)):null;
@@ -23,7 +30,7 @@ export function buildPromotionEventCard(args:PromotionCardArgs) {
  const title=args.kind==='DEX_PAID'?'💎 <b>DEX PAID DETECTED</b>':/BOOST INCREASED/.test(args.text)?'🚀 <b>BOOST INCREASED</b>':'🚀 <b>BOOST DETECTED</b>';
  const text=[title,`<b>${identity}</b>`,`Robinchain${args.launchType?' · '+esc(args.launchType):''}`,
  ...(args.kind==='DEX_PAID'?[`Payment <b>Confirmed</b>${age==null?'':` · ${age}m ago`}`]:[boost??'Boost purchase detected',...(paid?[paid]:[])]),'',
- '<b>MARKET</b>',...new Set(metrics),
+ '<b>MARKET</b>',...new Set(metrics),...(unavailable.length?['Not reported: '+unavailable.join(', ')]:[]),
  ...(s?.preBond?['Bonding curve · no DEX market yet']:!s?.chartUrl?['Trading venue unconfirmed']:[]),
  ...(!metrics.length?['Market snapshot pending']:[]),'',
  '<b>OWNERSHIP</b>',dev,top,

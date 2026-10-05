@@ -19,7 +19,7 @@ export type ExistingTokenUniverseEntry = { token: string; tier: ExistingTokenTie
 export type ExistingTokenMonitorData = { state?: TokenIntelligenceState; intelligenceState?: TokenIntelligenceState; observations?: IntelligenceObservation[]; peakMarketCap?: number | null; lastAlertState?: TokenIntelligenceState | null; lastAlertAt?: string | null };
 type UniverseRow = { asset_id?: string | null; token_address?: string | null; alerted_at?: string | null; created_at?: string | null; updated_at?: string | null; last_observed_at?: string | null; status?: string | null; strategy_key?: string | null; opportunities?: { asset_id?: string | null; chain?: string | null } | null };
 
-const SCANNER_TICK_MS = 15_000;
+const SCANNER_TICK_MS = Math.max(15_000, Number(process.env.EXISTING_TOKEN_SCANNER_TICK_MS ?? 60_000));
 const UNIVERSE_REFRESH_MS = 60_000;
 const MAX_UNIVERSE_ROWS_PER_SOURCE = 100;
 const MAX_HISTORY = 12;
@@ -301,12 +301,13 @@ export async function refreshExistingTokenOpportunityScanner() {
   } catch (error) {
     metrics.failed++; metrics.health = 'DEGRADED'; console.error('[ExistingTokenScanner] cycle failed', { reason: error instanceof Error ? error.message : String(error) }); return metrics;
   } finally {
-    metrics.duration_ms = Date.now() - started; scannerRunning = false; console.log('existing_token_scanner_cycle', metrics);
+    metrics.duration_ms = Date.now() - started; scannerRunning = false; console.log('existing_token_scanner_cycle', JSON.stringify(metrics));
   }
 }
 
 export function startExistingTokenOpportunityScanner() {
   if (scannerStarted) return; scannerStarted = true;
+  console.log(`[ExistingTokenScanner] READY intervalMs=${SCANNER_TICK_MS} maxPerCycle=${Math.min(config.existingTokenMaxPerCycle, EXISTING_TOKEN_SCANNER_SUSTAINABLE_QUOTA)} universeRefreshMs=${UNIVERSE_REFRESH_MS}`);
   void refreshExistingTokenOpportunityScanner();
   scannerTimer = setInterval(() => void refreshExistingTokenOpportunityScanner(), SCANNER_TICK_MS);
 }

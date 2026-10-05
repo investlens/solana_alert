@@ -1,6 +1,22 @@
 import { createClient, type RedisClientType } from 'redis';
 let client:RedisClientType|null=null;let connecting:Promise<void>|null=null;let disabledUntil=0;
-async function getClient(connectTimeoutMs=500):Promise<RedisClientType|null>{const url=process.env.REDIS_URL?.trim();if(!url||Date.now()<disabledUntil)return null;if(!client){client=createClient({url});client.on('error',(error)=>console.warn('[SharedCache] Redis unavailable; fail-open:',error instanceof Error?error.message:String(error)));}if(!client.isOpen){try{connecting??=client.connect().then(()=>undefined).finally(()=>{connecting=null;});await Promise.race([connecting,new Promise<never>((_,reject)=>setTimeout(()=>reject(new Error('Redis connect timeout')),connectTimeoutMs))]);}catch{disabledUntil=Date.now()+30_000;return null;}}return client;}
+async function getClient(connectTimeoutMs=1500):Promise<RedisClientType|null>{
+ const url=process.env.REDIS_URL?.trim();if(!url||Date.now()<disabledUntil)return null;
+ if(!client){client=createClient({url,socket:{connectTimeout:5000}});client.on('error',()=>console.warn('[SharedCache] Redis connection unavailable'));}
+ if(client.isReady)return client;
+ let timer:ReturnType<typeof setTimeout>|undefined;
+ try {
+   if(!connecting&&!client.isOpen)connecting=client.connect().then(()=>undefined).finally(()=>{connecting=null;});
+   const ready=connecting??new Promise<void>((resolve,reject)=>{
+     const onReady=()=>{cleanup();resolve();},onError=()=>{cleanup();reject(new Error('Redis connection unavailable'));};
+     const cleanup=()=>{client?.off('ready',onReady);client?.off('error',onError);};
+     client!.once('ready',onReady);client!.once('error',onError);
+     setTimeout(()=>{cleanup();reject(new Error('Redis ready timeout'));},connectTimeoutMs).unref();
+   });
+   await Promise.race([ready,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('Redis connect timeout')),connectTimeoutMs);})]);
+   return client.isReady?client:null;
+ }catch{disabledUntil=Date.now()+30_000;return null;}finally{if(timer)clearTimeout(timer);}
+}
 export async function getSharedJson<T>(key:string,deadlineMs=150):Promise<{value:T;fetchedAt:string}|null>{const timeout=Math.max(150,Math.min(1500,deadlineMs));try{const redis=await getClient(Math.max(500,timeout));if(!redis)return null;const raw:unknown=await Promise.race([redis.get(key),new Promise<null>((resolve)=>setTimeout(()=>resolve(null),timeout))]);if(typeof raw!=='string'||!raw)return null;const parsed=JSON.parse(raw) as {value:T;fetchedAt:string};return parsed?.fetchedAt?parsed:null;}catch{return null;}}
 export async function setSharedJson(key:string,value:unknown,fetchedAt:string,ttlMs:number):Promise<void>{if(ttlMs<=0)return;try{const redis=await getClient();if(!redis)return;await Promise.race([redis.set(key,JSON.stringify({value,fetchedAt}),{PX:ttlMs}),new Promise<void>((resolve)=>setTimeout(resolve,150))]);}catch{/* Fail open: live market data never depends on Redis. */}}
 
