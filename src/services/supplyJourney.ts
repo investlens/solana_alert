@@ -10,7 +10,7 @@ const ZERO='0x'+'0'.repeat(40),DEAD='0x'+'0'.repeat(36)+'dead';
 export type JourneyTransfer={from:string;to:string;amount:string;tx:string;index:number;block:string};
 export type SupplyJourney={token:string;creator:string|null;at:number;block:string|null;fromBlock:string|null;status:'WINDOW_COMPLETE'|'PARTIAL'|'UNAVAILABLE';reason:string|null;total:string|null;holding:string|null;recipients:{address:string;balance:string|null}[];transfers:JourneyTransfer[];excluded:number;stats:AlertKeyStats|null};
 export type JourneyDependencies={rpc:<T>(method:string,params:unknown[],signal?:AbortSignal)=>Promise<T>;marker:(token:string)=>Promise<{token?:string;factory?:string;creator?:string;curveAddress?:string}|null>;now:()=>number};
-const production:JourneyDependencies={rpc:(method,params,signal)=>createSupplyJourneyRpc(process.env.SUPPLY_JOURNEY_RPC_URL?.trim()||process.env.ROBINHOOD_RPC_URL?.trim()||'https://robinhood-rpc.publicnode.com')(method,params,signal),marker:async token=>(await getSharedJson<any>(`alphaos:pons:verified:${token}`))?.value??null,now:Date.now};
+const production:JourneyDependencies={rpc:(method,params,signal)=>createSupplyJourneyRpc(process.env.SUPPLY_JOURNEY_RPC_URL?.trim()||process.env.ROBINHOOD_RPC_URL?.trim()||'https://rpc.mainnet.chain.robinhood.com')(method,params,signal),marker:async token=>(await getSharedJson<any>(`alphaos:pons:verified:${token}`))?.value??null,now:Date.now};
 const topic=(a:string)=>'0x'+a.slice(2).padStart(64,'0');
 const balanceData=(a:string)=>'0x70a08231'+a.slice(2).padStart(64,'0');
 function raw(value:unknown):string {if(typeof value!=='string'||!/^0x[0-9a-f]+$/i.test(value))throw Error('Malformed on-chain quantity');return BigInt(value).toString();}

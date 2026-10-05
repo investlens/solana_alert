@@ -42,6 +42,6 @@ jobs:
       - name: Supply Journey live evidence comparison
         if: github.event.pull_request.number == 121
         env:
-          SUPPLY_VALIDATION_RPC_URL: https://robinhood-rpc.publicnode.com
-          SUPPLY_VALIDATION_SECONDARY_RPC_URL: https://rpc.mainnet.chain.robinhood.com
+          SUPPLY_VALIDATION_RPC_URL: https://rpc.mainnet.chain.robinhood.com
+          SUPPLY_VALIDATION_SECONDARY_RPC_URL: https://robinhood-mainnet-rpc.blockreq.com/v1/rpc/public
         run: node --import tsx scripts/validateSupplyJourneyLive.ts
