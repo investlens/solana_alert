@@ -72,7 +72,7 @@ test('cross-linked website confirms exact-chain CA; copied metadata or missing b
 });
 test('public Telegram acknowledgement requires reciprocal profile links and conflicts fail closed',async()=>{
  const profile=bio('Our project')+'<div data-testid="UserUrl"><a href="https://t.me/RevenueFamily">TG</a></div>';
- const page=`<a href="https://x.com/RevenueFamily">X</a><span>100 subscribers</span><div class="tgme_page_description">Robinchain CA: ${token}</div>`;
+ const page=`<a href="https://x.com/RevenueFamily">X</a><div class="tgme_page_extra">100 subscribers</div><div class="tgme_page_description">Robinchain CA: ${token}</div>`;
  assert.equal((await verifySocialContract(args,async url=>url.includes('x.com')?profile:page)).evidenceSource,'Telegram');
  assert.equal((await verifySocialContract(args,async url=>url.includes('x.com')?profile:page.replace(token,other))).confirmed,false);
 });

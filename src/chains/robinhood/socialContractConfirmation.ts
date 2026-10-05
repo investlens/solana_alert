@@ -155,7 +155,7 @@ export async function verifySocialContract(args: { token: string; xHandle: strin
 export function xProjectLinks(html:string,handle:string):string[] {
  const clean=html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace(/<!--[\s\S]*?-->/g,'');
  const regions=[...clean.matchAll(/<(?:div|span)\b[^>]*data-testid=["'](?:UserDescription|UserUrl)["'][^>]*>([\s\S]*?)<\/(?:div|span)>/gi)].map(m=>m[1]);
- const links=regions.flatMap(region=>[...region.matchAll(/(?:href|data-expanded-url)=["'](https:\/\/[^"']+)["']/gi)].map(m=>m[1].replace(/&amp;/g,'&')));
+ const links=regions.flatMap(region=>[...region.matchAll(/(?:href|data-expanded-url|title)=["'](https:\/\/[^"']+)["']/gi)].map(m=>m[1].replace(/&amp;/g,'&')));
  return [...new Set(links.filter(url=>{try{const u=new URL(url);return !u.username&&!u.password&&!u.port&&!['x.com','twitter.com','t.co'].includes(u.hostname)&&u.hostname.includes('.');}catch{return false;}}))].slice(0,3);
 }
 export function projectContractConflict(statement:string,token:string):boolean {
@@ -171,7 +171,7 @@ async function verifyCrossLinkedPages(args:{token:string;xHandle:string;telegram
  for(const link of links.slice(0,2)){
   const u=new URL(link),telegram=u.hostname==='t.me';
   if(telegram&&(!/^\/[A-Za-z][A-Za-z0-9_]{4,31}\/?$/.test(u.pathname)||!args.telegramUrl||new URL(args.telegramUrl).pathname.replace(/\/$/,'')!==u.pathname.replace(/\/$/,'')))continue;
-  const page=await readHtml(link).catch(()=>null);if(!page||!linksX(page,args.xHandle)|| (telegram&&!/members|subscribers|tgme_widget_message/i.test(page)))continue;
+  const page=await readHtml(link).catch(()=>null);if(!page||!linksX(page,args.xHandle)|| (telegram&&!/tgme_widget_message/i.test(page)&&!/members|subscribers/i.test(plainText(page.match(/class=["'][^"']*tgme_page_extra[^"']*["'][^>]*>([\s\S]*?)<\/div>/i)?.[1]??''))))continue;
   const clean=page.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi,'').replace(/<!--[\s\S]*?-->/g,'');
   const statements=telegram?[...clean.matchAll(/<div\b[^>]*class=["'][^"']*\b(?:tgme_page_description|tgme_widget_message_text)\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/gi)].map(m=>plainText(m[1])):[plainText(clean)];
   if(statements.some(text=>projectContractConflict(text,args.token)))return{confirmed:false,reason:'PROJECT_CONTRACT_CONFLICT'};
