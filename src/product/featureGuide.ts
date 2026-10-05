@@ -1,4 +1,5 @@
 import { subscriptionsEnabled } from './subscriptionPlan.js';
+import { RESEARCH_DISCLOSURE } from '../ui/researchDisclosure.js';
 
 export function alphaosHomeText(): string {
   return [
@@ -9,6 +10,7 @@ export function alphaosHomeText(): string {
     '🎯 <b>Trader Tools</b> — check readiness and manage monitors.', '',
     'Open <b>Free / Pro</b> to compare features, or <b>How to Use</b> for help.',
     '<i>Coverage varies by chain. Research only · DYOR.</i>',
+    RESEARCH_DISCLOSURE,
   ].join('\n');
 }
 
@@ -30,5 +32,6 @@ export function alphaosFeatureGuide(): string {
       : '<b>Testing access:</b> Pro tools are open to testers. Payments remain closed.', '',
     'Open <b>Trader Tools</b> for supported tokens and monitoring limits.',
     '<i>Missing data is not a passed check. Research does not establish a safe entry.</i>',
+    RESEARCH_DISCLOSURE,
   ].join('\n');
 }

@@ -161,9 +161,9 @@ test('PONS CHECK_ENTRY renders the premium OPPORTUNITY category without changing
       devHoldingEvidence: 'VERIFIED', totalBurnPercent: 0, burnEvidence: 'VERIFIED' },
   });
   assert.match(message, /🔥 <b>ALPHA OPPORTUNITY/);
-  assert.match(message, /🎯 <b>ACTION: CHECK ENTRY/);
+  assert.match(message, /🎯 <b>RESEARCH STATUS: REVIEW EVIDENCE/);
   assert.match(message, /📈 <b>WHY NOW<\/b>/);
   assert.match(message, /Volume and price structure remain constructive/);
-  assert.match(message, /🧠 <b>ALPHAOS VERDICT: CHECK ENTRY/);
+  assert.match(message, /🧠 <b>RESEARCH ASSESSMENT: SETUP FOR REVIEW/);
   assert.doesNotMatch(message, /ROI|Trade/);
 });

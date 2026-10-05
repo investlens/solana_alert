@@ -1,4 +1,5 @@
 import { cleanAlertCard, cleanAlertButtons } from '../ui/alertCardLayout.js';
+import { withResearchDisclosure } from '../ui/researchDisclosure.js';
 import { buildAlphaosAlertCard } from '../ui/alphaosAlertCard.js';
 import { sendAlphaosPhotoAlert, telegramCaptionLength } from '../ui/alphaosPhotoDelivery.js';
 import { config } from '../config.js';
@@ -53,6 +54,7 @@ export function buildAlphaReportUrl(tokenMint: string, context?: { engine?: stri
 async function sendTelegramRequest(chatId: string, text: string, buttons?: InlineButton[][]): Promise<number | null> {
   if (!chatId) return null;
   text = cleanAlertCard(text);
+  if (/DEX PAID DETECTED|BOOST DETECTED|BOOST INCREASED|MAX BOOST 500\+|ARC OPPORTUNITY|TRADE SETUP WATCH|SUPPLY BURN|SOCIAL MAFIA ALERT/.test(text.split('\n')[0])) text = withResearchDisclosure(text);
   if (/<code>/.test(text)) buttons = cleanAlertButtons(buttons, text);
 
   const body: Record<string, unknown> = {

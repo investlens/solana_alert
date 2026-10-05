@@ -13,7 +13,7 @@ test('standard automatic alert is compact, decision-oriented and contains no raw
       { label: 'Price', value: '$0.00003541' }, { label: 'Market cap', value: '$34.7K' },
       { label: 'Liquidity', value: '$18.3K' }, { label: '5m volume', value: '$118.5' },
     ], insightTitle: 'WHY NOW', insight: ['New ATH reached', 'Momentum strengthening', 'Liquidity remains healthy', 'ignored fourth insight'] });
-  assert.ok(message.length <= 1200); assert.ok(message.split('\n').length <= 14);
+  assert.ok(message.length <= 1200); assert.ok(message.split('\n').length <= 16);
   assert.match(message, /RUNNER — Time Vault \(\$TV\)/); assert.match(message, /\$0\.00003541/);
   assert.match(message, /Market cap <b>\$34\.7K/); assert.match(message, /Liquidity <b>\$18\.3K/); assert.match(message, /5m volume <b>\$118\.5/);
   assert.equal((message.match(/^• /gm) ?? []).length, 3); assert.doesNotMatch(message, /DEXSCREENER_VERIFIED|2026-\d\d-/);
@@ -120,9 +120,9 @@ test('first actionable CHECK_ENTRY is explicit entry intent and bounded to three
   await import('dotenv/config');
   const { buildOpportunityMessage } = await import('../src/services/opportunityDeliveryService.js');
   const message = buildOpportunityMessage(intentOpportunity({}));
-  assert.match(message, /^🔥 <b>ALPHA ENTRY — [^\n]+<\/b>/);
-  assert.match(message, /🎯 <b>ACTION: CHECK ENTRY<\/b>/);
-  assert.match(message, /ALPHAOS VERDICT: CHECK ENTRY/);
+  assert.match(message, /^🔎 <b>SETUP OBSERVED — [^\n]+<\/b>/);
+  assert.match(message, /🎯 <b>RESEARCH STATUS: REVIEW EVIDENCE<\/b>/);
+  assert.match(message, /RESEARCH ASSESSMENT: SETUP FOR REVIEW/);
   assert.doesNotMatch(message, /Previously alerted opportunity has a new qualified momentum signal/);
   assert.equal((message.match(/^• /gm) ?? []).length, 3);
   assert.match(message, /• Breakout confirmed\n• Volume acceleration increased\n• Structure remains confirmed/);
@@ -138,7 +138,7 @@ test('prior successfully delivered actionable event produces momentum intent wit
   const message = buildOpportunityMessage(base, comparison, { intent: 'MOMENTUM_UPDATE', notify: true,
     factors: ['PROGRESSION'], reasons: ['Price advanced 23.8% since previous alert'] });
   assert.match(message, /^📈 <b>MOMENTUM UPDATE — [^\n]+<\/b>/);
-  assert.match(message, /🎯 <b>ACTION: MOMENTUM UPDATE<\/b>/);
+  assert.match(message, /🎯 <b>RESEARCH STATUS: MOMENTUM UPDATE<\/b>/);
   assert.match(message, /Price advanced 23.8% since previous alert/);
   assert.match(message, /Previously alerted[\s\S]*Now[\s\S]*Change[\s\S]*\+23\.8%/);
   assert.match(message, /MOMENTUM UPDATE/);
@@ -157,10 +157,10 @@ test('reason formatting renders one verified reason once and never more than thr
 
 test('informational, avoid and exit display intents remain unambiguous', () => {
   const watch = renderAlphaNotification({ category: 'market', severity: 'watch', state: 'BOOST', symbol: 'HOTDOG', displayIntent: 'WATCH' });
-  assert.match(watch, /BOOST DETECTED[\s\S]*ACTION: WATCH[\s\S]*Information only — entry not confirmed/);
+  assert.match(watch, /BOOST DETECTED[\s\S]*RESEARCH STATUS: WATCH[\s\S]*Information only — entry not confirmed/);
   assert.doesNotMatch(watch, /CHECK ENTRY|ACTION: BUY/);
-  assert.match(renderAlphaNotification({ category: 'risk', severity: 'critical', state: 'RISK', symbol: 'HOTDOG', displayIntent: 'AVOID' }), /ACTION: AVOID/);
-  assert.match(renderAlphaNotification({ category: 'risk', severity: 'critical', state: 'EXIT_AVOID', symbol: 'HOTDOG', displayIntent: 'EXIT' }), /ACTION: EXIT/);
+  assert.match(renderAlphaNotification({ category: 'risk', severity: 'critical', state: 'RISK', symbol: 'HOTDOG', displayIntent: 'AVOID' }), /RESEARCH STATUS: RISK FLAG/);
+  assert.match(renderAlphaNotification({ category: 'risk', severity: 'critical', state: 'EXIT_AVOID', symbol: 'HOTDOG', displayIntent: 'EXIT' }), /RESEARCH STATUS: DETERIORATION OBSERVED/);
 });
 
 test('automatic social links are allowlisted, deduplicated and optional without changing callbacks', async () => {

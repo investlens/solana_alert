@@ -267,7 +267,7 @@ test('metadata failure safely leaves Exit address-only', async () => {
   });
   assert.equal(resolved.rawData.symbol, undefined);
   const { buildOpportunityMessage } = await service();
-  assert.match(buildOpportunityMessage(exit), /RISK EXIT ALERT[\s\S]*0xa091…36e9d<\/b>[\s\S]*ACTION: EXIT/);
+  assert.match(buildOpportunityMessage(exit), /RISK FLAG[\s\S]*0xa091…36e9d<\/b>[\s\S]*RESEARCH STATUS: DETERIORATION OBSERVED/);
 });
 
 test('persisted lifecycle identity prevents unnecessary metadata fallback', async () => {

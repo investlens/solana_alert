@@ -28,7 +28,9 @@ test('photo sends use multipart caption and buttons; enrichment edits the same c
   }) as typeof fetch;
   const result = await sendAlphaosPhotoAlert({ botToken: 'test', chatId: '1', text: '<b>AXIL</b>', keyboard: [], image: Buffer.from('png') }, request);
   assert.deepEqual(result, { messageId: 42, photo: true });
-  assert.equal((captured as unknown as FormData).get('caption'), '<b>AXIL</b>');
+  const caption = String((captured as unknown as FormData).get('caption'));
+  assert.ok(caption.startsWith('<b>AXIL</b>'));
+  assert.match(caption, /Research only — not a buy\/sell signal/);
   assert.equal(alphaosEnrichmentEdit(result, '1', 'Updated', []).method, 'editMessageCaption');
 });
 test('explicit photo rejection falls back to text; ambiguous errors never duplicate an alert', async () => {
