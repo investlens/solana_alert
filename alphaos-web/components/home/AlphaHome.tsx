@@ -19,7 +19,7 @@ const features = [
   ["04", "Trade Setup Watch", "Watch qualifying recovery evidence. Volume confirmation requires complete history; setups are not automatic entries.", "Conditional feed"],
 ];
 
-export default function AlphaHome() {
+export default function AlphaHome({ holderContractPublished = false }: { holderContractPublished?: boolean }) {
   const [items, setItems] = useState<LiveOpportunity[]>([]);
   const [performance, setPerformance] = useState<Performance | null>(null);
   const [loading, setLoading] = useState(true);
@@ -66,7 +66,7 @@ export default function AlphaHome() {
       {!loading && !performance?.recent?.length && <div className="empty-state">No recent event records are available in this sample. No performance claim can be made.</div>}
       <p className="muted small mt-3">{performance ? `Fetched ${date(performance.generatedAt)}. Fetch time is not price observation time.` : "Event history is loading."} Sampled price changes are not realised profit or an audited performance record. Missing tracking does not establish that Telegram delivery failed.</p>
     </section>
-    <section className="access-banner section-space"><div><p className="premium-eyebrow">BUILT AROUND YOUR RESEARCH</p><h2>Start free. Know what comes next.</h2><p>Compare Free and Pro delivery, learn the tools and follow the planned AlphaOS holder utility.</p></div><div className="hero-actions"><Link className="alpha-button-primary" href="/me">Compare access</Link><Link className="premium-button" href="/token">Holder roadmap →</Link></div></section>
+    <section className="access-banner section-space"><div><p className="premium-eyebrow">ALPHAOS TOKEN · LAUNCH ROADMAP</p><h2>{holderContractPublished ? 'AlphaOS holder access · coming soon.' : 'AlphaOS launching soon.'}</h2><p>Proposed Holder Pro access from 1 million tokens. Verification is not active; final terms will be published before activation. Research tools—not guaranteed returns.</p></div><div className="hero-actions"><Link className="alpha-button-primary" href="/me">Compare access</Link><Link className="premium-button" href="/token">Token & holder details →</Link></div></section>
     <footer className="product-footer"><span>AlphaOS · Token intelligence</span><div><Link href="/status">Data coverage</Link><Link href="/guide">Getting started</Link><Link href="/token">Token roadmap</Link><Link href="/disclosures">Risk & privacy</Link></div><p>Research only — not a buy/sell signal bot. Validate current data and risks independently. Returns are not guaranteed.</p></footer>
   </div></main>;
 }
