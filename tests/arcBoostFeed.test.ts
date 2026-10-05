@@ -29,3 +29,9 @@ test('contradictory volume windows are not displayed as verified stats',()=>{
   assert.equal(consistentArcVolume5m(0,4850),0);
   assert.equal(consistentArcVolume5m(null,4850),null);
 });
+
+import { withAlertKeyStats } from '../src/ui/alertKeyStats.js';
+test('security warning does not hide available liquidity',()=>{
+ const card=withAlertKeyStats('Liquidity, honeypot and sellability NOT CHECKED.',{liquidity:5700});
+ assert.match(card,/Liquidity <b>\$5.7K<\/b>/);
+});

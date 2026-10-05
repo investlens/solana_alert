@@ -18,7 +18,7 @@ export function withAlertKeyStats(text:string, stats:AlertKeyStats):string {
   add(/(?:^|\n).*\bPrice\s/i,'Price',usd(stats.price));
   add(/(?:Market cap|Market Cap|\bMC\s)/,'MC',usd(stats.marketCap));
   if(n(stats.fdv)&&stats.fdv>0 && (!n(stats.marketCap) || stats.marketCap !== stats.fdv))add(/\bFDV\s/,'FDV',usd(stats.fdv));
-  add(/Liquidity|LP liquidity/i,'Liquidity',stats.preBond?'Bonding curve · no DEX LP':usd(stats.liquidity));
+  add(/(?:^|\n)(?:💧\s*)?(?:Liquidity|LP liquidity)\s+(?:\$|Unavailable|Bonding)/i,'Liquidity',stats.preBond?'Bonding curve · no DEX LP':usd(stats.liquidity));
   add(/5m volume|5m Volume|Vol(?:ume)?\s*·?\s*5m/i,'Vol · 5m',usd(stats.volume5m));
   add(/Vol(?:ume)?\s*·?\s*24h/i,'Vol · 24h',usd(stats.volume24h));
   add(/Move\s*·?\s*5m/i,'Move · 5m',movement(stats.move5m));
