@@ -1,5 +1,6 @@
-import { resolveCreatorIdentity } from './verifiedCreatorIdentity.js';
-import { getPonsLaunchState } from '../chains/robinhood/ponsLaunchState.js';
+import { resolveCreatorIdentity, resolvePonsCreatorFromSources } from './verifiedCreatorIdentity.js';
+import { getPonsLaunchState, getIndexedVerifiedPonsLaunch } from '../chains/robinhood/ponsLaunchState.js';
+import { getSharedJson } from './sharedJsonCache.js';
 import { reuseRobinhoodDevTokenFlow } from '../chains/robinhood/security/devTokenFlowScanner.js';
 import { scanRobinhoodHolderRisk } from '../chains/robinhood/security/holderRiskScanner.js';
 import { getCreatorHoldingEvidence } from '../chains/robinhood/ponsPublicContext.js';
@@ -26,9 +27,15 @@ export async function robinhoodOwnership(token: string, creator?: string | null,
       const [dev, holders] = await Promise.allSettled([
         (async () => {
           const identity = await resolveCreatorIdentity(token, creator, {
-            factory: address => getPonsLaunchState(address, {requireCompleteFactoryVerification: true}),
+            factory: address => resolvePonsCreatorFromSources(address, {
+              marker: async () => (await getSharedJson(`alphaos:pons:verified:${address.toLowerCase()}`))?.value,
+              indexed: () => getIndexedVerifiedPonsLaunch(address),
+              factory: () => getPonsLaunchState(address, {requireCompleteFactoryVerification: true}),
+            }),
             history: async address => (await reuseRobinhoodDevTokenFlow(address)).deployerAddress,
           });
+          // Identity remains useful even if the independent balance read fails.
+          partial.get(key)!.creator = identity;
           const value = identity ? await getCreatorHoldingEvidence(token, identity) : null;
           Object.assign(partial.get(key)!,{devPercent:value?.percent ?? null,devObservedAt:value?.observedAt,devBlock:value?.block}); return value;
         })(),
@@ -37,7 +44,7 @@ export async function robinhoodOwnership(token: string, creator?: string | null,
           return result;
         }) : Promise.reject(new Error('Pool identity unavailable for holder exclusions')),
       ]);
-      return { devPercent: dev.status === 'fulfilled' ? dev.value?.percent ?? null : null,
+      return { creator:partial.get(key)?.creator ?? null,devPercent: dev.status === 'fulfilled' ? dev.value?.percent ?? null : null,
         devObservedAt:dev.status === 'fulfilled' ? dev.value?.observedAt : undefined,
         devBlock:dev.status === 'fulfilled' ? dev.value?.block : undefined,
         top10ObservedAt:holders.status === 'fulfilled' ? holders.value.scannedAt : undefined,

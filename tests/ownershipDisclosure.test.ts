@@ -2,6 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {withOwnershipDisclosure, validOwnershipPercent} from '../src/ui/ownershipDisclosure.js';
 const unknown = {devPercent:null,top10Percent:null,top10Coverage:'UNAVAILABLE' as const};
+test('creator link remains visible independently of unavailable holdings',()=>{
+ const creator='0x'+'b'.repeat(40);
+ const text=withOwnershipDisclosure('alert\n\n<b>CONTRACT</b>\n0xabc',{...unknown,creator});
+ assert.match(text,new RegExp('https://robinhoodchain.blockscout.com/address/'+creator));
+ assert.match(text,/Dev holding  <b>Unavailable/);assert.doesNotMatch(text,/0.00%/);
+ assert.doesNotMatch(withOwnershipDisclosure('alert',{...unknown,creator:'<script>'}),/script/);
+});
 test('ownership clearly warns at ten percent and precedes the contract', () => {
  const text=withOwnershipDisclosure('BOOST\n\n<b>CONTRACT</b>\n0xabc', {devPercent:10,top10Percent:42,top10Coverage:'INDEXED_SAMPLE'});
  assert.match(text,/10.00%/);assert.match(text,/potential sell pressure/);assert.match(text,/Top 10 · indexed sample/);
