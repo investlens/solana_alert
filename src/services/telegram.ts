@@ -116,6 +116,7 @@ export async function editTelegramMessage(chatId: string, messageId: number, tex
     return;
   }
   const res = await fetch(`https://api.telegram.org/bot${config.botToken}/editMessageText`, {
+    signal: AbortSignal.timeout(5_000),
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
       chat_id: chatId, message_id: messageId, text, parse_mode: 'HTML', disable_web_page_preview: true,
       reply_markup: { inline_keyboard: buttons ?? [] },

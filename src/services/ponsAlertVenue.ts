@@ -38,7 +38,7 @@ export function ponsVenueStats(token:string,context:PonsPublicContext|null,gradu
     &&p.pairAddress?.toLowerCase()===context.poolId!.toLowerCase());
   const m=robinhoodMarketSnapshotFromPairs(token,matching);
   if(!m)return {...unavailable,source:'Graduated · mapped DEX pool pending'};
-  return {name:m.name,symbol:m.symbol,chartUrl:m.chartUrl,authoritativeVenue:true,preBond:false,price:m.priceUsd,marketCap:m.marketCapUsd>0?m.marketCapUsd:null,fdv:m.fdvUsd,
+  return {...metadata,name:m.name,symbol:m.symbol,chartUrl:m.chartUrl,authoritativeVenue:true,preBond:false,price:m.priceUsd,marketCap:m.marketCapUsd>0?m.marketCapUsd:null,fdv:m.fdvUsd,
     liquidity:m.liquidityUsd,volume5m:m.volume5mReported?m.volume5mUsd:null,volume24h:m.volume24hUsd,
     move5m:m.priceChange5m,move1h:m.priceChange1h,buys:m.trades5mReported?m.buys5m:null,sells:m.trades5mReported?m.sells5m:null,
     pairCreatedAt:m.pairCreatedAt,source:'DEXScreener · PONS-mapped graduated pool',checkedAt};

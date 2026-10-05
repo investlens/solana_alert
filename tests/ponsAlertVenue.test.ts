@@ -29,6 +29,7 @@ test('graduated PONS uses only mapped pool and fails closed during indexing or s
   const graduated={...context,phase:1,venue:'dex',poolId:pool};
   const actual={...dust,pairAddress:pool,marketCap:50000,priceUsd:'0.00005',liquidity:{usd:20000}};
   assert.equal(ponsVenueStats(token,graduated,true,[dust,actual]).marketCap,50000);
+  assert.equal(ponsVenueStats(token,graduated,true,[dust,actual]).creator,context.creator);
   assert.equal(ponsVenueStats(token,graduated,true,[dust]).price,undefined);
   assert.equal(ponsVenueStats(token,context,true,[actual]).price,undefined);
   assert.equal(ponsVenueStats(token,context,null,[actual]).price,context.priceUsd);

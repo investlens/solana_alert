@@ -1,5 +1,7 @@
+import { schedulePromotionCardEnrichment, type PromotionEditTarget } from './promotionCardEnrichment.js';
+import type { PromotionCardArgs } from '../ui/promotionEventCard.js';
 import { recordFeedDelivery } from './feedDeliveryHealth.js';
-import { buildDexPaidEventCard } from '../ui/dexPaidCard.js';
+import { buildPromotionEventCard } from '../ui/promotionEventCard.js';
 import { discloseRobinhoodKeyStats, cachedRobinhoodAlertStats } from './alertKeyStatsService.js';
 import { routeBoostSecurity } from '../chains/robinhood/boostSecurityRouter.js';
 import { getVerifiedRobinhoodLaunchpad } from '../chains/robinhood/trustedLaunchpad.js';
@@ -162,12 +164,14 @@ export async function deliverAlphaSemanticEvent(args: {
     }
   }
 
+  let boostSecurityNote: string | null = null;
   if (dependencies === productionDependencies && args.event.type === 'BOOST' && args.event.chain.toLowerCase() === 'robinhood') {
     const origin = await getVerifiedRobinhoodLaunchpad(args.event.assetId).catch(() => null);
     const trusted = origin !== null;
     const safety = await routeBoostSecurity({tokenAddress:args.event.assetId, verifiedTrustedLaunchpad:trusted, requireExplicitSellability:true});
     if (!safety.allowed) { console.warn('[AlphaSemanticDelivery] Boost sellability blocked', {reason:safety.reason}); return {delivered:0,failed:0}; }
     launchType = origin?.launchType ?? 'CUSTOM';
+    boostSecurityNote = safety.reason;
   }
   let paidOwnership: OwnershipDisclosure | null = null;
   let paidCreator: string | null = null;
@@ -211,7 +215,7 @@ export async function deliverAlphaSemanticEvent(args: {
   }
   if (launchType) deliveryMessage = labelLaunchType(deliveryMessage, launchType);
 
-  if(dependencies===productionDependencies && args.event.type==='DEX_PAID' && args.event.chain==='robinhood') {
+  if(dependencies===productionDependencies && ['DEX_PAID','BOOST'].includes(args.event.type) && args.event.chain==='robinhood') {
     deliveryMessage=await discloseRobinhoodKeyStats(deliveryMessage,args.event.assetId,false,
       launchType==='PONS'||launchType==='FLAP'?`Trusted ${launchType} route`:'See sellability disclosure');
     // Resolve the public exact-contract creator before starting ownership work.
@@ -219,12 +223,13 @@ export async function deliverAlphaSemanticEvent(args: {
   }
   const deliveryStartedAt = Date.now();
   const users = (await dependencies.getUsers()).sort((a, b) => recipientDelayMs(a, deliveryStartedAt) - recipientDelayMs(b, deliveryStartedAt));
-  if (dependencies === productionDependencies && !deliveryMessage.includes('<b>OWNERSHIP</b>') && /^(robinhood|robinchain)$/i.test(args.event.chain ?? '')) {
-    deliveryMessage = paidOwnership ? withOwnershipDisclosure(deliveryMessage, paidOwnership)
+  if (dependencies === productionDependencies && (!deliveryMessage.includes('<b>OWNERSHIP</b>') || ['DEX_PAID','BOOST'].includes(args.event.type)) && /^(robinhood|robinchain)$/i.test(args.event.chain ?? '')) {
+    deliveryMessage = paidOwnership?.devPercent != null ? withOwnershipDisclosure(deliveryMessage, paidOwnership)
       : await discloseRobinhoodOwnership(deliveryMessage, args.event.assetId,
           paidCreator ?? (typeof args.event.rawSnapshot?.creator === 'string' ? args.event.rawSnapshot.creator : null),
-          typeof args.event.rawSnapshot?.pairAddress === 'string' ? args.event.rawSnapshot.pairAddress : null,
+          cachedRobinhoodAlertStats(args.event.assetId)?.chartUrl?.match(/\/robinhood\/(0x[a-fA-F0-9]{40,64})/)?.[1] ?? (cachedRobinhoodAlertStats(args.event.assetId)?.authoritativeVenue ? null : typeof args.event.rawSnapshot?.pairAddress === 'string' ? args.event.rawSnapshot.pairAddress : null),
           isUndelayedRiskEvent(args.event.type));
+    if(paidOwnership?.devPercent==null && paidOwnership?.top10Percent!=null)deliveryMessage=withOwnershipDisclosure(deliveryMessage,paidOwnership);
   }
   if(paidSecurityNote)deliveryMessage += `\n\n${paidSecurityNote}`;
   let deliveryButtons = args.buttons;
@@ -235,13 +240,14 @@ export async function deliverAlphaSemanticEvent(args: {
     deliveryMessage = card.text; deliveryButtons = card.buttons;
   }
   if (dependencies === productionDependencies && args.event.chain.toLowerCase() === 'robinhood' && !isUndelayedRiskEvent(args.event.type)) deliveryMessage = await discloseRobinhoodKeyStats(deliveryMessage,args.event.assetId,false,['DEX_PAID','BOOST'].includes(args.event.type)?(launchType==='PONS'||launchType==='FLAP'?`Trusted ${launchType} route`:args.event.type==='DEX_PAID'?'See sellability disclosure':'Verified flags · not a guarantee'):undefined);
-  if (dependencies === productionDependencies && args.event.type==='DEX_PAID' && args.event.chain==='robinhood') {
+  if (dependencies === productionDependencies && ['DEX_PAID','BOOST'].includes(args.event.type) && args.event.chain==='robinhood') {
     const raw=args.event.rawSnapshot ?? getEphemeralSemanticEventEvidence(args.event.eventIdentity);
-    const card=buildDexPaidEventCard({text:deliveryMessage,token:args.event.assetId,launchType,
-      stats:cachedRobinhoodAlertStats(args.event.assetId),securityNote:paidSecurityNote,buttons:deliveryButtons??[],
+    const card=buildPromotionEventCard({kind:args.event.type as 'DEX_PAID'|'BOOST',text:deliveryMessage,token:args.event.assetId,launchType,
+      stats:cachedRobinhoodAlertStats(args.event.assetId),securityNote:paidSecurityNote??boostSecurityNote,buttons:deliveryButtons??[],
       paymentTimestamp:typeof raw?.paymentTimestamp==='number'?raw.paymentTimestamp:null});
     deliveryMessage=card.text;deliveryButtons=card.buttons;
   }
+  const enrichmentTargets: PromotionEditTarget[] = [];
   const renderedCharacters = deliveryMessage.length;
   const renderedBytes = Buffer.byteLength(deliveryMessage, 'utf8');
   let delivered = 0; let failed = 0; let accepted = 0;
@@ -266,6 +272,7 @@ export async function deliverAlphaSemanticEvent(args: {
         try {
           args.onSendStarted?.();
           const sendResult = await dependencies.send(user.telegram_id, deliveryMessage, deliveryButtons);
+          if(dependencies===productionDependencies && typeof sendResult==='number' && enrichmentTargets.length<50)enrichmentTargets.push({chatId:user.telegram_id,messageId:sendResult});
           if (dependencies === productionDependencies) recordDeliveryAccepted(user, deliveryStartedAt, args.event.eventIdentity, isUndelayedRiskEvent(args.event.type));
           delivered += 1; accepted += 1;
           args.onTelegramAccepted?.(user);
@@ -295,7 +302,8 @@ export async function deliverAlphaSemanticEvent(args: {
       const leaseToken = createLeaseToken();
       if (!await dependencies.reserve(args.event, user, leaseToken)) continue;
       const result = await deliverReservedTelegram({
-        send: () => { args.onSendStarted?.(); return dependencies.send(user.telegram_id, deliveryMessage, deliveryButtons); },
+        send: async () => { args.onSendStarted?.(); const result=await dependencies.send(user.telegram_id, deliveryMessage, deliveryButtons);
+          if(dependencies===productionDependencies && typeof result==='number' && enrichmentTargets.length<50)enrichmentTargets.push({chatId:user.telegram_id,messageId:result});return result; },
         complete: sendResult => dependencies.complete(args.event, user, leaseToken,
           Number.isFinite(Number(sendResult)) ? Number(sendResult) : null),
         release: () => dependencies.release(args.event, user, leaseToken),
@@ -321,6 +329,11 @@ export async function deliverAlphaSemanticEvent(args: {
         semanticEventType: args.event.type, telegramId: user.telegram_id,
         reason: error instanceof Error ? error.message : String(error) });
     }
+  }
+  if(dependencies===productionDependencies && args.event.chain==='robinhood' && ['DEX_PAID','BOOST'].includes(args.event.type)) {
+    const raw=args.event.rawSnapshot ?? getEphemeralSemanticEventEvidence(args.event.eventIdentity);
+    const evidence:PromotionCardArgs={kind:args.event.type as 'DEX_PAID'|'BOOST',text:deliveryMessage,token:args.event.assetId,launchType,stats:cachedRobinhoodAlertStats(args.event.assetId),securityNote:paidSecurityNote??boostSecurityNote,buttons:deliveryButtons??[],paymentTimestamp:typeof raw?.paymentTimestamp==='number'?raw.paymentTimestamp:null};
+    schedulePromotionCardEnrichment(args.event.eventIdentity,evidence,enrichmentTargets,deliveryMessage);
   }
   if (dependencies === productionDependencies) {
     const feed = semanticLiveFeed(args.event.type,args.event.chain);

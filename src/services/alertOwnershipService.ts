@@ -13,7 +13,7 @@ let windowStart = 0, started = 0;
 // Per token, never per recipient. No database writes or background holder sweeps.
 export async function robinhoodOwnership(token: string, creator?: string | null, pool?: string | null): Promise<OwnershipDisclosure> {
   if (!/^0x[a-fA-F0-9]{40}$/.test(token)) return empty();
-  const key = `${token.toLowerCase()}:${(pool ?? '').toLowerCase()}`;
+  const key = `${token.toLowerCase()}:${(pool ?? '').toLowerCase()}:${(creator ?? '').toLowerCase()}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < 30_000) return hit.value;
   let work = pending.get(key);
@@ -54,7 +54,7 @@ export async function robinhoodOwnership(token: string, creator?: string | null,
   finally { if (timer) clearTimeout(timer); }
 }
 export async function discloseRobinhoodOwnership(text: string, token: string, creator?: string | null, pool?: string | null, cachedOnly = false): Promise<string> {
-  const cached = cache.get(`${token.toLowerCase()}:${(pool ?? '').toLowerCase()}`);
+  const cached = cache.get(`${token.toLowerCase()}:${(pool ?? '').toLowerCase()}:${(creator ?? '').toLowerCase()}`);
   const fresh = cached && Date.now() - cached.at < 30_000 ? cached.value : empty();
   return withOwnershipDisclosure(text, cachedOnly ? fresh : await robinhoodOwnership(token, creator, pool));
 }
