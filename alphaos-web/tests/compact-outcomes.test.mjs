@@ -1,10 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mapTrackedOutcome } from '../lib/dashboard/compact-outcomes.ts';
+import { mapTrackedOutcome, recordedOutcomeIdentity } from '../lib/dashboard/compact-outcomes.ts';
 const now = Date.parse('2026-10-05T19:00:00Z');
 const event = {id:1,asset_id:'0xabc',chain:'robinhood',semantic_event_type:'DEX_PAID',price:2,alerted_at:'2026-10-05T17:00:00Z'};
 const tracking = {chain:'robinhood',token:'0xabc',feed:'DEX_PAID',price_unit:'USD',baseline_price:2,started_at:'2026-10-05T17:00:01Z',samples:[{status:'MEASURED',price:3,at:'2026-10-05T17:15:01Z'}]};
 const map = (e=event,t=tracking,identities=[]) => mapTrackedOutcome(e,[],false,[t],identities,now);
+test('stored identity rejects conflicting embedded token or chain',()=>{
+  const row={chain:'robinhood',asset_id:'0xabc',raw_data:{symbol:'TEST',token:'0xabc'}};
+  assert.equal(recordedOutcomeIdentity(row).symbol,'TEST');
+  assert.equal(recordedOutcomeIdentity({...row,raw_data:{...row.raw_data,token:'0xdef'}}),null);
+  assert.equal(recordedOutcomeIdentity({...row,raw_data:{...row.raw_data,chain:'arc'}}),null);
+});
 test('existing compact observation yields comparable prices and accepted delivery',()=>{
   const row=map(); assert.equal(row.alertPrice,2); assert.equal(row.currentPrice,3); assert.equal(row.peakPrice,3); assert.equal(row.roiNow,50); assert.equal(row.deliveryStatus,'Delivery recorded');
 });

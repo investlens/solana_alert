@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 import { mapRecordedOutcome } from '@/lib/dashboard/recorded-outcomes';
-import { mapTrackedOutcome } from '@/lib/dashboard/compact-outcomes';
+import { mapTrackedOutcome, recordedOutcomeIdentity } from '@/lib/dashboard/compact-outcomes';
 export const dynamic = 'force-dynamic';
 type Item = ReturnType<typeof mapRecordedOutcome>;
 type Payload = { recent: Item[]; solanaTop: Item[]; robinhoodTop: Item[]; generatedAt: string; degraded?: boolean };
@@ -24,14 +24,14 @@ export async function GET() {
       ids.length ? supabaseAdmin.from('alpha_alert_event_deliveries').select('alert_event_id').in('alert_event_id',ids).not('delivered_at','is',null).limit(1000).abortSignal(AbortSignal.timeout(3500)) : Promise.resolve({data:[],error:null}),
       opportunities.length ? supabaseAdmin.from('opportunity_deliveries').select('opportunity_id,delivery_identity').in('opportunity_id',opportunities).not('delivered_at','is',null).limit(1000).abortSignal(AbortSignal.timeout(3500)) : Promise.resolve({data:[],error:null}),
       tokens.length ? supabaseAdmin.from('alpha_compact_tracking').select('chain,token,feed,price_unit,baseline_price,started_at,samples,finalized_at').in('token',tokens).limit(60).abortSignal(AbortSignal.timeout(3500)) : Promise.resolve({data:[],error:null}),
-      tokens.length ? supabaseAdmin.from('latest_token_intelligence').select('chain,token_address,symbol,name').in('token_address',tokens).limit(120).abortSignal(AbortSignal.timeout(3500)) : Promise.resolve({data:[],error:null}),
+      tokens.length ? supabaseAdmin.from('opportunities').select('chain,asset_id,raw_data').in('asset_id',tokens).order('created_at',{ascending:false}).limit(120).abortSignal(AbortSignal.timeout(3500)) : Promise.resolve({data:[],error:null}),
     ]);
     const receipts = new Set((deliveries.data??[]).map(row=>Number(row.alert_event_id)));
     const opportunityReceipts = new Set((opportunityDeliveries.data??[]).map(row=>`${row.opportunity_id}:${row.delivery_identity}`));
     const seen = new Set<string>();
     const recent = rows.map(row=>mapTrackedOutcome(row,outcomes.error ? [] : outcomes.data??[],
       (!deliveries.error && receipts.has(Number(row.id))) || (!opportunityDeliveries.error && opportunityReceipts.has(`${row.opportunity_id}:${row.delivery_identity}`)),
-      compact.error ? [] : compact.data??[], identities.error ? [] : identities.data??[], now))
+      compact.error ? [] : compact.data??[], identities.error ? [] : (identities.data??[]).map(recordedOutcomeIdentity).filter((row): row is NonNullable<typeof row> => row !== null), now))
       .filter(row=> { if (!row.token || !row.alertedAt || seen.has(row.identity)) return false; seen.add(row.identity); return true; }).slice(0,8);
     const payload: Payload = { recent, solanaTop:[], robinhoodTop:[], generatedAt:new Date(now).toISOString(),
       degraded: !!(outcomes.error || deliveries.error || opportunityDeliveries.error || compact.error || identities.error) };
