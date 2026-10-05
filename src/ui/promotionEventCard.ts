@@ -4,8 +4,10 @@ import type { AlertKeyStats } from './alertKeyStats.js';
 export type PromotionCardArgs = {text:string;token:string;launchType:string|null;stats:AlertKeyStats|null;securityNote:string|null;buttons:CardButton[][];paymentTimestamp?:number|null;kind:'BOOST'|'DEX_PAID'};
 export function buildPromotionEventCard(args:PromotionCardArgs) {
  const s=args.stats, lines=args.text.split('\n');
- const producer=args.text.match(/<b>\$([^<\n]+)<\/b>\s*·\s*([^\n<]+)/) ?? args.text.match(/\$([A-Za-z_][A-Za-z0-9_]{0,23})\s*·\s*([^\n<]+)/);
- const name=s?.name ?? producer?.[2]?.trim(),symbol=s?.symbol ?? producer?.[1]?.trim();
+ const plain=args.text.replace(/<[^>]+>/g,'').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"');
+ const producer=plain.match(/(?:^|\n)\$([A-Za-z_][A-Za-z0-9_]{0,23})\s*·\s*([^\n]+)/);
+ const compact=plain.match(/(?:^|\n)([^\n]+) \(\$([A-Za-z_][A-Za-z0-9_]{0,23})\)/);
+ const name=s?.name ?? producer?.[2]?.trim() ?? compact?.[1]?.trim(),symbol=s?.symbol ?? producer?.[1]?.trim() ?? compact?.[2]?.trim();
  const identity=name ? `${esc(name)}${symbol?' ($'+esc(symbol)+')':''}` : 'Token identity pending';
  const metrics=lines.filter(l=>/^(?:Price|MC|Market cap|FDV|Liquidity|Vol · (?:5m|24h)|Move · (?:5m|1h)|Trades · 5m|Pair age|Total supply)\s/i.test(l.replace(/<[^>]+>/g,'').replace(/^[^A-Za-z]+/,''))&&!/Unavailable|not confirmed/i.test(l));
  const dev=lines.find(l=>/Dev holding\s/i.test(l))??'Dev holding <b>Unavailable</b>';
