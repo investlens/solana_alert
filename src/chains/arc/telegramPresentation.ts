@@ -127,6 +127,8 @@ export function polishArcTelegramPresentation(text: string, buttons?: ArcInlineB
   else if (text.includes('BOOST DETECTED · ARC')) polished = compactArcBoost(text);
   else if (text.includes('AlphaOS · ARC SUPPLY BURN')) polished = compactArcBurn(text);
   else return { text: originalText, buttons };
+  const socials = originalText.split('\n').filter(line => /<a href="https:\/\/(?:x\.com|twitter\.com|t\.me)\//i.test(line));
+  if (socials.length) polished += '\n\n<b>SOCIALS</b>\n' + socials.join('\n');
   if (keyStats) polished = polished.includes('<b>CONTRACT</b>') ? polished.replace('<b>CONTRACT</b>',keyStats+'\n\n<b>CONTRACT</b>') : polished+'\n\n'+keyStats;
   if (ownership) {
     polished = polished.replace(/^.*Dev holding[^\n]*\n?/gmi, '');

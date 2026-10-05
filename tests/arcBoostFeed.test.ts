@@ -35,3 +35,9 @@ test('security warning does not hide available liquidity',()=>{
  const card=withAlertKeyStats('Liquidity, honeypot and sellability NOT CHECKED.',{liquidity:5700});
  assert.match(card,/Liquidity <b>\$5.7K<\/b>/);
 });
+
+import { polishArcTelegramPresentation } from '../src/chains/arc/telegramPresentation.js';
+test('ARC Boost keeps available social links after compact formatting',()=>{
+ const card=polishArcTelegramPresentation('BOOST DETECTED · ARC\n<b>SA</b>\n<a href="https://x.com/superant">X</a>');
+ assert.match(card.text,/https:\/\/x.com\/superant/);
+});
