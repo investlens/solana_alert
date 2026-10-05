@@ -12,7 +12,7 @@ export function mapTrackedOutcome(event: Row, checkpoints: Row[], delivered: boo
   const type = textValue(event.semantic_event_type) ?? textValue(event.alert_type);
   const matches = compact.filter(row => row.chain === chain && key(String(row.token)) === key(token)
     && row.feed === type && time && validDate(row.started_at, now)
-    && Math.abs(Date.parse(String(row.started_at)) - Date.parse(time)) <= 120_000);
+    && Math.abs(Date.parse(String(row.started_at)) - Date.parse(time)) <= 5_000);
   const tracking = matches.length === 1 ? matches[0] : undefined;
   const identity = identities.find(row => row.chain === chain && key(String(row.token_address)) === key(token));
   const enriched = { ...event, symbol: event.symbol ?? identity?.symbol, token_name: event.token_name ?? identity?.name };
