@@ -1,0 +1,11 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mapRecordedOutcome } from '../lib/dashboard/recorded-outcomes.ts';
+const now=Date.parse('2026-10-05T18:00:00Z');
+const event={id:1,asset_id:'0xabc',chain:'robinhood',symbol:'TEST',price:'2',price_provenance:'DEX_BASE_V1',alerted_at:'2026-10-05T17:00:00Z'};
+const point={alert_event_id:1,current_price:'1',price_provenance:'DEXSCREENER_VERIFIED_BASE_PAIR',measured_at:'2026-10-05T17:01:00Z',checkpoint_seconds:60,status:'MEASURED',completeness:{entryPrice:true,currentPrice:true}};
+test('untracked events never manufacture zero return or delivery',()=>{const row=mapRecordedOutcome(event,[],false,now);assert.equal(row.roiNow,null);assert.equal(row.trackingStatus,'Not tracked');assert.match(row.deliveryStatus,/unconfirmed/);});
+test('measured decline recomputed from comparable prices',()=>{const row=mapRecordedOutcome(event,[point],true,now);assert.equal(row.roiNow,-50);assert.equal(Date.parse(row.measuredAt),Date.parse(point.measured_at));assert.equal(row.deliveryStatus,'Delivery recorded');});
+test('real unchanged checkpoint can display zero',()=>assert.equal(mapRecordedOutcome(event,[{...point,current_price:'2'}],true,now).roiNow,0));
+for(const [label,patch] of [['wrong event',{alert_event_id:2}],['unavailable',{status:'UNAVAILABLE'}],['seeded',{measured_at:event.alerted_at}],['future',{measured_at:'2026-10-06T00:00:00Z'}],['missing provenance',{price_provenance:null}],['curve vs DEX',{price_provenance:'PONS_V2_CURVE_RESERVE_SPOT'}],['incomplete',{completeness:{}}],['boolean price',{current_price:true}]])test(`withhold ${label}`,()=>assert.equal(mapRecordedOutcome(event,[{...point,...patch}],true,now).roiNow,null));
+test('latest comparable observation wins, not array order',()=>assert.equal(mapRecordedOutcome(event,[{...point,current_price:3,measured_at:'2026-10-05T17:02:00Z'},point],true,now).roiNow,50));

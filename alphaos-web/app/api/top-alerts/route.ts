@@ -1,51 +1,39 @@
-import { nonnegative, addressKey } from "@/lib/dashboard/recorded-market";
-import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase-admin";
-
-export const dynamic = "force-dynamic";
-
-type AlertItem = {
-  id: string; token: string; symbol: string; name: string | null;
-  chain: "solana" | "robinhood" | "unknown"; score: number | null;
-  alertPrice: number | null; currentPrice: number | null; peakPrice: number | null;
-  roiHigh: number | null; roiNow: number | null; alertedAt: string | null; alertType: string | null;
-};
-type Payload = { solanaTop: AlertItem[]; robinhoodTop: AlertItem[]; recent: AlertItem[]; generatedAt: string; degraded?: boolean };
+import { NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabase-admin';
+import { mapRecordedOutcome } from '@/lib/dashboard/recorded-outcomes';
+export const dynamic = 'force-dynamic';
+type Item = ReturnType<typeof mapRecordedOutcome>;
+type Payload = { recent: Item[]; solanaTop: Item[]; robinhoodTop: Item[]; generatedAt: string; degraded?: boolean };
 let cache: Payload | null = null;
 let cachedUntil = 0;
-const numeric=nonnegative;
-const roi=(a:number|null,p:number|null)=>a!==null&&a>0&&p!==null?((p-a)/a)*100:null;
-function mapSolana(row:Record<string,unknown>):AlertItem{const alertPrice=numeric(row.alert_price);const currentPrice=numeric(row.current_price);const peakPrice=numeric(row.high_price_after_alert);return{id:`sol-${row.id}`,token:String(row.token_address??""),symbol:row.symbol?String(row.symbol):"UNKNOWN",name:row.name?String(row.name):null,chain:"solana",score:numeric(row.score_at_alert),alertPrice,currentPrice,peakPrice,roiHigh:roi(alertPrice,peakPrice),roiNow:roi(alertPrice,currentPrice),alertedAt:row.alerted_at?String(row.alerted_at):null,alertType:row.alert_type?String(row.alert_type):null}}
-function mapRobinhood(row:Record<string,unknown>):AlertItem{const alertPrice=numeric(row.price_at_alert);const currentPrice=numeric(row.current_price);const peakPrice=numeric(row.peak_price);return{id:`rh-${row.id}`,token:String(row.token_address??""),symbol:row.symbol?String(row.symbol):"UNKNOWN",name:row.name?String(row.name):null,chain:"robinhood",score:numeric(row.security_score),alertPrice,currentPrice,peakPrice,roiHigh:roi(alertPrice,peakPrice),roiNow:roi(alertPrice,currentPrice),alertedAt:row.alerted_at?String(row.alerted_at):null,alertType:"PONS"}}
-function recentUnique(items:AlertItem[]){
-  const ordered=[...items].sort((a,b)=>new Date(b.alertedAt??0).getTime()-new Date(a.alertedAt??0).getTime());
-  const seen=new Set<string>();
-  const result:AlertItem[]=[];
-  for(const item of ordered){
-    const key=`token:${item.chain}:${addressKey(item.token)}`;
-    if(seen.has(key))continue;
-    seen.add(key);result.push(item);
-    if(result.length===10)break;
+export async function GET() {
+  if (cache && Date.now() < cachedUntil) return NextResponse.json({success:true,data:cache});
+  try {
+    const now = Date.now();
+    const events = await supabaseAdmin.from('alpha_alert_events')
+      .select('id,opportunity_id,delivery_identity,asset_id,chain,symbol,token_name,semantic_event_type,alert_type,price,price_provenance,alerted_at')
+      .gte('alerted_at',new Date(now-7*86400_000).toISOString())
+      .order('alerted_at',{ascending:false}).limit(60).abortSignal(AbortSignal.timeout(3500));
+    if (events.error) throw events.error;
+    const rows = events.data ?? [], ids = rows.map(row=>row.id);
+    const opportunities = [...new Set(rows.flatMap(row=>row.opportunity_id == null ? [] : [row.opportunity_id]))];
+    const [outcomes, deliveries, opportunityDeliveries] = await Promise.all([
+      ids.length ? supabaseAdmin.from('alpha_alert_outcomes').select('alert_event_id,checkpoint_seconds,current_price,price_provenance,measured_at,status,completeness').in('alert_event_id',ids).order('measured_at',{ascending:false}).limit(420).abortSignal(AbortSignal.timeout(3500)) : Promise.resolve({data:[],error:null}),
+      ids.length ? supabaseAdmin.from('alpha_alert_event_deliveries').select('alert_event_id').in('alert_event_id',ids).not('delivered_at','is',null).limit(1000).abortSignal(AbortSignal.timeout(3500)) : Promise.resolve({data:[],error:null}),
+      opportunities.length ? supabaseAdmin.from('opportunity_deliveries').select('opportunity_id,delivery_identity').in('opportunity_id',opportunities).not('delivered_at','is',null).limit(1000).abortSignal(AbortSignal.timeout(3500)) : Promise.resolve({data:[],error:null}),
+    ]);
+    const receipts = new Set((deliveries.data??[]).map(row=>Number(row.alert_event_id)));
+    const opportunityReceipts = new Set((opportunityDeliveries.data??[]).map(row=>`${row.opportunity_id}:${row.delivery_identity}`));
+    const seen = new Set<string>();
+    const recent = rows.map(row=>mapRecordedOutcome(row,outcomes.error ? [] : outcomes.data??[],
+      (!deliveries.error && receipts.has(Number(row.id))) || (!opportunityDeliveries.error && opportunityReceipts.has(`${row.opportunity_id}:${row.delivery_identity}`)),now))
+      .filter(row=> { if (!row.token || !row.alertedAt || seen.has(row.identity)) return false; seen.add(row.identity); return true; }).slice(0,8);
+    const payload: Payload = { recent, solanaTop:[], robinhoodTop:[], generatedAt:new Date(now).toISOString(),
+      degraded: !!(outcomes.error || deliveries.error || opportunityDeliveries.error) };
+    cache=payload; cachedUntil=now+60_000;
+    return NextResponse.json({success:true,data:payload});
+  } catch {
+    console.error('Recent event history unavailable');
+    return NextResponse.json({success:true,data:cache ? {...cache,degraded:true} : {recent:[],solanaTop:[],robinhoodTop:[],generatedAt:new Date().toISOString(),degraded:true}});
   }
-  return result;
-}
-
-export async function GET(){
- if(cache && Date.now() < cachedUntil) return NextResponse.json({success:true,data:cache});
- try{
-  const solSelect="id, token_address, symbol, name, score_at_alert, alert_price, current_price, high_price_after_alert, alerted_at, alert_type";
-  const rhSelect="id, token_address, symbol, name, security_score, price_at_alert, current_price, peak_price, roi_high_percent, roi_now_percent, alerted_at";
-  const [solAll,rhAll,solRecent,rhRecent]=await Promise.all([
-   supabaseAdmin.from("alerts").select(solSelect).eq("chain","solana").gt("alert_price",0).gt("high_price_after_alert",0).limit(500).abortSignal(AbortSignal.timeout(3500)),
-   supabaseAdmin.from("robinhood_observations").select(rhSelect).not("alerted_at","is",null).gt("price_at_alert",0).gt("peak_price",0).order("roi_high_percent",{ascending:false}).limit(25).abortSignal(AbortSignal.timeout(3500)),
-   supabaseAdmin.from("alerts").select(solSelect).eq("chain","solana").order("alerted_at",{ascending:false}).limit(50).abortSignal(AbortSignal.timeout(3500)),
-   supabaseAdmin.from("robinhood_observations").select(rhSelect).not("alerted_at","is",null).order("alerted_at",{ascending:false}).limit(50).abortSignal(AbortSignal.timeout(3500))
-  ]);
-  if(solAll.error)throw solAll.error;if(rhAll.error)throw rhAll.error;if(solRecent.error)throw solRecent.error;if(rhRecent.error)throw rhRecent.error;
-  const solanaTop=(solAll.data??[]).map(mapSolana).filter(a=>a.roiHigh!==null).sort((a,b)=>(b.roiHigh??-Infinity)-(a.roiHigh??-Infinity)).slice(0,10);
-  const robinhoodTop=(rhAll.data??[]).map(mapRobinhood).filter(a=>a.roiHigh!==null).sort((a,b)=>(b.roiHigh??-Infinity)-(a.roiHigh??-Infinity)).slice(0,10);
-  const recent=recentUnique([...(solRecent.data??[]).map(mapSolana),...(rhRecent.data??[]).map(mapRobinhood)]);
-  const payload:Payload={solanaTop,robinhoodTop,recent,generatedAt:new Date().toISOString()};cache=payload;cachedUntil=Date.now()+60_000;
-  return NextResponse.json({success:true,data:payload});
- }catch(error){console.error("top-alerts",error);if(cache)return NextResponse.json({success:true,data:{...cache,degraded:true}});return NextResponse.json({success:true,data:{solanaTop:[],robinhoodTop:[],recent:[],generatedAt:new Date().toISOString(),degraded:true}})}
 }
