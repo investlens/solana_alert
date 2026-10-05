@@ -16,6 +16,7 @@ test('receipt in recovery audit does not require a duplicate delivery table writ
   assert.match(map({...event,raw_snapshot:{deliveryMode:'RECOVERY',acceptedRecipients:'9'}},{...tracking,feed:'BOOST'}).deliveryStatus,/unconfirmed/);
 });
 test('pending tracking is not presented as a zero return',()=>{const row=map(event,{...tracking,samples:[]});assert.equal(row.roiNow,null);assert.equal(row.trackingStatus,'Checkpoint pending');});
+test('a repeated promotion thirty seconds later cannot inherit the first outcome',()=>assert.equal(map({...event,alerted_at:'2026-10-05T17:00:30Z'}).roiNow,null));
 test('future and unavailable samples do not produce performance',()=>{for(const sample of [{status:'UNAVAILABLE',price:3,at:'2026-10-05T17:15:01Z'},{status:'MEASURED',price:3,at:'2026-10-06T00:00:00Z'}])assert.equal(map(event,{...tracking,samples:[sample]}).roiNow,null);});
 test('identity lookup is chain scoped and never replaces stored identity',()=>{
   assert.equal(map(event,tracking,[{chain:'arc',token_address:'0xabc',symbol:'WRONG'}]).symbol,'0xabc…xabc');
