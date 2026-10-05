@@ -1,4 +1,5 @@
 import { cleanTradeSetupCard } from '../../ui/tradeSetupCard.js';
+import { withResearchDisclosure } from '../../ui/researchDisclosure.js';
 import { recordFeedDelivery } from '../../services/feedDeliveryHealth.js';
 import { discloseRobinhoodKeyStats } from '../../services/alertKeyStatsService.js';
 import { discloseAlertDexPaid } from '../../services/alertDexPaidDisclosure.js';
@@ -189,7 +190,7 @@ async function sendTelegram(chatId: string, text: string, tokenAddress: string, 
   }
   const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({chat_id: chatId, text: card.text, parse_mode: 'HTML', disable_web_page_preview: true,
+    body: JSON.stringify({chat_id: chatId, text: withResearchDisclosure(card.text), parse_mode: 'HTML', disable_web_page_preview: true,
       reply_markup: {inline_keyboard: card.buttons}}),
   });
   if (!res.ok) throw new Error(`Telegram ${res.status}: ${await res.text().catch(() => '')}`);

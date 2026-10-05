@@ -1,4 +1,5 @@
 import { Markup } from 'telegraf';
+import { RESEARCH_DISCLOSURE } from '../ui/researchDisclosure.js';
 
 export const alphaosWelcomeText = [
   '<b>Welcome to AlphaOS 🔎</b>',
@@ -12,6 +13,7 @@ export const alphaosWelcomeText = [
   '👥 Add to Group — enable contract screening.', '',
   'Open <b>How to Use</b> for alert meanings and group setup.',
   '<i>Data varies by chain. Missing data is not a passed check. Research only; safety and returns are not guaranteed.</i>',
+  RESEARCH_DISCLOSURE,
 ].join('\n');
 
 export const alphaosScanGuide = [
@@ -23,6 +25,7 @@ export const alphaosScanGuide = [
   'MC and FDV are different. Unavailable history does not mean the creator has never launched a token.', '',
   'Use Refresh for an updated snapshot. Creator links open wallet research.',
   '<i>Coverage is partial. Missing data is not a safety check.</i>',
+  RESEARCH_DISCLOSURE,
 ].join('\n');
 
 export const alphaosGroupGuide = [
@@ -33,6 +36,7 @@ export const alphaosGroupGuide = [
   'For automatic screening of pasted addresses, make AlphaOS a group administrator so it can receive ordinary messages.',
   'Use <code>/scan_off</code> to disable automatic screening.', '',
   'Group members receive requested research in the group. Personal alert feeds and preferences stay in private chats; each user must open the bot and tap Start.',
+  RESEARCH_DISCLOSURE,
 ].join('\n');
 
 export const alphaosUsageGuide = [
@@ -51,6 +55,7 @@ export const alphaosUsageGuide = [
   '<b>Groups</b> — an admin enables /scan_on. Open Add to Group for instructions.',
   '<b>Help</b> — reopen this guide anytime with /help or How to Use on Home.', '',
   '<i>Missing data is not a passed check. AlphaOS does not guarantee legitimacy, safety or profits.</i>',
+  RESEARCH_DISCLOSURE,
 ].join('\n');
 
 export function alphaosWelcomeKeyboard(username?: string) {
