@@ -21,6 +21,25 @@ const request = (token: string, extra: Partial<Parameters<typeof governedDexScre
     cacheKey: `robinhood:${token}`, cacheTtlMs: 15_000, caller: 'test', endpoint: 'TOKEN_PAIRS_ROBINHOOD', ...extra });
 
 describe('shared DexScreener request governor', () => {
+  it('cancels a deduplicated waiter without aborting the original request', async () => {
+    let release!: () => void; let calls = 0;
+    resetDexScreenerGovernorForTests({fetch: async () => { calls++;
+      await new Promise<void>(resolve => { release = resolve; }); return jsonResponse({token:'ok'}); }});
+    const original = request('shared'); await new Promise(resolve => setImmediate(resolve));
+    const controller = new AbortController();
+    const waiter = request('shared', {signal:controller.signal});
+    const rejected = assert.rejects(waiter, {name:'AbortError'});
+    controller.abort(); await rejected;
+    release(); assert.equal((await original).value.token,'ok'); assert.equal(calls,1);
+  });
+  it('bounds a deduplicated waiter without duplicating HTTP work', async () => {
+    let release!: () => void; let calls = 0;
+    resetDexScreenerGovernorForTests({fetch: async () => { calls++;
+      await new Promise<void>(resolve => { release = resolve; }); return jsonResponse({token:'ok'}); }});
+    const original = request('shared-deadline'); await new Promise(resolve => setImmediate(resolve));
+    await assert.rejects(request('shared-deadline',{queueWaitTimeoutMs:10,httpTimeoutMs:10}),DexScreenerQueueCapacityError);
+    release(); await original; assert.equal(calls,1);
+  });
   it('passes successful requests through and preserves provenance and fetched time', async () => {
     let calls = 0; const now = Date.parse('2026-08-29T12:00:00Z');
     resetDexScreenerGovernorForTests({ now: () => now, fetch: async () => { calls++; return jsonResponse({ token: 'a' }); } });

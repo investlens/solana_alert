@@ -94,13 +94,14 @@ export function buildExistingTokenUniverse(args: { now?: number; opportunities?:
 export function selectDueExistingTokens(universe: ExistingTokenUniverseEntry[], args: { now?: number; max?: number; lastScanned?: Map<string, number>; hotStart?: number; warmStart?: number } = {}) {
   const now = args.now ?? Date.now(), history = args.lastScanned ?? lastScannedAt, max = args.max ?? config.existingTokenMaxPerCycle;
   const due = universe.filter(row => now - (history.get(row.token) ?? 0) >= (row.tier === 'HOT' ? config.existingTokenHotScanSeconds : config.existingTokenWarmScanSeconds) * 1000);
-  const watched = due.filter(x => x.watched);
+  const watched = due.filter(x => x.watched).sort((a,b) =>
+    (history.get(a.token) ?? 0) - (history.get(b.token) ?? 0));
   const hot = due.filter(x => x.tier === 'HOT' && !x.watched); const warm = due.filter(x => x.tier === 'WARM' && !x.watched);
   const hotStart = hot.length ? (args.hotStart ?? hotCursor) % hot.length : 0;
   const warmStart = warm.length ? (args.warmStart ?? warmCursor) % warm.length : 0;
   const rotatedHot = [...hot.slice(hotStart), ...hot.slice(0, hotStart)];
   const rotatedWarm = [...warm.slice(warmStart), ...warm.slice(0, warmStart)];
-  const watchedAllowance = Math.min(watched.length, max > 1 ? max - 1 : max);
+  const watchedAllowance = Math.min(watched.length, max > 1 && (hot.length || warm.length) ? max - 1 : max);
   const priority = watched.slice(0, watchedAllowance); const remaining = Math.max(0, max - priority.length);
   const hotAllowance = warm.length && remaining > 1 ? remaining - 1 : remaining;
   const selected = [...priority, ...rotatedHot.slice(0, hotAllowance), ...rotatedWarm].slice(0, max);
@@ -267,14 +268,13 @@ export async function refreshExistingTokenOpportunityScanner() {
   if (scannerRunning) return { skipped: true };
   scannerRunning = true; const started = Date.now();
   const metrics = { health: 'HEALTHY', universe: 0, due: 0, selected: 0, scanned_success: 0, no_market: 0, failed: 0,
-    queue_deferred: 0, cycle_deferred: 0, provider_backoff_deferred: 0, remaining_due: 0, candidates: 0, qualified: 0,
+    queue_deferred: 0, quota_deferred: 0, cycle_deferred: 0, provider_backoff_deferred: 0, remaining_due: 0, candidates: 0, qualified: 0,
     actionable_emitted: 0, failure_reasons: {} as Record<string, number>, provider_backoff: false, duration_ms: 0 };
   try {
     const universe = await loadUniverse(); metrics.universe = universe.length;
     const quota = Math.min(config.existingTokenMaxPerCycle, EXISTING_TOKEN_SCANNER_SUSTAINABLE_QUOTA);
     const due = selectDueExistingTokens(universe, { max: quota }); hotCursor = due.nextHotCursor; warmCursor = due.nextWarmCursor;
-    metrics.due = due.dueCount; metrics.selected = due.selected.length; metrics.queue_deferred = Math.max(0, due.dueCount - due.selected.length);
-    if (metrics.queue_deferred) metrics.failure_reasons.DEFERRED_QUEUE_CAPACITY = metrics.queue_deferred;
+    metrics.due = due.dueCount; metrics.selected = due.selected.length; metrics.quota_deferred = Math.max(0, due.dueCount - due.selected.length);
     if (getDexScreenerBackoffState().active) {
       metrics.health = 'DEGRADED'; metrics.failed = 1; metrics.provider_backoff = true; metrics.provider_backoff_deferred = due.selected.length;
       metrics.failure_reasons.RATE_LIMITED = 1; metrics.remaining_due = due.dueCount; return metrics;
