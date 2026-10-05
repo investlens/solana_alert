@@ -33,6 +33,18 @@ test('2x threshold, positive price, minimum volume/liquidity and freshness manda
  assert.equal(qualifyVolumeBreakout(s,5000,now-1),null);
 });
 
+test('diagnostics distinguish malformed market data from a readable nonqualifying market',async()=>{
+ const {readVolumeBreakoutResult}=await import('../src/services/volumeBreakoutEvidence.js');
+ const original=globalThis.fetch;
+ try{
+  globalThis.fetch=async()=>Response.json({data:null});
+  assert.equal((await readVolumeBreakoutResult('robinhood','0xtoken','0xpool')).reason,'SNAPSHOT_UNAVAILABLE');
+  const p=structuredClone(payload);p.data.attributes.price_change_percentage.h24='-2';
+  globalThis.fetch=async()=>Response.json(p);
+  assert.equal((await readVolumeBreakoutResult('robinhood','0xtoken','0xpool')).reason,'CONDITION_WAIT');
+ }finally{globalThis.fetch=original;}
+});
+
 test('historical lookup reuses hourly baseline, rejects HTTP errors and respects backoff',async()=>{
  const {readVolumeBreakout}=await import('../src/services/volumeBreakoutEvidence.js');
  const original=globalThis.fetch; let dailyCalls=0;
@@ -52,4 +64,9 @@ test('historical lookup reuses hourly baseline, rejects HTTP errors and respects
   let calls=0;globalThis.fetch=async()=>{calls++;throw new Error('unexpected');};
   assert.equal(await readVolumeBreakout('robinhood','0xtoken','0xthird'),null);assert.equal(calls,0);
  } finally { globalThis.fetch=original; }
+});
+
+test('diagnostics separate missing data, provider failure and valid nonqualifying market',async()=>{
+ const {readVolumeBreakoutResult}=await import('../src/services/volumeBreakoutEvidence.js');
+ assert.equal((await readVolumeBreakoutResult('unknown','token','pool')).reason,'INVALID_IDENTITY');
 });

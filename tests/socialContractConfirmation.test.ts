@@ -91,3 +91,14 @@ test('observed X profile links survive temporary X outage for one hour only',asy
  available=false;published=true;time=60001;assert.equal((await verify(args)).evidenceSource,'Website');
  time=3600001;assert.equal((await verify(args)).confirmed,false);
 });
+
+test('cached reciprocal links also work during an unreadable X shell, without trusting new metadata',async()=>{
+ const {createSocialContractVerifier}=await import('../src/chains/robinhood/socialContractConfirmation.js');
+ let time=0,shell=false,published=false;
+ const profile=bio('Our project')+'<div data-testid="UserUrl"><a href="https://project.example/">Website</a></div>';
+ const verify=createSocialContractVerifier(async url=>url.includes('x.com')?(shell?'<html><script>login()</script></html>':profile):url.includes('project.example')?`<a href="https://x.com/RevenueFamily">X</a><p>${published?'Robinchain CA: '+token:'Coming soon'}</p>`:null,()=>time);
+ assert.equal((await verify(args)).confirmed,false);
+ shell=true;published=true;time=60001;
+ assert.equal((await verify(args)).evidenceSource,'Website');
+ time=3600001;assert.equal((await verify(args)).confirmed,false);
+});

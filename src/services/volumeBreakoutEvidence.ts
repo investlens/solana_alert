@@ -56,16 +56,19 @@ async function json(url: string): Promise<any> {
   if (!response.ok) throw new Error(`history HTTP ${response.status}`);
   return response.json();
 }
-export async function readVolumeBreakout(network: string, token: string, pool: string): Promise<VolumeBreakoutEvidence | null> {
-  if (!['robinhood', 'arc', 'solana'].includes(network) || !token || !pool) return null;
+export type VolumeBreakoutRead = {evidence:VolumeBreakoutEvidence|null;reason:'QUALIFIED'|'CONDITION_WAIT'|'INVALID_IDENTITY'|'CAPACITY_LIMITED'|'PROVIDER_BACKOFF'|'SNAPSHOT_UNAVAILABLE'|'INCOMPLETE_WEEK'|'PROVIDER_UNAVAILABLE'};
+export async function readVolumeBreakoutResult(network: string, token: string, pool: string): Promise<VolumeBreakoutRead> {
+  if (!['robinhood', 'arc', 'solana'].includes(network) || !token || !pool) return {evidence:null,reason:'INVALID_IDENTITY'};
   const key = `${network}:${pool}:${Math.floor(Date.now() / 86400000)}`;
   for (const [k, v] of history) if (v.expires <= Date.now()) history.delete(k);
-  if (pending.has(key) || pending.size >= 1 || Date.now() < backoffUntil) return null;
+  if(Date.now()<backoffUntil)return {evidence:null,reason:'PROVIDER_BACKOFF'};
+  if (pending.has(key) || pending.size >= 1) return {evidence:null,reason:'CAPACITY_LIMITED'};
   pending.add(key);
   try {
     const base = `https://api.geckoterminal.com/api/v2/networks/${network}/pools/${encodeURIComponent(pool)}`;
     const snapshot = poolVolumeSnapshot(await json(base), network, token, pool, Date.now());
-    if (!snapshot || snapshot.volume24h < 10000 || snapshot.move24h <= 0 || snapshot.liquidity < 2000) return null;
+    if (!snapshot)return {evidence:null,reason:'SNAPSHOT_UNAVAILABLE'};
+    if(snapshot.volume24h < 10000 || snapshot.move24h <= 0 || snapshot.liquidity < 2000)return {evidence:null,reason:'CONDITION_WAIT'};
     let cached = history.get(key);
     if (!cached) {
       const boundary = Math.floor(Date.now() / 86400000) * 86400;
@@ -75,7 +78,10 @@ export async function readVolumeBreakout(network: string, token: string, pool: s
       cached = { average, expires: Date.now() + (average == null ? 10 * 60000 : 3600000) };
       history.set(key, cached);
     }
-    return cached.average == null ? null : qualifyVolumeBreakout(snapshot, cached.average);
-  } catch { return null; }
+    if(cached.average==null)return {evidence:null,reason:'INCOMPLETE_WEEK'};
+    const evidence=qualifyVolumeBreakout(snapshot,cached.average);return {evidence,reason:evidence?'QUALIFIED':'CONDITION_WAIT'};
+  } catch(error) { const message=error instanceof Error?error.message:'';return {evidence:null,reason:message==='history request budget'?'CAPACITY_LIMITED':Date.now()<backoffUntil?'PROVIDER_BACKOFF':'PROVIDER_UNAVAILABLE'}; }
   finally { pending.delete(key); }
 }
+
+export async function readVolumeBreakout(network:string,token:string,pool:string):Promise<VolumeBreakoutEvidence|null>{return (await readVolumeBreakoutResult(network,token,pool)).evidence;}
