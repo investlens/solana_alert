@@ -1,4 +1,5 @@
 import { cleanAlertCard } from './alertCardLayout.js';
+import { withResearchDisclosure } from './researchDisclosure.js';
 export type AlphaNotificationCategory = 'opportunity' | 'wallet' | 'creator' | 'smart-money' | 'market' | 'risk' | 'execution' | 'system';
 export type AlphaNotificationSeverity = 'info' | 'watch' | 'positive' | 'warning' | 'critical' | 'success';
 export type AlphaNotificationState = 'ENTRY_READY' | 'OPPORTUNITY' | 'VOLUME_IGNITION' | 'DEX_PAID' | 'BOOST' | 'MAJOR_BOOST' | 'DEV_BURN' | 'DEV_SOLD' | 'CRITICAL_RISK' | 'BUILDING' | 'RUNNER' | 'WATCHING' | 'BOOSTED_OPPORTUNITY' | 'EXIT_AVOID' | 'WALLET_BUY' | 'WALLET_SELL' | 'WALLET_LAUNCH' | 'WALLET_MOVE' | 'CREATOR_EVENT' | 'RISK' | 'EXECUTED' | 'FAILED' | 'PAUSED' | 'RESUMED' | 'POSITION_UPDATE';
@@ -14,7 +15,7 @@ export type AlphaNotification = {
 export type AlphaNotificationAction = { text: string; url?: string; callback_data?: string; };
 
 const STATE_LABELS: Record<AlphaNotificationState, string> = {
-  ENTRY_READY:'🔥 ALPHA ENTRY', OPPORTUNITY:'🔥 ALPHA OPPORTUNITY', VOLUME_IGNITION:'🚀 VOLUME IGNITION', DEX_PAID:'💎 DEX PAID DETECTED', BOOST:'🚀 BOOST DETECTED', MAJOR_BOOST:'🚨 MAX BOOST 500+', DEV_BURN:'🔥 VERIFIED BURN', DEV_SOLD:'🚨 DEV SELL', CRITICAL_RISK:'🚨 LIQUIDITY / CRITICAL RISK', BUILDING:'📈 MOMENTUM BUILDING', RUNNER:'🚀 RUNNER', WATCHING:'👀 WATCHING', BOOSTED_OPPORTUNITY:'🔥 BOOSTED OPPORTUNITY', EXIT_AVOID:'🚪 RISK EXIT ALERT', WALLET_BUY:'🐋 SMART MONEY ENTRY', WALLET_SELL:'🐋 SMART MONEY EXIT', WALLET_LAUNCH:'🐋 SMART MONEY LAUNCH', WALLET_MOVE:'🐋 SMART MONEY MOVEMENT', CREATOR_EVENT:'👨‍💻 DEV MOVEMENT', RISK:'⚠️ RISK ALERT', EXECUTED:'✅ EXECUTED', FAILED:'⚠️ EXECUTION FAILED', PAUSED:'⏸ AUTO TRADE PAUSED', RESUMED:'▶ AUTO TRADE RESUMED', POSITION_UPDATE:'📈 POSITION UPDATE'
+  ENTRY_READY:'🔎 SETUP OBSERVED', OPPORTUNITY:'🔥 ALPHA OPPORTUNITY', VOLUME_IGNITION:'🚀 VOLUME IGNITION', DEX_PAID:'💎 DEX PAID DETECTED', BOOST:'🚀 BOOST DETECTED', MAJOR_BOOST:'🚨 MAX BOOST 500+', DEV_BURN:'🔥 VERIFIED BURN', DEV_SOLD:'🚨 DEV SELL', CRITICAL_RISK:'🚨 LIQUIDITY / CRITICAL RISK', BUILDING:'📈 MOMENTUM BUILDING', RUNNER:'🚀 RUNNER', WATCHING:'👀 WATCHING', BOOSTED_OPPORTUNITY:'🔥 BOOSTED OPPORTUNITY', EXIT_AVOID:'⚠️ RISK FLAG', WALLET_BUY:'🐋 SMART MONEY ENTRY', WALLET_SELL:'🐋 SMART MONEY EXIT', WALLET_LAUNCH:'🐋 SMART MONEY LAUNCH', WALLET_MOVE:'🐋 SMART MONEY MOVEMENT', CREATOR_EVENT:'👨‍💻 DEV MOVEMENT', RISK:'⚠️ RISK ALERT', EXECUTED:'✅ EXECUTED', FAILED:'⚠️ EXECUTION FAILED', PAUSED:'⏸ AUTO TRADE PAUSED', RESUMED:'▶ AUTO TRADE RESUMED', POSITION_UPDATE:'📈 POSITION UPDATE'
 };
 export function escapeAlphaHtml(value: unknown): string { return String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;'); }
 export const TELEGRAM_MESSAGE_LIMIT = 4096;
@@ -26,8 +27,8 @@ export function assertAlphaActions(actions:AlphaNotificationAction[][]):AlphaNot
 function validMetric(metric:AlphaNotificationMetric):boolean { return metric.value!==null&&metric.value!==undefined&&String(metric.value).trim()!==''; }
 function validConfidence(value:number|null|undefined):number|null { return typeof value==='number'&&Number.isFinite(value)&&value>=0&&value<=100?value:null; }
 function chainLabel(value:string|null|undefined):string|null { const v=String(value??'').trim().toUpperCase(); if(!v)return null; if(v==='ROBINHOOD')return 'ROBINHOOD · PONS'; return v; }
-function verdict(alert:AlphaNotification):string { const intent=alert.displayIntent; if(intent==='EXIT')return 'EXIT'; if(intent==='AVOID')return 'AVOID'; if(intent==='ENTRY')return alert.entryAction==='BUY'?'BUY SETUP':'CHECK ENTRY'; if(alert.state==='DEX_PAID')return 'PROMOTION EVENT'; if(['BOOST','MAJOR_BOOST','VOLUME_IGNITION','BUILDING','RUNNER'].includes(alert.state))return 'MOMENTUM WATCH'; if(alert.category==='wallet'||alert.category==='smart-money')return 'SMART MONEY WATCH'; if(alert.category==='creator')return 'CREATOR WATCH'; return 'WATCH'; }
-function actionLabel(alert:AlphaNotification):string { if(alert.displayIntent==='ENTRY')return alert.entryAction==='BUY'?'BUY':'CHECK ENTRY'; if(alert.displayIntent==='MOMENTUM_UPDATE')return 'MOMENTUM UPDATE'; if(alert.displayIntent==='AVOID')return 'AVOID'; if(alert.displayIntent==='EXIT')return 'EXIT'; return 'WATCH'; }
+function verdict(alert:AlphaNotification):string { const intent=alert.displayIntent; if(intent==='EXIT')return 'DETERIORATION OBSERVED'; if(intent==='AVOID')return 'RISK FLAG'; if(intent==='ENTRY')return 'SETUP FOR REVIEW'; if(alert.state==='DEX_PAID')return 'PROMOTION EVENT'; if(['BOOST','MAJOR_BOOST','VOLUME_IGNITION','BUILDING','RUNNER'].includes(alert.state))return 'MOMENTUM WATCH'; if(alert.category==='wallet'||alert.category==='smart-money')return 'SMART MONEY WATCH'; if(alert.category==='creator')return 'CREATOR WATCH'; return 'WATCH'; }
+function actionLabel(alert:AlphaNotification):string { if(alert.displayIntent==='ENTRY')return 'REVIEW EVIDENCE'; if(alert.displayIntent==='MOMENTUM_UPDATE')return 'MOMENTUM UPDATE'; if(alert.displayIntent==='AVOID')return 'RISK FLAG'; if(alert.displayIntent==='EXIT')return 'DETERIORATION OBSERVED'; return 'WATCH'; }
 function observedLabel(value:string|number|Date|null|undefined):string { if(value==null)return 'Observed just now'; const t=value instanceof Date?value.getTime():typeof value==='number'?value:Date.parse(value); if(!Number.isFinite(t))return 'Observed just now'; const sec=Math.max(0,Math.floor((Date.now()-t)/1000)); return sec<10?'Observed just now':sec<60?`Observed ${sec}s ago`:`Observed ${Math.floor(sec/60)}m ago`; }
 
 export function renderAlphaNotification(alert:AlphaNotification):string {
@@ -49,17 +50,17 @@ export function renderAlphaNotification(alert:AlphaNotification):string {
   for(const m of metrics.filter(x=>![p,mc,liq,vol].includes(x)).slice(0,4))lines.push(`${m.icon?`${escapeAlphaHtml(m.icon)} `:''}${escapeAlphaHtml(boundedAlphaText(m.label,24))} <b>${escapeAlphaHtml(boundedAlphaText(m.value,80))}</b>`);
   const source=alert.insight?.length?alert.insight:alert.evidence?.length?alert.evidence:alert.reason?[alert.reason]:[];
   const insight=source.flatMap(v=>String(v??'').split(/(?<=[.!?])\s+/)).map(v=>boundedAlphaText(v.replace(/[.!?]+$/,''),140)).filter(Boolean).slice(0,3);
-  if(insight.length)lines.push('',`📈 <b>${escapeAlphaHtml(alert.insightTitle|| (alert.displayIntent==='ENTRY'?'WHY ALPHAOS LIKES IT':'WHAT CHANGED'))}</b>`,...insight.map(x=>`• ${escapeAlphaHtml(x)}`));
+  if(insight.length)lines.push('',`📈 <b>${escapeAlphaHtml(alert.insightTitle|| (alert.displayIntent==='ENTRY'?'SUPPORTING EVIDENCE':'WHAT CHANGED'))}</b>`,...insight.map(x=>`• ${escapeAlphaHtml(x)}`));
   const warnings=[alert.structureContext,alert.developerContext].filter((x):x is string=>Boolean(x&&String(x).trim())); if(warnings.length)lines.push('','⚠️ <b>WATCH OUT</b>',...warnings.slice(0,2).map(x=>`• ${escapeAlphaHtml(boundedAlphaText(x,180))}`));
   const risk=String(alert.risk??'UNKNOWN').toUpperCase(), riskIcon=risk==='LOW'?'✅':risk==='MEDIUM'||risk==='REVIEW'?'⚠️':risk==='HIGH'?'🚨':'⚪'; const confidence=validConfidence(alert.confidence);
-  lines.push('',`🎯 <b>ACTION: ${escapeAlphaHtml(actionLabel(alert))}</b>`);
+  lines.push('',`🎯 <b>RESEARCH STATUS: ${escapeAlphaHtml(actionLabel(alert))}</b>`);
   if(alert.displayIntent==='WATCH') lines.push('<i>Information only — entry not confirmed.</i>');
-  lines.push(`🧠 <b>ALPHAOS VERDICT: ${escapeAlphaHtml(verdict(alert))}${confidence==null?'':` — ${confidence.toFixed(0)}/100`}</b>`);
+  lines.push(`🧠 <b>RESEARCH ASSESSMENT: ${escapeAlphaHtml(verdict(alert))}${confidence==null?'':` — ${confidence.toFixed(0)}/100`}</b>`);
   if(confidence!=null)lines.push(`<b>Confidence:</b> ${confidence>=85?'HIGH':confidence>=70?'MEDIUM':'LOW'} (${confidence.toFixed(0)}/100)`);
   lines.push(`${riskIcon} <b>Risk:</b> ${escapeAlphaHtml(risk==='MEASURED'?'UNKNOWN':risk)}`);
   if(alert.observedAt!=null)lines.push(`<i>${escapeAlphaHtml(observedLabel(alert.observedAt))}</i>`);
-  if(alert.displayIntent==='WATCH')lines.push(alert.state==='DEX_PAID'?'<i>Paid promotion does not establish trading quality.</i>':'<i>AlphaOS is monitoring for entry confirmation.</i>');
+  if(alert.displayIntent==='WATCH')lines.push(alert.state==='DEX_PAID'?'<i>Paid promotion does not establish trading quality.</i>':'<i>AlphaOS is monitoring for further market evidence.</i>');
   if(alert.access==='FREE')lines.push('','<i>Free intelligence may be delayed.</i>');
-  const rendered=cleanAlertCard(lines.join('\n')); if(rendered.length>TELEGRAM_MESSAGE_LIMIT)throw new Error('Alpha notification exceeds Telegram message limit after bounded rendering'); return rendered;
+  const rendered=withResearchDisclosure(cleanAlertCard(lines.join('\n'))); if(rendered.length>TELEGRAM_MESSAGE_LIMIT)throw new Error('Alpha notification exceeds Telegram message limit after bounded rendering'); return rendered;
 }
 export function burnEvidenceMetric(burnedAmount:number|null|undefined):AlphaNotificationMetric { if(burnedAmount==null||!Number.isFinite(burnedAmount))return{label:'Burn',value:'Data unavailable'}; return{label:'Burn',value:burnedAmount===0?'0 confirmed':`${burnedAmount.toLocaleString()} confirmed`}; }

@@ -21,9 +21,9 @@ function render(state: AlphaNotification['state'], extra: Partial<AlphaNotificat
 }
 
 test('representative Opportunity Entry, Building, and Risk snapshots', () => {
-  assert.match(render('ENTRY_READY'), /🔥 <b>ALPHA ENTRY/);
+  assert.match(render('ENTRY_READY'), /🔎 <b>SETUP OBSERVED/);
   assert.match(render('BUILDING'), /📈 <b>MOMENTUM BUILDING/);
-  assert.match(render('EXIT_AVOID', { category: 'risk', severity: 'critical' }), /🚪 <b>RISK EXIT ALERT/);
+  assert.match(render('EXIT_AVOID', { category: 'risk', severity: 'critical' }), /⚠️ <b>RISK FLAG/);
 });
 
 test('representative Smart Money entry, exit, and launch snapshots', () => {
