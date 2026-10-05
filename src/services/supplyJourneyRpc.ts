@@ -3,7 +3,7 @@ export function createSupplyJourneyRpc(endpoint:string, fetcher:typeof fetch=fet
   const url=new URL(endpoint);
   if(!['http:','https:'].includes(url.protocol))throw Error('Invalid research RPC endpoint');
   return async <T>(method:string,params:unknown[],signal?:AbortSignal):Promise<T>=>{
-    if(!['eth_chainId','eth_blockNumber','eth_getBlockByNumber','eth_getLogs','eth_call'].includes(method))throw Error('Unsupported research read');
+    if(!['eth_chainId','eth_blockNumber','eth_getBlockByNumber','eth_getLogs','eth_call','eth_getTransactionReceipt'].includes(method))throw Error('Unsupported research read');
     const response=await fetcher(endpoint,{method:'POST',headers:{'content-type':'application/json'},
       body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal});
     if(!response.ok||!response.body)throw Error(`Research RPC HTTP ${response.status}`);

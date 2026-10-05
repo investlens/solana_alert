@@ -1,7 +1,7 @@
 /** Read-only smoke check. No database/cache writes or Telegram delivery. */
 import { parseAbiItem, toEventSelector, decodeEventLog } from 'viem';
 import { getPonsFactoryDeployments, PONS_CONTRACTS } from '../src/chains/robinhood/ponsContracts.js';
-import { analyzeSupplyJourney, decodeJourneyTransfers } from '../src/services/supplyJourney.js';
+import { analyzeSupplyJourney, decodeJourneyTransfers, JOURNEY_WINDOW_BLOCKS } from '../src/services/supplyJourney.js';
 import {createSupplyJourneyRpc} from '../src/services/supplyJourneyRpc.js';
 
 const endpoint = process.env.SUPPLY_VALIDATION_RPC_URL;
@@ -36,7 +36,7 @@ try {
   // A matching empty window does not validate the recipient-balance path.
   for(const log of candidates){
     const args=decodeEventLog({abi:[abi],data:log.data,topics:log.topics,strict:true}).args as {token:string;deployer:string;curve:string};
-    const from=end>511n?end-511n:0n;
+    const from=end>=JOURNEY_WINDOW_BLOCKS?end-JOURNEY_WINDOW_BLOCKS+1n:0n;
     const transferLogs=await rpc('eth_getLogs',[{address:args.token,fromBlock:'0x'+from.toString(16),toBlock:'0x'+end.toString(16),topics:['0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef','0x'+args.deployer.slice(2).padStart(64,'0')]}]);
     const excluded=new Set([args.curve,factory.address,args.deployer,PONS_CONTRACTS.swapRouter,PONS_CONTRACTS.positionManager,'0x'+'0'.repeat(40),'0x'+'0'.repeat(36)+'dead'].map(a=>a.toLowerCase()));
     if(decodeJourneyTransfers(transferLogs,args.token.toLowerCase(),from,end).some(row=>BigInt(row.amount)>0n&&!excluded.has(row.to))){positive=log;break;}
@@ -59,20 +59,33 @@ try {
       checkedBlock: result.block, creator: result.creator, holding: result.holding, supply: result.total,
       transfers: result.transfers, recipients: result.recipients }));
     if(result.status!=='WINDOW_COMPLETE')throw Error('Incomplete primary research');
+    let receipts=0;
+    if(result.transfers.length>10)throw Error('Positive receipt evidence exceeds validation cap');
+    for(const row of result.transfers){
+      const receipt=await rpc<any>('eth_getTransactionReceipt',[row.tx]);
+      if(receipt?.status!=='0x1'||receipt.transactionHash?.toLowerCase()!==row.tx||BigInt(receipt.blockNumber)!==BigInt(row.block))throw Error('Transfer receipt unavailable or mismatched');
+      const matched=decodeJourneyTransfers(receipt.logs.filter((l:any)=>l.address?.toLowerCase()===args.token.toLowerCase()&&l.topics?.[0]?.toLowerCase()==='0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'),args.token.toLowerCase(),BigInt(row.block),BigInt(row.block)).some(l=>JSON.stringify(l)===JSON.stringify(row));
+      if(!matched)throw Error('Transfer does not match receipt evidence');receipts++;
+    }
     for(const read of reads){
-      const value=await request<any>(secondary,read.method,read.params);
+      // Secondary public access covers only 1024 recent blocks. Never request
+      // older logs from it; compare its supported sub-window explicitly.
+      const params=read.method==='eth_getLogs'?[{...(read.params[0] as any),fromBlock:'0x'+(BigInt(result.block!)>511n?BigInt(result.block!)-511n:0n).toString(16)}]:read.params;
+      const value=await request<any>(secondary,read.method,params);
       if(read.method==='eth_call') {if(BigInt(value)!==BigInt(String(read.result)))throw Error('Balance or supply mismatch');}
       else if(read.method==='eth_getBlockByNumber'){if(value?.hash!==(read.result as any)?.hash)throw Error('Block hash mismatch');}
-      else {const query=read.params[0] as any;
+      else {const query=params[0] as any;
         const canonical=(logs:unknown)=>JSON.stringify(decodeJourneyTransfers(logs,args.token.toLowerCase(),BigInt(query.fromBlock),BigInt(query.toBlock)));
-        if(canonical(value)!==canonical(read.result))throw Error('Transfer evidence mismatch');
+        const primary=(read.result as any[]).filter(row=>BigInt(row.blockNumber)>=BigInt(query.fromBlock));
+        if(canonical(value)!==canonical(primary))throw Error('Transfer evidence mismatch');
       }
     }
     complete++;
+    console.log(JSON.stringify({token:args.token,receiptEvidenceChecked:receipts,independentBalances:'MATCHED',independentLogWindowBlocks:512}));
     positiveCoverage ||= result.recipients.length>0 && result.recipients.every(row=>row.balance!==null);
   }
   console.log(JSON.stringify({ samples: samples.length, complete, logicalRpcCalls: calls,
-    independentRpcComparison: 'PASSED',positiveRecipientCoverage:positiveCoverage, launchIdentitySource:'OFFICIAL_FACTORY_EVENT',productionRouteLatency: 'REQUIRED' }));
+    independentRpcComparison: 'BALANCES_AND_RECENT_512_BLOCK_LOGS_PASSED',positiveRecipientCoverage:positiveCoverage,olderTransferEvidence:'OFFICIAL_RPC_TRANSACTION_RECEIPTS', launchIdentitySource:'OFFICIAL_FACTORY_EVENT',productionRouteLatency: 'REQUIRED' }));
   if (complete !== samples.length || !positiveCoverage) process.exitCode = 1;
 } catch (error) {
   console.error(JSON.stringify({ status: 'LIVE_VALIDATION_BLOCKED', logicalRpcCalls: calls,

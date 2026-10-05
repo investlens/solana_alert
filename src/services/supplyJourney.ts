@@ -7,10 +7,11 @@ import type { AlertKeyStats } from '../ui/alertKeyStats.js';
 const ADDRESS=/^0x[a-f0-9]{40}$/i;
 const TRANSFER='0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 const ZERO='0x'+'0'.repeat(40),DEAD='0x'+'0'.repeat(36)+'dead';
+export const JOURNEY_WINDOW_BLOCKS=10000n;
 export type JourneyTransfer={from:string;to:string;amount:string;tx:string;index:number;block:string};
 export type SupplyJourney={token:string;creator:string|null;at:number;block:string|null;fromBlock:string|null;status:'WINDOW_COMPLETE'|'PARTIAL'|'UNAVAILABLE';reason:string|null;total:string|null;holding:string|null;recipients:{address:string;balance:string|null}[];transfers:JourneyTransfer[];excluded:number;stats:AlertKeyStats|null};
 export type JourneyDependencies={rpc:<T>(method:string,params:unknown[],signal?:AbortSignal)=>Promise<T>;marker:(token:string)=>Promise<{token?:string;factory?:string;creator?:string;curveAddress?:string}|null>;now:()=>number};
-const production:JourneyDependencies={rpc:(method,params,signal)=>createSupplyJourneyRpc(process.env.SUPPLY_JOURNEY_RPC_URL?.trim()||process.env.ROBINHOOD_RPC_URL?.trim()||'https://rpc.mainnet.chain.robinhood.com')(method,params,signal),marker:async token=>(await getSharedJson<any>(`alphaos:pons:verified:${token}`))?.value??null,now:Date.now};
+const production:JourneyDependencies={rpc:(method,params,signal)=>createSupplyJourneyRpc(process.env.SUPPLY_JOURNEY_RPC_URL?.trim()||'https://rpc.mainnet.chain.robinhood.com')(method,params,signal),marker:async token=>(await getSharedJson<any>(`alphaos:pons:verified:${token}`))?.value??null,now:Date.now};
 const topic=(a:string)=>'0x'+a.slice(2).padStart(64,'0');
 const balanceData=(a:string)=>'0x70a08231'+a.slice(2).padStart(64,'0');
 function raw(value:unknown):string {if(typeof value!=='string'||!/^0x[0-9a-f]+$/i.test(value))throw Error('Malformed on-chain quantity');return BigInt(value).toString();}
@@ -45,9 +46,8 @@ export async function analyzeSupplyJourney(token:string,d:JourneyDependencies=pr
   if(BigInt(raw(await rpc('eth_chainId',[])))!==4663n)throw Error('Wrong chain');
   const head=BigInt(raw(await rpc('eth_blockNumber',[])));
   if(head<40n)throw Error('Insufficient block history');
-  // Public archive fallback serves the last 1024 blocks. Leave headroom for
-  // chain progress during validation; this is explicitly recent activity.
-  const end=head-40n,start=end>511n?end-511n:0n,block='0x'+end.toString(16);
+  // Official RPC supports this bounded log window; it is not lifetime history.
+  const end=head-40n,start=end>=JOURNEY_WINDOW_BLOCKS?end-JOURNEY_WINDOW_BLOCKS+1n:0n,block='0x'+end.toString(16);
   r.block=end.toString();r.fromBlock=start.toString();
   const before=await rpc<any>('eth_getBlockByNumber',[block,false]);
   if(!/^0x[0-9a-f]{64}$/i.test(before?.hash??''))throw Error('Checked block unavailable');
