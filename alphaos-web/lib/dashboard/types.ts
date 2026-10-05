@@ -1,4 +1,4 @@
-export type Chain = 'solana' | 'ethereum' | 'base' | 'robinhood' | 'sui' | 'bsc' | 'unknown';
+export type Chain = 'arc' | 'solana' | 'ethereum' | 'base' | 'robinhood' | 'sui' | 'bsc' | 'unknown';
 export type OpportunityStatus = 'NEW' | 'WATCHING' | 'APPROVED' | 'EXECUTED' | 'REJECTED' | 'EXPIRED' | 'REVIEWED';
 export type OpportunityType = 'TOKEN_PREDEX' | 'TOKEN_CREATOR' | 'TOKEN_WALLET' | 'DEX_CONFIRMATION' | 'NFT_MISPRICE' | 'NFT_OFFER_ARBITRAGE' | 'CEX_DEX_ARB' | 'PREDICTION_MARKET' | 'NEWS_CATALYST';
 export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'UNKNOWN';
@@ -6,7 +6,7 @@ export type ScannerStatus = 'RUNNING' | 'DEGRADED' | 'STOPPED' | 'UNKNOWN';
 export type ModuleStatus = 'healthy' | 'degraded' | 'offline';
 export type DashboardStat = { id: string; label: string; value: string | number; helperText?: string; trend?: number | null; status?: ModuleStatus };
 export type DashboardStatsResponse = { scannerStatus: ScannerStatus; tokensTracked: number; timelineEvents: number; alertsToday: number; buysToday: number; moonshots: number; completedOutcomes: number; winnerRate: number; averagePeakReturn: number; latestBuy: { token: string; symbol: string; marketCap: number | null; score: number | null; createdAt: string | null } | null };
-export type LiveOpportunity = { id: string | number; opportunityType: OpportunityType; assetId: string; token: string; symbol: string; title: string; chain: Chain; sourceAgent: string; confidence: number; riskScore: number; riskLevel: RiskLevel; status: OpportunityStatus; expectedProfit: number | null; expectedProfitPercent: number | null; entryPrice: number | null; exitPrice: number | null; athPrice: number | null; marketCap: number | null; athMarketCap: number | null; liquidity: number | null; createdAt: string; updatedAt: string | null; reportUrl: string };
+export type LiveOpportunity = { id: string | number; opportunityType: OpportunityType; assetId: string; token: string; symbol: string; title: string; chain: Chain; sourceAgent: string; confidence: number; riskScore: number | null; riskLevel: RiskLevel; status: OpportunityStatus; expectedProfit: number | null; expectedProfitPercent: number | null; entryPrice: number | null; exitPrice: number | null; athPrice: number | null; marketCap: number | null; athMarketCap: number | null; liquidity: number | null; createdAt: string; updatedAt: string | null; reportUrl: string };
 export type OpportunitiesResponse = { items: LiveOpportunity[]; total: number; generatedAt: string };
 export type BestCall = { id: string; token: string; symbol: string; title: string; chain: Chain; score: number | null; conviction: string | null; roiNow: number | null; roiHigh: number; alertPrice: number | null; currentPrice: number | null; highAfterAlert: number | null; createdAt: string; reportUrl: string };
 export type BestCallsResponse = { items: BestCall[]; total: number; generatedAt: string };

@@ -14,10 +14,10 @@ export default function OpportunitiesPage() {
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
               </span>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-300">Live AlphaOS</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-300">Recorded research</p>
             </div>
             <h1 className="mt-3 text-3xl font-semibold tracking-[-0.035em] text-white md:text-5xl">Radar</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">Live opportunities across Solana and Robinhood, ranked by AlphaOS intelligence.</p>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-500">Stored research across supported chains. Refresh manually; recorded signals do not confirm an executable trade.</p>
           </section>
           <LiveOpportunities />
         </div>

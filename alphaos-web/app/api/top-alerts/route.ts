@@ -11,6 +11,7 @@ type AlertItem = {
 };
 type Payload = { solanaTop: AlertItem[]; robinhoodTop: AlertItem[]; recent: AlertItem[]; generatedAt: string; degraded?: boolean };
 let cache: Payload | null = null;
+let cachedUntil = 0;
 const numeric=(v:unknown)=>{if(v===null||v===undefined||v==="")return null;const n=Number(v);return Number.isFinite(n)?n:null};
 const roi=(a:number|null,p:number|null)=>a&&p!==null?((p-a)/a)*100:null;
 function mapSolana(row:any):AlertItem{const alertPrice=numeric(row.alert_price);const currentPrice=numeric(row.current_price);const peakPrice=numeric(row.high_price_after_alert);return{id:`sol-${row.id}`,token:String(row.token_address??""),symbol:row.symbol?String(row.symbol):"UNKNOWN",name:row.name?String(row.name):null,chain:"solana",score:numeric(row.score_at_alert),alertPrice,currentPrice,peakPrice,roiHigh:roi(alertPrice,peakPrice),roiNow:roi(alertPrice,currentPrice),alertedAt:row.alerted_at?String(row.alerted_at):null,alertType:row.alert_type?String(row.alert_type):null}}
@@ -29,6 +30,7 @@ function recentUnique(items:AlertItem[]){
 }
 
 export async function GET(){
+ if(cache && Date.now() < cachedUntil) return NextResponse.json({success:true,data:cache});
  try{
   const solSelect="id, token_address, symbol, name, score_at_alert, alert_price, current_price, high_price_after_alert, alerted_at, alert_type";
   const rhSelect="id, token_address, symbol, name, security_score, price_at_alert, current_price, peak_price, roi_high_percent, roi_now_percent, alerted_at";
@@ -42,7 +44,7 @@ export async function GET(){
   const solanaTop=(solAll.data??[]).map(mapSolana).filter(a=>a.roiHigh!==null).sort((a,b)=>(b.roiHigh??-Infinity)-(a.roiHigh??-Infinity)).slice(0,10);
   const robinhoodTop=(rhAll.data??[]).map(mapRobinhood).filter(a=>a.roiHigh!==null).sort((a,b)=>(b.roiHigh??-Infinity)-(a.roiHigh??-Infinity)).slice(0,10);
   const recent=recentUnique([...(solRecent.data??[]).map(mapSolana),...(rhRecent.data??[]).map(mapRobinhood)]);
-  const payload:Payload={solanaTop,robinhoodTop,recent,generatedAt:new Date().toISOString()};cache=payload;
+  const payload:Payload={solanaTop,robinhoodTop,recent,generatedAt:new Date().toISOString()};cache=payload;cachedUntil=Date.now()+60_000;
   return NextResponse.json({success:true,data:payload});
  }catch(error){console.error("top-alerts",error);if(cache)return NextResponse.json({success:true,data:{...cache,degraded:true}});return NextResponse.json({success:true,data:{solanaTop:[],robinhoodTop:[],recent:[],generatedAt:new Date().toISOString(),degraded:true}})}
 }
