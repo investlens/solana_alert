@@ -99,8 +99,9 @@ export function selectDueExistingTokens(universe: ExistingTokenUniverseEntry[], 
   const hot = due.filter(x => x.tier === 'HOT' && !x.watched); const warm = due.filter(x => x.tier === 'WARM' && !x.watched);
   const hotStart = hot.length ? (args.hotStart ?? hotCursor) % hot.length : 0;
   const warmStart = warm.length ? (args.warmStart ?? warmCursor) % warm.length : 0;
-  const rotatedHot = [...hot.slice(hotStart), ...hot.slice(0, hotStart)];
-  const rotatedWarm = [...warm.slice(warmStart), ...warm.slice(0, warmStart)];
+  const oldestFirst=(a:ExistingTokenUniverseEntry,b:ExistingTokenUniverseEntry)=>(history.get(a.token)??0)-(history.get(b.token)??0);
+  const rotatedHot = [...hot.slice(hotStart), ...hot.slice(0, hotStart)].sort(oldestFirst);
+  const rotatedWarm = [...warm.slice(warmStart), ...warm.slice(0, warmStart)].sort(oldestFirst);
   const watchedAllowance = Math.min(watched.length, max > 1 && (hot.length || warm.length) ? max - 1 : max);
   const priority = watched.slice(0, watchedAllowance); const remaining = Math.max(0, max - priority.length);
   const hotAllowance = warm.length && remaining > 1 ? remaining - 1 : remaining;
@@ -296,7 +297,7 @@ export async function refreshExistingTokenOpportunityScanner() {
     if (batch.providerBackoff) { metrics.provider_backoff = true; metrics.failed += 1; metrics.failure_reasons.RATE_LIMITED = 1; metrics.provider_backoff_deferred = batch.skipped; }
     else if (batch.skipped) { metrics.cycle_deferred += batch.skipped; metrics.failure_reasons.CYCLE_BUDGET_DEFERRED = batch.skipped; }
     metrics.remaining_due = Math.max(0, due.dueCount - metrics.scanned_success);
-    metrics.health = metrics.failed ? 'DEGRADED' : metrics.queue_deferred || metrics.cycle_deferred ? 'CAPACITY_LIMITED' : 'HEALTHY';
+    metrics.health = metrics.failed ? 'DEGRADED' : metrics.queue_deferred || metrics.cycle_deferred || metrics.quota_deferred ? 'CAPACITY_LIMITED' : 'HEALTHY';
     return metrics;
   } catch (error) {
     metrics.failed++; metrics.health = 'DEGRADED'; console.error('[ExistingTokenScanner] cycle failed', { reason: error instanceof Error ? error.message : String(error) }); return metrics;

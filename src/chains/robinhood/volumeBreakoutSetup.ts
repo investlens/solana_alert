@@ -1,5 +1,5 @@
 import type { ChainMarketSnapshot } from '../shared/types.js';
-import { readVolumeBreakout, type VolumeBreakoutEvidence } from '../../services/volumeBreakoutEvidence.js';
+import { readVolumeBreakoutResult, type VolumeBreakoutEvidence } from '../../services/volumeBreakoutEvidence.js';
 import { getVerifiedRobinhoodLaunchpad } from './trustedLaunchpad.js';
 import { routeBoostSecurity } from './boostSecurityRouter.js';
 import { claimSharedDelivery } from '../../services/sharedJsonCache.js';
@@ -34,9 +34,10 @@ export async function considerRobinhoodVolumeBreakout(m: ChainMarketSnapshot): P
   attempted.set(token, now);
   running = true;
   try {
-  const evidence = await readVolumeBreakout('robinhood', token, m.pairAddress);
-  recordFeedDelivery('RH_TRADE_SETUP', evidence ? 'EVALUATED' : 'DATA_UNAVAILABLE');
-  if (!evidence) { console.log('[VolumeBreakout] WAIT reason=NO_COMPLETE_QUALIFYING_EVIDENCE dbCandleWrites=0'); return; }
+  const result = await readVolumeBreakoutResult('robinhood', token, m.pairAddress);
+  const evidence=result.evidence;
+  recordFeedDelivery('RH_TRADE_SETUP', evidence ? 'EVALUATED' : result.reason==='CONDITION_WAIT'?'CONDITION_WAIT':'DATA_UNAVAILABLE');
+  if (!evidence) { console.log(`[VolumeBreakout] WAIT reason=${result.reason} dbCandleWrites=0`); return; }
   const launch = await getVerifiedRobinhoodLaunchpad(token).catch(() => null);
   const gate = await routeBoostSecurity({ tokenAddress: token, verifiedTrustedLaunchpad: !!launch, requireExplicitSellability: true });
   if (!gate.allowed || Date.now() - evidence.at > 90000) return;

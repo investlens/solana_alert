@@ -33,3 +33,12 @@ test('same-path readers share one request and cached JSON is independently reada
   assert.deepEqual(a, b); assert.equal(calls, 1);
   assert.deepEqual(await reader.read('/holders'), a); assert.equal(calls, 1);
 });
+
+test('official keyed route preserves query pagination and never leaks key to custom hosts',async()=>{
+ const urls:string[]=[];
+ const reader=createExplorerJsonReader({baseUrl:'https://api.blockscout.com/4663/api/v2',apiKey:'test-key',timeoutMs:1000,fetcher:async input=>{urls.push(String(input));return Response.json({items:[]});}});
+ await reader.read('/addresses/0xabc/transactions?block_number=123');
+ const u=new URL(urls[0]);assert.equal(u.searchParams.get('block_number'),'123');assert.equal(u.searchParams.get('apikey'),'test-key');
+ const custom=createExplorerJsonReader({baseUrl:'https://custom.example/api/v2',apiKey:'test-key',timeoutMs:1000,fetcher:async input=>{assert.ok(!String(input).includes('test-key'));return Response.json({});}});
+ await custom.read('/address');
+});

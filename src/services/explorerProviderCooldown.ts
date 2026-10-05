@@ -1,5 +1,5 @@
 export function createExplorerJsonReader(options: {
-  baseUrl: string; timeoutMs: number;
+  baseUrl: string; timeoutMs: number; apiKey?: string;
   fetcher?: typeof fetch; clock?: () => number;
 }) {
   const clock = options.clock ?? Date.now;
@@ -21,7 +21,9 @@ export function createExplorerJsonReader(options: {
       if (pending.size >= 1) throw new Error('Blockscout request capacity reached');
       let response: Response;
       try {
-        response = await fetcher(`${options.baseUrl}${path}`, {
+        const url=new URL(`${options.baseUrl}${path}`);
+        if(options.apiKey && url.origin==='https://api.blockscout.com' && url.pathname.startsWith('/4663/api/v2/'))url.searchParams.set('apikey',options.apiKey);
+        response = await fetcher(url.toString(), {
           headers: { accept: 'application/json' }, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(options.timeoutMs)]) : AbortSignal.timeout(options.timeoutMs),
         });
       } catch (error) { blockedUntil = clock() + 30_000; throw error; }

@@ -95,3 +95,9 @@ describe('existing-token continuous opportunity scanner', () => {
     assert.deepEqual(selected.map(row=>row.token),['0xwatch4','0xwatch3','0xwatch2']);
   });
 });
+
+it('oldest unscanned hot tokens beat recently rescanned tokens despite cursor position',()=>{
+ const universe=[{token:'recent',tier:'HOT' as const,lastSeenAt:new Date(now).toISOString()},{token:'old',tier:'HOT' as const,lastSeenAt:new Date(now).toISOString()}];
+ const history=new Map([['recent',now-3600000],['old',now-7200000]]);
+ assert.equal(selectDueExistingTokens(universe,{now,max:1,lastScanned:history,hotStart:0}).selected[0].token,'old');
+});

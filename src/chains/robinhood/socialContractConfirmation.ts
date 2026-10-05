@@ -87,8 +87,8 @@ async function verifySocialContractUncached(args: {
   // A readable rejection or different Robinchain CA cannot be overridden by another page.
   if(statements.some(statement=>/\b(?:no token|not launched|not launching|no official token)\b/i.test(statement)||projectContractConflict(statement,args.token))) return {confirmed:false,reason:'PROJECT_CONTRACT_CONFLICT'};
   const links=xProjectLinks(x,args.xHandle);
-  if(!direct&&links.length){
-    const fallback=await verifyCrossLinkedPages(args,links,readHtml);
+  if(!direct&&(links.length||anchoredLinks.length)){
+    const fallback=await verifyCrossLinkedPages(args,links.length?links:anchoredLinks,readHtml);
     if(fallback)return fallback;
   }
   if (!statements.length) return { confirmed: false, reason: 'X_CONTENT_UNREADABLE' };
