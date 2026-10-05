@@ -42,7 +42,7 @@ export async function renderIntelligenceHome(ctx: any) {
   await editOrReply(ctx, [
     '🧠 <b>INTELLIGENCE</b>', '',
     'Understand what is moving, who is involved, and how prior calls performed.', '',
-    'Choose an available tool below. Pro tools follow your membership access.\n\nScan a token → Full Intel → Wallet Links for observed developer-transfer relationships.\nVerified PONS pre-bond tokens also offer Curve Estimate with selectable ETH budgets.',
+    'Choose an available tool below. Pro tools follow your membership access.\n\nScan a token → Supply Journey for recent creator transfers and recipient balances. Automatic supply watches await validation.\nFull Intel → Wallet Links shows sampled developer-transfer relationships.\nVerified PONS pre-bond tokens also offer Curve Estimate with selectable ETH budgets.',
   ].join('\n'), intelligenceMenu(access).reply_markup);
 }
 
@@ -51,6 +51,8 @@ export async function renderPerformanceScreen(ctx: any) {
 }
 
 export function registerIntelligenceCenter(bot: Telegraf<any>) {
+  bot.action('SJ_HELP',async ctx=>{await ctx.answerCbQuery().catch(()=>{});await ctx.reply('Supply Journey: /scan <Robinchain contract> → Supply Journey. Verified PONS creator context is required. Research covers up to 2,000 recent blocks and 6 recipients; it does not establish shared ownership or sales. Automatic watches await validation.');});
+
   bot.action('INTELLIGENCE_CENTER', async ctx => { await ctx.answerCbQuery(); await renderIntelligenceHome(ctx); });
 
   bot.action('INTEL_INVESTIGATIONS', async ctx => {

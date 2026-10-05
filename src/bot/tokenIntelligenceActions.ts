@@ -1,3 +1,5 @@
+import { getSupplyJourney } from '../services/supplyJourney.js';
+import { renderSupplyJourney, supplyJourneyButtons } from '../ui/supplyJourneyView.js';
 import { getWalletLinkResearch, renderWalletLinkResearch } from '../services/walletLinkResearch.js';
 import { getCompactTokenView, getCompactCreatorView, renderCompactTokenView, renderCompactCreatorView } from '../services/compactOutcomeViews.js';
 import type { Telegraf } from 'telegraf';
@@ -38,6 +40,15 @@ export function registerTokenIntelligenceActions(bot: Telegraf<any>) {
     try { await ctx.reply(renderWalletLinkResearch(await getWalletLinkResearch(ctx.match[1])),{parse_mode:'HTML',link_preview_options:{is_disabled:true},reply_markup:{inline_keyboard:[[{text:'🧠 Full Intel',callback_data:`FI_RH_${ctx.match[1]}`}]]}}); }
     catch { await ctx.reply('Wallet-link research is busy or unavailable. Please retry shortly.').catch(()=>{}); }
     finally { activeReplies.delete(key); }
+  });
+  bot.action(/^(SJ|SJE|SJR)_RH_(0x[a-fA-F0-9]{40})$/, async ctx => {
+    await ctx.answerCbQuery('Checking bounded supply evidence…').catch(()=>{});
+    const key=`supply:${ctx.from?.id}`;if(activeReplies.has(key))return;activeReplies.add(key);
+    try {
+      const result=await getSupplyJourney(ctx.match[2]);
+      await ctx.reply(renderSupplyJourney(result,ctx.match[1]==='SJE'?'EVIDENCE':ctx.match[1]==='SJR'?'RECIPIENTS':'REPORT'),{parse_mode:'HTML',link_preview_options:{is_disabled:true},reply_markup:{inline_keyboard:supplyJourneyButtons(result.token)}});
+    }catch {await ctx.reply('Supply Journey is busy or unavailable. Retry in a minute. No alert or trading settings changed.').catch(()=>{});}
+    finally{activeReplies.delete(key);}
   });
   bot.action(/^COPY_CA_(0x[a-fA-F0-9]{40})$/, async ctx => {
     const token = String(ctx.match[1]);
