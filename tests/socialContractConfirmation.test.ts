@@ -61,3 +61,33 @@ test('unavailable X checks coalesce, cool down and retry after expiry; no proof 
   time = 299_999; await verify(args); assert.equal(calls, 1);
   time = 300_000; await verify(args); assert.equal(calls, 2);
 });
+
+test('cross-linked website confirms exact-chain CA; copied metadata or missing backlink does not',async()=>{
+ const profile=bio('Our project')+'<div data-testid="UserUrl"><a href="https://project.example/">Website</a></div>';
+ const page=`<a href="https://x.com/RevenueFamily">X</a><p>Robinchain CA: ${token}</p>`;
+ const good=await verifySocialContract(args,async url=>url.includes('x.com')?profile:url.includes('project.example')?page:null);
+ assert.equal(good.confirmed,true);assert.equal(good.evidenceSource,'Website');
+ for(const invalid of [page.replace('RevenueFamily','Impersonator'),page.replace(token,other),page.replace('Robinchain','Solana'),`<script><a href="https://x.com/RevenueFamily">X</a></script><p>Robinchain CA: ${token}</p>`])assert.equal((await verifySocialContract(args,async url=>url.includes('x.com')?profile:invalid)).confirmed,false);
+ assert.equal((await verifySocialContract(args,async url=>url.includes('x.com')?null:page)).confirmed,false);
+});
+test('public Telegram acknowledgement requires reciprocal profile links and conflicts fail closed',async()=>{
+ const profile=bio('Our project')+'<div data-testid="UserUrl"><a href="https://t.me/RevenueFamily">TG</a></div>';
+ const page=`<a href="https://x.com/RevenueFamily">X</a><span>100 subscribers</span><div class="tgme_page_description">Robinchain CA: ${token}</div>`;
+ assert.equal((await verifySocialContract(args,async url=>url.includes('x.com')?profile:page)).evidenceSource,'Telegram');
+ assert.equal((await verifySocialContract(args,async url=>url.includes('x.com')?profile:page.replace(token,other))).confirmed,false);
+});
+test('public page checks exclude internal network addresses',async()=>{
+ const {publicSocialAddress}=await import('../src/chains/robinhood/socialContractConfirmation.js');
+ for(const ip of ['127.0.0.1','10.0.0.1','169.254.169.254','172.16.1.1','192.168.0.1','100.64.0.1','::1','::ffff:127.0.0.1','fe80::1','fc00::1'])assert.equal(publicSocialAddress(ip),false);
+ assert.equal(publicSocialAddress('8.8.8.8'),true);
+});
+
+test('observed X profile links survive temporary X outage for one hour only',async()=>{
+ const {createSocialContractVerifier}=await import('../src/chains/robinhood/socialContractConfirmation.js');
+ let time=0,available=true,published=false;
+ const profile=bio('Our project')+'<div data-testid="UserUrl"><a href="https://project.example/">Website</a></div>';
+ const verify=createSocialContractVerifier(async url=>url.includes('x.com')?(available?profile:null):url.includes('project.example')?`<a href="https://x.com/RevenueFamily">X</a><p>${published?'Robinchain CA: '+token:'Coming soon'}</p>`:null,()=>time);
+ assert.equal((await verify(args)).confirmed,false);
+ available=false;published=true;time=60001;assert.equal((await verify(args)).evidenceSource,'Website');
+ time=3600001;assert.equal((await verify(args)).confirmed,false);
+});
