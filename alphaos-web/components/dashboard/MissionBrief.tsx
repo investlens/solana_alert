@@ -21,18 +21,7 @@ function compactUsd(value: number | null) {
   }).format(value);
 }
 
-function intelligenceUrl(item: LiveOpportunity) {
-  const params = new URLSearchParams({
-    chain: item.chain,
-    symbol: item.symbol,
-    source: item.sourceAgent || "AlphaOS",
-    confidence: String(item.confidence),
-    risk: item.riskLevel,
-  });
-  if (item.marketCap !== null) params.set("marketCap", String(item.marketCap));
-  if (item.liquidity !== null) params.set("liquidity", String(item.liquidity));
-  return `/intelligence/${encodeURIComponent(item.token)}?${params}`;
-}
+function intelligenceUrl(item: LiveOpportunity) { return item.reportUrl; }
 
 export default function MissionBrief() {
   const [items, setItems] = useState<LiveOpportunity[]>([]);
@@ -51,19 +40,19 @@ export default function MissionBrief() {
   }, []);
 
   useEffect(() => {
-    void load();
-    const timer = window.setInterval(() => void load(), 45_000);
-    return () => window.clearInterval(timer);
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
   }, [load]);
 
   const brief = useMemo(() => {
     const active = items.filter((item) => !["REJECTED", "EXPIRED"].includes(item.status));
-    const strongest = [...active].sort((a, b) => b.confidence - a.confidence)[0] ?? null;
+    const scored = active.filter(item=>item.confidence!==null);
+    const strongest = [...scored].sort((a, b) => (b.confidence ?? -1) - (a.confidence ?? -1))[0] ?? null;
     const lowRisk = active.filter((item) => item.riskLevel === "LOW").length;
     const highRisk = active.filter((item) => item.riskLevel === "HIGH").length;
-    const averageConfidence = active.length
-      ? Math.round(active.reduce((sum, item) => sum + item.confidence, 0) / active.length)
-      : 0;
+    const averageConfidence = scored.length
+      ? Math.round(scored.reduce((sum, item) => sum + (item.confidence ?? 0), 0) / scored.length)
+      : null;
     return { active, strongest, lowRisk, highRisk, averageConfidence };
   }, [items]);
 
@@ -76,19 +65,19 @@ export default function MissionBrief() {
           <div className="mt-3 flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
             <div>
               <h2 className="text-2xl font-semibold tracking-tight text-white md:text-3xl">
-                {brief.strongest ? `${brief.strongest.symbol} is the strongest live investigation` : "AlphaOS is scanning for the next asymmetric setup"}
+                {brief.strongest ? `${brief.strongest.symbol} is the highest scored recorded research` : "No scored research record available"}
               </h2>
               <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-400">
                 {brief.strongest
-                  ? `Current confidence is ${brief.strongest.confidence}/100 with ${brief.strongest.riskLevel.toLowerCase()} assessed risk. AlphaOS is tracking the market evidence actually available for this token and will update conviction as new observations arrive.`
-                  : "No active setup has cleared the current investigation threshold. AlphaOS continues scanning Solana and Robinhood · PONS."}
+                  ? `Recorded confidence is ${brief.strongest.confidence}/100 with ${brief.strongest.riskLevel.toLowerCase()} assessed risk. This is a stored market heuristic, not a current quote or contract audit.`
+                  : "No scored research is available in this dataset. Scanner and alert health are reported separately."}
               </p>
             </div>
             {brief.strongest ? <Link href={intelligenceUrl(brief.strongest)} className="alpha-button-primary shrink-0">Open intelligence</Link> : null}
           </div>
           <div className="mt-7 grid grid-cols-2 gap-3 md:grid-cols-4">
             <BriefMetric label="Active cases" value={String(brief.active.length)} />
-            <BriefMetric label="Avg confidence" value={`${brief.averageConfidence}/100`} />
+            <BriefMetric label="Avg confidence" value={brief.averageConfidence===null?"—":`${brief.averageConfidence}/100`} />
             <BriefMetric label="Low risk" value={String(brief.lowRisk)} tone="text-emerald-300" />
             <BriefMetric label="High risk" value={String(brief.highRisk)} tone="text-rose-300" />
           </div>

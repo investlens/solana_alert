@@ -1,0 +1,182 @@
+[
+  {
+    "asset_id": "0xe3297ca03f2a61174a0ec597366541d2e0e096d7",
+    "chain": "robinhood",
+    "risk_score": 65,
+    "confidence": 30,
+    "status": "WATCHING",
+    "source_agent": "ExistingTokenOpportunityScanner",
+    "raw_data": {
+      "name": "Praetor",
+      "state": "DISCOVERED",
+      "buys5m": 0,
+      "symbol": "PRAETOR",
+      "sells5m": 0,
+      "chartUrl": "https://dexscreener.com/robinhood/0x26d190f6c74cc1190e62afa3f3bf8b85fa53145ad29e7154b19a90a3e4eda7bf",
+      "volume5m": null,
+      "liquidity": 0.46,
+      "marketCap": 3460,
+      "currentRoi": 0,
+      "elapsedSec": 0,
+      "lastAlertAt": null,
+      "pairAddress": "0x26d190f6c74cc1190e62afa3f3bf8b85fa53145ad29e7154b19a90a3e4eda7bf",
+      "observations": [
+        {
+          "roi": 0,
+          "price": 0.000003502,
+          "buys5m": 0,
+          "sells5m": 0,
+          "volume5m": null,
+          "liquidity": 0.46,
+          "observedAt": "2026-10-05T16:27:28.219Z"
+        }
+      ],
+      "peakMarketCap": 3460,
+      "recentPeakRoi": 0,
+      "lastAlertState": null,
+      "volumeMultiple": null,
+      "scoreProvenance": {
+        "state": "DISCOVERED",
+        "source": "EXISTING_TOKEN_INTELLIGENCE_V1",
+        "currentRoi": 0,
+        "buySellRatio": 0,
+        "recentPeakRoi": 0,
+        "retentionRatio": null,
+        "volumeMultiple": null,
+        "observationCount": 1,
+        "explicitCriticalRisk": false,
+        "distanceFromAthMarketCapPct": 0
+      },
+      "previousVolume5m": null,
+      "intelligenceState": "DISCOVERED",
+      "existingTokenScanner": true,
+      "previousIntelligenceState": "DISCOVERED",
+      "distanceFromAthMarketCapPct": 0
+    },
+    "created_at": "2026-10-05 16:27:28.499464+00",
+    "updated_at": "2026-10-05 16:27:28.499464+00"
+  },
+  {
+    "asset_id": "0x52c4c365cf5317c89c817cf2516141613d38d08c",
+    "chain": "robinhood",
+    "risk_score": 63,
+    "confidence": 26,
+    "status": "WATCHING",
+    "source_agent": "ExistingTokenOpportunityScanner",
+    "raw_data": {
+      "name": "Alarm Otter",
+      "state": "DISCOVERED",
+      "buys5m": 25,
+      "symbol": "AOTTR",
+      "sells5m": 48,
+      "chartUrl": "https://dexscreener.com/robinhood/0xef099d3953ba2333423372a4d5732215470e5870d89da45f2627dee37206e95f",
+      "volume5m": 67766.21,
+      "liquidity": 415519.64,
+      "marketCap": 1805350,
+      "currentRoi": 0,
+      "elapsedSec": 0,
+      "lastAlertAt": null,
+      "pairAddress": "0xef099d3953ba2333423372a4d5732215470e5870d89da45f2627dee37206e95f",
+      "observations": [
+        {
+          "roi": 0,
+          "price": 0.00001805,
+          "buys5m": 25,
+          "sells5m": 48,
+          "volume5m": 67766.21,
+          "liquidity": 415519.64,
+          "observedAt": "2026-10-05T16:24:30.601Z"
+        }
+      ],
+      "peakMarketCap": 1805350,
+      "recentPeakRoi": 0,
+      "lastAlertState": null,
+      "volumeMultiple": 1,
+      "scoreProvenance": {
+        "state": "DISCOVERED",
+        "source": "EXISTING_TOKEN_INTELLIGENCE_V1",
+        "currentRoi": 0,
+        "buySellRatio": 0.5208333333333334,
+        "recentPeakRoi": 0,
+        "retentionRatio": null,
+        "volumeMultiple": 1,
+        "observationCount": 1,
+        "explicitCriticalRisk": false,
+        "distanceFromAthMarketCapPct": 0
+      },
+      "previousVolume5m": 67766.21,
+      "intelligenceState": "DISCOVERED",
+      "existingTokenScanner": true,
+      "previousIntelligenceState": "DISCOVERED",
+      "distanceFromAthMarketCapPct": 0
+    },
+    "created_at": "2026-10-05 16:24:31.208861+00",
+    "updated_at": "2026-10-05 16:24:31.208861+00"
+  },
+  {
+    "asset_id": "0xd1aaf85e66a9ff756f3b7e2179ecc1c7747b6293",
+    "chain": "robinhood",
+    "risk_score": 100,
+    "confidence": 18,
+    "status": "WATCHING",
+    "source_agent": "ExistingTokenOpportunityScanner",
+    "raw_data": {
+      "name": "Stompy",
+      "state": "DANGER",
+      "buys5m": 0,
+      "symbol": "Stompy",
+      "sells5m": 0,
+      "chartUrl": "https://dexscreener.com/robinhood/0x385daf9305b9f132657d5946478202ca43fc3126",
+      "volume5m": null,
+      "liquidity": 20.28,
+      "marketCap": 38279,
+      "currentRoi": -31.952347083926032,
+      "elapsedSec": 4184.032,
+      "lastAlertAt": null,
+      "pairAddress": "0x385daF9305b9f132657D5946478202CA43FC3126",
+      "observations": [
+        {
+          "roi": 0,
+          "price": 0.00005624,
+          "buys5m": 29,
+          "sells5m": 45,
+          "volume5m": 9476.71,
+          "liquidity": 34671.8,
+          "observedAt": "2026-10-05T15:05:44.364Z"
+        },
+        {
+          "roi": -31.952347083926032,
+          "price": 0.00003827,
+          "buys5m": 0,
+          "sells5m": 0,
+          "volume5m": null,
+          "liquidity": 20.28,
+          "observedAt": "2026-10-05T16:15:28.396Z"
+        }
+      ],
+      "peakMarketCap": 56242,
+      "recentPeakRoi": 0,
+      "lastAlertState": null,
+      "volumeMultiple": null,
+      "scoreProvenance": {
+        "state": "DANGER",
+        "source": "EXISTING_TOKEN_INTELLIGENCE_V1",
+        "currentRoi": -31.952347083926032,
+        "buySellRatio": 0,
+        "recentPeakRoi": 0,
+        "retentionRatio": null,
+        "volumeMultiple": null,
+        "observationCount": 2,
+        "explicitCriticalRisk": false,
+        "distanceFromAthMarketCapPct": -31.938764624302124
+      },
+      "previousVolume5m": 9476.71,
+      "intelligenceState": "DANGER",
+      "existingTokenScanner": true,
+      "previousIntelligenceState": "DISCOVERED",
+      "distanceFromAthMarketCapPct": -31.938764624302124
+    },
+    "created_at": "2026-10-05 15:05:44.666431+00",
+    "updated_at": "2026-10-05 16:15:28.397+00"
+  }
+]

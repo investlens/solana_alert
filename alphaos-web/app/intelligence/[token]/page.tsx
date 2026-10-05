@@ -1,13 +1,85 @@
-import { needsVenueConfirmation, type LaunchVenue } from "@/lib/dashboard/market-provenance";
-import Link from "next/link";
-import AppShell from "@/components/layout/AppShell";
-import { supabaseAdmin } from "@/lib/supabase-admin";
-export const dynamic="force-dynamic";
-type Props={params:Promise<{token:string}>;searchParams:Promise<Record<string,string|string[]|undefined>>};
-function one(v:string|string[]|undefined){return Array.isArray(v)?v[0]:v} function n(v:unknown){if(v===null||v===undefined||v==="")return null;const x=Number(v);return Number.isFinite(x)?x:null}
-function money(v:number|null){return v===null?"—":new Intl.NumberFormat("en-US",{style:"currency",currency:"USD",notation:"compact",maximumFractionDigits:2}).format(v)}
-function price(v:number|null){if(v===null)return"—";if(v>=1)return`$${v.toLocaleString("en-US",{maximumFractionDigits:4})}`;return `$${v.toLocaleString("en-US",{minimumFractionDigits:Math.min(8,Math.max(4,Math.ceil(-Math.log10(v))+3)),maximumFractionDigits:10})}`}
-function pct(v:number|null){return v===null?"—":`${v>0?"+":""}${v.toFixed(Math.abs(v)>=100?0:1)}%`} function short(v:string){return v.length>22?`${v.slice(0,10)}…${v.slice(-8)}`:v}
-function rawN(r:Record<string,unknown>,keys:string[]){for(const k of keys){const x=n(r[k]);if(x!==null)return x}return null} function rawS(r:Record<string,unknown>,keys:string[]){for(const k of keys){const x=r[k];if(typeof x==="string"&&x.trim())return x.trim()}return null}
-function riskClass(v:string){return v==="HIGH"||v==="CRITICAL"?"text-rose-300":v==="MEDIUM"?"text-amber-300":v==="LOW"?"text-emerald-300":"text-zinc-400"}
-export default async function IntelligencePage({params,searchParams}:Props){const{token}=await params;const q=await searchParams;const decoded=decodeURIComponent(token);const[oppResult,alertResult,memoryResult,launchResult]=await Promise.all([supabaseAdmin.from("opportunities").select("asset_id,chain,source_agent,risk_score,confidence,status,raw_data").eq("asset_id",decoded).order("created_at",{ascending:false}).limit(1).maybeSingle(),supabaseAdmin.from("alerts").select("token_address,symbol,name,score_at_alert,risk_at_alert,alert_price,current_price,high_price_after_alert,liquidity_at_alert,buys5m_at_alert,sells5m_at_alert,volume5m_at_alert,roi_now,roi_high,alerted_at,alert_type").eq("token_address",decoded).order("alerted_at",{ascending:false}).limit(1).maybeSingle(),supabaseAdmin.from("token_memory").select("token,symbol,name,chain,current_market_cap,peak_market_cap,current_liquidity,current_price,highest_price,confidence,risk_level,status,max_return_pct,drawdown_from_peak_pct,last_updated").eq("token",decoded).maybeSingle(),supabaseAdmin.from("pons_launches").select("token_address,chain,protocol_version,curve_address,pool_address").eq("chain","robinhood").eq("token_address",decoded.toLowerCase()).limit(1).abortSignal(AbortSignal.timeout(3500)).maybeSingle()]);const opp:any=oppResult.data,alert:any=alertResult.data,memory:any=memoryResult.data;const raw=opp?.raw_data&&typeof opp.raw_data==="object"&&!Array.isArray(opp.raw_data)?opp.raw_data as Record<string,unknown>:{};const venuePending=needsVenueConfirmation(launchResult.data as LaunchVenue|undefined,raw)||Boolean(launchResult.error && decoded.startsWith("0x"));const chain=String(opp?.chain??memory?.chain??one(q.chain)??(decoded.startsWith("0x")?"unknown":"solana")).toLowerCase(),isRobinhood=chain==="robinhood";const symbol=rawS(raw,["symbol","token_symbol","ticker"])??alert?.symbol??memory?.symbol??one(q.symbol)??"TOKEN",name=rawS(raw,["name"])??alert?.name??memory?.name??symbol;const confidence=venuePending?null:n(opp?.confidence)??n(alert?.score_at_alert)??n(memory?.confidence);const risk=venuePending?"UNKNOWN":String(raw.risk_level??alert?.risk_at_alert??memory?.risk_level??"UNKNOWN").toUpperCase();const marketCap=rawN(raw,["marketCap","market_cap","mcap"])??n(memory?.current_market_cap),peakMc=rawN(raw,["peakMarketCap","athMarketCap","ath_market_cap","allTimeHighMarketCap","marketCapAth"])??n(memory?.peak_market_cap),liquidity=rawN(raw,["liquidity","liquidity_usd","liquidityUsd"])??n(memory?.current_liquidity)??n(alert?.liquidity_at_alert);const volume=rawN(raw,["volume5m","volume_5m"])??n(alert?.volume5m_at_alert),buys=rawN(raw,["buys5m","buys_5m"])??n(alert?.buys5m_at_alert),sells=rawN(raw,["sells5m","sells_5m"])??n(alert?.sells5m_at_alert);const alertPrice=n(alert?.alert_price),currentPrice=n(memory?.current_price)??n(alert?.current_price)??rawN(raw,["price","currentPrice"]),storedAlertPeak=n(alert?.high_price_after_alert);let eventPeak:number|null=null;if(alert?.alerted_at){const{data:events}=await supabaseAdmin.from("token_memory_events").select("price").eq("token",decoded).gte("created_at",String(alert.alerted_at)).not("price","is",null).order("price",{ascending:false}).limit(1);eventPeak=n(events?.[0]?.price)}const peakPrice=eventPeak??storedAlertPeak;const maxMove=alertPrice!==null&&alertPrice>0&&peakPrice!==null?((peakPrice-alertPrice)/alertPrice)*100:null,currentMove=alertPrice!==null&&alertPrice>0&&currentPrice!==null?((currentPrice-alertPrice)/alertPrice)*100:null;const state=rawS(raw,["intelligenceState","state"])??String(opp?.status??memory?.status??alert?.alert_type??"TRACKING"),chartUrl=venuePending?`https://www.ponsfamily.com/launchpad/${decoded}`:rawS(raw,["chartUrl"]),source=String(opp?.source_agent??one(q.source)??(alert?"AlphaOS Alert Engine":"AlphaOS Intelligence")),hasEvidence=Boolean(opp||alert||memory);const facts=venuePending?[["MARKET VENUE","Confirmation pending","text-amber-300"]]:[...[alertPrice!==null?["ALERT PRICE",price(alertPrice),"text-white"]:null,peakPrice!==null?["PEAK PRICE",price(peakPrice),"text-amber-200"]:null,maxMove!==null?["MAX MOVE",pct(maxMove),maxMove>0?"text-emerald-300":"text-zinc-400"]:null,currentPrice!==null?["RECORDED PRICE",price(currentPrice),"text-white"]:null].filter(Boolean),["MARKET CAP",money(marketCap),"text-white"],["RECORDED PEAK MC",money(peakMc),"text-zinc-300"],["LIQUIDITY",money(liquidity),"text-white"],["5M VOLUME",money(volume),"text-white"],["BUYS / SELLS",buys!==null||sells!==null?`${buys??"—"} / ${sells??"—"}`:"—","text-white"],["RECORDED VS ALERT",pct(currentMove),currentMove!==null&&currentMove>0?"text-emerald-300":"text-zinc-300"]] as string[][];return <AppShell><main className="px-4 pb-28 pt-5 text-white sm:px-6 lg:px-8 lg:pb-10 lg:pt-8"><div className="mx-auto max-w-[1100px]"><div className="flex items-center justify-between"><Link href="/" className="text-xs text-zinc-500">← Home</Link><Link href="/opportunities" className="text-xs text-zinc-400">Research terminal →</Link></div><section className="mt-5 rounded-3xl border border-white/[0.09] bg-[#171b1f] p-5 sm:p-7"><div className="flex flex-wrap items-start justify-between gap-5"><div><div className="flex gap-2"><span className={`rounded-full border px-2.5 py-1 text-[9px] font-semibold ${isRobinhood?"border-emerald-400/20 text-emerald-300":"border-violet-400/20 text-violet-300"}`}>{isRobinhood?"ROBINHOOD · PONS":chain.toUpperCase()}</span><span className="rounded-full border border-white/[0.08] px-2.5 py-1 text-[9px] text-zinc-300">{state.toUpperCase()}</span></div><p className="mt-5 text-[10px] tracking-[0.18em] text-zinc-500">ALPHAOS TOKEN INTELLIGENCE</p><h1 className="mt-1 text-4xl font-semibold">{symbol}</h1><p className="mt-1 text-sm text-zinc-500">{name}</p><p className="mt-2 font-mono text-[10px] text-zinc-600">{short(decoded)}</p></div><div className="rounded-2xl border border-white/[0.08] bg-white/[0.035] px-5 py-4 text-right"><p className="text-4xl font-semibold text-emerald-300">{confidence===null?"—":Math.round(confidence)}</p><p className="text-[9px] text-zinc-500">ALPHA SCORE</p></div></div>{venuePending&&<p className="mt-5 text-sm text-amber-200">DEX observations are withheld until the active venue is confirmed. Launch-time records do not establish current bonding status. Open PONS for current market data.</p>}{hasEvidence?<div className="mt-7 grid grid-cols-2 gap-2 sm:grid-cols-4">{facts.map(([l,v,c])=><div key={l} className="rounded-2xl border border-white/[0.07] bg-[#1c2125] p-3.5"><p className="text-[8px] tracking-[0.13em] text-zinc-500">{l}</p><p className={`mt-1.5 text-sm font-semibold ${c}`}>{v}</p></div>)}</div>:<div className="mt-7 rounded-2xl border border-dashed border-white/10 p-6 text-sm text-zinc-500">AlphaOS is waiting for the first stored market observation.</div>}</section><div className="mt-4 grid gap-4 lg:grid-cols-[1.35fr_0.65fr]"><section className="rounded-3xl border border-white/[0.08] bg-[#171b1f] p-5 sm:p-6"><p className="text-[10px] tracking-[0.18em] text-zinc-500">ALERT PERFORMANCE</p><h2 className="mt-2 text-xl font-semibold">{!venuePending&&alertPrice!==null?`${price(alertPrice)} → ${price(peakPrice)}`:venuePending?"Market performance withheld: venue unconfirmed":"No AlphaOS alert price recorded yet"}</h2><div className="mt-5 space-y-3 text-sm"><div className="flex justify-between border-b border-white/[0.06] pb-3"><span className="text-zinc-500">Maximum move after alert</span><span className={maxMove!==null&&maxMove>0?"text-emerald-300":"text-zinc-300"}>{pct(venuePending?null:maxMove)}</span></div><div className="flex justify-between border-b border-white/[0.06] pb-3"><span className="text-zinc-500">Risk</span><span className={riskClass(risk)}>{risk}</span></div><div className="flex justify-between"><span className="text-zinc-500">Source</span><span className="max-w-[62%] text-right text-zinc-200">{source}</span></div></div></section><aside className="rounded-3xl border border-white/[0.08] bg-[#171b1f] p-5 sm:p-6"><p className="text-[10px] tracking-[0.18em] text-zinc-500">QUICK ACTIONS</p><h2 className="mt-2 text-xl font-semibold">Verify before acting.</h2>{chartUrl?<a href={chartUrl} target="_blank" rel="noreferrer" className="mt-5 flex min-h-11 items-center justify-center rounded-xl border border-emerald-300/25 bg-emerald-300/[0.08] px-4 text-xs font-semibold text-emerald-200">{venuePending?"Open PONS venue ↗":"Open venue chart ↗"}</a>:null}<Link href="/opportunities" className="mt-2 flex min-h-11 items-center justify-center rounded-xl border border-white/[0.09] px-4 text-xs text-zinc-200">Back to Research terminal</Link></aside></div></div></main></AppShell>}
+import Link from 'next/link';
+import AppShell from '@/components/layout/AppShell';
+import { supabaseAdmin } from '@/lib/supabase-admin';
+import { addressKey, finiteNumber, recordedMarket, object, textValue, validDate, type RecordRow } from '@/lib/dashboard/recorded-market';
+import type { LaunchVenue } from '@/lib/dashboard/market-provenance';
+export const dynamic = 'force-dynamic';
+type Props = { params: Promise<{token: string}>; searchParams: Promise<Record<string,string|string[]|undefined>> };
+const chains = ['robinhood','arc','solana','ethereum','base','bsc','sui'];
+const one = (v: string|string[]|undefined) => Array.isArray(v) ? v[0] : v;
+const money = (v: number|null) => v === null ? '—' : new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',notation:'compact',maximumFractionDigits:2}).format(v);
+const price = (v: number|null) => v === null ? '—' : v === 0 ? '$0' : v < 0.000001 ? `$${v.toExponential(5)}` : `$${v.toLocaleString('en-US',{maximumSignificantDigits:8})}`;
+const timestamp = (v: string|null) => v ? new Date(v).toISOString().replace('T',' ').replace('.000Z',' UTC').replace(/\.\d+Z$/,' UTC') : 'Unknown';
+export default async function IntelligencePage({params,searchParams}: Props) {
+  const {token} = await params, query = await searchParams;
+  const decoded = addressKey(token), requestedChain = one(query.chain)?.toLowerCase();
+  const invalidChain = !!requestedChain && !chains.includes(requestedChain);
+  let lookup = supabaseAdmin.from('opportunities')
+    .select('asset_id,chain,source_agent,risk_score,confidence,status,raw_data,created_at,updated_at')
+    .eq('asset_id',decoded).order('created_at',{ascending:false}).limit(12);
+  if (requestedChain && !invalidChain) lookup = lookup.eq('chain',requestedChain);
+  const result = invalidChain ? {data:null,error:{message:'Unsupported chain'}}
+    : await lookup.abortSignal(AbortSignal.timeout(3500));
+  const candidates = (result.data ?? []) as RecordRow[];
+  const ambiguous = !requestedChain && (decoded.startsWith('0x') || new Set(candidates.map(row=>row.chain)).size > 1);
+  const row = !ambiguous && !result.error ? candidates[0] : undefined;
+  const chain = row?.chain ?? requestedChain ?? 'unknown';
+  let launch: LaunchVenue|undefined, launchFailed = false;
+  if (row && chain === 'robinhood') {
+    const response = await supabaseAdmin.from('pons_launches')
+      .select('token_address,chain,protocol_version,curve_address,pool_address')
+      .eq('chain',chain).eq('token_address',decoded).limit(1)
+      .abortSignal(AbortSignal.timeout(3500)).maybeSingle();
+    launch = response.data as LaunchVenue|undefined;
+    launchFailed = !!response.error;
+  }
+  const market = row ? recordedMarket(row,launch,launchFailed) : null;
+  const raw = object(row?.raw_data);
+  const symbol = market?.identityMatches ? textValue(raw.symbol ?? raw.token_symbol ?? raw.ticker) ?? 'TOKEN' : 'TOKEN';
+  const name = market?.identityMatches ? textValue(raw.name) ?? symbol : symbol;
+  // Alert baseline is kept separate and constrained to the same token AND chain.
+  // No lifetime peak, old liquidity or memory price is spliced into this snapshot.
+  let alertPrice: number|null = null, alertedAt: string|null = null;
+  if (row) {
+    const alerts = await supabaseAdmin.from('alerts').select('alert_price,alerted_at')
+      .eq('token_address',decoded).eq('chain',chain)
+      .order('alerted_at',{ascending:false}).limit(1)
+      .abortSignal(AbortSignal.timeout(3500)).maybeSingle();
+    if (!alerts.error) {
+      const value = finiteNumber(alerts.data?.alert_price);
+      alertedAt = validDate(alerts.data?.alerted_at);
+      if (value !== null && value > 0 && alertedAt) alertPrice = value;
+    }
+  }
+  const facts = [
+    ['MARKET CAP',money(market?.marketCap ?? null)],
+    ['RECORDED PRICE',price(market?.price ?? null)],
+    ['LIQUIDITY',money(market?.liquidity ?? null)],
+    ['5M VOLUME',money(market?.volume5m ?? null)],
+    ['BUYS / SELLS',`${market?.buys5m ?? '—'} / ${market?.sells5m ?? '—'}`],
+    ['OBSERVED PEAK MC',money(market?.peakMarketCap ?? null)],
+  ];
+  const risk = market?.riskLevel ?? 'UNKNOWN';
+  const score = market?.confidence ?? null;
+  const scoreColor = score === null ? 'text-zinc-400' : score < 35 ? 'text-rose-300' : score < 70 ? 'text-amber-300' : 'text-emerald-300';
+  const venueUrl = market?.venuePending && market.launchpad === 'PONS'
+    ? `https://www.ponsfamily.com/launchpad/${decoded}` : market?.chartUrl;
+  return <AppShell><main className="px-4 pb-28 pt-5 text-white sm:px-6 lg:px-8 lg:pb-10 lg:pt-8"><div className="mx-auto max-w-[1100px]">
+    <div className="flex items-center justify-between"><Link href="/" className="text-xs text-zinc-500">← Home</Link><Link href="/opportunities" className="text-xs text-zinc-400">Research terminal →</Link></div>
+    <section className="mt-5 rounded-3xl border border-white/[0.09] bg-[#171b1f] p-5 sm:p-7">
+      <div className="flex flex-wrap items-start justify-between gap-5"><div>
+        <div className="flex gap-2"><span className="rounded-full border border-white/10 px-2.5 py-1 text-[9px] text-zinc-300">{chain.toUpperCase()}{market?.launchpad ? ` · ${market.launchpad}` : ''}</span><span className="rounded-full border border-white/10 px-2.5 py-1 text-[9px] text-zinc-300">{market?.state ?? 'UNAVAILABLE'}</span></div>
+        <p className="mt-5 text-[10px] tracking-[0.18em] text-zinc-500">ALPHAOS RECORDED RESEARCH</p><h1 className="mt-1 text-4xl font-semibold">{symbol}</h1><p className="mt-1 text-sm text-zinc-500">{name}</p><p className="mt-2 break-all font-mono text-[10px] text-zinc-500">{decoded}</p>
+      </div><div className="rounded-2xl border border-white/10 px-5 py-4 text-right"><p className={`text-4xl font-semibold ${scoreColor}`}>{score === null ? '—' : Math.round(score)}</p><p className="text-[9px] text-zinc-500">RECORDED ALPHA SCORE</p></div></div>
+      {!row ? <p className="mt-5 text-sm text-amber-200">{ambiguous ? 'Select the chain for this address. The same address may identify different tokens across chains.' : result.error ? 'Research lookup unavailable. No market conclusion was made.' : 'No recorded market snapshot. Use Telegram for a fresh scan.'}</p> : <>
+        <div className="mt-5 rounded-xl border border-white/10 p-3 text-xs leading-6 text-zinc-400"><p>Observed {timestamp(market?.observedAt ?? null)} · {market?.stale ? 'STALE — not a current quote' : 'Recorded snapshot — not a live quote'}</p><p>{market?.source}</p></div>
+        {market?.venuePending && <p className="mt-4 text-sm text-amber-200">Market figures withheld: identity, observation time or active venue is not confirmed. Launch records alone do not establish current bonding status.</p>}
+        <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-3">{facts.map(([label,value])=><div key={label} className="rounded-2xl border border-white/[0.07] bg-[#1c2125] p-3.5"><p className="text-[8px] tracking-[0.13em] text-zinc-500">{label}</p><p className="mt-1.5 text-sm font-semibold">{value}</p></div>)}</div>
+        <p className="mt-3 text-xs text-zinc-500">Observed peak covers AlphaOS records, not lifetime ATH. A dash means unavailable, not zero.</p>
+      </>}
+      {ambiguous && <div className="mt-4 flex flex-wrap gap-3">{Array.from(new Set(candidates.map(r=>r.chain))).map(c=><Link key={c} href={`/intelligence/${encodeURIComponent(decoded)}?chain=${encodeURIComponent(c ?? 'unknown')}`} className="text-sm text-emerald-300">{c}</Link>)}</div>}
+    </section>
+    <div className="mt-4 grid gap-4 lg:grid-cols-2"><section className="rounded-3xl border border-white/10 bg-[#171b1f] p-5"><p className="text-[10px] tracking-widest text-zinc-500">RECORDED MARKET RISK</p><h2 className={`mt-2 text-xl font-semibold ${risk === 'HIGH' ? 'text-rose-300' : risk === 'MEDIUM' ? 'text-amber-300' : 'text-zinc-300'}`}>{risk}</h2><p className="mt-3 text-sm text-zinc-400">Market heuristic from the stored research record. Sellability, contract safety and linked wallets are not established by this score.</p><p className="mt-3 text-xs text-zinc-500">Scanner: {row?.source_agent ?? 'Unknown'}</p>{alertPrice !== null && <p className="mt-4 text-sm text-zinc-300">Historical alert price {price(alertPrice)} · {timestamp(alertedAt)}</p>}</section>
+      <aside className="rounded-3xl border border-white/10 bg-[#171b1f] p-5"><h2 className="text-xl font-semibold">Verify before acting.</h2><p className="mt-3 text-sm text-zinc-400">Check the token and active trading venue before using these recorded figures.</p>{venueUrl && <a href={venueUrl} target="_blank" rel="noreferrer" className="mt-5 flex min-h-11 items-center justify-center rounded-xl border border-emerald-300/25 px-4 text-xs text-emerald-200">{market?.venuePending ? 'Open PONS venue ↗' : 'Open recorded DEX pair ↗'}</a>}<Link href="/scan" className="mt-2 flex min-h-11 items-center justify-center rounded-xl border border-white/10 text-xs">Request a fresh Telegram scan →</Link></aside>
+    </div></div></main></AppShell>;
+}
