@@ -16,6 +16,7 @@ export function renderSupplyJourney(r:SupplyJourney,detail:'REPORT'|'RECIPIENTS'
  lines.push('','<b>COVERAGE</b>',`Creator transfers: blocks ${r.fromBlock}–${r.block}. <b>Recent window, not launch history.</b>`,r.status==='PARTIAL'?'Recipient balances: partial.':'Queried creator-transfer window returned successfully; balances checked at block '+r.block+'.',...(r.reason?[esc(r.reason)]:[]),
  'One-hop recipients only. Known curve/router/burn addresses excluded; other infrastructure may remain.',
  'Recipient holdings can include other purchases. Transfers do not prove shared ownership, a sale or future selling.',
+ ...(detail==='EVIDENCE'?['Transfer percentages use supply at the checked block; repeated transfers must not be added.']:[]),
  'Automatic supply watches await live-data validation.',`Checked ${new Date(r.at).toISOString().slice(11,19)} UTC · Research only`);
  return lines.filter(l=>l!=='').join('\n').replace(/(<b>(?:MARKET|CREATOR &amp; RECIPIENTS|COVERAGE)<\/b>)/g,'\n$1');
 }

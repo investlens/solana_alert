@@ -45,7 +45,9 @@ export async function analyzeSupplyJourney(token:string,d:JourneyDependencies=pr
   if(BigInt(raw(await rpc('eth_chainId',[])))!==4663n)throw Error('Wrong chain');
   const head=BigInt(raw(await rpc('eth_blockNumber',[])));
   if(head<40n)throw Error('Insufficient block history');
-  const end=head-40n,start=end>1999n?end-1999n:0n,block='0x'+end.toString(16);
+  // Public archive fallback serves the last 1024 blocks. Leave headroom for
+  // chain progress during validation; this is explicitly recent activity.
+  const end=head-40n,start=end>511n?end-511n:0n,block='0x'+end.toString(16);
   r.block=end.toString();r.fromBlock=start.toString();
   const before=await rpc<any>('eth_getBlockByNumber',[block,false]);
   if(!/^0x[0-9a-f]{64}$/i.test(before?.hash??''))throw Error('Checked block unavailable');
