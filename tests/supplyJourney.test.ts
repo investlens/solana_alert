@@ -46,3 +46,15 @@ test('inconsistent combined balances cannot create holdings above total supply',
  d.rpc=async<T>(method,params,signal)=>method==='eth_call'?((params[0] as any).data==='0x18160ddd'?'0x3e8':'0x3e7') as T:rpc<T>(method,params,signal);
  const r=await analyzeSupplyJourney(token,d);assert.equal(r.status,'UNAVAILABLE');assert.equal(r.holding,null);assert.equal(r.recipients.length,0);
 });
+test('independent reads overlap with at most two requests and unchanged request cap',async()=>{
+ const logs=Array.from({length:6},(_,i)=>log('0x'+(i+1).toString(16).padStart(40,'0'),i));
+ const {d,calls}=fixture(logs);const base=d.rpc;let active=0,max=0;
+ d.rpc=async<T>(method,params,signal)=>{
+  active++;max=Math.max(max,active);
+  try{await new Promise(resolve=>setTimeout(resolve,5));return await base<T>(method,params,signal);}
+  finally{active--;}
+ };
+ const r=await analyzeSupplyJourney(token,d);
+ assert.equal(r.status,'WINDOW_COMPLETE');assert.equal(max,2);assert.equal(calls.length,13);
+ assert.deepEqual(r.recipients.map(row=>row.address),logs.map(row=>'0x'+row.topics[2].slice(-40)));
+});

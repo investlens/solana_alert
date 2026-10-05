@@ -43,8 +43,9 @@ export async function analyzeSupplyJourney(token:string,d:JourneyDependencies=pr
   const marker=await d.marker(token);
   if(!marker||marker.token?.toLowerCase()!==token||!ADDRESS.test(marker.creator??'')||!ADDRESS.test(marker.curveAddress??'')||!getPonsFactoryDeployments().some(f=>f.enabled&&f.address.toLowerCase()===marker.factory?.toLowerCase())){r.reason='Verified PONS creator context unavailable. Other launchpads are not supported yet.';return r;}
   r.creator=marker.creator!.toLowerCase();
-  if(BigInt(raw(await rpc('eth_chainId',[])))!==4663n)throw Error('Wrong chain');
-  const head=BigInt(raw(await rpc('eth_blockNumber',[])));
+  const [chainId,headValue]=await Promise.all([rpc('eth_chainId',[]),rpc('eth_blockNumber',[])]);
+  if(BigInt(raw(chainId))!==4663n)throw Error('Wrong chain');
+  const head=BigInt(raw(headValue));
   if(head<40n)throw Error('Insufficient block history');
   // Official RPC supports this bounded log window; it is not lifetime history.
   const end=head-40n,start=end>=JOURNEY_WINDOW_BLOCKS?end-JOURNEY_WINDOW_BLOCKS+1n:0n,block='0x'+end.toString(16);
@@ -59,14 +60,24 @@ export async function analyzeSupplyJourney(token:string,d:JourneyDependencies=pr
   // the recipient set excludes every possible pool, router or distributor.
   r.transfers=rows;r.excluded=rows.filter(row=>excluded.has(row.to)).length;
   const recipients=[...new Set(rows.filter(row=>BigInt(row.amount)>0n&&!excluded.has(row.to)).map(row=>row.to))];
-  r.total=raw(await rpc('eth_call',[{to:token,data:'0x18160ddd'},block]));
+  const [totalValue,holdingValue]=await Promise.all([
+   rpc('eth_call',[{to:token,data:'0x18160ddd'},block]),
+   rpc('eth_call',[{to:token,data:balanceData(r.creator)},block])
+  ]);
+  r.total=raw(totalValue);
   if(BigInt(r.total)<=0n)throw Error('Supply unavailable');
-  r.holding=raw(await rpc('eth_call',[{to:token,data:balanceData(r.creator)},block]));
+  r.holding=raw(holdingValue);
   if(BigInt(r.holding)>BigInt(r.total))throw Error('Invalid creator balance');
-  for(const address of recipients.slice(0,6)){
+  const readRecipient=async(address:string)=>{
    let balance:string|null=null;try{balance=raw(await rpc('eth_call',[{to:token,data:balanceData(address)},block]));}catch{/* No fabricated zero. */}
    if(balance!==null&&BigInt(balance)>BigInt(r.total))balance=null;
-   r.recipients.push({address,balance});
+   return {address,balance};
+  };
+  // Two reads at a time shorten latency without increasing the request budget
+  // or flooding the provider. Preserve recipient order for evidence rendering.
+  const selected=recipients.slice(0,6);
+  for(let i=0;i<selected.length;i+=2){
+   r.recipients.push(...await Promise.all(selected.slice(i,i+2).map(readRecipient)));
   }
   const after=await rpc<any>('eth_getBlockByNumber',[block,false]);
   if(before.hash!==after?.hash){r.transfers=[];r.recipients=[];r.holding=null;r.total=null;throw Error('Checked block changed; retry research');}
