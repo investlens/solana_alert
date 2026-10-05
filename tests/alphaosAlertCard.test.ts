@@ -18,7 +18,7 @@ test('long token names remain within Telegram photo caption limit without cuttin
     symbol: 'A'.repeat(500), name: '<>&'.repeat(500), socialContractConfirmed: true,
     socials: resolveSocialMafiaSocials({ twitter: 'https://x.com/projectalpha', telegram: 'https://t.me/projectalpha' })! });
   const visible = text.replace(/<[^>]*>/g, '').replace(/&(?:amp|lt|gt|quot);/g, 'x');
-  assert.ok(visible.length <= 1024); assert.match(text, /CA listed on X/);
+  assert.ok(visible.length <= 1024); assert.match(text, /Contract evidence <b>X contract match/);
 });
 test('photo sends use multipart caption and buttons; enrichment edits the same caption', async () => {
   let captured: FormData | null = null;

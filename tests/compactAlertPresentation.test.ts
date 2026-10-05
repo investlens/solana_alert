@@ -19,7 +19,7 @@ test('compact actions retain exact callbacks, use two columns and omit duplicate
 test('Social Mafia keeps truthful FDV, verified zero holdings, linked explorer and short social buttons', () => {
   const message = buildSocialMafiaAlertText({ tokenAddress: token, launchpadLabel: 'PONS', socials,
     symbol: 'AXIL', name: 'Axil Token', fdv: 51000, devHoldingPercent: 0 });
-  assert.match(message, /AXIL.*Axil Token/);
+  assert.match(message, /Axil Token.*AXIL/);
   assert.match(message, /FDV\s+<b>\$51\.0K/);
   assert.doesNotMatch(message, /Market cap/);
   assert.match(message, /Dev holding\s+<b>0\.00%/);

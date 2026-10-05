@@ -1,7 +1,7 @@
 import { escapeAlphaHtml as esc } from './alphaNotification.js';
 import { cleanAlertButtons, type CardButton } from './alertCardLayout.js';
 import type { AlertKeyStats } from './alertKeyStats.js';
-export type PromotionCardArgs = {text:string;token:string;launchType:string|null;stats:AlertKeyStats|null;securityNote:string|null;buttons:CardButton[][];paymentTimestamp?:number|null;kind:'BOOST'|'DEX_PAID'};
+export type PromotionCardArgs = {text:string;token:string;launchType:string|null;stats:AlertKeyStats|null;securityNote:string|null;buttons:CardButton[][];paymentTimestamp?:number|null;kind:'BOOST'|'DEX_PAID'|'SOCIAL_MAFIA'};
 export function buildPromotionEventCard(args:PromotionCardArgs) {
  const s=args.stats, lines=args.text.split('\n');
  const plain=args.text.replace(/<[^>]+>/g,'').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"');
@@ -27,19 +27,19 @@ export function buildPromotionEventCard(args:PromotionCardArgs) {
  if(!socials.length)for(const l of lines)if(/href="https:\/\/(?:x\.com|twitter\.com|t\.me)\//i.test(l))socials.push(l);
  const boost=lines.find(l=>/^Boost\s+\d/i.test(l.replace(/<[^>]+>/g,'').replace(/^[^A-Za-z]+/,'')));
  const paid=lines.find(l=>/^(?:Dex Paid|DEX Paid)\s/i.test(l.replace(/<[^>]+>/g,'')));
- const title=args.kind==='DEX_PAID'?'💎 <b>DEX PAID DETECTED</b>':/BOOST INCREASED/.test(args.text)?'🚀 <b>BOOST INCREASED</b>':'🚀 <b>BOOST DETECTED</b>';
+ const title=args.kind==='SOCIAL_MAFIA'?'🕶️ <b>SOCIAL MAFIA</b>':args.kind==='DEX_PAID'?'💎 <b>DEX PAID DETECTED</b>':/BOOST INCREASED/.test(args.text)?'🚀 <b>BOOST INCREASED</b>':'🚀 <b>BOOST DETECTED</b>';
  const text=[title,`<b>${identity}</b>`,`Robinchain${args.launchType?' · '+esc(args.launchType):''}`,
- ...(args.kind==='DEX_PAID'?[`Payment <b>Confirmed</b>${age==null?'':` · ${age}m ago`}`]:[boost??'Boost purchase detected',...(paid?[paid]:[])]),'',
+ ...(args.kind==='SOCIAL_MAFIA'?lines.filter(l=>/^(?:Contract evidence|X announcement|Telegram type|Evidence)\s/.test(l.replace(/<[^>]+>/g,''))):args.kind==='DEX_PAID'?[`Payment <b>Confirmed</b>${age==null?'':` · ${age}m ago`}`]:[boost??'Boost purchase detected',...(paid?[paid]:[])]),'',
  '<b>MARKET</b>',...new Set(metrics),...(unavailable.length?['Not reported: '+unavailable.join(', ')]:[]),
  ...(s?.preBond?['Bonding curve · no DEX market yet']:!s?.chartUrl?['Trading venue unconfirmed']:[]),
  ...(!metrics.length?['Market snapshot pending']:[]),'',
- '<b>OWNERSHIP</b>',dev,top,
+ '<b>OWNERSHIP</b>',dev,top,...(args.kind==='SOCIAL_MAFIA'?lines.filter(l=>/^Creator\s/.test(l.replace(/<[^>]+>/g,'').replace(/^[^A-Za-z]+/,''))):[]),
  ...(lines.some(l=>/Creator wallet balance only/.test(l))?['Zero creator balance does not prove a sale or burn.']:[]),
  ...lines.filter(l=>/Concentrated dev holding/.test(l)),
  ...lines.filter(l=>/^(?:Burned|Verified dev burn)\s/i.test(l.replace(/<[^>]+>/g,'').replace(/^[^A-Za-z]+/,''))&&!/Unavailable|Unverified/i.test(l)),'',
  '<b>RISK</b>',risk,
  ...(socials.length?['',socials.join(' · ')]:[]),'',
- `<code>${esc(args.token)}</code>`,'<i>Promotion event · DYOR</i>',
+ `<code>${esc(args.token)}</code>`,args.kind==='SOCIAL_MAFIA'?'<i>Project acknowledgement · market risks remain · DYOR</i>':'<i>Promotion event · DYOR</i>',
  ...(s?.source?[`${esc(s.source)}${s.checkedAt?' · '+esc(s.checkedAt)+' UTC':''}`]:[])].join('\n');
  const original=args.buttons.flat();
  const chart=s?.chartUrl&&/^https:\/\/dexscreener\.com\/robinhood\//i.test(s.chartUrl)?{text:'📈 Chart',url:s.chartUrl}:null;

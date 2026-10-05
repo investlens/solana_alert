@@ -22,3 +22,8 @@ test('required market cap remains visible beside FDV and missing stats are discl
  assert.match(card.text,/Not reported: liquidity, 5m volume, 24h volume, 1h change/);
  assert.match(card.text,/FDV <b>\$21.03K/);
 });
+
+test('Social Mafia card keeps identity evidence, key market stats and ownership without promotion wording',()=>{
+ const card=buildPromotionEventCard({kind:'SOCIAL_MAFIA',token,launchType:'PONS',stats:{name:'Project',symbol:'PRO'},securityNote:null,buttons:[],text:'Contract evidence <b>Cross-linked Website</b>\nEvidence <a href="https://project.example/">View acknowledgement</a>\nPrice $0.01\nMC $100K\nLiquidity $12K\nVol · 5m $2K\nMove · 1h +8%\nDev holding 3%\nTop 10 28%'});
+ assert.match(card.text,/SOCIAL MAFIA/);assert.match(card.text,/Cross-linked Website/);assert.match(card.text,/https:\/\/project.example/);assert.match(card.text,/MC \$100K/);assert.match(card.text,/Top 10 28%/);assert.doesNotMatch(card.text,/Boost purchase|Payment|Promotion event/);
+});

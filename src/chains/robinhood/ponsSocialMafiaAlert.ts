@@ -1,5 +1,6 @@
 import { recordFeedDelivery } from '../../services/feedDeliveryHealth.js';
-import { discloseRobinhoodKeyStats } from '../../services/alertKeyStatsService.js';
+import { buildPromotionEventCard } from '../../ui/promotionEventCard.js';
+import { discloseRobinhoodKeyStats, cachedRobinhoodAlertStats } from '../../services/alertKeyStatsService.js';
 import { discloseRobinhoodOwnership } from '../../services/alertOwnershipService.js';
 import { discloseAlertDexPaid } from '../../services/alertDexPaidDisclosure.js';
 import { enabledLiveRecipients } from '../../services/liveAlertPreferences.js';
@@ -156,7 +157,8 @@ async function sendTelegram(args: {
 }): Promise<AlphaosDelivery> {
   const botToken = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
   if (!botToken) throw new Error('missing Telegram bot token');
-  const card = await discloseAlertDexPaid(args.text, buildSocialMafiaActions(args.tokenAddress, args.launchpad, args.socials), args.tokenAddress);
+  const compact = /SOCIAL MAFIA/.test(args.text) ? buildPromotionEventCard({kind:'SOCIAL_MAFIA',text:args.text,token:args.tokenAddress,launchType:args.launchpad.id,stats:cachedRobinhoodAlertStats(args.tokenAddress),securityNote:null,buttons:buildSocialMafiaActions(args.tokenAddress,args.launchpad,args.socials)}) : null;
+  const card = await discloseAlertDexPaid(compact?.text??args.text, compact?.buttons??buildSocialMafiaActions(args.tokenAddress, args.launchpad, args.socials), args.tokenAddress);
   return sendAlphaosPhotoAlert({ botToken, chatId: args.chatId, text: card.text, image: args.image, keyboard: card.buttons });
 }
 
@@ -173,13 +175,15 @@ export function buildSocialMafiaAlertText(args: {
   telegramType?: TelegramPreviewType;
   valuationSource?: string | null;
   socialContractConfirmed?: boolean;
+  evidenceSource?: 'Website'|'Telegram';
+  evidenceUrl?: string;
 }): string {
   const symbol = String(args.symbol ?? '').trim().replace(/^\$+/, '').toUpperCase().slice(0, 24) || 'Symbol unavailable';
   const name = String(args.name ?? '').trim().slice(0, 64);
   return [
     '<b>🕶 SOCIAL MAFIA ALERT</b>',
     '',
-    `<b>${escapeHtml(symbol)}</b>${name ? ` · ${escapeHtml(name)}` : ''}`,
+    `<b>${name?escapeHtml(name):'Token'} ($${escapeHtml(symbol)})</b>`,
     `🚀 Launchpad  <b>${escapeHtml(args.launchpadLabel.slice(0, 16))}</b>`,
     '',
     '<b>📊 TOKEN STATS</b>',
@@ -190,15 +194,16 @@ export function buildSocialMafiaAlertText(args: {
     `👨‍💻 Dev holding  <b>${escapeHtml(percent(args.devHoldingPercent))}</b>`,
     ...(args.creatorAddress ? [`👤 Creator  <a href="https://robinhoodchain.blockscout.com/address/${encodeURIComponent(args.creatorAddress)}">${escapeHtml(args.creatorAddress.slice(0, 6))}…${escapeHtml(args.creatorAddress.slice(-4))}</a>`] : []),
     '',
+    `Telegram type <b>${escapeHtml(args.telegramType??(args.socials.telegramUrl?'Type unverified':'Unavailable'))}</b>`,
     '<b>SOCIAL LINKS</b>',
-    ...(args.socialContractConfirmed ? ['✓ CA listed on X · Robinchain'] : []),
+    ...(args.socialContractConfirmed ? [`Contract evidence <b>${args.evidenceSource ? 'Cross-linked '+args.evidenceSource : 'X contract match'}</b>`, ...(args.evidenceSource?['X announcement <b>Contract not confirmed on X</b>']:[]), ...(args.evidenceUrl?[`Evidence <a href="${escapeHtml(args.evidenceUrl).replace(/"/g,'&quot;')}">View contract acknowledgement</a>`]:[])] : []),
     `𝕏 X  <a href="${escapeHtml(args.socials.xUrl).replace(/"/g, '&quot;')}">@${escapeHtml(args.socials.xHandle)}</a>`,
     socialsTelegramLine(args.socials, args.telegramType),
     '',
     '<b>CONTRACT</b>',
     `<a href="https://robinhoodchain.blockscout.com/token/${encodeURIComponent(args.tokenAddress)}">${escapeHtml(args.tokenAddress)}</a>`,
     '',
-    `<i>Verified launchpad · ${args.socialContractConfirmed ? 'CA confirmed on X' : 'Social ownership unverified'}${args.socials.telegramUrl ? ' · Telegram linked, ownership unverified' : ' · Telegram unavailable'} · DYOR</i>`,
+    `<i>Verified launchpad · ${args.socialContractConfirmed ? (args.evidenceSource ? 'CA confirmed on cross-linked '+args.evidenceSource : 'CA confirmed on X') : 'Social ownership unverified'}${args.socials.telegramUrl ? ' · Telegram linked, ownership unverified' : ' · Telegram unavailable'} · DYOR</i>`,
   ].join('\n');
 }
 
@@ -321,7 +326,7 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
       marketCap: positive(market?.marketCapUsd) ?? (curve?.valuationType === 'MARKET_CAP' ? curve.valueUsd : null),
       fdv: positive(market?.fdvUsd) ?? (curve?.valuationType === 'FDV' ? curve.valueUsd : pons?.fdvUsd),
       devHoldingPercent: dev && dev.evidenceStatus !== 'UNAVAILABLE' && dev.devHoldingPercent != null ? dev.devHoldingPercent : creatorHolding,
-      creatorAddress: launch.deployer_address, telegramType, socialContractConfirmed: true,
+      creatorAddress: launch.deployer_address, telegramType, socialContractConfirmed: true, evidenceSource: identity?.evidenceSource, evidenceUrl: identity?.evidenceUrl,
       valuationSource: positive(market?.marketCapUsd) == null && positive(market?.fdvUsd) == null && curve?.valueUsd == null && pons?.fdvUsd != null ? 'PONS snapshot' : null,
     });
   };
@@ -335,7 +340,7 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   // Render once per eligible token, reuse the in-memory buffer across recipients.
   const image = await buildAlphaosAlertCard({ symbol: partial.metadata?.symbol || pons?.symbol,
     name: partial.metadata?.name || pons?.name, logo: pons?.logo,
-    ...(route === 'PROTOCOL_DISCOVERY' ? { category: 'PROTOCOL DISCOVERY', badge: 'SOCIAL OWNERSHIP UNVERIFIED', footer: 'Protocol-name discovery. Research only; no safety or trade endorsement.' } : {}) }).catch(() => {
+    ...(route === 'PROTOCOL_DISCOVERY' ? { category: 'PROTOCOL DISCOVERY', badge: 'SOCIAL OWNERSHIP UNVERIFIED', footer: 'Protocol-name discovery. Research only; no safety or trade endorsement.' } : {category:'SOCIAL MAFIA',badge:identity?.evidenceSource?'CROSS-LINKED CONTRACT':'X CONTRACT MATCH',footer:'Project contract acknowledgement · ownership and market risks remain.'}) }).catch(() => {
       console.warn('[AlphaosCard] rendering unavailable; using text alert'); return null;
     });
   const chats = await enabledLiveRecipients(await recipients(), route === 'PROTOCOL_DISCOVERY' ? 'RH_PROTOCOL_DISCOVERY' : 'RH_SOCIAL_MAFIA');
@@ -357,7 +362,8 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
     const botToken = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
     await Promise.allSettled(results.map(async (result, index) => {
       if (result.status !== 'fulfilled' || result.value == null) return;
-      const card = await discloseAlertDexPaid(enriched, buildSocialMafiaActions(token, launchpad, socials), token);
+      const compact = route==='SOCIAL_MAFIA'?buildPromotionEventCard({kind:'SOCIAL_MAFIA',text:enriched,token,launchType:launchpad.id,stats:cachedRobinhoodAlertStats(token),securityNote:null,buttons:buildSocialMafiaActions(token,launchpad,socials)}):null;
+      const card = await discloseAlertDexPaid(compact?.text??enriched, compact?.buttons??buildSocialMafiaActions(token, launchpad, socials), token);
       const edit = alphaosEnrichmentEdit(result.value, chats[index], card.text, card.buttons);
       await fetch(`https://api.telegram.org/bot${botToken}/${edit.method}`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(5_000),
@@ -524,5 +530,5 @@ export async function restoreSocialWatchCheckpoint(load = () => getWatchCheckpoi
 }
 
 function socialsTelegramLine(socials: SocialMafiaSocials, type?: TelegramPreviewType): string {
-  return socials.telegramUrl ? `✈️ TG <a href="${escapeHtml(socials.telegramUrl).replace(/"/g, '&quot;')}">${escapeHtml(socials.telegramLabel)}</a> · ${escapeHtml(type ?? 'Type unverified')}` : '✈️ Telegram <b>Unavailable</b> · X contract confirmed';
+  return socials.telegramUrl ? `✈️ TG <a href="${escapeHtml(socials.telegramUrl).replace(/"/g, '&quot;')}">${escapeHtml(socials.telegramLabel)}</a> · ${escapeHtml(type ?? 'Type unverified')}` : '✈️ Telegram <b>Unavailable</b>';
 }
