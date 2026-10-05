@@ -88,4 +88,10 @@ describe('existing-token continuous opportunity scanner', () => {
     const selected = selectDueExistingTokens(universe, { now, max: 6, lastScanned: new Map() }).selected;
     assert.equal(selected[0].token, '0xwatched'); assert.equal(selected.some(row => row.token === '0xwarm'), true); assert.equal(selected.length, 6);
   });
+  it('rotates watched tokens by oldest successful check instead of universe order', () => {
+    const universe=Array.from({length:5},(_,i)=>({token:`0xwatch${i}`,tier:'HOT' as const,lastSeenAt:new Date(now).toISOString(),watched:true}));
+    const history=new Map(universe.map((row,i)=>[row.token,now-10_000_000-i*1_000]));
+    const selected=selectDueExistingTokens(universe,{now,max:3,lastScanned:history}).selected;
+    assert.deepEqual(selected.map(row=>row.token),['0xwatch4','0xwatch3','0xwatch2']);
+  });
 });

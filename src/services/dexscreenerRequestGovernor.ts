@@ -60,6 +60,7 @@ type CompletionClassification = 'SUCCESS' | 'HTTP_TIMEOUT' | 'CALLER_ABORT' | 'R
   'PROVIDER_HTTP_ERROR' | 'MALFORMED_RESPONSE' | 'THROWN_EXCEPTION';
 
 const DEFAULT_MAX_CONCURRENCY = 2;
+export const DEXSCREENER_QUEUE_WAIT_TIMEOUT_MS = 10_000;
 export const DEXSCREENER_REQUESTS_PER_SECOND = 2;
 export const DEXSCREENER_EXECUTION_TIMEOUT_MS = 10_000;
 const FALLBACK_BACKOFF_MS = 30_000;
@@ -322,7 +323,24 @@ export async function governedDexScreenerJson<T>(args: {
   if (existing) {
     counters.inflightHits += 1;
     metricsFor(args.caller, priority).inflightDedup += 1; logActivity(args.caller, args.endpoint, priority);
-    const result = await existing;
+    // A joining caller must not inherit an unbounded wait or lose cancellation.
+    // Its deadline does not abort the shared request needed by other callers.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cleanup = () => {};
+    const waitMs = (args.queueWaitTimeoutMs ?? DEXSCREENER_QUEUE_WAIT_TIMEOUT_MS) +
+      (args.httpTimeoutMs ?? DEXSCREENER_EXECUTION_TIMEOUT_MS);
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new DexScreenerQueueCapacityError(waitMs)), waitMs);
+      if (args.signal) {
+        const abort = () => reject(args.signal!.reason ?? new DOMException('Aborted', 'AbortError'));
+        if (args.signal.aborted) abort();
+        else { args.signal.addEventListener('abort', abort, { once: true });
+          cleanup = () => args.signal!.removeEventListener('abort', abort); }
+      }
+    });
+    let result: GovernedDexScreenerValue<unknown>;
+    try { result = await Promise.race([existing, deadline]); }
+    finally { if (timer) clearTimeout(timer); cleanup(); }
     return { ...result, value: result.value as T, cache: 'INFLIGHT' };
   }
   const blockedUntil = activeBackoff();
@@ -337,7 +355,7 @@ export async function governedDexScreenerJson<T>(args: {
     throw new DexScreenerProviderBackoffError(blockedUntil);
   }
   const request = schedule({ priority, caller: args.caller, endpoint: args.endpoint,
-    queueWaitTimeoutMs: args.queueWaitTimeoutMs, signal: args.signal }, async (recoveryProbe): Promise<GovernedDexScreenerValue<T>> => {
+    queueWaitTimeoutMs: args.queueWaitTimeoutMs ?? DEXSCREENER_QUEUE_WAIT_TIMEOUT_MS, signal: args.signal }, async (recoveryProbe): Promise<GovernedDexScreenerValue<T>> => {
     counters.requests += 1;
     const metrics = metricsFor(args.caller, priority); const httpStartedAt = dependencies.now();
     logActivity(args.caller, args.endpoint, priority);
