@@ -34,12 +34,12 @@ async function fetchCustomLiquidityProtection(tokenAddress: string, requireExpli
   const url = `https://api.gopluslabs.io/api/v1/token_security/4663?contract_addresses=${encodeURIComponent(tokenAddress)}`;
   try {
     const response = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(4_000) });
-    if (!response.ok) return { allowed: allowUnknownSellability, status: 'UNKNOWN', reason: `GoPlus HTTP ${response.status}` };
+    if (!response.ok) return { allowed: allowUnknownSellability, status: 'UNKNOWN', reason: `Sellability and LP protection unverified (provider HTTP ${response.status}). Validate liquidity and selling before buying.` };
     const payload = await response.json() as { result?: Record<string, Record<string, unknown>> };
     const key = normalize(tokenAddress);
     const result = payload.result ?? {};
     const security = result[key] ?? result[Object.keys(result).find(v => normalize(v) === key) ?? ''];
-    if (!security) return { allowed: allowUnknownSellability, status: 'UNKNOWN', reason: 'security/LP data unavailable' };
+    if (!security) return { allowed: allowUnknownSellability, status: 'UNKNOWN', reason: 'Sellability and LP protection unverified: provider data unavailable. Validate liquidity and selling before buying.' };
 
     // Hard safety failures remain non-negotiable. A BOOST never overrides
     // honeypot or sell-restriction evidence.
@@ -86,7 +86,7 @@ async function fetchCustomLiquidityProtection(tokenAddress: string, requireExpli
     // BOOST remains fail-closed; DEX payments can disclose unknown evidence. We only warn-and-allow BOOST when we
     // positively know the token passed hard sellability/honeypot checks and
     // the remaining issue is unlocked LP.
-    return { allowed: allowUnknownSellability, status: 'UNKNOWN', reason: error instanceof Error ? error.message.slice(0, 180) : String(error).slice(0, 180) };
+    return { allowed: allowUnknownSellability, status: 'UNKNOWN', reason: 'Sellability and LP protection unverified: provider check failed. Validate liquidity and selling before buying.' };
   }
 }
 
@@ -124,7 +124,7 @@ export async function routeBoostSecurity(args: {
     reason: liquidity.allowed
       ? warning
         ? `custom security warning: ${liquidity.reason}`
-        : `custom security passed: ${liquidity.reason}`
+        : `custom security ${liquidity.status === 'UNKNOWN' ? 'warning' : 'passed'}: ${liquidity.reason}`
       : `custom security blocked: ${liquidity.reason}`,
     cached: false,
     sellabilityVerified: liquidity.allowed && /Sellability checks passed|LP PROTECTED|LP UNLOCKED/.test(liquidity.reason),
