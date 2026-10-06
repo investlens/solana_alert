@@ -310,7 +310,7 @@ export async function enrichDeliveredBoostAlert(args: {
     launchSource: args.trustedLaunchType ?? (args.verifiedPons ? 'PONS' : 'UNKNOWN'),
     boostTotal: args.totalBoostAmount, boostIncrement: args.boostAmount, risk: 'UNKNOWN',
     insightTitle: 'WHY NOW', insight: [`${args.canonicalTitle} observed`, args.securityReason],
-    statusTitle: 'Security', status: args.trustedLaunchType ? `Verified ${args.trustedLaunchType} origin · market risks apply` : args.verifiedPons ? 'Verified PONS origin · market risks apply' : 'Sellability checked · LP protection unverified', displayIntent: 'WATCH',
+    statusTitle: 'Security', status: args.trustedLaunchType ? `Verified ${args.trustedLaunchType} origin · market risks apply` : args.verifiedPons ? 'Verified PONS origin · market risks apply' : 'LP protection unverified · validate liquidity and selling before buying', displayIntent: 'WATCH',
   });
   message = await discloseRobinhoodOwnership(message, args.tokenAddress, pons?.creator, market?.pairAddress ?? pons?.curveAddress);
   const tokenUrl = args.verifiedPons
@@ -325,7 +325,7 @@ export async function enrichDeliveredBoostAlert(args: {
     xUrl: socials.twitter, telegramUrl: socials.telegram,
   });
   const deliveries = await loadDeliveredBoostMessages(args.eventId).catch(() => []);
-  message = await discloseRobinhoodKeyStats(message,args.tokenAddress,false,args.trustedLaunchType?`Trusted ${args.trustedLaunchType} route`:args.verifiedPons?'Trusted PONS route':'Verified sellability flags');
+  message = await discloseRobinhoodKeyStats(message,args.tokenAddress,false,args.trustedLaunchType?`Trusted ${args.trustedLaunchType} route`:args.verifiedPons?'Trusted PONS route':'Sellability/LP status: review security note; validate before buying');
   const card = await discloseAlertDexPaid(message, buttons, args.tokenAddress);
   const edits = await Promise.allSettled(deliveries.map(delivery =>
     editTelegramMessage(delivery.telegramId, delivery.messageId, card.text, card.buttons)));
@@ -413,7 +413,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
   const origin = await getVerifiedRobinhoodLaunchpad(boost.tokenAddress);
   const trustedLaunchType = origin?.launchType;
   const verifiedPons = trustedLaunchType === 'PONS';
-  const security = await routeBoostSecurity({ tokenAddress: boost.tokenAddress, verifiedTrustedLaunchpad: origin !== null, requireExplicitSellability: true });
+  const security = await routeBoostSecurity({ tokenAddress: boost.tokenAddress, verifiedTrustedLaunchpad: origin !== null, requireExplicitSellability: true, allowUnknownSellability: true });
   console.log('[RobinhoodBoostObserver] BOOST_SECURITY_DECISION', {
     token: tokenKey, eventType: canonical.type, route: security.route,
     allowed: security.allowed, reason: security.reason, cached: security.cached,
@@ -511,7 +511,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
     statusTitle: 'Security',
     status: security.liquidity?.status && security.liquidity.status !== 'UNKNOWN'
       ? `LP ${security.liquidity.status}`
-      : trustedLaunchType ? `Verified ${trustedLaunchType} origin · market risks apply` : 'Sellability checked · LP protection unverified',
+      : trustedLaunchType ? `Verified ${trustedLaunchType} origin · market risks apply` : 'LP protection unverified · validate liquidity and selling before buying',
     displayIntent: 'WATCH',
   });
   baseMessage = await discloseRobinhoodOwnership(baseMessage, boost.tokenAddress, pons?.creator, market?.pairAddress ?? pons?.curveAddress);
@@ -558,7 +558,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
   }
 
   if (sharedDeliveryUnavailable && accepted === 0 && !sendStarted) {
-    baseMessage = await discloseRobinhoodKeyStats(baseMessage,boost.tokenAddress,false,trustedLaunchType?`Trusted ${trustedLaunchType} route`:'Verified sellability flags',security.liquidity?.status);
+    baseMessage = await discloseRobinhoodKeyStats(baseMessage,boost.tokenAddress,false,trustedLaunchType?`Trusted ${trustedLaunchType} route`:'Sellability/LP status: review security note; validate before buying',security.liquidity?.status);
     const fallbackCard = await discloseAlertDexPaid(baseMessage, baseButtons, boost.tokenAddress);
     sendStarted = true; // Conservative: retain claim even if fallback fails before acceptance.
     const fallbackDelivered = await deliverAdminBoostFallback({
