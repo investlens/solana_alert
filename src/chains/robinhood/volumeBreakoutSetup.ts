@@ -6,29 +6,31 @@ import { claimSharedDelivery } from '../../services/sharedJsonCache.js';
 import { directTelegramRecipients } from './ponsNormalAlertFastLane.js';
 import { recordFeedDelivery } from '../../services/feedDeliveryHealth.js';
 let running = false;
-console.log('[VolumeBreakout] READY chain=robinhood feed=RH_TRADE_SETUP completeDays=7 maxProviderRequestsPerMinute=6 dbCandleWrites=0');
+console.log('[VolumeBreakout] READY chain=robinhood feed=RH_TRADE_SETUP completeDays=8 maxProviderRequestsPerMinute=6 dbCandleWrites=0');
 const attempted = new Map<string, number>();
 const html = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const usd = (n: number) => '$' + n.toLocaleString('en-US', { maximumFractionDigits: 2 });
 export function volumeBreakoutCard(m: Pick<ChainMarketSnapshot, 'name' | 'symbol' | 'tokenAddress'>, e: VolumeBreakoutEvidence, risk: string): string {
-  return ['📈 <b>TRADE SETUP · VOLUME BREAKOUT</b>', `<b>${html(m.name)} ($${html(m.symbol)})</b> · Robinchain`, '',
-    '<b>MARKET</b>', `Price <b>$${e.price.toPrecision(6)}</b>`,
-    `${e.marketCap ? 'Market cap' : 'FDV'} <b>${usd(e.marketCap ?? e.fdv!)}</b>`,
+  return ['📈 <b>TRADE SETUP · VOLUME SURGE WATCH</b>', `<b>${html(m.name)} ($${html(m.symbol)})</b> · Robinchain`, '',
+    '<b>CURRENT MARKET</b>', `Market cap <b>${e.marketCap ? usd(e.marketCap) : 'Unavailable'}</b>`,
+    ...(!e.marketCap && e.fdv ? [`FDV <b>${usd(e.fdv)}</b>`] : []),
+    `Price <b>$${e.price.toPrecision(6)}</b>`,
     `Liquidity <b>${usd(e.liquidity)}</b> · Pair age <b>${Math.floor((e.at - e.pairCreatedAt) / 86400000)}d</b>`,
-    `Move · 1h <b>${e.move1h.toFixed(2)}%</b> · 24h <b>+${e.move24h.toFixed(2)}%</b>`, '',
-    '<b>WHY ALERTED</b>', `24h pool volume <b>${usd(e.volume24h)}</b>`,
-    `Previous 7 completed UTC days · daily average <b>${usd(e.dailyAverage)}</b>`,
+    `Move · 1h <b>${e.move1h.toFixed(2)}%</b> · rolling 24h <b>${e.move24h.toFixed(2)}%</b>`, '',
+    '<b>WHY ALERTED</b>', `Completed day pool volume <b>${usd(e.signalVolume)}</b>`,
+    `Signal day <b>${new Date(e.dayStart).toISOString().slice(0,10)} UTC</b> · Price <b>+${e.signalMove.toFixed(2)}%</b>`,
+    `Preceding 7 days · daily average <b>${usd(e.dailyAverage)}</b>`,
     `Volume strength <b>${e.multiple.toFixed(2)}×</b>`, '',
     '<b>RISK</b>', html(risk), 'Unusual activity; wash trading and linked wallets are not ruled out.', '',
     `<code>${html(m.tokenAddress)}</code>`, `GeckoTerminal · Checked ${new Date(e.at).toISOString().slice(11,19)} UTC`,
-    '<i>Research watch · Volume breakout is not a confirmed reversal · DYOR</i>'].join('\n');
+    '<i>Research watch · Activity signal, not a buy recommendation · DYOR</i>'].join('\n');
 }
 // Piggybacks the existing older-token shortlist. No timers, candle writes or broad discovery.
 export async function considerRobinhoodVolumeBreakout(m: ChainMarketSnapshot): Promise<void> {
   if (running || process.env.VOLUME_BREAKOUT_ENABLED === 'false') return;
   const now = Date.now(), token = m.tokenAddress.toLowerCase();
-  if (!m.pairAddress || !m.name || !m.symbol || !m.pairCreatedAt || m.pairCreatedAt > (Math.floor(now / 86400000) - 7) * 86400000
-    || (m.volume24hUsd ?? 0) < 10000 || now - (attempted.get(token) ?? 0) < 10 * 60000) return;
+  if (!m.pairAddress || !m.name || !m.symbol || !m.pairCreatedAt || m.pairCreatedAt > (Math.floor(now / 86400000) - 8) * 86400000
+    || now - (attempted.get(token) ?? 0) < 10 * 60000) return;
   for (const [k, at] of attempted) if (now - at > 3600000) attempted.delete(k);
   if (attempted.size >= 100) return;
   attempted.set(token, now);
@@ -41,7 +43,7 @@ export async function considerRobinhoodVolumeBreakout(m: ChainMarketSnapshot): P
   const launch = await getVerifiedRobinhoodLaunchpad(token).catch(() => null);
   const gate = await routeBoostSecurity({ tokenAddress: token, verifiedTrustedLaunchpad: !!launch, requireExplicitSellability: true });
   if (!gate.allowed || Date.now() - evidence.at > 90000) return;
-  const claim = await claimSharedDelivery(`alphaos:volume-breakout:delivered:robinhood:${token}`, 24 * 3600000);
+  const claim = await claimSharedDelivery(`alphaos:volume-breakout:delivered:robinhood:${token}:${evidence.dayStart}`, 24 * 3600000);
   if (claim !== 'CLAIMED') return;
   const risk = launch ? `Verified ${launch.launchType} origin · market risks remain` : gate.reason;
   const delivery = await directTelegramRecipients(volumeBreakoutCard(m, evidence, risk), token, undefined, false, true,
