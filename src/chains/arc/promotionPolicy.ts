@@ -4,6 +4,13 @@ export function isArcPromotionFeed(feed: string): boolean {
 }
 import type {ArcBoostSafety} from './boostSafety.js';
 export async function arcDeliverySafety(feed:string,token:string,check:(token:string)=>Promise<ArcBoostSafety & {observedAt?:number}>):Promise<ArcBoostSafety & {observedAt?:number}> {
+  if (feed === 'ARC_BOOST') {
+    const safety = await check(token).catch(() => ({allowed:false,reason:'Provider check unavailable'} as ArcBoostSafety));
+    if (safety.sellabilityBlocked) return safety;
+    return {...safety,allowed:true,reason:safety.sellabilityVerified
+      ? 'No honeypot/sell-restriction flag reported. LP lock unverified; validate liquidity before buying.'
+      : 'Sellability and LP lock unverified. Validate liquidity and selling before buying.'};
+  }
   if (isArcPromotionFeed(feed)) return {allowed:true,reason:ARC_PROMOTION_WARNING,sellabilityVerified:false};
   return check(token);
 }

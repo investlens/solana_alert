@@ -246,8 +246,8 @@ async function broadcastArcAlert(text: string, buttons: any[][], outcomeToken?: 
   if (!sellSafety.allowed) throw new Error(`ARC sellability blocked: ${sellSafety.reason}`);
   const stats = await arcAlertStats(outcomeToken,expectedPool);
   if (feed==='ARC_DEX_PAID') text = text.replace('Promotion payment confirmed',`${String(stats.name??'Token name unavailable').replace(/[<>&]/g,'')} (${String(stats.symbol??'Symbol unavailable').replace(/[<>&]/g,'')})\nPromotion payment confirmed`);
-  if(isArcPromotionFeed(feed)) text += `\n⚠️ <b>${ARC_PROMOTION_WARNING}</b>`;
-  text = withAlertKeyStats(text,{...stats,sellability:isArcPromotionFeed(feed)?'Not checked · manual validation required':'Provider flags passed · execution unverified',lp:isArcPromotionFeed(feed)?'Not checked':'Unverified',dexPaid:feed==='ARC_DEX_PAID'?'Yes · payment confirmed':undefined});
+  if(isArcPromotionFeed(feed)) text += `\n⚠️ <b>${feed==='ARC_BOOST'?sellSafety.reason:ARC_PROMOTION_WARNING}</b>`;
+  text = withAlertKeyStats(text,{...stats,sellability:isArcPromotionFeed(feed)?(feed==='ARC_BOOST'&&sellSafety.sellabilityVerified?'No provider sell-restriction flag · execution unverified':'Unverified · manual validation required'):'Provider flags passed · execution unverified',lp:isArcPromotionFeed(feed)?'Not checked':'Unverified',dexPaid:feed==='ARC_DEX_PAID'?'Yes · payment confirmed':undefined});
   text = withOwnershipDisclosure(text, {devPercent: sellSafety.devHoldingPercent ?? null, devObservedAt:sellSafety.observedAt,top10ObservedAt:sellSafety.observedAt,
     top10Percent: sellSafety.top10Percent ?? null, top10Coverage: sellSafety.top10Percent == null ? 'UNAVAILABLE' : 'PROVIDER_REPORTED'});
   if (outcomeToken && /^0x[a-fA-F0-9]{40}$/.test(outcomeToken)) buttons = [...buttons, [{text:'⭐ Track',callback_data:`OUT_ARC_${outcomeToken}`}]];
