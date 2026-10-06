@@ -1,5 +1,5 @@
-// Pool-specific evidence: seven completed UTC days, never missing days as zero.
-export type VolumeBreakoutEvidence = { price: number; marketCap: number | null; fdv: number | null; liquidity: number; volume24h: number; move24h: number; move1h: number; dailyAverage: number; multiple: number; pairCreatedAt: number; at: number; dayStart: number };
+// Pool-specific evidence: one completed signal day and seven preceding days; no overlap or synthetic zeros.
+export type VolumeBreakoutEvidence = { price: number; marketCap: number | null; fdv: number | null; liquidity: number; volume24h: number; move24h: number; move1h: number; dailyAverage: number; multiple: number; pairCreatedAt: number; at: number; dayStart: number; signalMove: number; signalVolume: number };
 const DAY = 86400;
 const positive = (v: unknown): number | null => typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null;
 const numeric = (v: unknown): number | null => typeof v === 'number' && Number.isFinite(v) ? v : null;
@@ -20,6 +20,20 @@ export function completedWeekAverage(rows: unknown, now: number, createdAt: numb
   const average = [...days.values()].reduce((a, b) => a + b, 0) / 7;
   return average >= 1000 ? average : null;
 }
+export type CompletedVolumeWindow = { dailyAverage: number; signalVolume: number; signalMove: number; dayStart: number };
+export function completedVolumeWindow(rows: unknown, now: number, createdAt: number): CompletedVolumeWindow | null {
+  const boundary = Math.floor(now / 1000 / DAY) * DAY;
+  if (!Array.isArray(rows) || !Number.isFinite(createdAt) || createdAt > (boundary - 8 * DAY) * 1000) return null;
+  const signalRows = rows.filter(row => Array.isArray(row) && row[0] === boundary - DAY);
+  if (signalRows.length !== 1) return null;
+  // Validate the signal candle with the same strict OHLCV checks as the baseline.
+  const baseline = completedWeekAverage(rows, now - DAY * 1000, createdAt);
+  const signal = signalRows[0];
+  const [at, open, high, low, close, volume] = signal;
+  if (signal.length !== 6 || ![at, open, high, low, close, volume].every(x => typeof x === 'number' && Number.isFinite(x))
+    || volume < 0 || open <= 0 || close <= 0 || low <= 0 || high < Math.max(open, close) || low > Math.min(open, close) || baseline == null) return null;
+  return { dailyAverage: baseline, signalVolume: volume, signalMove: (close / open - 1) * 100, dayStart: at * 1000 };
+}
 export function poolVolumeSnapshot(payload: any, network: string, token: string, pool: string, at: number) {
   const d = payload?.data, a = d?.attributes;
   if (!a || d.id?.toLowerCase() !== `${network}_${pool}`.toLowerCase()
@@ -35,13 +49,14 @@ export function poolVolumeSnapshot(payload: any, network: string, token: string,
   if (!price || !liquidity || !volume24h || move24h == null || move1h == null || (!marketCap && !fdv) || !Number.isFinite(pairCreatedAt)) return null;
   return { price, liquidity, volume24h, move24h, move1h, marketCap, fdv, pairCreatedAt, at };
 }
-export function qualifyVolumeBreakout(snapshot: NonNullable<ReturnType<typeof poolVolumeSnapshot>>, average: number, now = Date.now()): VolumeBreakoutEvidence | null {
-  if (!Number.isFinite(average) || average < 1000 || now < snapshot.at || now - snapshot.at > 90_000
-    || snapshot.volume24h < 10000 || snapshot.liquidity < 2000 || snapshot.move24h <= 0 || snapshot.volume24h / average < 2) return null;
-  return { ...snapshot, dailyAverage: average, multiple: snapshot.volume24h / average, dayStart: Math.floor(now / 86400000) * 86400000 };
+export function qualifyVolumeBreakout(snapshot: NonNullable<ReturnType<typeof poolVolumeSnapshot>>, window: CompletedVolumeWindow, now = Date.now()): VolumeBreakoutEvidence | null {
+  if (!Number.isFinite(window.dailyAverage) || window.dailyAverage < 1000 || now < snapshot.at || now - snapshot.at > 90_000
+    || window.dayStart !== (Math.floor(now / 86400000) - 1) * 86400000
+    || window.signalVolume < 10000 || snapshot.liquidity < 2000 || window.signalMove <= 0 || window.signalVolume / window.dailyAverage < 2) return null;
+  return { ...snapshot, ...window, multiple: window.signalVolume / window.dailyAverage };
 }
 
-type Cached = { expires: number; average: number | null };
+type Cached = { expires: number; window: CompletedVolumeWindow | null };
 const history = new Map<string, Cached>();
 const pending = new Set<string>();
 let minute = 0, requests = 0, backoffUntil = 0;
@@ -59,7 +74,7 @@ async function json(url: string): Promise<any> {
 export type VolumeBreakoutRead = {evidence:VolumeBreakoutEvidence|null;reason:'QUALIFIED'|'CONDITION_WAIT'|'INVALID_IDENTITY'|'CAPACITY_LIMITED'|'PROVIDER_BACKOFF'|'SNAPSHOT_UNAVAILABLE'|'INCOMPLETE_WEEK'|'PROVIDER_UNAVAILABLE'};
 export async function readVolumeBreakoutResult(network: string, token: string, pool: string): Promise<VolumeBreakoutRead> {
   if (!['robinhood', 'arc', 'solana'].includes(network) || !token || !pool) return {evidence:null,reason:'INVALID_IDENTITY'};
-  const key = `${network}:${pool}:${Math.floor(Date.now() / 86400000)}`;
+  const key = `${network}:${token}:${pool}:${Math.floor(Date.now() / 86400000)}`;
   for (const [k, v] of history) if (v.expires <= Date.now()) history.delete(k);
   if(Date.now()<backoffUntil)return {evidence:null,reason:'PROVIDER_BACKOFF'};
   if (pending.has(key) || pending.size >= 1) return {evidence:null,reason:'CAPACITY_LIMITED'};
@@ -68,18 +83,18 @@ export async function readVolumeBreakoutResult(network: string, token: string, p
     const base = `https://api.geckoterminal.com/api/v2/networks/${network}/pools/${encodeURIComponent(pool)}`;
     const snapshot = poolVolumeSnapshot(await json(base), network, token, pool, Date.now());
     if (!snapshot)return {evidence:null,reason:'SNAPSHOT_UNAVAILABLE'};
-    if(snapshot.volume24h < 10000 || snapshot.move24h <= 0 || snapshot.liquidity < 2000)return {evidence:null,reason:'CONDITION_WAIT'};
+    if(snapshot.liquidity < 2000)return {evidence:null,reason:'CONDITION_WAIT'};
     let cached = history.get(key);
     if (!cached) {
       const boundary = Math.floor(Date.now() / 86400000) * 86400;
-      const data = await json(`${base}/ohlcv/day?aggregate=1&limit=7&before_timestamp=${boundary - 1}&currency=usd&token=base&include_empty_intervals=false`);
-      const average = completedWeekAverage(data?.data?.attributes?.ohlcv_list, Date.now(), snapshot.pairCreatedAt);
+      const data = await json(`${base}/ohlcv/day?aggregate=1&limit=8&before_timestamp=${boundary - 1}&currency=usd&token=base&include_empty_intervals=false`);
+      const window = completedVolumeWindow(data?.data?.attributes?.ohlcv_list, Date.now(), snapshot.pairCreatedAt);
       if (history.size >= 100) history.delete(history.keys().next().value!);
-      cached = { average, expires: Date.now() + (average == null ? 10 * 60000 : 3600000) };
+      cached = { window, expires: window == null ? Date.now() + 10 * 60000 : (boundary + DAY) * 1000 };
       history.set(key, cached);
     }
-    if(cached.average==null)return {evidence:null,reason:'INCOMPLETE_WEEK'};
-    const evidence=qualifyVolumeBreakout(snapshot,cached.average);return {evidence,reason:evidence?'QUALIFIED':'CONDITION_WAIT'};
+    if(cached.window==null)return {evidence:null,reason:'INCOMPLETE_WEEK'};
+    const evidence=qualifyVolumeBreakout(snapshot,cached.window);return {evidence,reason:evidence?'QUALIFIED':'CONDITION_WAIT'};
   } catch(error) { const message=error instanceof Error?error.message:'';return {evidence:null,reason:message==='history request budget'?'CAPACITY_LIMITED':Date.now()<backoffUntil?'PROVIDER_BACKOFF':'PROVIDER_UNAVAILABLE'}; }
   finally { pending.delete(key); }
 }
