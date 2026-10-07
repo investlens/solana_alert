@@ -88,9 +88,30 @@ async function publicHtml(url: string): Promise<string | null> {
     return html;
   } finally { pageInflight.delete(url); }
 }
-async function fetchPublicHtml(url: string): Promise<string | null> {
+export function isSamePonsLaunchRedirect(original: string, target: string): boolean {
   try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(4_000), redirect: 'error', headers: { accept: 'text/html' } });
+    const a = new URL(original), b = new URL(target);
+    return [a,b].every(u => u.protocol === 'https:' && !u.username && !u.password && !u.port
+      && ['ponsfamily.com','www.ponsfamily.com'].includes(u.hostname)
+      && /^\/launchpad\/0x[a-f0-9]{40}\/?$/i.test(u.pathname))
+      && a.pathname.replace(/\/$/,'').toLowerCase() === b.pathname.replace(/\/$/,'').toLowerCase();
+  } catch { return false; }
+}
+export async function fetchPublicHtml(url: string, request: typeof fetch = fetch): Promise<string | null> {
+  try {
+    const signal = AbortSignal.timeout(4_000);
+    let current = url;
+    let response: Response;
+    for (let hop = 0; ; hop++) {
+      response = await request(current, { signal, redirect: 'manual', headers: { accept: 'text/html' } });
+      if (![301,302,303,307,308].includes(response.status)) break;
+      const location = response.headers.get('location');
+      await response.body?.cancel().catch(() => {});
+      if (!location || hop >= 2) return null;
+      const target = new URL(location, current).href;
+      if (!isSamePonsLaunchRedirect(url, target)) return null;
+      current = target;
+    }
     if (!response.ok || !response.headers.get('content-type')?.includes('text/html')) return null;
     const reader = response.body?.getReader(); if (!reader) return null;
     const decoder = new TextDecoder(); let html = ''; let size = 0;

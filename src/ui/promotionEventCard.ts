@@ -8,7 +8,7 @@ export function buildPromotionEventCard(args:PromotionCardArgs) {
  const producer=plain.match(/(?:^|\n)\$([A-Za-z_][A-Za-z0-9_]{0,23})\s*·\s*([^\n]+)/);
  const compact=plain.match(/(?:^|\n)([^\n]+) \(\$([A-Za-z_][A-Za-z0-9_]{0,23})\)/);
  const name=s?.name ?? producer?.[2]?.trim() ?? compact?.[1]?.trim(),symbol=s?.symbol ?? producer?.[1]?.trim() ?? compact?.[2]?.trim();
- const identity=name ? `${esc(name)}${symbol?' ($'+esc(symbol)+')':''}` : 'Token identity pending';
+ const identity=name ? `${esc(name)}${symbol?' ($'+esc(symbol)+')':''}` : symbol ? '$'+esc(symbol) : 'Token identity pending';
  // Normalize legacy combined rows before selecting one row per metric. Structured
  // snapshot values take precedence; missing snapshot fields retain producer facts.
  const metricRows = lines.flatMap(line=>line.split(/\s*·\s*(?=(?:[^A-Za-z<]*)(?:Market cap|MC|FDV|Liquidity|5m volume|Price)\s)/i))
@@ -47,7 +47,7 @@ export function buildPromotionEventCard(args:PromotionCardArgs) {
  const title=args.kind==='SOCIAL_MAFIA'?'🕶️ <b>SOCIAL MAFIA</b>':args.kind==='DEX_PAID'?'💎 <b>DEX PAID DETECTED</b>':/BOOST INCREASED/.test(args.text)?'🚀 <b>BOOST INCREASED</b>':'🚀 <b>BOOST DETECTED</b>';
  const text=[title,`<b>${identity}</b>`,`Robinchain${args.launchType?' · '+esc(args.launchType):''}`,
  ...(args.kind==='SOCIAL_MAFIA'?lines.filter(l=>/^(?:Contract evidence|X announcement|Telegram type|Evidence)\s/.test(l.replace(/<[^>]+>/g,''))):args.kind==='DEX_PAID'?[`Payment <b>Confirmed</b>${age==null?'':` · ${age}m ago`}`]:[boost??'Boost purchase detected',...(paid?[paid]:[])]),'',
- '<b>MARKET</b>',...new Set(metrics),...(unavailable.length?['Not reported: '+unavailable.join(', ')]:[]),
+ '<b>MARKET</b>',...new Set(metrics),...(unavailable.length?['Market data incomplete · use Full Intel to recheck']:[]),
  ...(s?.preBond?['Bonding curve · no DEX market yet']:!s?.chartUrl?['Trading venue unconfirmed']:[]),
  ...(!metrics.length?['Market snapshot pending']:[]),'',
  '<b>OWNERSHIP</b>',...(creator?[creator]:[]),dev,top,

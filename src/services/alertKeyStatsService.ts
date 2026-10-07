@@ -1,3 +1,4 @@
+import { readRobinhoodTokenIdentity, type TokenIdentity } from './researchTokenIdentity.js';
 import { getIndexedVerifiedPonsLaunch, getPonsLaunchState } from '../chains/robinhood/ponsLaunchState.js';
 import { getVerifiedPonsPublicContext, getPonsV1PoolMapping } from '../chains/robinhood/ponsPublicContext.js';
 import { withAlertKeyStats, type AlertKeyStats } from '../ui/alertKeyStats.js';
@@ -19,20 +20,28 @@ export async function discloseRobinhoodKeyStats(text:string,token:string,preBond
     if(!work&&pending.size<2&&started<10){
       started++;
       let observedMarket:ChainMarketSnapshot|null=null;
+      let identity:TokenIdentity={};
       let observedVenue:AlertKeyStats|null=preBond?{preBond:true,authoritativeVenue:true}:null;
       const publish=(venue:AlertKeyStats|null)=>{
         observedVenue=venue;
-        const stats=selectAlertMarket(token,venue,observedMarket);
+        const selected=selectAlertMarket(token,venue,observedMarket);
+        const stats={...selected,name:selected.name??identity.name,symbol:selected.symbol??identity.symbol};
         if(cache.size>=100)cache.delete(cache.keys().next().value!);
         cache.set(key,{at:Date.now(),value:stats});
         return stats;
       };
+      const identityWork=readRobinhoodTokenIdentity(token).then(value=>{identity=value;publish(observedVenue);return value;});
       const marketWork=getRobinhoodMarketSnapshot(token,{priority:'NORMAL',caller:'alert_key_stats',queueWaitTimeoutMs:750}).then(m=>{
         observedMarket=m;publish(observedVenue);return m;
       });
       const venue=async()=>{
         // Independent reads start together; slow index lookups must not postpone the public page request.
-        const publicWork=ponsHint ? getVerifiedPonsPublicContext(token).catch(()=>null) : Promise.resolve(null);
+        const publicWork=ponsHint ? getVerifiedPonsPublicContext(token).then(context=>{
+          // Exact-token, enabled-factory public metadata is independent of the index.
+          // Quote is explicitly unconfirmed until the venue read completes.
+          if(context)publish({...ponsVenueStats(token,context,null,[]),supply:formatResearchSupply(context)});
+          return context;
+        }).catch(()=>null) : Promise.resolve(null);
         const [indexedLaunch,publicContext]=await Promise.all([getIndexedVerifiedPonsLaunch(token).catch(()=>null),publicWork]);
         let launch=indexedLaunch;
         // A verified V2 origin can exist before the durable launch index catches up.
@@ -71,22 +80,23 @@ export async function discloseRobinhoodKeyStats(text:string,token:string,preBond
         if(stats)publish(stats);
         return stats;
       });
-      work=Promise.allSettled([marketWork,readResearchTokenSupply(token,'robinhood'),venueWork]).then(([market,supply,context])=>{
+      work=Promise.allSettled([marketWork,readResearchTokenSupply(token,'robinhood'),venueWork,identityWork]).then(([market,supply,context])=>{
         const m=market.status==='fulfilled'?market.value:null;
         const s=supply.status==='fulfilled'?supply.value:null;
-        const c=context.status==='fulfilled'?context.value:null;
+        const c=context.status==='fulfilled'?context.value:observedVenue;
         const stats:AlertKeyStats=ponsHint||c?{...selectAlertMarket(token,c??(preBond?{preBond:true,authoritativeVenue:true}:null),m),supply:s?formatResearchSupply(s):c?.supply}:{name:m?.name,symbol:m?.symbol,chartUrl:m?.chartUrl,price:m?.priceUsd||null,marketCap:m?.marketCapUsd||null,fdv:m?.fdvUsd||null,liquidity:m?.liquidityUsd||null,
           volume5m:m?.volume5mReported?m.volume5mUsd:null,volume24h:m?.volume24hUsd,move5m:m?.priceChange5m,move1h:m?.priceChange1h,
           buys:m?.trades5mReported?m.buys5m:null,sells:m?.trades5mReported?m.sells5m:null,pairCreatedAt:m?.pairCreatedAt,
           supply:s?formatResearchSupply(s):null,source:m?'DEXScreener'+(s?' / on-chain supply':''):s?'On-chain supply':null,
           checkedAt:m?new Date(m.timestamp).toISOString().slice(11,19):s?.checkedAt.slice(11,19) ?? null};
+        stats.name??=identity.name;stats.symbol??=identity.symbol;
         if(cache.size>=100)cache.delete(cache.keys().next().value!);cache.set(key,{at:Date.now(),value:stats});return stats;
       }).finally(()=>pending.delete(key));pending.set(key,work);
     }
     if(work){let timer:ReturnType<typeof setTimeout>|undefined;try{const stats=await Promise.race([work,new Promise<null>(resolve=>{timer=setTimeout(()=>resolve(null),2500);})]);if(stats)value={at:Date.now(),value:stats};}finally{if(timer)clearTimeout(timer);}}
     value=cache.get(key)??value;
   }
-  const stats=ponsHint && !value?.value.authoritativeVenue ? {authoritativeVenue:true,supply:value?.value.supply,source:'PONS venue data pending',checkedAt:new Date().toISOString().slice(11,19)} : value?.value ?? {};
+  const stats=ponsHint && !value?.value.authoritativeVenue ? {authoritativeVenue:true,name:value?.value.name,symbol:value?.value.symbol,twitter:value?.value.twitter,telegram:value?.value.telegram,creator:value?.value.creator,supply:value?.value.supply,source:'PONS venue data pending',checkedAt:new Date().toISOString().slice(11,19)} : value?.value ?? {};
   return withAlertKeyStats(text,{...stats,preBond:stats.authoritativeVenue?stats.preBond:preBond,sellability,lp});
 }
 
