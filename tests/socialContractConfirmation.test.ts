@@ -102,3 +102,9 @@ test('cached reciprocal links also work during an unreadable X shell, without tr
  assert.equal((await verify(args)).evidenceSource,'Website');
  time=3600001;assert.equal((await verify(args)).confirmed,false);
 });
+
+test('author-bound public profile metadata can confirm a contract without reading scripts or a login shell',async()=>{
+ const html=`<link rel="canonical" href="https://x.com/RevenueFamily"><meta property="og:title" content="Revenue (@RevenueFamily) / X"><meta name="description" content="Robinchain CA: ${token}">`;
+ assert.equal((await verifySocialContract(args,async()=>html)).confirmed,true);
+ for(const bad of [html.replace('href="https://x.com/RevenueFamily"','href="https://x.com/Other"'),html.replace('@RevenueFamily','@Other'),html.replace('https://x.com/RevenueFamily','https://evil.example/RevenueFamily'),`<script>${html}</script>`,html.replace(`Robinchain CA: ${token}`,'Log in to X')])assert.equal((await verifySocialContract(args,async()=>bad)).confirmed,false);
+});

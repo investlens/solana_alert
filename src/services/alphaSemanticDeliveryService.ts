@@ -221,6 +221,7 @@ export async function deliverAlphaSemanticEvent(args: {
     // Resolve the public exact-contract creator before starting ownership work.
     paidCreator=paidCreator ?? cachedRobinhoodAlertStats(args.event.assetId)?.creator ?? null;
   }
+  const outcomeStats = args.event.chain === 'robinhood' && ['DEX_PAID','BOOST'].includes(args.event.type) ? cachedRobinhoodAlertStats(args.event.assetId) : null;
   const deliveryStartedAt = Date.now();
   const users = (await dependencies.getUsers()).sort((a, b) => recipientDelayMs(a, deliveryStartedAt) - recipientDelayMs(b, deliveryStartedAt));
   if (dependencies === productionDependencies && (!deliveryMessage.includes('<b>OWNERSHIP</b>') || ['DEX_PAID','BOOST'].includes(args.event.type)) && /^(robinhood|robinchain)$/i.test(args.event.chain ?? '')) {
@@ -342,9 +343,11 @@ export async function deliverAlphaSemanticEvent(args: {
   if (ephemeralMode && delivered > 0) void recordRecoveryAlertAudit(args.event, delivered);
   if (dependencies === productionDependencies && isPositiveSemanticEvent(args.event.type)) {
     const raw = args.event.rawSnapshot ?? getEphemeralSemanticEventEvidence(args.event.eventIdentity) ?? {};
+    const stats=outcomeStats;
+    const verifiedPair=stats?.source?.includes('DEXScreener')?stats.chartUrl?.match(/^https:\/\/dexscreener\.com\/robinhood\/(0x(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64}))(?:[?#]|$)/)?.[1]:null;
     void recordCompactAlert({chain:args.event.chain, token:args.event.assetId, feed:args.event.type,
-      price:raw.price as number | null, marketCap:raw.marketCap as number | null,
-      liquidity:raw.liquidity as number | null, pair:raw.pairAddress as string | null}, accepted);
+      price:verifiedPair?stats!.price:raw.price as number | null, marketCap:verifiedPair?stats!.marketCap:raw.marketCap as number | null,
+      liquidity:verifiedPair?stats!.liquidity:raw.liquidity as number | null, pair:verifiedPair??raw.pairAddress as string | null}, accepted);
   }
   return { delivered, failed };
 }
