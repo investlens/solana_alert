@@ -1,10 +1,6 @@
-export type ArcBoostSafety = { allowed: boolean; reason: string; sellabilityBlocked?: boolean; sellabilityVerified?: boolean; devHoldingPercent?: number | null; top10Percent?: number | null };
+export type ArcBoostSafety = { allowed: boolean; reason: string; sellabilityBlocked?: boolean; sellabilityVerified?: boolean; creator?: string | null; devHoldingPercent?: number | null; top10Percent?: number | null };
 export function arcBoostSafetyFromEvidence(evidence: Record<string, unknown> | null | undefined): ArcBoostSafety {
   if (!evidence) return { allowed: false, reason: 'honeypot evidence unavailable' };
-  if (String(evidence.is_honeypot) === '1') return { allowed: false, sellabilityBlocked:true, reason: 'honeypot flag' };
-  if (String(evidence.cannot_sell_all) === '1') return { allowed: false, sellabilityBlocked:true, reason: 'cannot-sell flag' };
-  if (String(evidence.is_honeypot) !== '0' || String(evidence.cannot_sell_all) !== '0')
-    return { allowed: false, reason: 'honeypot/sell evidence incomplete' };
   // GoPlus percentages are fractions of supply. Owner is not necessarily creator.
   const fraction = (value: unknown): number | null => {
     if (!['string', 'number'].includes(typeof value) || (typeof value === 'string' && !value.trim())) return null;
@@ -18,8 +14,14 @@ export function arcBoostSafetyFromEvidence(evidence: Record<string, unknown> | n
   // Partial provider lists are explicitly labelled; never infer complete coverage.
   const top10Percent = portions.length && portions.every(p => p != null)
     ? portions.sort((a,b) => b! - a!).slice(0,10).reduce<number>((sum,p) => sum + p!, 0) : null;
+  const creator=typeof evidence.creator_address==='string' && /^0x[a-fA-F0-9]{40}$/.test(evidence.creator_address) && !/^0x0{40}$/i.test(evidence.creator_address) ? evidence.creator_address : null;
+  const ownership={creator,devHoldingPercent:holding,top10Percent:top10Percent!=null && top10Percent<=100?top10Percent:null};
+  if (String(evidence.is_honeypot) === '1') return { ...ownership, allowed: false, sellabilityBlocked:true, reason: 'honeypot flag' };
+  if (String(evidence.cannot_sell_all) === '1') return { ...ownership, allowed: false, sellabilityBlocked:true, reason: 'cannot-sell flag' };
+  if (String(evidence.is_honeypot) !== '0' || String(evidence.cannot_sell_all) !== '0')
+    return { ...ownership, allowed: false, reason: 'honeypot/sell evidence incomplete' };
   return { allowed: true, sellabilityVerified:true, reason: 'no honeypot/cannot-sell flag detected; LP check intentionally skipped for BOOST',
-    devHoldingPercent: holding, top10Percent: top10Percent != null && top10Percent <= 100 ? top10Percent : null };
+    ...ownership };
 }
 export async function processArcBoostObservation(totals: Map<string, number>, boost: { tokenAddress: string; totalAmount: number },
   deliver: (eventType: 'NEW' | 'INCREASE') => Promise<boolean>): Promise<void> {

@@ -26,3 +26,13 @@ test('provider wallet sample excludes contracts and burn addresses; incomplete p
  assert.equal(arcBoostSafetyFromEvidence({...base,holders:[{is_contract:'0',percent:'0.1'},{is_contract:'1',percent:'0.8'}]}).top10Percent,10);
  assert.equal(arcBoostSafetyFromEvidence({...base,holders:[{is_contract:'0',percent:''}]}).top10Percent,null);
 });
+
+test('incomplete sellability does not discard independent ownership evidence',()=>{
+ const creator='0x'+'b'.repeat(40);
+ const result=arcBoostSafetyFromEvidence({creator_address:creator,creator_percent:'0.15',holders:[{is_contract:'0',percent:'0.20'}]});
+ assert.equal(result.allowed,false);assert.equal(result.sellabilityVerified,undefined);
+ assert.equal(result.creator,creator);assert.equal(result.devHoldingPercent,15);assert.equal(result.top10Percent,20);
+ const flagged=arcBoostSafetyFromEvidence({is_honeypot:'1',creator_address:creator,creator_percent:'0.15'});
+ assert.equal(flagged.sellabilityBlocked,true);assert.equal(flagged.allowed,false);
+ assert.equal(arcBoostSafetyFromEvidence({creator_address:'<script>',owner_address:creator}).creator,null);
+});
