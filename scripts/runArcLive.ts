@@ -199,7 +199,6 @@ async function processArcBurns(fromBlock: bigint, toBlock: bigint): Promise<void
         [ ...(twitter ? [{text:'𝕏 X',url:twitter}] : []), ...(telegram ? [{text:'✈️ TG',url:telegram}] : []) ],
       ].filter(row => row.length > 0);
       const delivery = await broadcastArcAlert(text, buttons, token, 'ARC_SUPPLY_BURN');
-      void recordCompactAlert({chain:'arc', token, feed:'ARC_SUPPLY_BURN', price:outcomePrice, pair:outcomePair}, delivery.delivered);
       burnDelivered.add(identity);
       console.log('[ArcBurn] ALERT_SENT', { token, symbol, burnPercent, txHash, delivered:delivery.delivered });
     } catch (error) {
@@ -275,6 +274,7 @@ async function broadcastArcAlert(text: string, buttons: any[][], outcomeToken?: 
   });
   recordFeedDelivery(feed,'ACCEPTED',deliveredCount); recordFeedDelivery(feed,'PROCESSING_FAILED',failed);
   if (!deliveredCount) throw new Error(`ARC Telegram delivery failed for all ${failed} recipients`);
+  void recordCompactAlert({chain:'arc', token:outcomeToken, feed, price:stats.price, marketCap:stats.marketCap, liquidity:stats.liquidity, pair:stats.pairAddress}, deliveredCount);
   return { delivered: deliveredCount, failed, adminMessageId };
 }
 
@@ -346,7 +346,6 @@ async function deliverArcAlert(market: Awaited<ReturnType<typeof enrichArcMarket
   ].filter(row => row.length > 0);
 
   const delivery = await broadcastArcAlert(text, buttons, market.assetId, 'ARC_OPPORTUNITY', market.poolId);
-  void recordCompactAlert({chain:'arc', token:market.assetId, feed:'ARC_OPPORTUNITY', price:market.priceUsd, pair:market.poolId, marketCap:market.marketCapUsd, liquidity:market.liquidityUsd}, delivery.delivered);
   delivered.add(key);
   console.log('[ArcLive] ALERT_SENT', { assetId: market.assetId, symbol: market.symbol, messageId: delivery.adminMessageId, delivered: delivery.delivered, failed: delivery.failed });
 }
@@ -574,7 +573,6 @@ async function deliverArcBoost(boost: {tokenAddress:string;amount:number;totalAm
   ].filter(row => row.length > 0);
   try {
     const delivery = await broadcastArcAlert(text, buttons, boost.tokenAddress, 'ARC_BOOST');
-    void recordCompactAlert({chain:'arc', token:boost.tokenAddress, feed:'BOOST', price:outcomePrice, pair:outcomePair}, delivery.delivered);
     arcBoostDelivered.add(identity);
     await persistArcBoostDelivery(boost).catch(error => console.warn('[ArcBoost] PERSIST_FAILED', { token:key, totalBoost:boost.totalAmount, reason:error instanceof Error ? error.message : String(error) }));
     console.log('[ArcBoost] ALERT_SENT', { token:key, totalBoost:boost.totalAmount, eventType, messageId:delivery.adminMessageId, delivered:delivery.delivered, failed:delivery.failed });
@@ -699,7 +697,7 @@ async function arcAlertStats(token:string,expectedPool?:string):Promise<AlertKey
  const pairs=pairRead.status==='fulfilled'&&Array.isArray(pairRead.value.value)?pairRead.value.value:[];
  const pair=pairs.filter(p=>p?.chainId==='arc'&&String(p?.baseToken?.address).toLowerCase()===token.toLowerCase()&&(!expectedPool||String(p.pairAddress).toLowerCase()===expectedPool.toLowerCase())).sort((a,b)=>(arcMarketNumber(b?.liquidity?.usd)??0)-(arcMarketNumber(a?.liquidity?.usd)??0))[0];
  const supply=supplyRead.status==='fulfilled'?supplyRead.value:null;
- const value:AlertKeyStats={symbol:pair?.baseToken?.symbol??null,name:pair?.baseToken?.name??null,price:arcMarketNumber(pair?.priceUsd),marketCap:arcMarketNumber(pair?.marketCap),fdv:arcMarketNumber(pair?.fdv),liquidity:arcMarketNumber(pair?.liquidity?.usd),volume5m:consistentArcVolume5m(pair?.volume?.m5,pair?.volume?.h24),volume24h:arcMarketNumber(pair?.volume?.h24),move5m:arcSignedNumber(pair?.priceChange?.m5),move1h:arcSignedNumber(pair?.priceChange?.h1),buys:arcMarketNumber(pair?.txns?.m5?.buys),sells:arcMarketNumber(pair?.txns?.m5?.sells),pairCreatedAt:arcMarketNumber(pair?.pairCreatedAt),supply:supply?formatResearchSupply(supply):null,source:pair?'DEXScreener'+(supply?' / on-chain supply':''):supply?'On-chain supply':null,checkedAt:pair&&pairRead.status==='fulfilled'?new Date(pairRead.value.fetchedAt).toISOString().slice(11,19):supply?new Date(supply.checkedAt).toISOString().slice(11,19):null};
+ const value:AlertKeyStats={pairAddress:/^0x(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(pair?.pairAddress??'')?pair.pairAddress:null,symbol:pair?.baseToken?.symbol??null,name:pair?.baseToken?.name??null,price:arcMarketNumber(pair?.priceUsd),marketCap:arcMarketNumber(pair?.marketCap),fdv:arcMarketNumber(pair?.fdv),liquidity:arcMarketNumber(pair?.liquidity?.usd),volume5m:consistentArcVolume5m(pair?.volume?.m5,pair?.volume?.h24),volume24h:arcMarketNumber(pair?.volume?.h24),move5m:arcSignedNumber(pair?.priceChange?.m5),move1h:arcSignedNumber(pair?.priceChange?.h1),buys:arcMarketNumber(pair?.txns?.m5?.buys),sells:arcMarketNumber(pair?.txns?.m5?.sells),pairCreatedAt:arcMarketNumber(pair?.pairCreatedAt),supply:supply?formatResearchSupply(supply):null,source:pair?'DEXScreener'+(supply?' / on-chain supply':''):supply?'On-chain supply':null,checkedAt:pair&&pairRead.status==='fulfilled'?new Date(pairRead.value.fetchedAt).toISOString().slice(11,19):supply?new Date(supply.checkedAt).toISOString().slice(11,19):null};
  if(arcStatsCache.size>=100)arcStatsCache.delete(arcStatsCache.keys().next().value!);arcStatsCache.set(token.toLowerCase()+':'+(expectedPool??''),{at:Date.now(),value});return value;
 }
 function arcSignedNumber(value:unknown):number|null{if(value==null||value==='')return null;const n=Number(value);return Number.isFinite(n)?n:null;}
