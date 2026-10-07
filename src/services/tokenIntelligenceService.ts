@@ -1,6 +1,7 @@
 import { readResearchTokenSupply } from './researchTokenSupply.js';
 import { scanRobinhoodDexPaid } from '../chains/robinhood/security/dexPaidScanner.js';
-import { isVerifiedPonsLaunch } from '../chains/robinhood/ponsLaunchState.js';
+import { ponsVenueStats, confirmedCurveGraduation } from './ponsAlertVenue.js';
+import { selectAlertMarket } from './alertMarketSelection.js';
 import { getVerifiedPonsPublicContext, getCreatorHoldingPercent } from '../chains/robinhood/ponsPublicContext.js';
 import { getAddress } from 'viem';
 import { config } from '../config.js';
@@ -27,7 +28,7 @@ export type FreshWalletIntel = { oneDayPct: number | null; verifiedFresh: number
   classified: number; coveragePct: number | null; sampleSize: number; evidence: FreshConfidence; methodology: string };
 export type TokenIntel = {
   status: 'COMPLETE' | 'PARTIAL'; analyzedAt: string; chain: 'robinhood'; tokenAddress: string;
-  name: string | null; symbol: string | null; decimals: number | null; supply: string | null;
+  name: string | null; symbol: string | null; decimals: number | null; supply: string | null; launchpad?: 'PONS' | null;
   ageObservedAt: string | null; price: number | null; marketCap: number | null; liquidity: number | null;
   volume5m: number | null; volume24h?: number | null; priceChange1h?: number | null; chartUrl: string | null; fdv?: number | null; valuationSource?: string | null; marketObservedAt?: string | null;
   lastVerifiedMarket?: { price: number | null; marketCap: number | null; liquidity: number | null; volume5m: number | null;
@@ -238,40 +239,83 @@ function emptyIntel(token: string, previous?: TokenIntel | null): TokenIntel {
     incompleteReason: 'Some intelligence is still unavailable. Showing verified data collected within analysis budget.' };
 }
 
+const intelSources = {
+ metadata:getRobinhoodTokenMetadata, pairs:fetchRobinhoodPairs, pons:getVerifiedPonsPublicContext,
+ holders:scanRobinhoodHolderRisk, database:databaseContext, supply:readResearchTokenSupply,
+ holding:getCreatorHoldingPercent, fresh:analyzeFreshWalletSample, paid:scanRobinhoodDexPaid,
+ graduation:confirmedCurveGraduation,
+};
 export async function analyzeRobinhoodToken(tokenAddress: string, previous?: TokenIntel | null,
-  budgetMs = ANALYSIS_DEADLINE_MS): Promise<TokenIntel> {
+  budgetMs = ANALYSIS_DEADLINE_MS, sources = intelSources): Promise<TokenIntel> {
   const token = getAddress(tokenAddress), result = emptyIntel(token, previous), controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.max(100, budgetMs));
   try {
     const observedAt = new Date().toISOString();
-    const dexPaidWork = bounded(scanRobinhoodDexPaid(token), controller.signal).catch(() => null);
-    const ponsWork = bounded(isVerifiedPonsLaunch(token).then(verified => verified ? getVerifiedPonsPublicContext(token) : null), controller.signal).catch(() => null);
+    let market: ReturnType<typeof robinhoodMarketSnapshotFromPairs> = null;
+    let venue: ReturnType<typeof ponsVenueStats> | null = null;
+    const publishMarket = () => {
+      const stats=selectAlertMarket(token,venue,market);
+      result.name ||= stats.name ?? null; result.symbol ||= stats.symbol ?? null;
+      Object.assign(result,{price:stats.price??null,marketCap:stats.marketCap??null,fdv:stats.fdv??null,
+        liquidity:stats.liquidity??null,volume5m:stats.volume5m??null,volume24h:stats.volume24h??null,
+        priceChange1h:stats.move1h??null,chartUrl:stats.chartUrl??null,
+        valuationSource:stats.source??null,marketObservedAt:stats.price!=null?observedAt:null,
+        ageObservedAt:stats.pairCreatedAt?new Date(stats.pairCreatedAt).toISOString():null});
+    };
+    const databaseWork=bounded(sources.database(token,controller.signal),controller.signal).catch(()=>null);
+    const dexPaidWork = bounded(sources.paid(token), controller.signal).then(paid=>{
+      if(paid?.dexPaid!=null)result.security.dexPaid=paid.dexPaid;return paid;
+    }).catch(() => null);
+    // This public reader verifies exact contract + enabled PONS factory itself.
+    // Do not gate it on a slower durable launch index lookup.
+    const ponsWork = bounded(sources.pons(token), controller.signal).then(pons=>{
+      if(pons){
+        result.name ||= pons.name;result.symbol ||= pons.symbol;
+        result.decimals ??= pons.decimals;result.supply ??= pons.totalSupplyRaw.toString();
+        result.developer.wallet ||= pons.creator;result.launchpad='PONS';
+        venue=ponsVenueStats(token,pons,null,[]);publishMarket();
+      }return pons;
+    }).catch(() => null);
+    const venueWork=ponsWork.then(async pons=>{
+      if(!pons?.curveAddress)return;
+      const graduated=await bounded(sources.graduation(token,pons.curveAddress),controller.signal).catch(()=>null);
+      if(!controller.signal.aborted){venue=ponsVenueStats(token,pons,graduated,[]);publishMarket();}
+    });
     const ponsHoldingWork = ponsWork.then(pons => pons
-      ? bounded(getCreatorHoldingPercent(token, pons.creator), controller.signal).catch(() => null) : null);
+      ? bounded(sources.holding(token, pons.creator), controller.signal).then(percent=>{
+          if(result.developer.wallet?.toLowerCase()===pons.creator.toLowerCase()){
+            result.developer.holdingPct=percent;if(percent!=null)result.developer.holdingObservedAt=new Date().toISOString();
+          }return percent;
+        }).catch(() => null) : null);
     const [metadataResult, pairsResult] = await Promise.allSettled([
-      getRobinhoodTokenMetadata(token, { signal: controller.signal }), fetchRobinhoodPairs(token, { signal: controller.signal })]);
+      bounded(sources.metadata(token, { signal: controller.signal }), controller.signal), bounded(sources.pairs(token, { signal: controller.signal }), controller.signal)]);
     const metadata: RobinhoodTokenMetadata | null = metadataResult.status === 'fulfilled' ? metadataResult.value : null;
-    const pairs = pairsResult.status === 'fulfilled' ? pairsResult.value : [], market = robinhoodMarketSnapshotFromPairs(token, pairs);
+    const pairs = pairsResult.status === 'fulfilled' ? pairsResult.value : []; market = robinhoodMarketSnapshotFromPairs(token, pairs);
     const pair = chooseBestRobinhoodPair(pairs, token);
-    const supplyWork = metadata?.totalSupplyRaw != null && metadata.decimals != null ? Promise.resolve(null)
-      : bounded(readResearchTokenSupply(token, 'robinhood'), controller.signal).catch(() => null);
-    if (metadata) Object.assign(result, { name: metadata.name ?? market?.name ?? null, symbol: metadata.symbol ?? market?.symbol ?? null,
-      decimals: metadata.decimals, supply: metadata.totalSupplyRaw?.toString() ?? null });
-    if (market) Object.assign(result, { price: market.priceUsd, marketCap: market.marketCapUsd, liquidity: market.liquidityUsd,
-      volume5m: market.volume5mUsd, chartUrl: market.chartUrl ?? null, marketObservedAt: observedAt });
+    const supplyWork = controller.signal.aborted || (metadata?.totalSupplyRaw != null && metadata.decimals != null) ? Promise.resolve(null)
+      : bounded(sources.supply(token, 'robinhood'), controller.signal).then(supply=>{
+        if(supply){result.decimals=supply.decimals;result.supply=supply.totalSupplyRaw.toString();}return supply;
+      }).catch(() => null);
+    if (metadata) Object.assign(result, { name: metadata.name ?? result.name ?? market?.name ?? null, symbol: metadata.symbol ?? result.symbol ?? market?.symbol ?? null,
+      decimals: metadata.decimals ?? result.decimals, supply: metadata.totalSupplyRaw?.toString() ?? result.supply });
+    publishMarket();
     result.name ||= pair?.baseToken?.name ?? null; result.symbol ||= pair?.baseToken?.symbol ?? null;
-    result.volume24h = finiteMarketNumber(pair?.volume?.h24);
-    result.priceChange1h = finiteMarketNumber(pair?.priceChange?.h1, true);
-    result.ageObservedAt = pair?.pairCreatedAt ? new Date(pair.pairCreatedAt).toISOString() : null; result.socials = socialLinks(pair);
+    result.socials = socialLinks(pair);
+    // Recover supply before holder analysis so the scanner sees the same denominator
+    // that the report renders, rather than retaining a pre-fallback missing-supply warning.
+    await supplyWork;
+    const holderMetadata:RobinhoodTokenMetadata|null=result.supply!=null&&result.decimals!=null
+      ? {...(metadata??{address:token, name:result.name, symbol:result.symbol, bytecodeExists:false,readErrors:[]}),
+          decimals:result.decimals,totalSupplyRaw:BigInt(result.supply)} : metadata;
     const [holderResult, dbResult] = await Promise.allSettled([
-      metadata ? scanRobinhoodHolderRisk(token, { metadata, signal: controller.signal }) : Promise.reject(new Error('metadata unavailable')),
-      databaseContext(token, controller.signal)]);
+      holderMetadata && !controller.signal.aborted ? bounded(sources.holders(token, { metadata:holderMetadata, signal: controller.signal }),controller.signal) : Promise.reject(new Error('metadata unavailable')),
+      databaseWork]);
     const db = dbResult.status === 'fulfilled' ? dbResult.value : null;
     result.ath = mergeTokenAth({ previous: previous?.ath, historicalPrice: db?.historicalPrice, historicalMc: db?.historicalMc,
-      currentPrice: market?.priceUsd, currentMc: market?.marketCapUsd, observedAt, currentVerified: Boolean(market),
+      currentPrice: market?.priceUsd, currentMc: market?.marketCapUsd, observedAt, currentVerified: Boolean(market && result.chartUrl===market.chartUrl && result.price===market.priceUsd),
       chain: 'robinhood', token });
     if (db) {
-      result.security.dexPaid = db.dexPaid; result.security.boostTotal = db.boostTotal;
+      result.security.dexPaid = db.dexPaid ?? result.security.dexPaid; result.security.boostTotal = db.boostTotal;
       result.alpha.state = db.latest?.intelligence_state ?? null; result.alpha.risk = db.latest?.risk_label ?? null;
       const raw = (db.latest?.raw_snapshot ?? {}) as Record<string, unknown>;
       const lastPrice = positive(db.latest?.price ?? raw.price ?? raw.currentPrice);
@@ -283,8 +327,12 @@ export async function analyzeRobinhoodToken(tokenAddress: string, previous?: Tok
         observedAt: db.latest?.alerted_at ?? null,
         source: db.latest?.price_provenance ?? (lastPrice ? 'ALPHAOS_VERIFIED_EVENT_SNAPSHOT' : null),
       };
-      result.developer = { observedAt: db.latest?.alerted_at ?? null, wallet: typeof raw.deployerAddress === 'string' ? raw.deployerAddress : null,
-        holdingPct: finitePercentage(raw.devHoldingPercent), sold: raw.confirmedDevSell === true ? true : raw.confirmedDevSell === false ? false : null,
+      const priorDeveloper=result.developer;
+      const wallet=typeof raw.deployerAddress==='string' && /^0x[a-f0-9]{40}$/i.test(raw.deployerAddress) ? raw.deployerAddress : priorDeveloper.wallet;
+      const sameCreator=wallet?.toLowerCase()===priorDeveloper.wallet?.toLowerCase();
+      result.developer = { observedAt: db.latest?.alerted_at ?? null, wallet,
+        holdingPct: finitePercentage(raw.devHoldingPercent) ?? (sameCreator?priorDeveloper.holdingPct:null),
+        holdingObservedAt:sameCreator?priorDeveloper.holdingObservedAt:null, sold: raw.confirmedDevSell === true ? true : raw.confirmedDevSell === false ? false : null,
         transferredPct: finitePercentage(raw.otherDevTransferPercent), burnedPct: finitePercentage(raw.confirmedDevBurnPercent) };
       result.security.tokenBurnedPct = finitePercentage(raw.totalBurnPercent);
     }
@@ -292,7 +340,7 @@ export async function analyzeRobinhoodToken(tokenAddress: string, previous?: Tok
       const holders = holderResult.value;
       result.holders = { count: holders.holderCountObserved || null, top10Pct: holders.top10Pct, largestPct: holders.top1Pct,
         risk: holders.concentrationRisk, warnings: holders.warnings };
-      result.freshWallets = await analyzeFreshWalletSample(holders.sampledWallets, { signal: controller.signal });
+      result.freshWallets = await bounded(sources.fresh(holders.sampledWallets, { signal: controller.signal }),controller.signal).catch(()=>unknownFresh(holders.sampledWallets.length));
     }
     if (db) {
       const launches = db.creatorRows.length;
@@ -308,9 +356,9 @@ export async function analyzeRobinhoodToken(tokenAddress: string, previous?: Tok
     if (pons) {
       result.name ||= pons.name; result.symbol ||= pons.symbol;
       result.decimals ??= pons.decimals; result.supply ??= pons.totalSupplyRaw.toString();
-      if (result.marketCap == null && pons.fdvUsd != null) { result.fdv = pons.fdvUsd; result.valuationSource = 'PONS public launchpad'; }
+      // Valuation is selected by the shared phase-aware venue selector above.
       result.developer.wallet ||= pons.creator;
-      if (result.developer.wallet.toLowerCase() === pons.creator.toLowerCase() && result.developer.holdingPct == null) {
+      if (result.developer.wallet?.toLowerCase() === pons.creator.toLowerCase() && result.developer.holdingPct == null) {
         result.developer.holdingPct = await ponsHoldingWork;
         if (result.developer.holdingPct != null) result.developer.holdingObservedAt = new Date().toISOString();
       }
@@ -319,6 +367,7 @@ export async function analyzeRobinhoodToken(tokenAddress: string, previous?: Tok
         if (social && !result.socials.some(link => link.label === social.label)) result.socials.push(social);
       }
     }
+    await venueWork;
     const supply = await supplyWork;
     if (supply) { result.decimals = supply.decimals; result.supply = supply.totalSupplyRaw.toString(); }
     const paid = await dexPaidWork;
@@ -354,10 +403,11 @@ export async function getRobinhoodTokenIntelligence(tokenAddress: string): Promi
   analysisStarts.push(Date.now());
   const request = analyzeRobinhoodToken(token, (data?.result as TokenIntel | undefined) ?? null,
     ANALYSIS_DEADLINE_MS - (Date.now() - startedAt)).then(async result => {
-    const { error } = await supabase.from('token_intelligence_cache').upsert({ chain: 'robinhood', token_address: token.toLowerCase(),
+    const writeSignal=AbortSignal.timeout(1500);
+    const { error } = await bounded(supabase.from('token_intelligence_cache').upsert({ chain: 'robinhood', token_address: token.toLowerCase(),
       status: result.status, result, analyzed_at: result.analyzedAt,
       expires_at: new Date(Date.now() + (result.status === 'COMPLETE' ? CACHE_MS : PARTIAL_CACHE_MS)).toISOString() },
-      { onConflict: 'chain,token_address' });
+      { onConflict: 'chain,token_address' }).abortSignal(writeSignal),writeSignal).catch(error=>({error}));
     if (error) console.warn('[TokenIntel] Cache write failed', { token, error: error.message }); return result;
   }).finally(() => inFlight.delete(key));
   inFlight.set(key, request); return request;
