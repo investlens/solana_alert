@@ -12,9 +12,31 @@ export async function resolvePonsCreatorFromSources(token:string, sources:{
   marker:()=>Promise<unknown>;
   indexed:()=>Promise<{exists:boolean;token:string;deployer:string|null}|null>;
   factory:()=>Promise<LaunchIdentity|null>;
+  publicContext?:()=>Promise<{creator:string}|null>;
 }):Promise<LaunchIdentity|null> {
   const creator = creatorFromVerifiedPonsMarker(token, await sources.marker().catch(()=>null));
   if (creator) return {exists:true,token,deployer:creator};
+  // Ownership-only metadata fallback. This resolver never establishes launch
+  // eligibility or changes security policy. The public reader checks exact token
+  // and an enabled factory; do not wait for a slow index before reading it.
+  if (sources.publicContext) {
+    const reads = [
+      sources.indexed().then(value => {
+        if (!value?.exists || value.token.toLowerCase()!==token.toLowerCase() || !valid(value.deployer)) throw new Error('No indexed creator');
+        return value.deployer;
+      }),
+      sources.publicContext().then(value => {
+        if (!valid(value?.creator)) throw new Error('No public creator');
+        return value.creator;
+      }),
+    ];
+    const candidate=await new Promise<string|null>(resolve=>{
+      let remaining=reads.length;
+      for(const read of reads)read.then(resolve,()=>{if(--remaining===0)resolve(null);});
+    });
+    if (candidate) return {exists:true,token,deployer:candidate};
+    return sources.factory();
+  }
   const indexed = await sources.indexed().catch(()=>null);
   if (indexed?.exists && indexed.token.toLowerCase()===token.toLowerCase() && valid(indexed.deployer))
     return {exists:true,token,deployer:indexed.deployer};

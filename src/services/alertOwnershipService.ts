@@ -3,33 +3,40 @@ import { getPonsLaunchState, getIndexedVerifiedPonsLaunch } from '../chains/robi
 import { getSharedJson } from './sharedJsonCache.js';
 import { reuseRobinhoodDevTokenFlow } from '../chains/robinhood/security/devTokenFlowScanner.js';
 import { scanRobinhoodHolderRisk } from '../chains/robinhood/security/holderRiskScanner.js';
-import { getCreatorHoldingEvidence } from '../chains/robinhood/ponsPublicContext.js';
+import { getCreatorHoldingEvidence, getReportedPonsPublicContext } from '../chains/robinhood/ponsPublicContext.js';
 import { withOwnershipDisclosure, type OwnershipDisclosure } from '../ui/ownershipDisclosure.js';
+import { reusableOwnership } from './reusableOwnership.js';
 
 const empty = (): OwnershipDisclosure => ({ devPercent: null, top10Percent: null, top10Coverage: 'UNAVAILABLE' });
 const cache = new Map<string, { at: number; value: OwnershipDisclosure }>();
 const pending = new Map<string, Promise<OwnershipDisclosure>>();
 const partial = new Map<string, OwnershipDisclosure>();
 let windowStart = 0, started = 0;
+export function cachedRobinhoodOwnership(token:string,creator?:string|null,pool?:string|null):OwnershipDisclosure {
+  return reusableOwnership(cache.entries(),token,creator,pool);
+}
 // Per token, never per recipient. No database writes or background holder sweeps.
 export async function robinhoodOwnership(token: string, creator?: string | null, pool?: string | null): Promise<OwnershipDisclosure> {
   if (!/^0x[a-fA-F0-9]{40}$/.test(token)) return empty();
   const key = `${token.toLowerCase()}:${(pool ?? '').toLowerCase()}:${(creator ?? '').toLowerCase()}`;
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < 30_000) return hit.value;
+  if (hit && Date.now() - hit.at < (hit.value.devPercent==null?2_000:30_000)) return hit.value;
+  const reusable=reusableOwnership(cache.entries(),token,creator,pool);
   let work = pending.get(key);
   if (!work) {
     if (Date.now() - windowStart >= 60_000) { windowStart = Date.now(); started = 0; }
-    if (pending.size >= 2 || started >= 10) return empty();
+    if (pending.size >= 2 || started >= 10) return reusable;
     started++;
-    partial.set(key, empty());
+    partial.set(key, {...reusable});
     work = (async () => {
       const [dev, holders] = await Promise.allSettled([
         (async () => {
-          const identity = await resolveCreatorIdentity(token, creator, {
+          if(reusable.devPercent!=null && reusable.creator)return {percent:reusable.devPercent,observedAt:reusable.devObservedAt,block:reusable.devBlock};
+          const identity = await resolveCreatorIdentity(token, creator ?? reusable.creator, {
             factory: address => resolvePonsCreatorFromSources(address, {
               marker: async () => (await getSharedJson(`alphaos:pons:verified:${address.toLowerCase()}`))?.value,
               indexed: () => getIndexedVerifiedPonsLaunch(address),
+              publicContext: () => getReportedPonsPublicContext(address),
               factory: () => getPonsLaunchState(address, {requireCompleteFactoryVerification: true}),
             }),
             history: async address => (await reuseRobinhoodDevTokenFlow(address)).deployerAddress,
@@ -62,6 +69,6 @@ export async function robinhoodOwnership(token: string, creator?: string | null,
 }
 export async function discloseRobinhoodOwnership(text: string, token: string, creator?: string | null, pool?: string | null, cachedOnly = false): Promise<string> {
   const cached = cache.get(`${token.toLowerCase()}:${(pool ?? '').toLowerCase()}:${(creator ?? '').toLowerCase()}`);
-  const fresh = cached && Date.now() - cached.at < 30_000 ? cached.value : empty();
+  const fresh = cached && Date.now() - cached.at < 30_000 ? cached.value : reusableOwnership(cache.entries(),token,creator,pool);
   return withOwnershipDisclosure(text, cachedOnly ? fresh : await robinhoodOwnership(token, creator, pool));
 }

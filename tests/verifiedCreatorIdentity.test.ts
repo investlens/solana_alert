@@ -4,6 +4,15 @@ import { resolveCreatorIdentity, creatorFromVerifiedPonsMarker, resolvePonsCreat
 import {PONS_CONTRACTS} from '../src/chains/robinhood/ponsContracts.js';
 const token='0x1234567890abcdef1234567890abcdef12345678';
 const creator='0xabcdef1234567890abcdef1234567890abcdef12';
+test('exact public creator is available while launch index is stalled',async()=>{
+ const result=await resolvePonsCreatorFromSources(token,{marker:async()=>null,indexed:()=>new Promise(()=>{}),publicContext:async()=>({creator}),factory:async()=>{throw Error('must not run');}});
+ assert.equal(result?.deployer,creator);
+});
+test('invalid public creator cannot defeat valid index or manufacture identity',async()=>{
+ const sources={marker:async()=>null,indexed:async()=>({exists:true,token,deployer:creator}),publicContext:async()=>({creator:'0x'+'0'.repeat(40)}),factory:async()=>null};
+ assert.equal((await resolvePonsCreatorFromSources(token,sources))?.deployer,creator);
+ assert.equal(await resolvePonsCreatorFromSources(token,{...sources,indexed:async()=>null}),null);
+});
 test('verified launch marker skips index and incompatible legacy factory reads',async()=>{
  const result=await resolvePonsCreatorFromSources(token,{marker:async()=>({token,creator,factory:PONS_CONTRACTS.factory}),indexed:async()=>{throw Error('must not run');},factory:async()=>{throw Error('must not run');}});
  assert.equal(result?.deployer,creator);

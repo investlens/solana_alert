@@ -1,7 +1,7 @@
 import { getPonsFactoryDeployments } from './ponsContracts.js';
-import { createPublicClient, http, encodeFunctionData, parseAbi, type Address } from 'viem';
-import { robinhoodChain } from './config.js';
+import { encodeFunctionData, parseAbi, type Address } from 'viem';
 import { requestRobinhoodRpcResilient } from './rpc.js';
+import { boundedEvidenceCache } from '../../services/boundedEvidenceCache.js';
 
 export type TelegramPreviewType = 'Group' | 'Channel' | 'Personal account' | 'Type unverified';
 export type PonsPublicContext = {
@@ -149,7 +149,16 @@ export async function getTelegramPreviewType(url: string): Promise<TelegramPrevi
 }
 
 const abi = parseAbi(['function balanceOf(address) view returns (uint256)', 'function totalSupply() view returns (uint256)']);
-export async function getCreatorHoldingEvidence(token: string, creator: string, blockTag?: `0x${string}`): Promise<{percent:number;block:string;observedAt:number} | null> {
+type HoldingEvidence={percent:number;block:string;observedAt:number};
+const holdingEvidence=boundedEvidenceCache<HoldingEvidence>(key=>{
+  const [token,creator,block]=key.split(':');
+  return readCreatorHoldingEvidence(token,creator,block?block as `0x${string}`:undefined);
+});
+export async function getCreatorHoldingEvidence(token: string, creator: string, blockTag?: `0x${string}`): Promise<HoldingEvidence | null> {
+  if(![token,creator].every(value=>/^0x[a-fA-F0-9]{40}$/.test(value)) || /^0x0{40}$/i.test(creator))return null;
+  return holdingEvidence(`${token.toLowerCase()}:${creator.toLowerCase()}:${blockTag??''}`);
+}
+async function readCreatorHoldingEvidence(token: string, creator: string, blockTag?: `0x${string}`): Promise<HoldingEvidence | null> {
   try {
     // Both values come from the same block; identity alone cannot prove holdings.
     const block = blockTag ?? await requestRobinhoodRpcResilient({ method: 'eth_blockNumber', params: [] });
@@ -197,14 +206,10 @@ export async function getReportedPonsPublicContext(token: string): Promise<PonsP
 // Interactive scans have a separate hard deadline and no automatic retries.
 // A website-reported creator is an identity claim, not evidence of ownership.
 export async function getScreenCreatorBalance(token: string, creator: string): Promise<number | null> {
-  if (![token, creator].every(value => /^0x[a-fA-F0-9]{40}$/.test(value))) return null;
-  const client = createPublicClient({ chain: robinhoodChain, transport: http(robinhoodChain.rpcUrls.default.http[0], {
-    timeout: 2_000, retryCount: 0, fetchOptions: { signal: AbortSignal.timeout(4_000) },
-  }) });
+  let timer:ReturnType<typeof setTimeout>|undefined;
   try {
-    const blockNumber = await client.getBlockNumber();
-    const balance = await client.readContract({ address: token as Address, abi, functionName: 'balanceOf', args: [creator as Address], blockNumber, authorizationList: undefined });
-    const supply = await client.readContract({ address: token as Address, abi, functionName: 'totalSupply', blockNumber, authorizationList: undefined });
-    return supply > 0n && balance <= supply ? Number(balance) / Number(supply) * 100 : null;
-  } catch { return null; }
+    const evidence=await Promise.race([getCreatorHoldingEvidence(token,creator),
+      new Promise<null>(resolve=>{timer=setTimeout(()=>resolve(null),4_000);})]);
+    return evidence?.percent ?? null;
+  } finally {if(timer)clearTimeout(timer);}
 }
