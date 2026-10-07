@@ -27,7 +27,7 @@ test('linked producer identity survives absent public metadata and later compact
 test('required market cap remains visible beside FDV and missing stats are disclosed compactly',()=>{
  const card=buildPromotionEventCard({kind:'DEX_PAID',token,launchType:'PONS',stats:{name:'orynt.fun',symbol:'ORYNT',fdv:21030},securityNote:null,buttons:[],text:'Price <b>$0.000021026</b>\nFDV <b>$21.03K</b>\nTotal supply <b>1B</b>'});
  assert.match(card.text,/Market cap <b>Unavailable<\/b>/);assert.match(card.text,/FDV shown; circulating supply unconfirmed/);
- assert.match(card.text,/Not reported: liquidity, 5m volume, 24h volume, 1h change/);
+ assert.match(card.text,/Market data incomplete · use Full Intel to recheck/);
  assert.match(card.text,/FDV <b>\$21.03K/);
 });
 

@@ -21,16 +21,16 @@ const production:Dependencies={now:Date.now,schedule:(run,ms)=>{const t=setTimeo
   text=await discloseRobinhoodOwnership(text,args.token,stats?.creator,pool);
   return buildPromotionEventCard({...args,text,stats});
  }};
-// At most two refreshes per accepted promotion. IDs live in RAM for <=90 seconds.
+// At most three refreshes per accepted promotion. IDs live in RAM for <=180 seconds.
 // Never resend, never write retries to DB, never change eligibility or reservations.
 export function schedulePromotionCardEnrichment(key:string,args:PromotionCardArgs,targets:PromotionEditTarget[],original:string,dependencies:Dependencies=production):boolean {
  const useful=targets.filter(t=>t.chatId&&Number.isInteger(t.messageId)&&t.messageId>0).slice(0,50);
  if(!useful.length||jobs.has(key)||jobs.size>=10)return false;
- jobs.add(key);const expires=dependencies.now()+90000;let remaining=2;const signatures=new Map(useful.map(t=>[t.chatId+':'+t.messageId,promotionContentSignature(original)]));
+ jobs.add(key);const expires=dependencies.now()+180000;let remaining=3;const signatures=new Map(useful.map(t=>[t.chatId+':'+t.messageId,promotionContentSignature(original)]));
  const run=async()=>{
   try {
    if(dependencies.now()>expires)return;
-   if(dependencies===production)console.log('[PromotionCard] ENRICHMENT_CHECK attempt='+String(3-remaining)+' dbRetryWrites=0');
+   if(dependencies===production)console.log('[PromotionCard] ENRICHMENT_CHECK attempt='+String(4-remaining)+' dbRetryWrites=0');
    const card=await dependencies.refresh(args),signature=promotionContentSignature(card.text);
    if(useful.every(t=>signatures.get(t.chatId+':'+t.messageId)===signature))return;
    for(const target of useful){
@@ -42,7 +42,7 @@ export function schedulePromotionCardEnrichment(key:string,args:PromotionCardArg
    }
 
   } catch { /* provider/editor failure leaves the accepted original intact */ }
-  finally { remaining--;if(remaining>0&&dependencies.now()<expires)dependencies.schedule(()=>{void run();},30000);else jobs.delete(key); }
+  finally { remaining--;if(remaining>0&&dependencies.now()<expires)dependencies.schedule(()=>{void run();},remaining===2?30000:60000);else jobs.delete(key); }
  };
  dependencies.schedule(()=>{void run();},15000);return true;
 }
