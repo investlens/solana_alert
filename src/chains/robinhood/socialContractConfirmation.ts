@@ -22,6 +22,21 @@ export function xProjectStatements(html: string, handle: string): string[] {
   const statements: string[] = [];
   const bio = html.match(/<div\b[^>]*data-testid=["']UserDescription["'][^>]*>([\s\S]*?)<\/div>/i)?.[1];
   if (bio) statements.push(plainText(bio));
+  // Some public profile responses expose biography only in HTML metadata.
+  // Require both an exact profile canonical URL and author-specific title;
+  // generic login shells, scripts and unrelated page descriptions never count.
+  const attr=(tag:string,name:string)=>tag.match(new RegExp(`\\b${name}=["']([^"']*)["']`,'i'))?.[1];
+  const metas=[...html.matchAll(/<meta\b[^>]*>/gi)].map(m=>m[0]);
+  const meta=(name:string)=>metas.find(tag=>(attr(tag,'property')??attr(tag,'name'))?.toLowerCase()===name);
+  const canonical=[...html.matchAll(/<link\b[^>]*>/gi)].map(m=>m[0]).find(tag=>attr(tag,'rel')?.toLowerCase()==='canonical');
+  const url=canonical?attr(canonical,'href'):meta('og:url')?attr(meta('og:url')!,'content'):null;
+  let exactProfile=false;
+  try{const u=new URL(url??'');exactProfile=u.protocol==='https:'&&['x.com','twitter.com'].includes(u.hostname)&&u.pathname.replace(/\/$/,'').toLowerCase()===`/${handle.toLowerCase()}`;}catch{/* No profile anchor. */}
+  const title=plainText(attr(meta('og:title')??'','content')??'');
+  if(exactProfile && new RegExp(`(?:^|[^A-Za-z0-9_])@${handle}(?:$|[^A-Za-z0-9_])`,'i').test(title)){
+    const description=plainText(attr(meta('og:description')??meta('description')??'','content')??'');
+    if(/\b0x[a-f0-9]{40}\b|\b(?:no token|not launched|no official token)\b/i.test(description))statements.push(description);
+  }
   for (const article of html.matchAll(/<article\b[^>]*>([\s\S]*?)<\/article>/gi)) {
     const author = article[1].match(/data-testid=["']User-Name["'][^>]*>([\s\S]*?)<\/div>/i)?.[1];
     const authors = author ? [...author.matchAll(/href=["']\/([a-z0-9_]+)["']/gi)].map(m => m[1].toLowerCase()) : [];
