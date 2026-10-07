@@ -2,24 +2,27 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {arcDeliverySafety,ARC_PROMOTION_WARNING} from '../src/chains/arc/promotionPolicy.js';
 import {readFileSync} from 'node:fs';
 import {polishArcTelegramPresentation} from '../src/chains/arc/telegramPresentation.js';
-test('ARC DEX retains unchecked policy; BOOST blocks confirmed sell restrictions and warns for unknown evidence',async()=>{
- let calls=0;const check=async()=>{calls++;return {allowed:false,reason:'cannot sell'};};
- for(const feed of ['ARC_DEX_PAID']){
-  const result=await arcDeliverySafety(feed,'token',check);
-  assert.equal(result.allowed,true);assert.equal(result.sellabilityVerified,false);assert.match(result.reason,/NOT CHECKED/);
+test('ARC boost and DEX paid block confirmed honeypots but allow unknown evidence with warnings',async()=>{
+ for(const feed of ['ARC_BOOST','ARC_DEX_PAID']){
+  let calls=0;
+  for(const reason of ['honeypot','cannot-sell flag']){
+   const blocked=await arcDeliverySafety(feed,'token',async()=>{calls++;return {allowed:false,sellabilityBlocked:true,reason};});
+   assert.equal(blocked.allowed,false);assert.equal(blocked.reason,reason);
+  }
+  const unknown=await arcDeliverySafety(feed,'token',async()=>{calls++;return {allowed:false,reason:'missing data'};});
+  assert.equal(unknown.allowed,true);assert.match(unknown.reason,/unverified/);
+  const unavailable=await arcDeliverySafety(feed,'token',async()=>{calls++;throw new Error('provider timeout');});
+  assert.equal(unavailable.allowed,true);assert.match(unavailable.reason,/unverified/);
+  const verified=await arcDeliverySafety(feed,'token',async()=>{calls++;return {allowed:true,sellabilityVerified:true,reason:'flags clear',devHoldingPercent:10,top10Percent:30};});
+  assert.equal(verified.allowed,true);assert.match(verified.reason,/LP lock unverified/);
+  assert.equal(verified.devHoldingPercent,10);assert.equal(verified.top10Percent,30);assert.equal(calls,5);
  }
- assert.equal(calls,0);assert.match(ARC_PROMOTION_WARNING,/Verify selling and liquidity/);
- const blocked=await arcDeliverySafety('ARC_BOOST','token',async()=>({allowed:false,sellabilityBlocked:true,reason:'honeypot'}));
- assert.equal(blocked.allowed,false);
- const unknown=await arcDeliverySafety('ARC_BOOST','token',async()=>({allowed:false,reason:'missing data'}));
- assert.equal(unknown.allowed,true);assert.match(unknown.reason,/unverified/);
- const verified=await arcDeliverySafety('ARC_BOOST','token',async()=>({allowed:true,sellabilityVerified:true,reason:'flags clear'}));
- assert.equal(verified.allowed,true);assert.match(verified.reason,/LP lock unverified/);
+ const check=async()=>({allowed:false,reason:'market security gate'});
  assert.equal((await arcDeliverySafety('ARC_OPPORTUNITY','token',check)).allowed,false);
- assert.equal((await arcDeliverySafety('ARC_SUPPLY_BURN','token',check)).allowed,false);assert.equal(calls,2);
+ assert.equal((await arcDeliverySafety('ARC_SUPPLY_BURN','token',check)).allowed,false);
  const source=readFileSync(new URL('../scripts/runArcLive.ts',import.meta.url),'utf8');
- const boost=source.slice(source.indexOf('async function deliverArcBoost('),source.indexOf('async function pollArcBoosts('));
- assert.doesNotMatch(boost,/await checkArcBoostSecurity/);assert.match(source,/text \+= .*ARC_PROMOTION_WARNING/);
+ assert.match(source,/arcDeliverySafety\('ARC_DEX_PAID',token,checkArcBoostSecurity\)/);
+ assert.match(source,/text \+= .*sellSafety.reason/);
 });
 test('premium ARC boost formatter preserves unchecked warning and removes safety approval',()=>{
  const text=`🚀 <b>BOOST DETECTED · ARC</b>\n<b>ABC</b>\n🔥 Boost <b>10 total (+10)</b>\n<code>0x${'1'.repeat(40)}</code>\n⚠️ <b>${ARC_PROMOTION_WARNING}</b>`;
