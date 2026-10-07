@@ -239,6 +239,7 @@ async function broadcastArcAlert(text: string, buttons: any[][], outcomeToken?: 
   const sellSafety = await arcDeliverySafety(feed,outcomeToken,checkArcBoostSecurity);
   const cachedOwnership = isArcPromotionFeed(feed) ? arcSellSafetyCache.get(outcomeToken.toLowerCase()) : null;
   if(cachedOwnership && Date.now()-cachedOwnership.at < 90_000) {
+    sellSafety.creator=cachedOwnership.result.creator;
     sellSafety.devHoldingPercent=cachedOwnership.result.devHoldingPercent;
     sellSafety.top10Percent=cachedOwnership.result.top10Percent;
     sellSafety.observedAt=cachedOwnership.result.observedAt;
@@ -248,7 +249,7 @@ async function broadcastArcAlert(text: string, buttons: any[][], outcomeToken?: 
   if (feed==='ARC_DEX_PAID') text = text.replace('Promotion payment confirmed',`${String(stats.name??'Token name unavailable').replace(/[<>&]/g,'')} (${String(stats.symbol??'Symbol unavailable').replace(/[<>&]/g,'')})\nPromotion payment confirmed`);
   if(isArcPromotionFeed(feed)) text += `\n⚠️ <b>${sellSafety.reason}</b>`;
   text = withAlertKeyStats(text,{...stats,sellability:isArcPromotionFeed(feed)?(sellSafety.sellabilityVerified?'No provider sell-restriction flag · execution unverified':'Unverified · manual validation required'):'Provider flags passed · execution unverified',lp:isArcPromotionFeed(feed)?'Not checked':'Unverified',dexPaid:feed==='ARC_DEX_PAID'?'Yes · payment confirmed':undefined});
-  text = withOwnershipDisclosure(text, {devPercent: sellSafety.devHoldingPercent ?? null, devObservedAt:sellSafety.observedAt,top10ObservedAt:sellSafety.observedAt,
+  text = withOwnershipDisclosure(text, {creator:sellSafety.creator,creatorExplorer:"https://explorer.arc.io/address/",devPercent: sellSafety.devHoldingPercent ?? null, devObservedAt:sellSafety.observedAt,top10ObservedAt:sellSafety.observedAt,
     top10Percent: sellSafety.top10Percent ?? null, top10Coverage: sellSafety.top10Percent == null ? 'UNAVAILABLE' : 'PROVIDER_REPORTED'});
   if (outcomeToken && /^0x[a-fA-F0-9]{40}$/.test(outcomeToken)) buttons = [...buttons, [{text:'⭐ Track',callback_data:`OUT_ARC_${outcomeToken}`}]];
   const recipients = await enabledLiveRecipients(await getArcRecipients(), feed);
@@ -435,7 +436,7 @@ async function processMarketRetries(): Promise<void> {
   }
 }
 
-type ArcBoostSecurity = { sellabilityBlocked?:boolean; sellabilityVerified?:boolean; allowed: boolean; reason: string; devHoldingPercent?: number | null; top10Percent?: number | null; observedAt?: number };
+type ArcBoostSecurity = { sellabilityBlocked?:boolean; sellabilityVerified?:boolean; allowed: boolean; reason: string; creator?:string|null; devHoldingPercent?: number | null; top10Percent?: number | null; observedAt?: number };
 
 async function fetchArcBoosts() {
   try { return await fetchArcBoostFeed(); }

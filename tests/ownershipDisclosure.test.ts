@@ -37,3 +37,11 @@ test('ARC compact presentation preserves ownership for every automatic feed',()=
   assert.match(output,/Dev holding  <b>10.00%/);assert.match(output,/Top 10 · provider wallet sample/);assert.match(output,/potential sell pressure/);
  }
 });
+
+test('ARC provider creator links use the ARC explorer and reject injected destinations',()=>{
+ const creator='0x'+'b'.repeat(40);
+ const evidence={...unknown,creator,creatorExplorer:'https://explorer.arc.io/address/'};
+ assert.match(withOwnershipDisclosure('alert',evidence),new RegExp('https://explorer.arc.io/address/'+creator));
+ assert.doesNotMatch(withOwnershipDisclosure('alert',evidence),/robinhoodchain/);
+ assert.doesNotMatch(withOwnershipDisclosure('alert',{...evidence,creatorExplorer:'https://evil.example/'}),/evil/);
+});
