@@ -1,3 +1,4 @@
+import { cachedRobinhoodOwnership } from '../services/alertOwnershipService.js';
 import { deliverResearchCard, researchErrorSummary } from './researchCardDelivery.js';
 import { readResearchTokenSupply, formatResearchSupply, type ResearchTokenSupply } from '../services/researchTokenSupply.js';
 import { extractAutomaticSocials } from '../ui/alphaNotificationActions.js';
@@ -22,7 +23,7 @@ export function extractScanContract(text: string): string | null {
   const addresses = text.match(/(?<![A-Za-z0-9])0x[a-fA-F0-9]{40}(?![A-Za-z0-9])/g) ?? [];
   return addresses.length === 1 ? addresses[0].toLowerCase() : null;
 }
-export function renderContractScreen(token: string, pair: DexScreenerPair | null, pons?: PonsPublicContext | null, creatorBalance?: number | null, chainLabel = 'Robinchain', supply?: ResearchTokenSupply | null): string {
+export function renderContractScreen(token: string, pair: DexScreenerPair | null, pons?: PonsPublicContext | null, creatorBalance?: number | null, chainLabel = 'Robinchain', supply?: ResearchTokenSupply | null, creatorIdentity?:string|null): string {
   const curveMarket = pons?.phase === 0 && pons.venue === 'curve';
   // A side pool is not the active launchpad market. Never mix its valuation,
   // liquidity, volume, trades or age into a pre-bond PONS report.
@@ -60,6 +61,7 @@ export function renderContractScreen(token: string, pair: DexScreenerPair | null
     ...(curveMarket ? ['FDV = price × total supply.', 'Curve liquidity, volume and age unavailable in this snapshot.', ''] : []),
     '<b>SOCIALS</b>', links.length && links.join(' · ').length < 180 ? links.join(' · ') : 'Not listed', '',
     ...(pons ? [`Creator · PONS page  <a href="https://robinhoodchain.blockscout.com/address/${pons.creator}">${pons.creator.slice(0, 6)}…${pons.creator.slice(-4)}</a>`] : []),
+    ...(!pons && creatorIdentity && /^0x[a-fA-F0-9]{40}$/.test(creatorIdentity) ? [`Creator <a href="https://robinhoodchain.blockscout.com/address/${creatorIdentity}">${creatorIdentity.slice(0,6)}…${creatorIdentity.slice(-4)}</a>`] : []),
     ...(creatorBalance != null && Number.isFinite(creatorBalance) && creatorBalance >= 0 && creatorBalance <= 100 ? [`Creator balance  <b>${(creatorBalance === 0 ? '0.00' : creatorBalance < 0.01 ? '&lt;0.01' : creatorBalance.toFixed(2))}%</b> · On-chain`] : []),
     '🔒 Sellability, creator and holder risks not assessed.', '',
     `<code>${token}</code>`, 'Research only · DYOR',
@@ -104,9 +106,12 @@ export async function getRobinhoodContractReport(token: string, refresh = false,
     const pons = await (known ? getVerifiedPonsPublicContext(token, factory) : getReportedPonsPublicContext(token)).catch(() => null);
     const curveMarket = pons?.phase === 0 && pons.venue === 'curve';
     const pair = curveMarket ? null : dexPair;
-    const creatorBalance = pons ? await getScreenCreatorBalance(token, pons.creator) : null;
-    const supply = !pons && pair ? await readResearchTokenSupply(token, 'robinhood') : null;
-    const text = renderContractScreen(token, pair, pons, creatorBalance, 'Robinchain', supply);
+    const [ownership,supply] = await Promise.all([
+      pons ? getScreenCreatorBalance(token,pons.creator).then(devPercent=>({devPercent,creator:pons.creator})) : Promise.resolve(cachedRobinhoodOwnership(token)),
+      !pons && pair ? readResearchTokenSupply(token,'robinhood') : Promise.resolve(null),
+    ]);
+    const creatorBalance=ownership.devPercent;
+    const text = renderContractScreen(token, pair, pons, creatorBalance, 'Robinchain', supply,ownership.creator);
     const image = await buildAlphaosAlertCard({ title: pair?.baseToken?.symbol || pons?.symbol ? undefined : 'Contract research', symbol: pair?.baseToken?.symbol || pons?.symbol, name: pair?.baseToken?.name || pons?.name, logo: pons?.logo,
       category: 'CONTRACT SCREEN', chainLabel: 'ROBINCHAIN', badge: curveMarket ? 'PONS PRE-BOND' : !pair && pons ? 'PONS SNAPSHOT' : 'MARKET SNAPSHOT', footer: 'Requested contract research · Sourced market snapshot' }).catch(() => null);
     const result = { text, image, chart: curveMarket ? `https://www.ponsfamily.com/launchpad/${token}` : pair ? verifiedRobinhoodChartUrl(pair) : undefined };
