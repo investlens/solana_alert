@@ -1,5 +1,6 @@
 import { escapeAlphaHtml } from './alphaNotification.js';
 export type AlertKeyStats = {
+  pairAddress?:string|null;
   price?: number|null; marketCap?: number|null; fdv?:number|null; liquidity?:number|null;
   volume5m?:number|null; volume24h?:number|null; move5m?:number|null; move1h?:number|null;
   buys?:number|null;sells?:number|null;pairCreatedAt?:number|null; supply?:string|null;

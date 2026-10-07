@@ -1,5 +1,6 @@
 import { removeAlertedCandidate } from './rejectedCandidateReview.js';
 import { governedDexScreenerJson } from './dexscreenerRequestGovernor.js';
+import {processCompactRunner,type RunnerSample} from './compactRunnerMilestones.js';
 
 export const compactOutcomesEnabled = () => String(process.env.ALPHA_COMPACT_OUTCOMES_ENABLED ?? 'true').toLowerCase() === 'true';
 export type CompactAlertBaseline = {
@@ -68,7 +69,7 @@ export function classifyCompactOutcome(baseline: number, samples: CompactSample[
   const low = Math.min(0,...roi); const final = roi[2];
   return final >= 25 && low >= -30 ? 'WINNER' : final <= -50 || low <= -80 ? 'FAILED' : 'NEUTRAL';
 }
-async function measure(row: CompactTrackingRow): Promise<CompactSample> {
+async function measure(row: CompactTrackingRow): Promise<RunnerSample> {
   const sample: CompactSample = { status:'UNAVAILABLE',price:null,mc:null,liquidity:null,at:new Date().toISOString() };
   if (compactCheckpointIsLate(row, Date.now())) return {...sample,reason:'MISSED_CHECKPOINT_WINDOW'};
   try {
@@ -84,7 +85,9 @@ async function measure(row: CompactTrackingRow): Promise<CompactSample> {
       cacheKey:`compact-outcome:${row.chain}:${row.token}`,cacheTtlMs:30000,signal:AbortSignal.timeout(5000),queueWaitTimeoutMs:750,
     });
     const pair = selectCompactPair(response.value, row); const price = positive(pair?.priceUsd);
-    return {...sample,status:price ? 'MEASURED':'UNAVAILABLE',price,mc:positive(pair?.marketCap),liquidity:positive(pair?.liquidity?.usd),reason:price ? undefined:'EXACT_PAIR_DATA_UNAVAILABLE'};
+    return {...sample,status:price ? 'MEASURED':'UNAVAILABLE',price,mc:positive(pair?.marketCap),liquidity:positive(pair?.liquidity?.usd),at:response.fetchedAt,
+      name:typeof pair?.baseToken?.name==='string'?pair.baseToken.name.slice(0,48):undefined,symbol:typeof pair?.baseToken?.symbol==='string'?pair.baseToken.symbol.slice(0,20):undefined,
+      reason:price ? undefined:'EXACT_PAIR_DATA_UNAVAILABLE'};
   } catch { return {...sample,reason:'PROVIDER_UNAVAILABLE'}; }
 }
 
@@ -107,8 +110,11 @@ export async function runCompactOutcomeCycle(): Promise<void> {
     for (const row of (data ?? []) as CompactTrackingRow[]) {
       const sample = await measure(row);
       const retry = sample.status==='UNAVAILABLE' && sample.reason!=='MISSED_CHECKPOINT_WINDOW' && !row.retried;
-      const result = await supabase.rpc('alpha_finish_compact_check',{p_chain:row.chain,p_token:row.token,p_lease:row.lease,p_sample:sample,p_retry:retry}).abortSignal(AbortSignal.timeout(2000));
+      // Names are presentation-only; preserve the existing six-field DB sample.
+      const {name,symbol,...storedSample}=sample;
+      const result = await supabase.rpc('alpha_finish_compact_check',{p_chain:row.chain,p_token:row.token,p_lease:row.lease,p_sample:storedSample,p_retry:retry}).abortSignal(AbortSignal.timeout(2000));
       if (result.error) throw result.error;
+      if(['CHECKPOINT','WINNER','FAILED','NEUTRAL','INCOMPLETE'].includes(result.data))void processCompactRunner(row,sample).catch(()=>console.warn('[RunnerCard] milestone delivery unavailable'));
       console.log('[CompactOutcomes] CHECKPOINT',{chain:row.chain,token:row.token,slot:row.checkpoint,result:result.data});
     }
     console.log('[CompactOutcomes] CYCLE',{claimed:data?.length??0,maxActive:20,maxPerMinute:2});
