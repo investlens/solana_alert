@@ -58,7 +58,7 @@ test('social URLs remain allowlisted data but Full Intel keyboard cannot emit st
     { label: 'X', url: 'https://x.com/stonkatm' }, { label: 'X', url: 'https://twitter.com/stonkatm' },
   ] }));
   assert.deepEqual(buttons.map(row => row.map(button => button.text)),
-    [['📊 Chart', '🔎 Explorer'], ['📋 Copy CA'], ['🔗 Wallet Links · Pro'], ['🎯 Readiness · Pro', 'My Monitors']]);
+    [['📊 Chart', '🔎 Explorer'], ['📋 Copy CA'], ['🔗 Wallet Links · Pro', '↻ Refresh'], ['🎯 Readiness · Pro', 'My Monitors']]);
   assert.equal(buttons.flat().some(button => /(^|\s)X($|\s)/.test(button.text)), false);
   assert.equal(buttons.flat().some(button => /Trade/i.test(button.text)), false);
 });
@@ -208,7 +208,7 @@ test('Full Intel performance controls are bounded and deduplicate cache misses',
   assert.match(service, /const inFlight = new Map/); assert.match(service, /if \(running\) return running/);
   assert.match(service, /finally\(\(\) => inFlight\.delete\(key\)\)/);
   assert.match(holder, /timeoutMs \?\? 2_750/); assert.match(holder, /AbortSignal\.any/);
-  assert.equal((service.match(/fetchRobinhoodPairs\(token/g) ?? []).length, 1);
+  assert.equal((service.match(/sources\.pairs\(token/g) ?? []).length, 1);
   assert.match(callback, /const activeReplies = new Set/); assert.match(callback, /activeReplies\.delete\(replyKey\)/);
   assert.doesNotMatch(callback + service, /adminTrading|autoBuy|executeTrade|ADMIN_BUY|ADMIN_SELL/);
 });
@@ -281,4 +281,20 @@ test('missing burn reads remain unknown while verified zeros remain zero', async
   assert.equal(combineVerifiedBurnBalances(10n, null), null);
   assert.equal(combineVerifiedBurnBalances(0n, 0n), 0n);
   assert.equal(combineVerifiedBurnBalances(10n, 2n), 12n);
+});
+
+
+test('Full Intel suppresses superseded missing-supply warning and keeps real ownership risks',()=>{
+ const text=renderTokenIntelligence(fixture({alpha:{state:null,risk:null,verdict:'',positive:[],watch:['Total supply unavailable','Elevated concentration']}}));
+ assert.match(text,/Supply <b>/);assert.doesNotMatch(text,/Total supply unavailable/);assert.match(text,/Elevated concentration/);
+ const missing=renderTokenIntelligence(fixture({supply:null,alpha:{state:null,risk:null,verdict:'',positive:[],watch:['Total supply unavailable']}}));
+ assert.match(missing,/Total supply unavailable/);
+});
+test('PONS Full Intel has source link, a refresh control and market cap ahead of price',()=>{
+ const intel=fixture({chartUrl:null,valuationSource:'PONS reported curve quote · venue unconfirmed'});
+ const rows=tokenIntelligenceButtons(intel);
+ assert.ok(rows.flat().some(b=>'url' in b&&b.url===`https://www.ponsfamily.com/launchpad/${intel.tokenAddress}`));
+ assert.ok(rows.flat().some(b=>b.text==='↻ Refresh'));
+ const text=renderTokenIntelligence(intel);assert.ok(text.indexOf('Market Cap')<text.indexOf('Price '));
+ assert.match(text,/Source PONS reported curve quote/);assert.doesNotMatch(text,/ {2,}|\n{3,}/);
 });

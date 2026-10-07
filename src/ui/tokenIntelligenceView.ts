@@ -1,3 +1,4 @@
+import { withResearchDisclosure } from './researchDisclosure.js';
 import type { TokenIntel } from '../services/tokenIntelligenceService.js';
 
 const esc = (value: unknown) => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -39,19 +40,21 @@ export function renderTokenIntelligence(intel: TokenIntel): string {
   const securityAvailable = intel.security.tokenBurnedPct != null || intel.security.lpStatus !== 'UNKNOWN' || intel.security.dexPaid != null || intel.security.boostTotal != null;
   const historyAvailable = intel.devHistory.launches > 0;
   const view = alphaView(intel.alpha.state);
-  const watch = intel.alpha.watch.filter(item => !technicalDiagnostic(item)).slice(0, 4);
+  const usableSupply=supply!=null && intel.supply!=null && BigInt(intel.supply)>0n;
+  const watch = intel.alpha.watch.filter(item => !technicalDiagnostic(item) && !(usableSupply && /Total supply unavailable/i.test(item))).slice(0, 4);
   const lines = [
     '🔬 <b>FULL INTEL</b>', '',
     `<b>${esc(intel.name ?? 'Unknown Token')} (${esc(intel.symbol ? `$${intel.symbol}` : 'UNKNOWN')})</b>`,
     `<code>${esc(short(intel.tokenAddress))}</code>`, '',
     '📊 <b>MARKET</b>', ...(currentMarketAvailable ? [
-      ...(intel.price != null ? [`Price             <b>${money(intel.price)}</b>`] : []),
       ...(intel.marketCap != null ? [`Market Cap        <b>${money(intel.marketCap)}</b>`] : []),
+      ...(intel.price != null ? [`Price             <b>${money(intel.price)}</b>`] : []),
       ...(intel.liquidity != null ? [`Liquidity         <b>${money(intel.liquidity)}</b>`] : []),
       ...(intel.volume5m != null ? [`Volume (5m)       <b>${money(intel.volume5m)}</b>`] : []),
       ...(intel.volume24h != null ? [`Volume (24h)      <b>${money(intel.volume24h)}</b>`] : []),
       ...(intel.priceChange1h != null ? [`Move (1h)         <b>${intel.priceChange1h >= 0 ? '+' : ''}${intel.priceChange1h.toFixed(2)}%</b>`] : []),
       ...(intel.ageObservedAt ? [`Pair observed     <b>${formatIntelTime(intel.ageObservedAt)}</b>`] : []),
+      ...(intel.valuationSource ? [`Source ${esc(intel.valuationSource)}`] : []),
       `Observed          <b>${formatIntelTime(intel.marketObservedAt ?? intel.analyzedAt)}</b>`,
     ] : [
       'Current market data <b>unavailable</b>',
@@ -86,9 +89,9 @@ export function renderTokenIntelligence(intel: TokenIntel): string {
     ...(freshAvailable && intel.freshWallets.oneDayPct != null && intel.freshWallets.oneDayPct > 50
       ? ['⚠️ <b>High fresh-wallet concentration</b>',
         `${intel.freshWallets.oneDayPct.toFixed(1)}% of verified classified wallets are ≤1 day old`] : []),
-    '', ...(!developerAvailable && !historyAvailable ? ['👨‍💻 <b>DEVELOPER</b>', 'No verified developer history available.'] : []),
+    '', ...(!developerAvailable && !historyAvailable ? ['👨‍💻 <b>DEVELOPER</b>', 'Creator history not available from current evidence.'] : []),
     ...(developerAvailable ? ['👨‍💻 <b>DEVELOPER</b>',
-      ...(intel.developer.wallet ? [`Wallet             <code>${esc(short(intel.developer.wallet))}</code>`] : []),
+      ...(intel.developer.wallet ? [`Wallet             <a href="https://robinhoodchain.blockscout.com/address/${esc(intel.developer.wallet)}">${esc(short(intel.developer.wallet))}</a>`] : []),
       ...(intel.developer.holdingPct != null ? [`Holding            <b>${pct(intel.developer.holdingPct)}</b>`] : []),
       ...(intel.developer.sold != null ? [`Sold               <b>${intel.developer.sold ? 'Verified sell' : 'No verified sell'}</b>`] : []),
       ...(intel.developer.transferredPct != null ? [`Transferred        <b>${pct(intel.developer.transferredPct)}</b>`] : []),
@@ -103,21 +106,23 @@ export function renderTokenIntelligence(intel: TokenIntel): string {
       `Observed launches  <b>${intel.devHistory.launches}</b>`, `Measured success  <b>${intel.devHistory.measuredSuccessful}</b>`,
       `Weak/failed        <b>${intel.devHistory.weakOrFailed}</b>`, `Verdict            <b>${esc(intel.devHistory.verdict)}</b>`,
     ] : []), '',
+    ...(intel.socials.length?['🔗 <b>SOCIALS</b>',intel.socials.map(link=>`<a href="${esc(link.url)}">${esc(link.label)}</a>`).join(' · '),'']:[]),
     '🔥 <b>TOKEN / SECURITY</b>', ...(securityAvailable ? [
       ...(intel.security.tokenBurnedPct != null ? [`Token burned      <b>${pct(intel.security.tokenBurnedPct)}</b>`] : []),
       ...(intel.security.lpStatus !== 'UNKNOWN' ? [`LP status         <b>${intel.security.lpStatus}</b>`] : []),
       ...(intel.security.dexPaid != null ? [`DEX Paid          <b>${intel.security.dexPaid ? 'YES' : 'NO'}</b>`] : []),
       ...(intel.security.boostTotal != null ? [`Boost total       <b>${intel.security.boostTotal}</b>`] : []),
-    ] : ['No verified token-security data available.']),
-    'Sellability and contract controls are not established by this report. DEX payment is promotion evidence.',
+    ] : intel.launchpad==='PONS'?[]:['No verified token-security data available.']),
+    intel.launchpad==='PONS'?'Verified PONS origin · separate sellability check skipped. Market and ownership risks remain.':'Sellability and contract controls are not established by this report. DEX payment is promotion evidence.',
     '24h fees unavailable from current sources.', '',
-    '🧠 <b>ALPHAOS</b>', `State              <b>${esc(intel.alpha.state ?? 'UNKNOWN')}</b>`,
-    `Risk               ${esc(intel.alpha.risk === 'MEASURED' ? 'UNKNOWN' : intel.alpha.risk ?? 'UNKNOWN')}`,
+    '🧠 <b>ALPHAOS</b>', `Report <b>${intel.status==='PARTIAL'?'Partial data':'Available checks complete'}</b>`,
+    ...(intel.alpha.state ? [`State <b>${esc(intel.alpha.state)}</b>`] : []),
+    `Risk ${esc(!intel.alpha.risk || ['MEASURED','UNKNOWN'].includes(intel.alpha.risk) ? 'Not assessed' : intel.alpha.risk)}`,
     ...intel.alpha.positive.slice(0, 3).map(x => `✅ ${esc(x)}`), ...watch.map(x => `⚠️ ${esc(x)}`),
     ...(view ? [`View               ${esc(view)}`] : []), '',
     `<i>Observed ${formatIntelTime(intel.analyzedAt)}</i>`,
   ];
-  const rendered = lines.join('\n');
+  const rendered = withResearchDisclosure(lines.map(line=>line.replace(/ {2,}/g,' ')).join('\n').replace(/\n{3,}/g,'\n\n'));
   if (rendered.length > 3000) throw new Error('Full Intel exceeds compact Telegram budget');
   return rendered;
 }
@@ -126,10 +131,11 @@ export function tokenIntelligenceButtons(intel: TokenIntel, supportedCurve = fal
   const rows: Array<Array<{ text: string; url: string } | { text: string; callback_data: string }>> = [];
   const market = [] as Array<{ text: string; url: string }>;
   if (intel.chartUrl) market.push({ text: '📊 Chart', url: intel.chartUrl });
+  else if (/PONS/i.test(intel.valuationSource??'')) market.push({text:'🚀 PONS',url:`https://www.ponsfamily.com/launchpad/${intel.tokenAddress}`});
   market.push({ text: '🔎 Explorer', url: `https://robinhoodchain.blockscout.com/token/${intel.tokenAddress}` });
   rows.push(market);
   if (/^0x[a-fA-F0-9]{40}$/.test(intel.tokenAddress)) rows.push([...(supportedCurve ? [{ text: '🎯 Curve Estimate', callback_data: `PC_RH_0.01_${intel.tokenAddress}` }] : []), { text: '📋 Copy CA', callback_data: `COPY_CA_${intel.tokenAddress}` }]);
-  rows.push([{text:'🔗 Wallet Links · Pro',callback_data:`WL_RH_${intel.tokenAddress}`}]);
+  rows.push([{text:'🔗 Wallet Links · Pro',callback_data:`WL_RH_${intel.tokenAddress}`},{text:'↻ Refresh',callback_data:`FI_RH_${intel.tokenAddress}`}]);
   rows.push([{ text: '🎯 Readiness · Pro', callback_data: `TR_RH_${intel.tokenAddress}` }, { text: 'My Monitors', callback_data: 'DM_HOME' }]);
   return rows;
 }

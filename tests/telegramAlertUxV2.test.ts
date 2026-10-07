@@ -72,7 +72,7 @@ test('Full Intel groups unavailable evidence and humanizes time and provenance',
   assert.doesNotMatch(message, /DEXSCREENER_VERIFIED_BASE_PAIR|2026-\d\d-\d\dT/);
   assert.equal((message.match(/👨‍💻 <b>DEVELOPER<\/b>/g) ?? []).length, 1);
   assert.doesNotMatch(message, /DEV HISTORY/);
-  assert.match(message, /No verified developer history available/);
+  assert.match(message, /Creator history not available from current evidence/);
 });
 
 test('Internet Money Full Intel stays compact without hiding verified security evidence', () => {
