@@ -7,7 +7,7 @@ import {buildAlphaosAlertCard} from '../ui/alphaosAlertCard.js';
 import {sendAlphaosPhotoAlert} from '../ui/alphaosPhotoDelivery.js';
 import {waitForRecipientDelivery,recordDeliveryAccepted} from './recipientDeliveryTiming.js';
 import {withResearchDisclosure} from '../ui/researchDisclosure.js';
-export const RUNNER_MULTIPLES=[2,5,10] as const;
+export const RUNNER_MULTIPLES=[2,5,10,50,100] as const;
 export type RunnerSample=CompactSample & {name?:string;symbol?:string};
 export function runnerSourceFeed(chain:string,feed:string):LiveFeedKey|null {
  if(chain==='arc')return /DEX_PAID/.test(feed)?'ARC_DEX_PAID':/BOOST/.test(feed)?'ARC_BOOST':/BURN/.test(feed)?'ARC_SUPPLY_BURN':feed==='ARC_OPPORTUNITY'?'ARC_OPPORTUNITY':null;
@@ -32,7 +32,7 @@ const at=(v:string)=>new Date(v).toISOString().replace('T',' ').slice(0,19)+' UT
 export function renderCompactRunner(row:CompactTrackingRow,sample:RunnerSample,multiple:number):string {
  if(!runnerCrossings(row,sample).includes(multiple))throw Error('Unverified runner milestone');
  const actual=sample.price!/row.baseline_price;
- const label=multiple===10?'🏆 MEGA RUNNER':multiple===5?'🔥 STRONG RUNNER':'🚀 RUNNER';
+ const label=multiple===100?'💎 LEGENDARY RUNNER':multiple===50?'🏆 ULTRA RUNNER':multiple===10?'🏆 MEGA RUNNER':multiple===5?'🔥 STRONG RUNNER':'🚀 RUNNER';
  const identity=sample.name?esc(sample.name.slice(0,48)):esc(row.token.slice(0,8)+'…'+row.token.slice(-4));
  const thin=sample.liquidity==null||!Number.isFinite(sample.liquidity)||sample.liquidity<2_000;
  return withResearchDisclosure([
