@@ -27,3 +27,24 @@ test('card shows original/observed evidence and never calls sampled price change
  assert.match(renderCompactRunner(row,{...sample(.002),liquidity:1,name:'<script>'},2),/Liquidity is thin/);assert.doesNotMatch(renderCompactRunner(row,{...sample(.002),name:'<script>'},2),/<script>/);
  const arc={...row,chain:'arc'};assert.equal(runnerSourceFeed('arc','BOOST'),'ARC_BOOST');assert.match(compactRunnerButtons(arc)[1][0].url!,/explorer.arc.io/);assert.match(compactRunnerButtons(arc)[0][0].url!,/dexscreener.com\/arc/);
 });
+
+test('50x and 100x require exact thresholds and send once through normal progression',async()=>{
+ assert.deepEqual(runnerCrossings(row,sample(.049999)),[2,5,10]);
+ assert.deepEqual(runnerCrossings(row,sample(.05)),[2,5,10,50]);
+ assert.deepEqual(runnerCrossings(row,sample(.099999)),[2,5,10,50]);
+ assert.deepEqual(runnerCrossings(row,sample(.1)),[2,5,10,50,100]);
+ const claimed=new Set<string>(),sent:number[]=[];
+ const deps={claim:async(key:string)=>{if(claimed.has(key))return 'EXISTS' as const;claimed.add(key);return 'CLAIMED' as const;},deliver:async(_r:any,_s:any,m:number)=>{sent.push(m);}};
+ for(const p of [.002,.005,.01,.05,.06,.1,.12,.05])await processCompactRunner(row,sample(p),deps);
+ assert.deepEqual(sent,[2,5,10,50,100]);assert.equal(claimed.size,5);
+ claimed.clear();sent.length=0;
+ await processCompactRunner(row,sample(.1),deps);await processCompactRunner(row,sample(.05),deps);
+ assert.deepEqual(sent,[100]);assert.equal(claimed.size,5);
+ for(const m of [50,100]){
+  const text=renderCompactRunner(row,sample(m*.001),m);
+  assert.match(text,new RegExp(m+'× SINCE ALERT'));assert.match(text,/Alert price/);assert.match(text,/not realised profit/);
+  assert.ok(text.replace(/<[^>]*>/g,'').length<1024);
+ }
+ assert.match(renderCompactRunner(row,sample(.05),50),/ULTRA RUNNER/);
+ assert.match(renderCompactRunner(row,sample(.1),100),/LEGENDARY RUNNER/);
+});
