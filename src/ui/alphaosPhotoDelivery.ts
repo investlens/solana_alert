@@ -10,6 +10,14 @@ export function telegramCaptionLength(text: string): number {
     return Number.isFinite(value) && value >= 0 && value <= 0x10ffff ? String.fromCodePoint(value) : entity;
   }).length;
 }
+export function telegramRecipientUnavailable(error: unknown): boolean {
+  const reason = error instanceof Error ? error.message : String(error);
+  return /(?:403\b|chat not found|bot was blocked|user is deactivated|bot can't initiate conversation)/i.test(reason);
+}
+function rejection(status: number, payload: { error_code?: number; description?: string } | null): Error {
+  const description = String(payload?.description ?? 'response did not confirm delivery').slice(0, 500);
+  return new Error(`Telegram delivery rejected: ${payload?.error_code ?? status} ${description}`);
+}
 export type AlphaosDelivery = { messageId: number; photo: boolean };
 export async function sendAlphaosPhotoAlert(args: {
   botToken: string; chatId: string; text: string; keyboard: unknown; image: Buffer | null;
@@ -23,9 +31,10 @@ export async function sendAlphaosPhotoAlert(args: {
     form.set('reply_markup', JSON.stringify({ inline_keyboard: args.keyboard }));
     form.set('photo', new Blob([new Uint8Array(args.image)], { type: 'image/png' }), 'alphaos-alert.png');
     const response = await request(`${base}/sendPhoto`, { method: 'POST', body: form, signal: AbortSignal.timeout(8_000) });
-    const payload = await response.json().catch(() => null) as { ok?: boolean; result?: { message_id?: number } } | null;
+    const payload = await response.json().catch(() => null) as { ok?: boolean; error_code?: number; description?: string; result?: { message_id?: number } } | null;
     if (response.ok && payload?.ok && Number.isInteger(payload.result?.message_id))
       return { messageId: payload!.result!.message_id!, photo: true };
+    if (telegramRecipientUnavailable(rejection(response.status, payload))) throw rejection(response.status, payload);
     // Fallback only on an explicit rejection, never an ambiguous timeout/5xx.
     if (!(response.status >= 400 && response.status < 500 && response.status !== 429)
       && !(response.ok && payload?.ok === false)) throw new Error('Telegram photo delivery not confirmed');
@@ -34,8 +43,8 @@ export async function sendAlphaosPhotoAlert(args: {
   const response = await request(`${base}/sendMessage`, { method: 'POST', headers: { 'content-type': 'application/json' },
     signal: AbortSignal.timeout(5_000), body: JSON.stringify({ chat_id: args.chatId, text: args.text, parse_mode: 'HTML',
       disable_web_page_preview: true, reply_markup: { inline_keyboard: args.keyboard } }) });
-  const payload = await response.json() as { ok?: boolean; result?: { message_id?: number } };
-  if (!response.ok || !payload.ok || !Number.isInteger(payload.result?.message_id)) throw new Error('Telegram delivery rejected');
+  const payload = await response.json() as { ok?: boolean; error_code?: number; description?: string; result?: { message_id?: number } };
+  if (!response.ok || !payload.ok || !Number.isInteger(payload.result?.message_id)) throw rejection(response.status, payload);
   return { messageId: payload.result!.message_id!, photo: false };
 }
 

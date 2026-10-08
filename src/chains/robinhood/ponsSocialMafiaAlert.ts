@@ -9,14 +9,14 @@ import { waitForRecipientDelivery, recordDeliveryAccepted } from '../../services
 import { recordCompactAlert } from '../../services/compactAlertOutcomes.js';
 import { recordLaunchSocialEligibility } from './alertEligibilityState.js';
 import { buildAlphaosAlertCard } from '../../ui/alphaosAlertCard.js';
-import { sendAlphaosPhotoAlert, alphaosEnrichmentEdit, type AlphaosDelivery } from '../../ui/alphaosPhotoDelivery.js';
+import { sendAlphaosPhotoAlert, telegramRecipientUnavailable, alphaosEnrichmentEdit, type AlphaosDelivery } from '../../ui/alphaosPhotoDelivery.js';
 import { verifySocialContract, socialEvidenceEligibility } from './socialContractConfirmation.js';
 import { getPonsPublicContext, getCreatorHoldingPercent, getTelegramPreviewType, type TelegramPreviewType } from './ponsPublicContext.js';
 import type { PonsLaunch } from './ponsHistoricalLaunchScanner.js';
 import { getRobinhoodTokenMetadata, getRobinhoodTokenSocials } from './tokenMetadata.js';
 import { getRobinhoodMarketSnapshot } from './market.js';
 import { scanRobinhoodDevTokenFlow } from './security/devTokenFlowScanner.js';
-import { getDeliverableUsers } from '../../core/delivery.js';
+import { getDeliverableUsers, markTelegramUserBlocked } from '../../core/delivery.js';
 import { getPonsFactoryDeployments } from './ponsContracts.js';
 import { getPonsV2CurveState } from './ponsV2CurveQuote.js';
 import { resolvePonsV2PreIndexValuation } from './ponsPreIndexValuation.js';
@@ -351,7 +351,16 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   text = await discloseRobinhoodKeyStats(text,token,!partial.market,'Trusted PONS route');
   const results = await Promise.allSettled(chats.map(async chatId => {
     await waitForRecipientDelivery(chatId, deliveryStartedAt);
-    const accepted = await sendTelegram({chatId, text, tokenAddress: token, launchpad, socials, image});
+    let accepted: AlphaosDelivery;
+    try { accepted = await sendTelegram({chatId, text, tokenAddress: token, launchpad, socials, image}); }
+    catch (error) {
+      if (telegramRecipientUnavailable(error)) {
+        await markTelegramUserBlocked(chatId);
+        recipientCache.delete(chatId);
+      }
+      console.warn('[SocialMafia] recipient rejected', { reason: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
     recordDeliveryAccepted(chatId, deliveryStartedAt, `pons:social:${token}`);
     return accepted;
   }));

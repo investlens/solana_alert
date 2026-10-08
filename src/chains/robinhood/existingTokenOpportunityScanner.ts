@@ -36,13 +36,21 @@ let warmCursor = 0;
 let cachedUniverse: ExistingTokenUniverseEntry[] = [];
 let lastUniverseRefreshAt = 0;
 const lastScannedAt = new Map<string, number>();
+const noMarketUntil = new Map<string, number>();
+const NO_MARKET_RETRY_MS = 15 * 60_000;
+export function recordExistingTokenNoMarket(entry: ExistingTokenUniverseEntry, now = Date.now()) {
+  for (const [token, until] of noMarketUntil) if (until <= now) noMarketUntil.delete(token);
+  if (noMarketUntil.size >= 500 && !noMarketUntil.has(normalize(entry.token))) noMarketUntil.delete(noMarketUntil.keys().next().value!);
+  noMarketUntil.set(normalize(entry.token), now + NO_MARKET_RETRY_MS);
+  recordCompletedExistingTokenScans([entry], now);
+}
 
 export function recordCompletedExistingTokenScans(entries: ExistingTokenUniverseEntry[], scannedAt = Date.now()) {
   for (const entry of entries) lastScannedAt.set(normalize(entry.token), scannedAt);
 }
 
 export function existingTokenLastScannedAtForTests(token: string) { return lastScannedAt.get(normalize(token)) ?? null; }
-export function resetExistingTokenLastScannedAtForTests() { lastScannedAt.clear(); }
+export function resetExistingTokenLastScannedAtForTests() { lastScannedAt.clear(); noMarketUntil.clear(); }
 
 export function requirePersistedScannerOpportunity<T>(value: T | null, strategyKey: string): T {
   if (value == null) throw new Error(`scanner persistence failed for ${strategyKey}`);
@@ -93,7 +101,7 @@ export function buildExistingTokenUniverse(args: { now?: number; opportunities?:
 
 export function selectDueExistingTokens(universe: ExistingTokenUniverseEntry[], args: { now?: number; max?: number; lastScanned?: Map<string, number>; hotStart?: number; warmStart?: number } = {}) {
   const now = args.now ?? Date.now(), history = args.lastScanned ?? lastScannedAt, max = args.max ?? config.existingTokenMaxPerCycle;
-  const due = universe.filter(row => now - (history.get(row.token) ?? 0) >= (row.tier === 'HOT' ? config.existingTokenHotScanSeconds : config.existingTokenWarmScanSeconds) * 1000);
+  const due = universe.filter(row => (noMarketUntil.get(normalize(row.token)) ?? 0) <= now && now - (history.get(row.token) ?? 0) >= (row.tier === 'HOT' ? config.existingTokenHotScanSeconds : config.existingTokenWarmScanSeconds) * 1000);
   const watched = due.filter(x => x.watched).sort((a,b) =>
     (history.get(a.token) ?? 0) - (history.get(b.token) ?? 0));
   const hot = due.filter(x => x.tier === 'HOT' && !x.watched); const warm = due.filter(x => x.tier === 'WARM' && !x.watched);
@@ -289,14 +297,14 @@ export async function refreshExistingTokenOpportunityScanner() {
         : error instanceof DexScreenerHttpTimeoutError ? 'HTTP_TIMEOUT' : error instanceof DexScreenerMalformedResponseError ? 'MALFORMED_RESPONSE'
         : error instanceof DexScreenerProviderHttpError ? 'PROVIDER_HTTP_ERROR' : isDexScreenerProviderBackoffError(error) ? 'RATE_LIMITED'
         : reason.startsWith('scanner persistence failed') ? 'PERSISTENCE_FAILED' : 'TOKEN_SCAN_FAILED';
-      if (category === 'NO_USABLE_PAIR') recordCompletedExistingTokenScans([entry]);
+      if (category === 'NO_USABLE_PAIR') recordExistingTokenNoMarket(entry);
       if (category === 'DEFERRED_QUEUE_CAPACITY') metrics.queue_deferred++; else if (category === 'NO_USABLE_PAIR') metrics.no_market++; else metrics.failed++;
       metrics.failure_reasons[category] = (metrics.failure_reasons[category] ?? 0) + 1;
       console.warn('[ExistingTokenScanner] token failed', { token: entry.token, category, reason });
     }
     if (batch.providerBackoff) { metrics.provider_backoff = true; metrics.failed += 1; metrics.failure_reasons.RATE_LIMITED = 1; metrics.provider_backoff_deferred = batch.skipped; }
     else if (batch.skipped) { metrics.cycle_deferred += batch.skipped; metrics.failure_reasons.CYCLE_BUDGET_DEFERRED = batch.skipped; }
-    metrics.remaining_due = Math.max(0, due.dueCount - metrics.scanned_success);
+    metrics.remaining_due = Math.max(0, due.dueCount - metrics.scanned_success - metrics.no_market);
     metrics.health = metrics.failed ? 'DEGRADED' : metrics.queue_deferred || metrics.cycle_deferred || metrics.quota_deferred ? 'CAPACITY_LIMITED' : 'HEALTHY';
     return metrics;
   } catch (error) {

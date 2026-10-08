@@ -15,6 +15,8 @@ export async function upsertUser(args: {
     telegram_id: telegramId,
     username: username ?? null,
     first_name: firstName ?? null,
+    // This upsert follows an incoming Telegram interaction (including /start).
+    is_blocked: false,
     updated_at: new Date().toISOString(),
   };
 
