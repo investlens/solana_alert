@@ -1,3 +1,4 @@
+import { forgetRuntimeSubscriber } from '../services/runtimeSubscriberRegistry.js';
 import { cacheDeliveryRecipients } from '../services/recipientDeliveryTiming.js';
 import { supabase } from '../services/supabase.js';
 import {
@@ -171,6 +172,7 @@ export async function getAlertDeliveries(alertId: string): Promise<Array<{ teleg
 }
 
 export async function markTelegramUserBlocked(telegramId: string): Promise<void> {
+  forgetRuntimeSubscriber(telegramId);
   const { error } = await supabase.from('users').update({ is_blocked: true, updated_at: new Date().toISOString() }).eq('telegram_id', telegramId);
   if (error) console.error('markTelegramUserBlocked failed:', { telegramId, error });
 }

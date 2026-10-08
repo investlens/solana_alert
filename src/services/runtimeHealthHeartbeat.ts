@@ -1,32 +1,34 @@
 import { supabase } from './supabase.js';
 
-const SERVICES = [
-  'telegram_bot',
-  'dexscreener',
-  'wallet_watcher',
-  'creator_intel',
-  'ai_decision_engine',
-  'premium_alerts',
-] as const;
+let lastRetentionAt = Date.now();
+const RETENTION_INTERVAL_MS = 6 * 60 * 60_000;
 
 async function heartbeat(): Promise<void> {
   const now = new Date().toISOString();
 
-  // All runtime services share the same heartbeat timestamp/status, so update them
-  // in one request instead of issuing one Supabase request per service.
+  // A process heartbeat proves liveness only, not provider or feature health.
   const { error } = await supabase
     .from('system_health')
-    .update({
+    .upsert({
+      service: `runtime_${process.env.RAILWAY_SERVICE_NAME ?? 'telegram_bot'}`,
       status: 'healthy',
-      message: 'Runtime heartbeat active',
+      message: 'Process alive; feature and delivery health assessed separately',
+      metadata: { scope: 'PROCESS_LIVENESS_ONLY' },
       last_seen_at: now,
       updated_at: now,
-    })
-    .in('service', [...SERVICES]);
+    }, { onConflict: 'service' });
+
+  if (!error && Date.now() - lastRetentionAt >= RETENTION_INTERVAL_MS) {
+    // One bounded maintenance request per six hours; no new polling loop.
+    lastRetentionAt = Date.now();
+    const result = await supabase.rpc('alphaos_trim_stale_agent_payloads');
+    if (result.error) console.warn('[Retention] raw input cleanup unavailable', result.error.message);
+    else console.log('[Retention] obsolete input payloads trimmed', { rows: result.data, maxRows: 250 });
+  }
 
   if (error) {
     console.warn('[SystemHealth] heartbeat failed', {
-      services: SERVICES.length,
+      scope: 'process',
       reason: error.message,
     });
   }

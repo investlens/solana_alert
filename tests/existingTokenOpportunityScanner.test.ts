@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { assessExistingTokenObservation, buildExistingTokenUniverse, existingTokenObservationIsSeparated, existingTokenPersistedState, selectDueExistingTokens } from '../src/chains/robinhood/existingTokenOpportunityScanner.js';
+import { assessExistingTokenObservation, buildExistingTokenUniverse, existingTokenObservationIsSeparated, existingTokenPersistedState, selectDueExistingTokens, recordExistingTokenNoMarket, resetExistingTokenLastScannedAtForTests } from '../src/chains/robinhood/existingTokenOpportunityScanner.js';
 
 const now = Date.parse('2026-08-28T12:00:00.000Z');
 const observations = [
@@ -100,4 +100,16 @@ it('oldest unscanned hot tokens beat recently rescanned tokens despite cursor po
  const universe=[{token:'recent',tier:'HOT' as const,lastSeenAt:new Date(now).toISOString()},{token:'old',tier:'HOT' as const,lastSeenAt:new Date(now).toISOString()}];
  const history=new Map([['recent',now-3600000],['old',now-7200000]]);
  assert.equal(selectDueExistingTokens(universe,{now,max:1,lastScanned:history,hotStart:0}).selected[0].token,'old');
+});
+
+
+it('tokens without a verified market yield budget until the bounded retry expires', () => {
+  resetExistingTokenLastScannedAtForTests();
+  const now = Date.now();
+  const missing = {token:'missing',tier:'HOT' as const,lastSeenAt:new Date(now).toISOString(),watched:false};
+  const indexed = {...missing,token:'indexed'};
+  recordExistingTokenNoMarket(missing,now);
+  assert.deepEqual(selectDueExistingTokens([missing,indexed],{now:now+60_000,max:6}).selected.map(x=>x.token),['indexed']);
+  assert.ok(selectDueExistingTokens([missing],{now:now+16*60_000,max:6}).selected.length);
+  resetExistingTokenLastScannedAtForTests();
 });
