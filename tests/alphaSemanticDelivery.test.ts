@@ -154,3 +154,16 @@ test('DEX_PAID UI and delivery share the durable database-backed preference key'
   assert.ok(observer.indexOf('persistOrLoadAlphaSemanticEventRecord({') < observer.indexOf("eventIdentity: semanticEvent.event_identity, type: 'DEX_PAID'"),
     'internal semantic persistence must precede preference-gated delivery');
 });
+
+
+test('chat-not-found recipients are disabled without starving the next recipient', async () => {
+  const run = harness([user('missing','free'),user('reachable','free')]);
+  const blocked: string[]=[];
+  run.dependencies.blocked=async(id?:string)=>{blocked.push(id!);};
+  run.dependencies.send=async(id:string)=>{if(id==='missing')throw new Error('Telegram delivery rejected: 400 Bad Request: chat not found');run.sends.push(id);};
+  const event={id:26088,eventIdentity:'v2:BOOST:missing',type:'BOOST',assetId:'0x1111111111111111111111111111111111111111',chain:'robinhood'};
+  const result=await deliverAlphaSemanticEvent({event,message:'BOOST'},run.dependencies);
+  assert.deepEqual(blocked,['missing']);
+  assert.deepEqual(run.sends,['reachable']);
+  assert.deepEqual(result,{delivered:1,failed:1});
+});

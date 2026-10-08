@@ -1,3 +1,4 @@
+import { telegramRecipientUnavailable } from '../ui/alphaosPhotoDelivery.js';
 import { getDeliverableUsers, markTelegramUserBlocked, type DeliverableUser } from '../core/delivery.js';
 import { accessProfileForUser, hasCapability } from '../product/capabilities.js';
 import { evaluateDexPaidAlertSafety } from '../chains/robinhood/security/dexPaidAlertSafetyGate.js';
@@ -210,7 +211,7 @@ export async function deliverAlphaSemanticEvent(args: {
           args.onFailure?.(error);
           args.onRecipientFailure?.(user, error, 'telegram_send');
           const reason = error instanceof Error ? error.message : String(error);
-          if (reason.includes('403')) await dependencies.blocked(user.telegram_id).catch(() => undefined);
+          if (telegramRecipientUnavailable(error)) await dependencies.blocked(user.telegram_id).catch(() => undefined);
           console.error('[AlphaSemanticDelivery] Ephemeral Telegram delivery failed:', {
             eventIdentity: args.event.eventIdentity,
             semanticEventType: args.event.type,
@@ -237,10 +238,10 @@ export async function deliverAlphaSemanticEvent(args: {
         console.error('[AlphaSemanticDelivery] Could not preserve sent-unconfirmed state:', error));
       const reason = result.error instanceof Error ? result.error.message : String(result.error ?? 'unknown');
       args.onFailure?.(result.error);
-      if (reason.includes('403')) await dependencies.blocked(user.telegram_id);
+      if (telegramRecipientUnavailable(result.error)) await dependencies.blocked(user.telegram_id);
       console.error('[AlphaSemanticDelivery] Delivery failed:', { alertEventId: args.event.id,
         semanticEventType: args.event.type, recipientCount: users.length, renderedCharacters, renderedBytes,
-        telegramErrorCategory: reason.includes('text is too long') ? 'MESSAGE_TOO_LONG' : reason.includes('403') ? 'RECIPIENT_BLOCKED' : 'SEND_FAILED',
+        telegramErrorCategory: reason.includes('text is too long') ? 'MESSAGE_TOO_LONG' : telegramRecipientUnavailable(result.error) ? 'RECIPIENT_BLOCKED' : 'SEND_FAILED',
         telegramId: user.telegram_id, sent: result.sent, reason });
     } catch (error) {
       failed += 1;

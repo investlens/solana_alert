@@ -41,3 +41,8 @@ export function runtimeDeliverableUsers(options?: { allRealtime?: boolean }) {
     is_blocked: false,
   }));
 }
+
+// An explicit Telegram rejection must also remove the in-memory fallback recipient.
+export function forgetRuntimeSubscriber(telegramId: string): void {
+  subscribers.delete(String(telegramId));
+}
