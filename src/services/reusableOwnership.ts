@@ -6,7 +6,7 @@ export function reusableOwnership(entries:Iterable<[string,{at:number;value:Owne
     const [entryToken,entryPool]=key.split(':');const v=entry.value;
     if(entryToken!==token.toLowerCase() || now-entry.at>=30_000 || (creator && v.creator?.toLowerCase()!==creator.toLowerCase()))continue;
     if(v.creator && entry.at>devAt && (v.devPercent!=null || result.devPercent==null)){
-      Object.assign(result,{creator:v.creator,devPercent:v.devPercent,devObservedAt:v.devObservedAt,devBlock:v.devBlock});devAt=entry.at;
+      Object.assign(result,{creator:v.creator,devPercent:v.devPercent,devObservedAt:v.devObservedAt,devBlock:v.devBlock,devSource:v.devSource});devAt=entry.at;
     }
     // Pool/burn exclusions are venue specific; never borrow another pool's sample.
     if(pool && entryPool===pool.toLowerCase() && v.top10Percent!=null && entry.at>holderAt){
