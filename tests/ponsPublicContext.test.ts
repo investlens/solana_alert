@@ -44,3 +44,31 @@ test('creator balance preserves tiny nonzero percentages and rejects inconsisten
  assert.equal(creatorHoldingPercentFromRaw(101n,100n),null);
  assert.equal(creatorHoldingPercentFromRaw(1n,0n),null);
 });
+
+function currentPage(overrides={}, tradeOverrides={}) {
+ const launch={address:token,name:'Brivon Network',symbol:'BRIVON',protocol:'v2',stage:'curve',factory,deployer:creator,
+  decimals:18,totalSupply:1000000000,circulatingSupply:1000000000,priceUsd:0.000022657873478285073,
+  marketCapUsd:22657.873478285073,volumeUsd:12392.456227052136,raisedUsd:5662.309818065646,progress:0.5392,
+  createdAt:1000,curve:factory,poolId:null,quoteUsd:2500,socials:{twitter:'https://x.com/brivonnetwork',telegram:null},...overrides};
+ const text='25:T4,test14:'+JSON.stringify(['$','screen',null,{address:token,launch,trades:'$@27'}])+'\n27:'+JSON.stringify({items:[
+  {id:'a',side:'buy',timestamp:1950,quoteAmount:0.01},
+  {id:'b',side:'sell',timestamp:1800,quoteAmount:0.02},
+  {id:'c',side:'buy',timestamp:1600,quoteAmount:0.03}],nextCursor:'more',...tradeOverrides})+'\n';
+ return `<script>self.__next_f.push(${JSON.stringify([1,text.slice(0,80)])})</script><script>self.__next_f.push(${JSON.stringify([1,text.slice(80)])})</script>`;
+}
+test('current PONS launch payload survives text-record prefixes and split chunks with exact identity checks',()=>{
+ const c=parsePonsPublicContext(currentPage(),token,factory,creator,2000000)!;
+ assert.equal(c.name,'Brivon Network');assert.equal(c.marketCapUsd,22657.873478285073);
+ assert.equal(c.priceUsd,0.000022657873478285073);assert.equal(c.totalSupplyRaw,10n**27n);
+ assert.equal(c.phase,0);assert.equal(c.venue,'curve');assert.equal(c.creator,creator);
+ assert.equal(c.volumeTotalUsd,12392.456227052136);assert.equal(c.curveReserveUsd,5662.309818065646);
+ assert.equal(c.progressPct,53.92);assert.equal(c.volume5mUsd,75);assert.equal(c.buys5m,1);assert.equal(c.sells5m,1);
+ for(const changes of [{address:factory},{factory:token},{deployer:token},{totalSupply:-1},{decimals:37}])
+  assert.equal(parsePonsPublicContext(currentPage(changes),token,factory,creator,2000000),null);
+});
+test('PONS partial trade history cannot masquerade as complete 5m volume; MC requires circulating supply',()=>{
+ const c=parsePonsPublicContext(currentPage({circulatingSupply:null},{items:[{id:'a',side:'buy',timestamp:1950,quoteAmount:1}]}),token,factory,creator,2000000)!;
+ assert.equal(c.volume5mUsd,null);assert.equal(c.buys5m,null);assert.equal(c.marketCapUsd,null);
+ assert.ok(c.fdvUsd!>0);assert.ok(c.volumeTotalUsd!>0);
+ assert.equal(parsePonsPublicContext(currentPage({circulatingSupply:2000000000}),token,factory,creator,2000000)!.marketCapUsd,null);
+});
