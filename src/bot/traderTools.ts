@@ -33,7 +33,7 @@ export function registerTraderTools(bot: Telegraf<any>) {
         if (!result.market) { await ctx.reply('Monitoring could not start: a fresh indexed Robinchain USD price and pool liquidity are required.'); return; }
         const started = await startDeteriorationMonitor(user, result.market);
         await ctx.reply(started.status === 'ACTIVE' && started.row
-          ? `🔔 Personal monitoring active until ${new Date(started.row.expires).toISOString().slice(11, 19)} UTC.\nBaseline starts at ${new Date(started.row.at).toISOString().slice(11, 19)} UTC, not at the original alert.\nAbout 2-minute checks · Price −15% / LP −20% · Maximum 3 warning events.\nNot continuous protection; fast declines may happen between checks.`
+          ? `🔔 Personal monitoring active until ${new Date(started.row.expires).toISOString().slice(11, 19)} UTC.\nBaseline observed ${new Date(started.row.observedAt ?? started.row.at).toISOString().slice(11, 19)} UTC; shared token snapshot, not your entry price or the original alert.\nAbout 2-minute checks · Price −15% / LP −20% · Maximum 3 warning events.\nNot continuous protection; fast declines may happen between checks.`
           : 'Monitoring capacity reached: maximum 2 tokens per user, 10 tokens overall and 10 subscribers per token. Stop a monitor or retry after expiry.',
           { reply_markup: { inline_keyboard: [[{ text: 'My Monitors', callback_data: 'DM_HOME' }, { text: 'Stop Monitor', callback_data: `DS_RH_${token}` }]] } });
         return;
