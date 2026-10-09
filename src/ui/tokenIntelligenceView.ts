@@ -92,7 +92,7 @@ export function renderTokenIntelligence(intel: TokenIntel): string {
     '', ...(!developerAvailable && !historyAvailable ? ['👨‍💻 <b>DEVELOPER</b>', 'Creator history not available from current evidence.'] : []),
     ...(developerAvailable ? ['👨‍💻 <b>DEVELOPER</b>',
       ...(intel.developer.wallet ? [`Wallet             <a href="https://robinhoodchain.blockscout.com/address/${esc(intel.developer.wallet)}">${esc(short(intel.developer.wallet))}</a>`] : []),
-      ...(intel.developer.holdingPct != null ? [`Holding            <b>${pct(intel.developer.holdingPct)}</b>`] : []),
+      ...(intel.developer.holdingPct != null ? [`Holding            <b>${intel.developer.holdingPct > 0 && intel.developer.holdingPct < 0.005 ? "&lt;0.01%" : pct(intel.developer.holdingPct)}</b>`] : []),
       ...(intel.developer.sold != null ? [`Sold               <b>${intel.developer.sold ? 'Verified sell' : 'No verified sell'}</b>`] : []),
       ...(intel.developer.transferredPct != null ? [`Transferred        <b>${pct(intel.developer.transferredPct)}</b>`] : []),
       ...(intel.developer.burnedPct != null ? [`Burned             <b>${pct(intel.developer.burnedPct)}</b>`] : []),
@@ -130,7 +130,8 @@ export function renderTokenIntelligence(intel: TokenIntel): string {
 export function tokenIntelligenceButtons(intel: TokenIntel, supportedCurve = false) {
   const rows: Array<Array<{ text: string; url: string } | { text: string; callback_data: string }>> = [];
   const market = [] as Array<{ text: string; url: string }>;
-  if (intel.chartUrl) market.push({ text: '📊 Chart', url: intel.chartUrl });
+  if (intel.preBond) market.push({text:'🚀 PONS',url:`https://www.ponsfamily.com/launchpad/${intel.tokenAddress}`});
+  else if (intel.chartUrl) market.push({ text: '📊 Chart', url: intel.chartUrl });
   else if (/PONS/i.test(intel.valuationSource??'')) market.push({text:'🚀 PONS',url:`https://www.ponsfamily.com/launchpad/${intel.tokenAddress}`});
   market.push({ text: '🔎 Explorer', url: `https://robinhoodchain.blockscout.com/token/${intel.tokenAddress}` });
   rows.push(market);
