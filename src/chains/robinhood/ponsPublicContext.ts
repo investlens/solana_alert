@@ -8,16 +8,75 @@ export type PonsPublicContext = {
   name: string; symbol: string; creator: string; decimals: number; totalSupplyRaw: bigint;
   logo?: string | null; curveAddress?: string | null; priceUsd?: number | null; fdvUsd: number | null; twitter: string | null; telegram: string | null;
   phase?: number | null; venue?: string | null; poolId?: string | null;
+  marketCapUsd?:number|null; volumeTotalUsd?:number|null; curveReserveUsd?:number|null; progressPct?:number|null; createdAt?:number|null;
+  volume5mUsd?:number|null; buys5m?:number|null; sells5m?:number|null;
+
 };
 
+// RSC text records can precede JSON records without a newline. Scan balanced
+// JSON payloads rather than assuming one record per line; skip references and text.
+function ponsPageRecords(chunks:string[]):Map<string,any> {
+  const text=chunks.join(''), records=new Map<string,any>();let consumed=0;
+  for(const match of text.matchAll(/([0-9a-f]+):(?=[\[{])/g)) {
+    if(match.index!<consumed)continue;
+    const start=match.index!+match[0].length;let depth=0,quoted=false,escaped=false;
+    for(let i=start;i<text.length;i++){
+      const c=text[i];
+      if(quoted){if(escaped)escaped=false;else if(c==='\\')escaped=true;else if(c==='"')quoted=false;continue;}
+      if(c==='"'){quoted=true;continue;}
+      if(c==='{'||c==='[')depth++;
+      else if(c==='}'||c===']')depth--;
+      if(depth===0){try{records.set(match[1],JSON.parse(text.slice(start,i+1)));consumed=i+1;}catch{}break;}
+    }
+  }
+  return records;
+}
+const finiteNonnegative=(v:unknown):v is number=>typeof v==='number'&&Number.isFinite(v)&&v>=0;
 // Read server-rendered public metadata, never credentials or social-profile APIs.
-export function parsePonsPublicContext(html: string, token: string, factory: string, creator?: string): PonsPublicContext | null {
+export function parsePonsPublicContext(html: string, token: string, factory: string, creator?: string, now=Date.now()): PonsPublicContext | null {
   const chunks: string[] = [];
   for (const match of html.matchAll(/self\.__next_f\.push\((.*?)\)<\/script>/gs)) {
     try { const value = JSON.parse(match[1]); if (typeof value[1] === 'string') chunks.push(value[1]); } catch { /* unknown page layout */ }
   }
+  const records=ponsPageRecords(chunks);
   const visit = (value: any): PonsPublicContext | null => {
     if (!value || typeof value !== 'object') return null;
+    const launch=value.launch;
+    if(launch && value.address?.toLowerCase?.()===token.toLowerCase()
+      && launch.address?.toLowerCase?.()===token.toLowerCase()
+      && launch.factory?.toLowerCase?.()===factory.toLowerCase()
+      && /^0x[a-fA-F0-9]{40}$/.test(launch.deployer??'') && !/^0x0{40}$/i.test(launch.deployer)
+      && (!creator||launch.deployer.toLowerCase()===creator.toLowerCase())
+      && typeof launch.name==='string' && typeof launch.symbol==='string'
+      && Number.isInteger(launch.decimals)&&launch.decimals>=0&&launch.decimals<=36
+      && Number.isSafeInteger(launch.totalSupply)&&launch.totalSupply>0) {
+      const supply=BigInt(launch.totalSupply)*10n**BigInt(launch.decimals);
+      const price=finiteNonnegative(launch.priceUsd)&&launch.priceUsd>0?launch.priceUsd:null;
+      const circulating=finiteNonnegative(launch.circulatingSupply)&&launch.circulatingSupply<=launch.totalSupply?launch.circulatingSupply:null;
+      const mc=price!=null&&circulating!=null?price*circulating:null;
+      const ref=typeof value.trades==='string'?value.trades.match(/^\$@([0-9a-f]+)$/)?.[1]:null;
+      const trades=ref?records.get(ref):null;
+      const items=Array.isArray(trades?.items)?trades.items:null;
+      const end=now/1000,start=end-300;
+      const complete=items && items.every((t:any)=>typeof t.id==='string'&&finiteNonnegative(t.timestamp)&&t.timestamp<=end
+        && finiteNonnegative(t.quoteAmount)&&['buy','sell'].includes(t.side))
+        && new Set(items.map((t:any)=>t.id)).size===items.length
+        && (trades.nextCursor===null||items.some((t:any)=>t.timestamp<=start));
+      const recent=complete?items.filter((t:any)=>t.timestamp>start):null;
+      const quoteUsd=finiteNonnegative(launch.quoteUsd)&&launch.quoteUsd>0?launch.quoteUsd:null;
+      return {name:launch.name,symbol:launch.symbol.replace(/^\$+/,''),creator:launch.deployer,decimals:launch.decimals,totalSupplyRaw:supply,
+        phase:launch.stage==='curve'?0:launch.stage==='dex'?1:null,venue:launch.stage==='curve'?'curve':launch.stage==='dex'?'dex':null,
+        curveAddress:/^0x[a-fA-F0-9]{40}$/.test(launch.curve??'')?launch.curve:null,
+        poolId:/^0x(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$/.test(launch.poolId??launch.pool??'')?(launch.poolId??launch.pool):null,
+        priceUsd:price,marketCapUsd:mc!=null&&Number.isFinite(mc)?mc:null,fdvUsd:price!=null&&Number.isFinite(price*launch.totalSupply)?price*launch.totalSupply:null,
+        volumeTotalUsd:finiteNonnegative(launch.volumeUsd)?launch.volumeUsd:null,
+        curveReserveUsd:finiteNonnegative(launch.raisedUsd)?launch.raisedUsd:null,
+        progressPct:finiteNonnegative(launch.progress)&&launch.progress<=1?launch.progress*100:null,
+        createdAt:finiteNonnegative(launch.createdAt)&&launch.createdAt>0&&launch.createdAt<=end?launch.createdAt*1000:null,
+        volume5mUsd:recent&&quoteUsd?recent.reduce((sum:number,t:any)=>sum+t.quoteAmount*quoteUsd,0):null,
+        buys5m:recent?recent.filter((t:any)=>t.side==='buy').length:null,sells5m:recent?recent.filter((t:any)=>t.side==='sell').length:null,
+        twitter:typeof launch.socials?.twitter==='string'?launch.socials.twitter:null,telegram:typeof launch.socials?.telegram==='string'?launch.socials.telegram:null};
+    }
     const d = value.initialDetails;
     if (d && typeof d.token === 'string' && d.token.toLowerCase() === token.toLowerCase()
       && typeof d.factory === 'string' && d.factory.toLowerCase() === factory.toLowerCase()
@@ -42,9 +101,7 @@ export function parsePonsPublicContext(html: string, token: string, factory: str
     for (const child of Object.values(value)) { const result = visit(child); if (result) return result; }
     return null;
   };
-  for (const line of chunks.join('').split('\n')) {
-    try { const result = visit(JSON.parse(line.slice(line.indexOf(':') + 1))); if (result) return result; } catch { /* non-JSON RSC record */ }
-  }
+  for(const value of records.values()){const result=visit(value);if(result)return result;}
   return null;
 }
 
