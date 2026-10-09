@@ -2,8 +2,9 @@ import type { ChainMarketSnapshot } from '../chains/shared/types.js';
 import type { AlertKeyStats } from '../ui/alertKeyStats.js';
 
 // Pool observations describe this token's DEX market, not verified launchpad
-// mapping or sellability. Preserve a usable primary valuation, not an empty phase flag.
+// mapping, graduation or sellability. A secondary pool cannot override a known curve phase.
 export function selectAlertMarket(token:string, venue:AlertKeyStats|null, market:ChainMarketSnapshot|null, now=Date.now()):AlertKeyStats {
+  if(venue?.preBond===true) return {...venue,chartUrl:null};
   if(typeof venue?.price==='number' && Number.isFinite(venue.price) && venue.price>0) return {...venue};
   const fresh=market && now-market.timestamp>=0 && now-market.timestamp<=90000;
   const valid=fresh && market.chain==='robinhood' && market.tokenAddress.toLowerCase()===token.toLowerCase()

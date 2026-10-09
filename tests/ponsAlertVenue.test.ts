@@ -33,6 +33,7 @@ test('graduated PONS uses only mapped pool and fails closed during indexing or s
   assert.equal(ponsVenueStats(token,graduated,true,[dust]).price,undefined);
   assert.equal(ponsVenueStats(token,context,true,[actual]).price,undefined);
   assert.equal(ponsVenueStats(token,context,null,[actual]).price,context.priceUsd);
+  assert.equal(ponsVenueStats(token,context,null,[actual]).preBond,true);
   assert.match(ponsVenueStats(token,context,null,[actual]).source!,/reported.*unconfirmed/);
   assert.equal(ponsVenueStats(token,context,null,[actual]).liquidity,undefined);
   assert.equal(ponsVenueStats(token,graduated,true,[{...actual,chainId:'arc'}]).price,undefined);

@@ -74,7 +74,7 @@ export function cleanAlertButtons<T extends CardButton>(rows: T[][] | undefined,
     seen.add(key); return true;
   });
   // Put the four primary research controls first when present. Preserve all other actions.
-  const primary = [/DexScreener|Chart/i, /Full Intel/i, /^.*Track\b/i, /Copy CA/i]
+  const primary = [/DexScreener|Chart|PONS/i, /Full Intel/i, /^.*Track\b/i, /Copy CA/i]
     .map(pattern => buttons.find(button => pattern.test(button.text)))
     .filter((button): button is T => Boolean(button));
   const ordered = [...new Set(primary), ...buttons.filter(button => !primary.includes(button))];

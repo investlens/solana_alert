@@ -298,3 +298,10 @@ test('PONS Full Intel has source link, a refresh control and market cap ahead of
  const text=renderTokenIntelligence(intel);assert.ok(text.indexOf('Market Cap')<text.indexOf('Price '));
  assert.match(text,/Source PONS reported curve quote/);assert.doesNotMatch(text,/ {2,}|\n{3,}/);
 });
+
+test('Full Intel keeps PONS primary for prebond and renders tiny holdings without a false zero',()=>{
+ const intel=fixture({preBond:true,developer:{...fixture().developer,holdingPct:0.000001}});
+ assert.match(tokenIntelligenceButtons(intel)[0][0].text,/PONS/);
+ assert.match(renderTokenIntelligence(intel),/Holding.*&lt;0.01%/);
+ assert.ok(tokenIntelligenceButtons(fixture({preBond:false}))[0][0].text.includes('Chart'));
+});

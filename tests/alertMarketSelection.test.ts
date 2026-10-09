@@ -19,23 +19,15 @@ test('fallback rejects stale, wrong-chain, wrong-token and unusable snapshots',(
 });
 
 
-test('empty prebond and reported PONS quotes do not suppress valid exact-token DEX fallback',()=>{
- for(const venue of [
-   {preBond:true,creator:token,supply:'1B'},
-   {preBond:true,price:0,creator:token},
-   {price:null,source:'PONS reported curve quote · venue unconfirmed',creator:token},
-   {preBond:true,price:Number.NaN},
-   {preBond:true,price:Number.POSITIVE_INFINITY}
- ]){
-  const stats=selectAlertMarket(token,venue,market,now);
-  assert.equal(stats.price,market.priceUsd);assert.equal(stats.marketCap,market.marketCapUsd);
-  assert.equal(stats.chartUrl,market.chartUrl);assert.equal(stats.preBond,false);
-  assert.match(stats.source!,/fallback.*PONS curve quote unavailable/);
-  if(venue.creator)assert.equal(stats.creator,token);
+test('known prebond phase never adopts a secondary DEX market even when curve quote is missing',()=>{
+ for(const price of [undefined,0,null,Number.NaN,Number.POSITIVE_INFINITY]) {
+  const stats=selectAlertMarket(token,{preBond:true,price,creator:token},market,now);
+  assert.equal(stats.preBond,true);assert.equal(stats.chartUrl,null);
+  assert.equal(stats.marketCap,undefined);assert.equal(stats.creator,token);
  }
 });
 test('empty PONS quote with no valid alternate keeps unknowns instead of inventing prices',()=>{
  const venue={preBond:true,creator:token,supply:'1B'};
- assert.deepEqual(selectAlertMarket(token,venue,null,now),venue);
- assert.deepEqual(selectAlertMarket(token,venue,{...market,timestamp:now-90001},now),venue);
+ assert.deepEqual(selectAlertMarket(token,venue,null,now),{...venue,chartUrl:null});
+ assert.deepEqual(selectAlertMarket(token,venue,{...market,timestamp:now-90001},now),{...venue,chartUrl:null});
 });

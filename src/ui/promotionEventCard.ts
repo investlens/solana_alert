@@ -25,7 +25,7 @@ export function buildPromotionEventCard(args:PromotionCardArgs) {
  const metrics:string[]=[], absent=new Set<string>();
  for(const [pattern,label] of definitions){
    const row=snapshotRows.find(row=>pattern.test(plainRow(row))&&usable(row))
-     ??metricRows.find(row=>pattern.test(plainRow(row))&&usable(row));
+     ??(s?.authoritativeVenue&&s.preBond?undefined:metricRows.find(row=>pattern.test(plainRow(row))&&usable(row)));
    if(row)metrics.push(row);
    else if(label==='market cap')metrics.push('Market cap <b>Unavailable</b>'+(typeof s?.fdv==='number'&&s.fdv>0?' · FDV shown; circulating supply unconfirmed':''));
    else absent.add(label);
@@ -59,7 +59,7 @@ export function buildPromotionEventCard(args:PromotionCardArgs) {
  `<code>${esc(args.token)}</code>`,args.kind==='SOCIAL_MAFIA'?'<i>Project acknowledgement · market risks remain · DYOR</i>':'<i>Promotion event · DYOR</i>',
  ...(s?.source?[`${esc(s.source)}${s.checkedAt?' · '+esc(s.checkedAt)+' UTC':''}`]:[])].join('\n');
  const original=args.buttons.flat();
- const chart=s?.chartUrl&&/^https:\/\/dexscreener\.com\/robinhood\//i.test(s.chartUrl)?{text:'📈 Chart',url:s.chartUrl}:null;
+ const chart=!s?.preBond&&s?.chartUrl&&/^https:\/\/dexscreener\.com\/robinhood\//i.test(s.chartUrl)?{text:'📈 Chart',url:s.chartUrl}:null;
  const venue=chart??(args.launchType==='PONS'?{text:'🚀 PONS',url:`https://www.ponsfamily.com/launchpad/${args.token}`}:{text:'🔎 Explorer',url:`https://robinhoodchain.blockscout.com/token/${args.token}`});
  const intel=original.find(b=>/Full Intel/i.test(b.text))??{text:'🧠 Full Intel',callback_data:`FI_RH_${args.token}`};
  const track=original.find(b=>/Track/i.test(b.text))??{text:'⭐ Track',callback_data:`BOOST_TRACK_${args.token}`};

@@ -15,7 +15,7 @@ const production:Dependencies={now:Date.now,schedule:(run,ms)=>{const t=setTimeo
   let stats=cachedRobinhoodAlertStats(args.token);
   // A transient provider failure must not erase the still-labelled original quote.
   // Confirmed graduation/mapped-pool transitions may legitimately invalidate it.
-  if(args.stats?.price != null && stats?.price == null && !/Graduated|mapped/i.test(stats?.source??'')) { stats=args.stats;text=withAlertKeyStats(text,stats); }
+  if(args.stats?.price != null && stats?.price == null && stats?.preBond === args.stats.preBond && !/Graduated|mapped/i.test(stats?.source??'')) { stats=args.stats;text=withAlertKeyStats(text,stats); }
   if(stats)stats={...stats,name:stats.name??args.stats?.name,symbol:stats.symbol??args.stats?.symbol,creator:stats.creator??args.stats?.creator};
   const pool=stats?.chartUrl?.match(/\/robinhood\/(0x[a-fA-F0-9]{40,64})/)?.[1];
   text=await discloseRobinhoodOwnership(text,args.token,stats?.creator,pool);
