@@ -30,7 +30,7 @@ export type TokenIntel = {
   status: 'COMPLETE' | 'PARTIAL'; analyzedAt: string; chain: 'robinhood'; tokenAddress: string;
   name: string | null; symbol: string | null; decimals: number | null; supply: string | null; launchpad?: 'PONS' | null;
   ageObservedAt: string | null; price: number | null; marketCap: number | null; liquidity: number | null;
-  preBond?: boolean; volume5m: number | null; volume24h?: number | null; priceChange1h?: number | null; chartUrl: string | null; fdv?: number | null; valuationSource?: string | null; marketObservedAt?: string | null;
+  ponsVolumeTotal?:number|null; curveReserve?:number|null; bondingProgress?:number|null; preBond?: boolean; volume5m: number | null; volume24h?: number | null; priceChange1h?: number | null; chartUrl: string | null; fdv?: number | null; valuationSource?: string | null; marketObservedAt?: string | null;
   lastVerifiedMarket?: { price: number | null; marketCap: number | null; liquidity: number | null; volume5m: number | null;
     observedAt: string | null; source: string | null } | null;
   ath: TokenAth;
@@ -258,7 +258,7 @@ export async function analyzeRobinhoodToken(tokenAddress: string, previous?: Tok
       result.name ||= stats.name ?? null; result.symbol ||= stats.symbol ?? null;
       Object.assign(result,{price:stats.price??null,marketCap:stats.marketCap??null,fdv:stats.fdv??null,
         liquidity:stats.liquidity??null,volume5m:stats.volume5m??null,volume24h:stats.volume24h??null,
-        priceChange1h:stats.move1h??null,chartUrl:stats.chartUrl??null,preBond:stats.preBond,
+        priceChange1h:stats.move1h??null,chartUrl:stats.chartUrl??null,preBond:stats.preBond,ponsVolumeTotal:stats.volumeTotal,curveReserve:stats.curveReserve,bondingProgress:stats.bondingProgress,
         valuationSource:stats.source??null,marketObservedAt:stats.price!=null?observedAt:null,
         ageObservedAt:stats.pairCreatedAt?new Date(stats.pairCreatedAt).toISOString():null});
     };

@@ -38,3 +38,12 @@ test('graduated PONS uses only mapped pool and fails closed during indexing or s
   assert.equal(ponsVenueStats(token,context,null,[actual]).liquidity,undefined);
   assert.equal(ponsVenueStats(token,graduated,true,[{...actual,chainId:'arc'}]).price,undefined);
 });
+
+test('current prebond PONS metrics flow into card without mislabelling total volume or curve reserve as DEX LP',()=>{
+ const stats=ponsVenueStats(token,{...context,marketCapUsd:18000,volumeTotalUsd:1000,curveReserveUsd:5000,progressPct:50,createdAt:Date.now()-60000,volume5mUsd:75,buys5m:1,sells5m:2},null,[dust]);
+ assert.equal(stats.marketCap,18000);assert.equal(stats.volumeTotal,1000);assert.equal(stats.volume24h,undefined);
+ assert.equal(stats.volume5m,75);assert.equal(stats.liquidity,undefined);
+ const text=withAlertKeyStats('',stats);
+ assert.match(text,/MC.*18K/);assert.match(text,/Volume · PONS total.*1K/);assert.match(text,/Curve reserve.*5K/);
+ assert.match(text,/Bonding progress.*50.0%/);assert.match(text,/Vol · 24h.*Unavailable/);
+});

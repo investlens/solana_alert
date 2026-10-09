@@ -18,7 +18,7 @@ export function buildPromotionEventCard(args:PromotionCardArgs) {
    [/^(?:MC|Market cap)\s/i,'market cap'],[/^FDV\s/i,'FDV'],[/^Price\s/i,'price'],
    [/^(?:Liquidity|LP liquidity)\s/i,'liquidity'],[/^(?:Vol · 5m|5m volume)\s/i,'5m volume'],
    [/^Vol · 24h\s/i,'24h volume'],[/^Move · 5m\s/i,'5m change'],[/^Move · 1h\s/i,'1h change'],
-   [/^Trades · 5m\s/i,'trades'],[/^Pair age\s/i,'pair age'],[/^Total supply\s/i,'supply']
+   [/^Trades · 5m\s/i,'trades'],[/^Pair age\s/i,'pair age'],[/^Total supply\s/i,'supply'],[/^Volume · PONS total\s/i,'total volume'],[/^Curve reserve\s/i,'curve reserve'],[/^Bonding progress\s/i,'bonding progress']
  ] as const;
  const plainRow=(row:string)=>row.replace(/<[^>]+>/g,'').replace(/^[^A-Za-z0-9]+/,'');
  const usable=(row:string)=>! /Unavailable|not confirmed/i.test(row);

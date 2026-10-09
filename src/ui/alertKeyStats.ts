@@ -4,7 +4,7 @@ export type AlertKeyStats = {
   volume5m?:number|null; volume24h?:number|null; move5m?:number|null; move1h?:number|null;
   buys?:number|null;sells?:number|null;pairCreatedAt?:number|null; supply?:string|null;
   creator?:string|null; chartUrl?: string|null; twitter?:string|null; telegram?:string|null; authoritativeVenue?: boolean;
-  preBond?:boolean; sellability?:string|null; lp?:string|null; source?:string|null; checkedAt?:string|null; dexPaid?:string|null; symbol?:string|null; name?:string|null;
+  volumeTotal?:number|null;curveReserve?:number|null;bondingProgress?:number|null; preBond?:boolean; sellability?:string|null; lp?:string|null; source?:string|null; checkedAt?:string|null; dexPaid?:string|null; symbol?:string|null; name?:string|null;
 };
 const n=(v:unknown):v is number=>typeof v==='number'&&Number.isFinite(v);
 const usd=(v:unknown)=>n(v)&&v>=0?'$'+(v>=1000?(v/1000).toLocaleString('en-US',{maximumFractionDigits:2})+'K':v===0?'0':v.toPrecision(5)):'Unavailable';
@@ -26,6 +26,9 @@ export function withAlertKeyStats(text:string, stats:AlertKeyStats):string {
   add(/Liquidity|LP liquidity/i,'Liquidity',stats.preBond?'Bonding curve · no DEX LP':usd(stats.liquidity));
   add(/5m volume|5m Volume|Vol(?:ume)?\s*·?\s*5m/i,'Vol · 5m',usd(stats.volume5m));
   add(/Vol(?:ume)?\s*·?\s*24h/i,'Vol · 24h',usd(stats.volume24h));
+  if(n(stats.volumeTotal))lines.push(`Volume · PONS total <b>${usd(stats.volumeTotal)}</b>`);
+  if(stats.preBond&&n(stats.curveReserve))lines.push(`Curve reserve <b>${usd(stats.curveReserve)}</b>`);
+  if(stats.preBond&&n(stats.bondingProgress))lines.push(`Bonding progress <b>${stats.bondingProgress.toFixed(1)}%</b>`);
   add(/Move\s*·?\s*5m/i,'Move · 5m',movement(stats.move5m));
   add(/Move\s*·?\s*1h/i,'Move · 1h',movement(stats.move1h));
   add(/Trades\s*·?\s*5m|Buy \/ sell/i,'Trades · 5m',n(stats.buys)&&n(stats.sells)?`${stats.buys} buy / ${stats.sells} sell`:'Unavailable');

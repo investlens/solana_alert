@@ -19,17 +19,19 @@ export function ponsVenueStats(token:string,context:PonsPublicContext|null,gradu
   const metadata={creator:context?.creator,name:context?.name,symbol:context?.symbol,twitter:context?.twitter,telegram:context?.telegram};
   const unavailable:AlertKeyStats={...metadata,authoritativeVenue:true,source:'PONS venue data pending',checkedAt};
   if(!context) return unavailable;
+  const curveStats={marketCap:context.marketCapUsd,volumeTotal:context.volumeTotalUsd,curveReserve:context.curveReserveUsd,
+    bondingProgress:context.progressPct,pairCreatedAt:context.createdAt,volume5m:context.volume5mUsd,buys:context.buys5m,sells:context.sells5m};
   if(graduated==null) {
     // Public exact-contract quotes remain useful when the RPC venue read is slow.
     // They are reported quotes, not confirmed execution or circulating valuation.
     if(context.phase===0 && context.venue==='curve') return {...unavailable,
-      preBond:true,price:context.priceUsd,fdv:context.fdvUsd,source:'PONS reported curve quote · venue unconfirmed'};
+      ...curveStats,preBond:true,price:context.priceUsd,fdv:context.fdvUsd,source:'PONS reported curve quote · venue unconfirmed'};
     return unavailable;
   }
   if(!graduated){
     if(context.venue!=='curve'||context.phase!==0)return unavailable;
-    return {...metadata,authoritativeVenue:true,preBond:true,price:context.priceUsd,marketCap:null,fdv:context.fdvUsd,
-      source:'PONS bonding-curve snapshot · FDV, not circulating market cap',checkedAt};
+    return {...metadata,authoritativeVenue:true,preBond:true,...curveStats,price:context.priceUsd,marketCap:context.marketCapUsd??null,fdv:context.fdvUsd,
+      source:context.marketCapUsd!=null?'PONS bonding-curve snapshot':'PONS bonding-curve snapshot · FDV, not circulating market cap',checkedAt};
   }
   // Official exact-contract pool mapping + on-chain graduation. Never choose a
   // secondary pool just because it has marginally greater reported liquidity.
