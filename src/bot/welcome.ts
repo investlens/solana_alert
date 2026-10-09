@@ -46,7 +46,7 @@ export const alphaosUsageGuide = [
   '<b>What the alerts mean</b>',
   '⚡ <b>Boost</b> — additional token promotion; promotion does not establish quality.',
   '💎 <b>DEX Paid</b> — a newly confirmed DexScreener payment; no market-cap or token-age limit. Applicable contract safety checks remain. Enable DEX Paid · Robinchain in Alert Preferences. Free receives a 30-second release delay; Pro receives priority delivery.',
-  '🕶 <b>Social Mafia</b> — verified launchpad origin and exact contract confirmed on X. Telegram is optional and labelled when missing. Ownership and safety remain unverified.',
+  '🕶 <b>Social Mafia</b> — verified launchpad and exact contract confirmed on X, with recent buying and fresh creator balance or verified burn evidence. Telegram is optional. Market and ownership risks remain.',
   '🏆 <b>Runner milestones</b> — 2×, 5×, 10×, 50× and 100× sampled USD price moves from tracked alerts. Follows your source-feed preferences; limited checkpoint coverage, not trade profit.',
   '🔎 <b>Protocol Discovery</b> — PONS projects named Protocol/Protocols with X and Telegram links. Screened on the bounded launch watch, with no X contract-publication requirement. Social ownership is unverified.',
   '📊 <b>Trade Setup Watch</b> — verified PONS curves show a recovery or breakout with two spaced reserve/price increases, with fresh creator holding/transfer evidence. Older Robinchain pools can also qualify for Volume Surge Watch: completed-day pool volume ≥2× the preceding seven completed days’ daily average, with a positive price change on that signal day and all eight days of history. This is a research watch, not a buy recommendation. X contract publication is not required; social identity remains unverified.', '',
