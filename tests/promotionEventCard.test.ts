@@ -46,3 +46,13 @@ test('combined legacy rows render once with market cap first and no false missin
  assert.match(legacy.text,/<b>MARKET<\/b>\nMarket cap \$100K\nPrice/);
  assert.doesNotMatch(legacy.text,/Not reported:.*5m volume|Market cap <b>Unavailable/);
 });
+
+test('prebond venue survives final button cleanup and does not reuse legacy DEX metrics',async()=>{
+ const {cleanAlertButtons}=await import('../src/ui/alertCardLayout.js');
+ const c=buildPromotionEventCard({kind:'BOOST',token,launchType:'PONS',stats:{authoritativeVenue:true,preBond:true,fdv:8000,chartUrl:'https://dexscreener.com/robinhood/'+token},securityNote:null,buttons:[],text:'Boost 10 total (+10)\nPrice $0.9\nMarket cap $900K\nLiquidity $40K'});
+ assert.doesNotMatch(c.text,/900K|40K|\$0.9/);
+ assert.match(c.text,/FDV.*8K/);
+ const final=cleanAlertButtons(c.buttons,c.text)!;
+ assert.match(final[0][0].text,/PONS/);assert.match(final[0][1].text,/Full Intel/);
+ assert.ok(final.flat().every(b=>!b.url?.includes('dexscreener')));
+});
