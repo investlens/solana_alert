@@ -305,3 +305,15 @@ test('Full Intel keeps PONS primary for prebond and renders tiny holdings withou
  assert.match(renderTokenIntelligence(intel),/Holding.*&lt;0.01%/);
  assert.ok(tokenIntelligenceButtons(fixture({preBond:false}))[0][0].text.includes('Chart'));
 });
+
+
+test('Full Intel preserves small positive ownership and flow percentages instead of displaying zero', () => {
+ const original=fixture();
+ const text=renderTokenIntelligence(fixture({developer:{...original.developer,holdingPct:0.02,transferredPct:0.03,burnedPct:0.00001},holders:{...original.holders,top10Pct:0.04,largestPct:0.00001}}));
+ assert.match(text,/Holding\s+<b>0\.02%<\/b>/);
+ assert.match(text,/Transferred\s+<b>0\.03%<\/b>/);
+ assert.match(text,/Burned\s+<b>&lt;0\.01%<\/b>/);
+ assert.match(text,/Top 10\s+<b>0\.04%<\/b>/);
+ assert.match(text,/Largest holder\s+<b>&lt;0\.01%<\/b>/);
+ assert.doesNotMatch(text,/(?:Holding|Transferred|Burned|Top 10|Largest holder)\s+<b>0\.0%/);
+});
