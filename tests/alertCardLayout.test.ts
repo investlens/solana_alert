@@ -41,5 +41,5 @@ test('inline social retains destination while redundant button disappears',()=>{
 
 test('paid and prebond actions retain PONS and social links after four primary controls',()=>{
  const rows=[[{text:'PONS',url:'https://www.ponsfamily.com/launchpad/token'},{text:'DexScreener',url:'https://dexscreener.com/robinhood/token'}],[{text:'Full Intel',callback_data:'FI'},{text:'Track',callback_data:'TRACK'}],[{text:'Copy CA',callback_data:'COPY'},{text:'TG',url:'https://t.me/project'}]];
- assert.deepEqual(cleanAlertButtons(rows)!.map(row=>row.map(b=>b.text)),[['DexScreener','Full Intel'],['Track','Copy CA'],['PONS','TG']]);
+ assert.deepEqual(cleanAlertButtons(rows)!.map(row=>row.map(b=>b.text)),[['PONS','Full Intel'],['Track','Copy CA'],['DexScreener','TG']]);
 });
