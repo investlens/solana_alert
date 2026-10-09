@@ -1,3 +1,4 @@
+import { getIndexedCreatorHolding } from './indexedCreatorHolding.js';
 import { readResearchTokenSupply } from './researchTokenSupply.js';
 import { scanRobinhoodDexPaid } from '../chains/robinhood/security/dexPaidScanner.js';
 import { ponsVenueStats, confirmedCurveGraduation } from './ponsAlertVenue.js';
@@ -36,7 +37,7 @@ export type TokenIntel = {
   ath: TokenAth;
   holders: { count: number | null; top10Pct: number | null; largestPct: number | null; risk: string; warnings: string[] };
   freshWallets: FreshWalletIntel;
-  developer: { observedAt?: string | null; holdingObservedAt?: string | null; wallet: string | null; holdingPct: number | null; sold: boolean | null; transferredPct: number | null; burnedPct: number | null };
+  developer: { holdingSource?:'RPC'|'BLOCKSCOUT_INDEXED'|null; observedAt?: string | null; holdingObservedAt?: string | null; wallet: string | null; holdingPct: number | null; sold: boolean | null; transferredPct: number | null; burnedPct: number | null };
   devHistory: { launches: number; measuredSuccessful: number; weakOrFailed: number; verdict: string; risks: string[] };
   security: { tokenBurnedPct: number | null; lpStatus: 'LOCKED' | 'BURNED' | 'UNLOCKED' | 'UNKNOWN'; dexPaid: boolean | null; boostTotal: number | null };
   socials: SafeSocial[]; alpha: { state: string | null; risk: string | null; verdict: string; positive: string[]; watch: string[] };
@@ -282,9 +283,12 @@ export async function analyzeRobinhoodToken(tokenAddress: string, previous?: Tok
       if(!controller.signal.aborted){venue=ponsVenueStats(token,pons,graduated,[]);publishMarket();}
     });
     const ponsHoldingWork = ponsWork.then(pons => pons
-      ? bounded(sources.holding(token, pons.creator), controller.signal).then(percent=>{
+      ? bounded(sources.holding(token, pons.creator), controller.signal).then(async percent=>{
+          const indexed=percent==null && sources===intelSources && !controller.signal.aborted
+            ? await bounded(getIndexedCreatorHolding(token,pons.creator),controller.signal).catch(()=>null):null;
+          percent ??= indexed?.percent ?? null;
           if(result.developer.wallet?.toLowerCase()===pons.creator.toLowerCase()){
-            result.developer.holdingPct=percent;if(percent!=null)result.developer.holdingObservedAt=new Date().toISOString();
+            result.developer.holdingPct=percent;result.developer.holdingSource=indexed?'BLOCKSCOUT_INDEXED':'RPC';if(percent!=null)result.developer.holdingObservedAt=new Date().toISOString();
           }return percent;
         }).catch(() => null) : null);
     const [metadataResult, pairsResult] = await Promise.allSettled([
@@ -331,7 +335,8 @@ export async function analyzeRobinhoodToken(tokenAddress: string, previous?: Tok
       const wallet=typeof raw.deployerAddress==='string' && /^0x[a-f0-9]{40}$/i.test(raw.deployerAddress) ? raw.deployerAddress : priorDeveloper.wallet;
       const sameCreator=wallet?.toLowerCase()===priorDeveloper.wallet?.toLowerCase();
       result.developer = { observedAt: db.latest?.alerted_at ?? null, wallet,
-        holdingPct: finitePercentage(raw.devHoldingPercent) ?? (sameCreator?priorDeveloper.holdingPct:null),
+        holdingPct: (sameCreator?priorDeveloper.holdingPct:null) ?? finitePercentage(raw.devHoldingPercent),
+        holdingSource:sameCreator?priorDeveloper.holdingSource:null,
         holdingObservedAt:sameCreator?priorDeveloper.holdingObservedAt:null, sold: raw.confirmedDevSell === true ? true : raw.confirmedDevSell === false ? false : null,
         transferredPct: finitePercentage(raw.otherDevTransferPercent), burnedPct: finitePercentage(raw.confirmedDevBurnPercent) };
       result.security.tokenBurnedPct = finitePercentage(raw.totalBurnPercent);
