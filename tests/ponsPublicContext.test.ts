@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parsePonsPublicContext, parsePonsV1PoolMapping, classifyTelegramPreview } from '../src/chains/robinhood/ponsPublicContext.js';
+import { creatorHoldingPercentFromRaw, parsePonsPublicContext, parsePonsV1PoolMapping, classifyTelegramPreview } from '../src/chains/robinhood/ponsPublicContext.js';
 const token = '0x1111111111111111111111111111111111111111';
 const factory = '0x2222222222222222222222222222222222222222';
 const creator = '0x3333333333333333333333333333333333333333';
@@ -35,4 +35,12 @@ test('Telegram preview distinguishes explicit community counts; invites and bloc
   assert.equal(classifyTelegramPreview('<div class="tgme_page_extra">@axil_coin</div><a>Send Message</a>'), 'Personal account');
   assert.equal(classifyTelegramPreview('<div class="tgme_page_extra">@axil_coin</div>'), 'Type unverified');
   assert.equal(classifyTelegramPreview('Site Unavailable'), 'Type unverified');
+});
+
+test('creator balance preserves tiny nonzero percentages and rejects inconsistent reads',()=>{
+ assert.equal(creatorHoldingPercentFromRaw(0n,10n**27n),0);
+ assert.ok(creatorHoldingPercentFromRaw(1n,10n**27n)!>0);
+ assert.equal(creatorHoldingPercentFromRaw(10n,100n),10);
+ assert.equal(creatorHoldingPercentFromRaw(101n,100n),null);
+ assert.equal(creatorHoldingPercentFromRaw(1n,0n),null);
 });
