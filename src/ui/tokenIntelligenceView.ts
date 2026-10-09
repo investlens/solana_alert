@@ -96,6 +96,7 @@ export function renderTokenIntelligence(intel: TokenIntel): string {
     ...(developerAvailable ? ['👨‍💻 <b>DEVELOPER</b>',
       ...(intel.developer.wallet ? [`Wallet             <a href="https://robinhoodchain.blockscout.com/address/${esc(intel.developer.wallet)}">${esc(short(intel.developer.wallet))}</a>`] : []),
       ...(intel.developer.holdingPct != null ? [`Holding            <b>${intel.developer.holdingPct > 0 && intel.developer.holdingPct < 0.005 ? "&lt;0.01%" : pct(intel.developer.holdingPct)}</b>`] : []),
+      ...(intel.developer.holdingSource==='BLOCKSCOUT_INDEXED'?['Explorer indexed holding · live block not confirmed']:[]),
       ...(intel.developer.sold != null ? [`Sold               <b>${intel.developer.sold ? 'Verified sell' : 'No verified sell'}</b>`] : []),
       ...(intel.developer.transferredPct != null ? [`Transferred        <b>${pct(intel.developer.transferredPct)}</b>`] : []),
       ...(intel.developer.burnedPct != null ? [`Burned             <b>${pct(intel.developer.burnedPct)}</b>`] : []),
