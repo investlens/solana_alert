@@ -23,7 +23,7 @@ export function ponsVenueStats(token:string,context:PonsPublicContext|null,gradu
     // Public exact-contract quotes remain useful when the RPC venue read is slow.
     // They are reported quotes, not confirmed execution or circulating valuation.
     if(context.phase===0 && context.venue==='curve') return {...unavailable,
-      price:context.priceUsd,fdv:context.fdvUsd,source:'PONS reported curve quote · venue unconfirmed'};
+      preBond:true,price:context.priceUsd,fdv:context.fdvUsd,source:'PONS reported curve quote · venue unconfirmed'};
     return unavailable;
   }
   if(!graduated){
