@@ -1,3 +1,4 @@
+import { tokenBalancePercent } from '../../../services/tokenBalancePercent.js';
 import {
   getAddress,
   type Address,
@@ -111,14 +112,7 @@ function percent(
     return null;
   }
 
-  return (
-    Number(
-      value *
-      1_000_000n /
-      total,
-    ) /
-    10_000
-  );
+  return tokenBalancePercent(value,total);
 }
 
 function tokenAmount(value: bigint | null, decimals: bigint | null): number | null {

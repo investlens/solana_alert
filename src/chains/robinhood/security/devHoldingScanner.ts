@@ -1,3 +1,4 @@
+import { tokenBalancePercent } from '../../../services/tokenBalancePercent.js';
 import {
   decodeFunctionResult,
   encodeFunctionData,
@@ -179,13 +180,8 @@ export async function scanRobinhoodDevHolding(
           raw,
       });
 
-    const holdingPercent =
-      Number(
-        balanceRaw *
-        1_000_000n /
-        metadata.totalSupplyRaw,
-      ) /
-      10_000;
+    const holdingPercent = tokenBalancePercent(balanceRaw, metadata.totalSupplyRaw);
+    if(holdingPercent==null)throw new Error('Inconsistent creator balance or supply');
 
     const balanceTokens =
       Number(

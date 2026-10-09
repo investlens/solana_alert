@@ -34,3 +34,15 @@ test('holding measurements are not reassigned to a conflicting creator from hist
  assert.equal(result.developer.wallet,other);assert.equal(result.developer.holdingPct,null);
  assert.equal(result.security.dexPaid,true);
 });
+
+test('fresh creator balance wins over an older stored zero; fresh zero wins over old nonzero',async()=>{
+ for(const [fresh,stored] of [[1.2,0],[0,10]]){
+  const sources=mockSources();sources.holding=async()=>fresh;
+  sources.database=(async()=>{await new Promise(resolve=>setTimeout(resolve,20));return {
+   latest:{alerted_at:'2026-01-01T00:00:00Z',raw_snapshot:{deployerAddress:creator,devHoldingPercent:stored}},
+   historicalPrice:[],historicalMc:null,boostTotal:null,dexPaid:null,creatorRows:[]};}) as Sources['database'];
+  const result=await analyzeRobinhoodToken(token,null,1500,sources);
+  assert.equal(result.developer.holdingPct,fresh);
+  assert.ok(Date.parse(result.developer.holdingObservedAt!)>Date.parse('2026-01-01T00:00:00Z'));
+ }
+});

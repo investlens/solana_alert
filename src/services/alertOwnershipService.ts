@@ -1,3 +1,4 @@
+import { getIndexedCreatorHolding } from './indexedCreatorHolding.js';
 import { resolveCreatorIdentity, resolvePonsCreatorFromSources } from './verifiedCreatorIdentity.js';
 import { getPonsLaunchState, getIndexedVerifiedPonsLaunch } from '../chains/robinhood/ponsLaunchState.js';
 import { getSharedJson } from './sharedJsonCache.js';
@@ -31,7 +32,7 @@ export async function robinhoodOwnership(token: string, creator?: string | null,
     work = (async () => {
       const [dev, holders] = await Promise.allSettled([
         (async () => {
-          if(reusable.devPercent!=null && reusable.creator)return {percent:reusable.devPercent,observedAt:reusable.devObservedAt,block:reusable.devBlock};
+          if(reusable.devPercent!=null && reusable.creator)return {percent:reusable.devPercent,observedAt:reusable.devObservedAt,block:reusable.devBlock,source:reusable.devSource};
           const identity = await resolveCreatorIdentity(token, creator ?? reusable.creator, {
             factory: address => resolvePonsCreatorFromSources(address, {
               marker: async () => (await getSharedJson(`alphaos:pons:verified:${address.toLowerCase()}`))?.value,
@@ -43,8 +44,10 @@ export async function robinhoodOwnership(token: string, creator?: string | null,
           });
           // Identity remains useful even if the independent balance read fails.
           partial.get(key)!.creator = identity;
-          const value = identity ? await getCreatorHoldingEvidence(token, identity) : null;
-          Object.assign(partial.get(key)!,{devPercent:value?.percent ?? null,devObservedAt:value?.observedAt,devBlock:value?.block}); return value;
+          const direct = identity ? await getCreatorHoldingEvidence(token, identity) : null;
+          const value = direct ?? (identity ? await getIndexedCreatorHolding(token,identity) : null);
+          const block = direct?.block;
+          Object.assign(partial.get(key)!,{devPercent:value?.percent ?? null,devObservedAt:value?.observedAt,devBlock:block,devSource:direct?'RPC':value?'BLOCKSCOUT_INDEXED':undefined}); return value?{...value,block,source:direct?'RPC' as const:'BLOCKSCOUT_INDEXED' as const}:null;
         })(),
         pool ? scanRobinhoodHolderRisk(token, { poolAddress: pool, timeoutMs: 1_500 }).then(result => {
           if (result.sampledWallets.length) { partial.get(key)!.top10Percent = result.top10Pct; partial.get(key)!.top10Coverage = 'INDEXED_SAMPLE'; partial.get(key)!.top10ObservedAt=result.scannedAt; }
@@ -54,6 +57,7 @@ export async function robinhoodOwnership(token: string, creator?: string | null,
       return { creator:partial.get(key)?.creator ?? null,devPercent: dev.status === 'fulfilled' ? dev.value?.percent ?? null : null,
         devObservedAt:dev.status === 'fulfilled' ? dev.value?.observedAt : undefined,
         devBlock:dev.status === 'fulfilled' ? dev.value?.block : undefined,
+        devSource:dev.status === 'fulfilled' ? dev.value?.source : undefined,
         top10ObservedAt:holders.status === 'fulfilled' ? holders.value.scannedAt : undefined,
         top10Percent: holders.status === 'fulfilled' && holders.value.sampledWallets.length ? holders.value.top10Pct : null,
         top10Coverage: holders.status === 'fulfilled' && holders.value.sampledWallets.length ? 'INDEXED_SAMPLE' as const : 'UNAVAILABLE' as const };

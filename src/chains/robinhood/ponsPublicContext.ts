@@ -1,3 +1,4 @@
+import { tokenBalancePercent } from '../../services/tokenBalancePercent.js';
 import { getPonsFactoryDeployments } from './ponsContracts.js';
 import { encodeFunctionData, parseAbi, type Address } from 'viem';
 import { requestRobinhoodRpcResilient } from './rpc.js';
@@ -207,10 +208,7 @@ export async function getTelegramPreviewType(url: string): Promise<TelegramPrevi
 
 const abi = parseAbi(['function balanceOf(address) view returns (uint256)', 'function totalSupply() view returns (uint256)']);
 export function creatorHoldingPercentFromRaw(balance:bigint,supply:bigint):number|null {
-  if(supply<=0n || balance<0n || balance>supply)return null;
-  if(balance===0n)return 0;
-  const percent=Number(balance)/Number(supply)*100;
-  return Number.isFinite(percent)&&percent>0?percent:null;
+  return tokenBalancePercent(balance,supply);
 }
 type HoldingEvidence={percent:number;block:string;observedAt:number};
 const holdingEvidence=boundedEvidenceCache<HoldingEvidence>(key=>{
