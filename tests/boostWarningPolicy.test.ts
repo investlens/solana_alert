@@ -17,5 +17,8 @@ test('BOOST warns for unavailable LP/security and blocks confirmed exit restrict
   assert.equal(result.allowed,true);assert.equal(result.sellabilityVerified,false);assert.match(result.reason,/Validate liquidity and selling/);
   const source=readFileSync(new URL('../src/chains/robinhood/robinhoodBoostObserver.ts',import.meta.url),'utf8');
   assert.match(source,/verifiedTrustedLaunchpad: origin !== null, requireExplicitSellability: true, allowUnknownSellability: true/);
+  const deliverySource=readFileSync(new URL('../src/services/alphaSemanticDeliveryService.ts',import.meta.url),'utf8');
+  assert.match(deliverySource,/verifiedTrustedLaunchpad:trusted, requireExplicitSellability:true, allowUnknownSellability:true/,
+    'The delivery gate must preserve the observer warning policy; confirmed honeypots still block');
  }finally{globalThis.fetch=original;clearBoostSecurityRouterCacheForTests();}
 });
