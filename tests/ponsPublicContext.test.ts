@@ -72,3 +72,14 @@ test('PONS partial trade history cannot masquerade as complete 5m volume; MC req
  assert.ok(c.fdvUsd!>0);assert.ok(c.volumeTotalUsd!>0);
  assert.equal(parsePonsPublicContext(currentPage({circulatingSupply:2000000000}),token,factory,creator,2000000)!.marketCapUsd,null);
 });
+
+
+test('PONS graduated stage is postbond while unknown stages stay unconfirmed',()=>{
+ for(const stage of ['dex','graduated']) {
+  const c=parsePonsPublicContext(currentPage({stage,circulatingSupply:285714000}),token,factory,creator,2000000)!;
+  assert.equal(c.phase,1);assert.equal(c.venue,'dex');
+  assert.ok(c.marketCapUsd!<c.fdvUsd!);
+ }
+ const unknown=parsePonsPublicContext(currentPage({stage:'unknown'}),token,factory,creator,2000000)!;
+ assert.equal(unknown.phase,null);assert.equal(unknown.venue,null);
+});

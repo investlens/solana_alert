@@ -5,7 +5,9 @@ const esc = (value: unknown) => String(value ?? '').replace(/&/g, '&amp;').repla
   .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const money = (value: number | null) => value == null ? 'UNKNOWN' : value === 0 ? '$0' : value >= 1_000_000
   ? `$${(value / 1_000_000).toFixed(2)}M` : value >= 1_000 ? `$${(value / 1_000).toFixed(1)}K` : `$${value.toPrecision(4)}`;
-const pct = (value: number | null) => value == null ? 'UNKNOWN' : `${value.toFixed(1)}%`;
+const pct = (value: number | null) => value == null ? 'UNKNOWN'
+  : value > 0 && value < 0.005 ? '&lt;0.01%'
+  : `${value.toFixed(value > 0 && value < 0.1 ? 2 : 1)}%`;
 const short = (value: string | null) => value ? `${value.slice(0, 6)}…${value.slice(-4)}` : 'UNKNOWN';
 export function formatIntelTime(value: string | null, now = Date.now()): string {
   if (!value) return 'time unavailable';
