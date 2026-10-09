@@ -66,7 +66,7 @@ export function parsePonsPublicContext(html: string, token: string, factory: str
       const recent=complete?items.filter((t:any)=>t.timestamp>start):null;
       const quoteUsd=finiteNonnegative(launch.quoteUsd)&&launch.quoteUsd>0?launch.quoteUsd:null;
       return {name:launch.name,symbol:launch.symbol.replace(/^\$+/,''),creator:launch.deployer,decimals:launch.decimals,totalSupplyRaw:supply,
-        phase:launch.stage==='curve'?0:launch.stage==='dex'?1:null,venue:launch.stage==='curve'?'curve':launch.stage==='dex'?'dex':null,
+        phase:launch.stage==='curve'?0:['dex','graduated'].includes(launch.stage)?1:null,venue:launch.stage==='curve'?'curve':['dex','graduated'].includes(launch.stage)?'dex':null,
         curveAddress:/^0x[a-fA-F0-9]{40}$/.test(launch.curve??'')?launch.curve:null,
         poolId:/^0x(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$/.test(launch.poolId??launch.pool??'')?(launch.poolId??launch.pool):null,
         priceUsd:price,marketCapUsd:mc!=null&&Number.isFinite(mc)?mc:null,fdvUsd:price!=null&&Number.isFinite(price*launch.totalSupply)?price*launch.totalSupply:null,
