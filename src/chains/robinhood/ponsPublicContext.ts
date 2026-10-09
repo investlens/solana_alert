@@ -149,6 +149,12 @@ export async function getTelegramPreviewType(url: string): Promise<TelegramPrevi
 }
 
 const abi = parseAbi(['function balanceOf(address) view returns (uint256)', 'function totalSupply() view returns (uint256)']);
+export function creatorHoldingPercentFromRaw(balance:bigint,supply:bigint):number|null {
+  if(supply<=0n || balance<0n || balance>supply)return null;
+  if(balance===0n)return 0;
+  const percent=Number(balance)/Number(supply)*100;
+  return Number.isFinite(percent)&&percent>0?percent:null;
+}
 type HoldingEvidence={percent:number;block:string;observedAt:number};
 const holdingEvidence=boundedEvidenceCache<HoldingEvidence>(key=>{
   const [token,creator,block]=key.split(':');
@@ -168,7 +174,8 @@ async function readCreatorHoldingEvidence(token: string, creator: string, blockT
       call(encodeFunctionData({ abi, functionName: 'totalSupply' })),
     ]);
     const b = BigInt(String(balance)); const s = BigInt(String(supply));
-    return s > 0n && b >= 0n && b <= s ? {percent:Number(b * 1_000_000n / s) / 10_000,block:BigInt(String(block)).toString(),observedAt:Date.now()} : null;
+    const percent=creatorHoldingPercentFromRaw(b,s);
+    return percent!=null ? {percent,block:BigInt(String(block)).toString(),observedAt:Date.now()} : null;
   } catch { return null; }
 }
 
