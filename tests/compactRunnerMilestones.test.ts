@@ -48,3 +48,12 @@ test('50x and 100x require exact thresholds and send once through normal progres
  assert.match(renderCompactRunner(row,sample(.05),50),/ULTRA RUNNER/);
  assert.match(renderCompactRunner(row,sample(.1),100),/LEGENDARY RUNNER/);
 });
+
+test('runner peak includes only earlier measured observations from the same tracked series', () => {
+ const history = [sample(.008), {...sample(.5),at:'2026-10-07T09:30:00Z'},
+  {...sample(50),status:'UNAVAILABLE' as const}, {...sample(99),at:'invalid'}];
+ const text = renderCompactRunner({...row,samples:history}, {...sample(.005),at:'2026-10-07T09:00:00Z'}, 5);
+ assert.match(text,/Highest sampled price.*8.00×/);assert.match(text,/Latest multiple.*5.00×/);
+ assert.doesNotMatch(text,/500.00×|50000.00×/);
+ assert.ok(text.replace(/<[^>]*>/g,'').length<1024);
+});

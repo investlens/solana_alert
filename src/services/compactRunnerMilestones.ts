@@ -32,6 +32,10 @@ const at=(v:string)=>new Date(v).toISOString().replace('T',' ').slice(0,19)+' UT
 export function renderCompactRunner(row:CompactTrackingRow,sample:RunnerSample,multiple:number):string {
  if(!runnerCrossings(row,sample).includes(multiple))throw Error('Unverified runner milestone');
  const actual=sample.price!/row.baseline_price;
+ const peakPrice = Math.max(row.baseline_price, sample.price!, ...(row.samples ?? [])
+  .filter(s => s.status === 'MEASURED' && typeof s.price === 'number' && Number.isFinite(s.price) && s.price > 0
+   && Date.parse(s.at) > Date.parse(row.started_at) && Date.parse(s.at) <= Date.parse(sample.at))
+  .map(s => s.price!));
  const label=multiple===100?'💎 LEGENDARY RUNNER':multiple===50?'🏆 ULTRA RUNNER':multiple===10?'🏆 MEGA RUNNER':multiple===5?'🔥 STRONG RUNNER':'🚀 RUNNER';
  const identity=sample.name?esc(sample.name.slice(0,48)):esc(row.token.slice(0,8)+'…'+row.token.slice(-4));
  const thin=sample.liquidity==null||!Number.isFinite(sample.liquidity)||sample.liquidity<2_000;
@@ -40,7 +44,8 @@ export function renderCompactRunner(row:CompactTrackingRow,sample:RunnerSample,m
   `${row.chain==='arc'?'ARC':'Robinchain'} · ${esc(row.feed.replace(/_/g,' '))}`,'',
   ...(sample.mc!=null&&Number.isFinite(sample.mc)&&sample.mc>0?[`Market cap <b>${money(sample.mc)}</b>`]:[]),
   `Alert price <b>${price(row.baseline_price)}</b>`,`Observed price <b>${price(sample.price!)}</b>`,
-  `Price multiple <b>${actual.toFixed(2)}×</b> · <b>+${((actual-1)*100).toFixed(1)}%</b>`,
+  `Highest sampled price <b>${price(peakPrice)}</b> · <b>${(peakPrice/row.baseline_price).toFixed(2)}×</b>`,
+  `Latest multiple <b>${actual.toFixed(2)}×</b> · <b>+${((actual-1)*100).toFixed(1)}%</b>`,
   ...(sample.liquidity!=null&&Number.isFinite(sample.liquidity)&&sample.liquidity>=0?[`Liquidity <b>${money(sample.liquidity)}</b>`]:[]),
   '',`Alert baseline ${at(row.started_at)}`,`Observed ${at(sample.at)}`,
   ...(thin?['⚠️ Liquidity is thin or unconfirmed; quoted gains may not be executable.']:[]),

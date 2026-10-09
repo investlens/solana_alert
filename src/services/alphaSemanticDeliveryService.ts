@@ -8,7 +8,7 @@ import { routeBoostSecurity } from '../chains/robinhood/boostSecurityRouter.js';
 import { getVerifiedRobinhoodLaunchpad } from '../chains/robinhood/trustedLaunchpad.js';
 import { withOwnershipDisclosure, type OwnershipDisclosure } from '../ui/ownershipDisclosure.js';
 import { decorateDexPaidAlert, discloseAlertDexPaid } from './alertDexPaidDisclosure.js';
-import { discloseRobinhoodOwnership } from './alertOwnershipService.js';
+import { discloseRobinhoodOwnership, cachedRobinhoodOwnership } from './alertOwnershipService.js';
 import { liveFeedEnabled, semanticLiveFeed } from './liveAlertPreferences.js';
 import { claimSharedDelivery } from './sharedJsonCache.js';
 import { recordCompactAlert } from './compactAlertOutcomes.js';
@@ -233,6 +233,12 @@ export async function deliverAlphaSemanticEvent(args: {
           isUndelayedRiskEvent(args.event.type));
     if(paidOwnership?.devPercent==null && paidOwnership?.top10Percent!=null)deliveryMessage=withOwnershipDisclosure(deliveryMessage,paidOwnership);
   }
+  // Read the evidence already fetched for the card; no additional provider calls.
+  const ownershipCapturedAt = Date.now();
+  const baselineOwnership = dependencies === productionDependencies && args.event.chain === 'robinhood'
+    ? cachedRobinhoodOwnership(args.event.assetId, paidCreator,
+        outcomeStats?.chartUrl?.match(/\/robinhood\/(0x(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64}))(?:[?#]|$)/)?.[1] ?? null)
+    : null;
   if(paidSecurityNote)deliveryMessage += `\n\n${paidSecurityNote}`;
   let deliveryButtons = args.buttons;
   if (dependencies === productionDependencies && args.event.chain === 'robinhood' && !isUndelayedRiskEvent(args.event.type)) {
@@ -341,7 +347,7 @@ export async function deliverAlphaSemanticEvent(args: {
     const feed = semanticLiveFeed(args.event.type,args.event.chain);
     if (feed) { recordFeedDelivery(feed,'ACCEPTED',accepted); recordFeedDelivery(feed,'PROCESSING_FAILED',failed); }
   }
-  if (ephemeralMode && delivered > 0) void recordRecoveryAlertAudit(args.event, delivered);
+  if (dependencies === productionDependencies && accepted > 0) void recordRecoveryAlertAudit(args.event, accepted, baselineOwnership, ownershipCapturedAt, ephemeralMode);
   if (dependencies === productionDependencies && isPositiveSemanticEvent(args.event.type)) {
     const raw = args.event.rawSnapshot ?? getEphemeralSemanticEventEvidence(args.event.eventIdentity) ?? {};
     const stats=outcomeStats;
