@@ -4,7 +4,7 @@ import { validReadinessMarket } from './tradeReadiness.js';
 import type { ChainMarketSnapshot } from '../chains/shared/types.js';
 
 export type Monitor = { token: string; pair: string; symbol: string; price: number; liquidity: number;
-  at: number; expires: number; checked: number; users: string[]; mask: number; notices: number };
+  at: number; observedAt?: number; expires: number; checked: number; users: string[]; mask: number; notices: number };
 const KEY = 'alphaos:personal-monitor:v1';
 // One shared hash, ten token records maximum. Admission, selection, rate budget
 // and warning transitions are atomic across restarts/replicas. No DB writes.
@@ -70,7 +70,7 @@ export async function startDeteriorationMonitor(user: string, market: ChainMarke
   if (!/^\d+$/.test(user) || !validReadinessMarket(market, market.tokenAddress)) throw new Error('Fresh indexed Robinchain market required');
   const now = Date.now(); const token = market.tokenAddress.toLowerCase();
   const row: Monitor = { token, pair: market.pairAddress!.toLowerCase(), symbol: market.symbol.slice(0, 24), price: market.priceUsd,
-    liquidity: market.liquidityUsd, at: now, expires: now + 60 * 60_000, checked: now, users: [], mask: 0, notices: 0 };
+    liquidity: market.liquidityUsd, at: now, observedAt: market.timestamp, expires: now + 60 * 60_000, checked: now, users: [], mask: 0, notices: 0 };
   return store('add', token, user, JSON.stringify(row));
 }
 export async function stopDeteriorationMonitor(user: string, token: string) { return store('stop', token.toLowerCase(), user); }

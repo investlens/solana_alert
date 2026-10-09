@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assessReadiness, validReadinessMarket } from '../src/services/tradeReadiness.js';
+import { assessReadiness, validReadinessMarket, refreshReadinessEvidence } from '../src/services/tradeReadiness.js';
 import { deteriorationMask, type Monitor } from '../src/services/deteriorationMonitor.js';
 import { renderReadiness, renderDeterioration, readinessButtons } from '../src/ui/tradeReadinessView.js';
 import { accessProfileForTier, hasCapability } from '../src/product/capabilities.js';
@@ -11,7 +11,7 @@ const pair = '0x2222222222222222222222222222222222222222';
 const now = 1_000_000_000;
 const market = (changes: Partial<ChainMarketSnapshot> = {}): ChainMarketSnapshot => ({ chain: 'robinhood', tokenAddress: token,
   pairAddress: pair, symbol: '<TAG>', name: 'Test', priceUsd: 1, marketCapUsd: 50_000, liquidityUsd: 10_000,
-  volume5mUsd: 5_000, buys5m: 100, sells5m: 50, trades5mReported: true,
+  volume5mUsd: 5_000, volume5mReported: true, buys5m: 100, sells5m: 50, trades5mReported: true,
   pairCreatedAt: now - 60 * 60_000, priceChange1h: 5, timestamp: now, ...changes });
 const row: Monitor = { token, pair, symbol: '<TAG>', price: 1, liquidity: 10_000, at: now - 180_000,
   expires: now + 3600_000, checked: now, users: ['1'], mask: 0, notices: 0 };
@@ -69,4 +69,47 @@ test('unavailable readiness is compact, has no enrollment button and remains res
   assert.doesNotMatch(text, /PERSONAL MONITOR|SETUP FORMING|Position Check/);
   assert.equal(readinessButtons(token, false).flat().some(b => b.callback_data.startsWith('DM_RH_')), false);
   assert.equal(readinessButtons(token, true).flat().some(b => b.callback_data.startsWith('DM_RH_')), true);
+});
+
+test('readiness distinguishes confirmed zero activity from absent activity and exposes all unmet checks', () => {
+ const absent = assessReadiness(market({volume5mUsd:5000,volume5mReported:false}),token,now);
+ assert.equal(absent.state,'WATCH');
+ assert.equal(absent.checks?.find(c=>c.label==='5m activity')?.state,'UNVERIFIED');
+ const inactive = assessReadiness(market({volume5mUsd:0}),token,now);
+ assert.equal(inactive.checks?.find(c=>c.label==='5m activity')?.state,'BELOW');
+ assert.match(renderReadiness(token,inactive),/Vol · 5m <b>\$0/);
+ const incomplete = assessReadiness(market({marketCapUsd:0,liquidityUsd:5000,volume5mReported:false,
+   trades5mReported:false,pairCreatedAt:undefined,priceChange1h:undefined}),token,now);
+ assert.equal(incomplete.reasons.length,6);assert.equal(incomplete.checks?.length,6);
+ assert.ok(incomplete.checks?.every(c=>c.state!=='MET'));
+});
+test('cached research revalidates snapshot and ownership ages without a provider request', () => {
+ const current=assessReadiness(market(),token,now);
+ const ownership={creator:pair,devPercent:0,devObservedAt:now,devBlock:'12345',top10Percent:22,
+   top10Coverage:'INDEXED_SAMPLE' as const,top10ObservedAt:now};
+ const recent=refreshReadinessEvidence({...current,ownership},token,now+30000);
+ assert.equal(recent.ownership?.devPercent,0);assert.equal(recent.ownership?.top10Percent,22);
+ const staleOwnership=refreshReadinessEvidence({...current,ownership},token,now+60001);
+ assert.equal(staleOwnership.ownership?.devPercent,null);assert.equal(staleOwnership.ownership?.top10Percent,null);
+ const staleMarket=refreshReadinessEvidence({...current,ownership},token,now+120001);
+ assert.equal(staleMarket.market,null);assert.equal(staleMarket.state,'WATCH');
+ assert.equal(staleMarket.ownership,undefined);
+ const text=renderReadiness(token,recent);
+ assert.match(text,/Creator holding <b>0.00%/);assert.match(text,/coverage may be partial/);
+ assert.doesNotMatch(text,/win probability.*[0-9]+%|safe to buy/i);
+});
+test('research keeps tiny positive prices nonzero and market cap first, with honest monitor baseline', () => {
+ const text=renderReadiness(token,assessReadiness(market({priceUsd:0.000000000123456}),token,now));
+ assert.match(text,/Price <b>\$0.000000000123456/);
+ assert.ok(text.indexOf('MC <b>')<text.indexOf('Price <b>'));
+ assert.match(text,/not your entry price/);
+ assert.ok(text.length<4096);
+ const observedAt=now-10000;
+ assert.match(renderDeterioration({...row,observedAt},market({priceUsd:.8}),1),new RegExp(new Date(observedAt).toISOString().slice(11,19)));
+});
+
+test('readiness does not print non-finite provider numbers or unbounded project metadata', () => {
+ const text=renderReadiness(token,assessReadiness(market({marketCapUsd:Infinity,fdvUsd:NaN,buys5m:NaN,
+   name:'x'.repeat(10000),symbol:'z'.repeat(10000)}),token,now));
+ assert.doesNotMatch(text,/Infinity|NaN/);assert.ok(text.length<4096);
 });
