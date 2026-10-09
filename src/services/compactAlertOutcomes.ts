@@ -69,6 +69,12 @@ export function classifyCompactOutcome(baseline: number, samples: CompactSample[
   const low = Math.min(0,...roi); const final = roi[2];
   return final >= 25 && low >= -30 ? 'WINNER' : final <= -50 || low <= -80 ? 'FAILED' : 'NEUTRAL';
 }
+// The deployed SQL validator permits exactly these six sample keys. Keep
+// presentation and experimental metadata outside the checkpoint RPC payload.
+export function compactStoredSample(sample: CompactSample): CompactSample {
+ return {status:sample.status,price:sample.price,mc:sample.mc,liquidity:sample.liquidity,at:sample.at,
+  ...(sample.reason ? {reason:sample.reason} : {})};
+}
 // Prospective shadow status uses only evidence available at this checkpoint.
 // Price and LP can co-move mechanically; this is not independent demand proof.
 export function compactShadowStatus(row: CompactTrackingRow, sample: CompactSample): NonNullable<CompactSample['shadow']> {
@@ -121,13 +127,13 @@ export async function runCompactOutcomeCycle(): Promise<void> {
     for (const row of (data ?? []) as CompactTrackingRow[]) {
       const sample = await measure(row);
       const retry = sample.status==='UNAVAILABLE' && sample.reason!=='MISSED_CHECKPOINT_WINDOW' && !row.retried;
-      // Reuse the existing bounded checkpoint JSON; no new requests, rows or timer.
-      const {name,symbol,...storedSample}=sample;
-      storedSample.shadow = compactShadowStatus(row, sample);
+      // Preserve the deployed six-field contract; shadow evidence is logging-only.
+      const storedSample = compactStoredSample(sample);
+      const shadow = compactShadowStatus(row, sample);
       const result = await supabase.rpc('alpha_finish_compact_check',{p_chain:row.chain,p_token:row.token,p_lease:row.lease,p_sample:storedSample,p_retry:retry}).abortSignal(AbortSignal.timeout(2000));
       if (result.error) throw result.error;
       if(['CHECKPOINT','WINNER','FAILED','NEUTRAL','INCOMPLETE'].includes(result.data))void processCompactRunner(row,sample).catch(()=>console.warn('[RunnerCard] milestone delivery unavailable'));
-      console.log('[CompactOutcomes] CHECKPOINT',{chain:row.chain,token:row.token,slot:row.checkpoint,result:result.data,shadow:storedSample.shadow});
+      console.log('[CompactOutcomes] CHECKPOINT',{chain:row.chain,token:row.token,slot:row.checkpoint,result:result.data,shadow});
     }
     console.log('[CompactOutcomes] CYCLE',{claimed:data?.length??0,maxActive:20,maxPerMinute:2});
   } catch { pausedUntil=Date.now()+60000; console.warn('[CompactOutcomes] cycle unavailable; paused for 60s'); }

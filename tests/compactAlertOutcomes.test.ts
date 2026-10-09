@@ -36,3 +36,19 @@ test('shadow status is prospective, USD only, and requires comparable price and 
  for(const bad of [{...s,status:'UNAVAILABLE' as const},{...s,liquidity:null},{...s,at:r.started_at}])
   assert.equal(compactShadowStatus(r,bad),'UNCONFIRMED');
 });
+
+test('checkpoint RPC projection obeys the deployed strict SQL contract and excludes shadow/presentation fields', async () => {
+ const {compactStoredSample}=await import('../src/services/compactAlertOutcomes.js');
+ const {readFileSync}=await import('node:fs');
+ const sql=readFileSync(new URL('../supabase/migrations/20261002190839_compact_outcome_sample_validation.sql',import.meta.url),'utf8');
+ const whitelist=sql.match(/where k not in \(([^)]+)\)/)?.[1].match(/'([^']+)'/g)?.map(s=>s.slice(1,-1)) ?? [];
+ assert.equal(whitelist.length,6);
+ const sample={status:'MEASURED' as const,price:1,mc:10000,liquidity:5000,at:'2026-10-09T06:00:00Z',
+  shadow:'STRENGTHENING' as const,name:'presentation',symbol:'TOK',unexpected:'future metadata'};
+ assert.deepEqual(Object.keys(compactStoredSample(sample)).sort(),['at','liquidity','mc','price','status']);
+ assert.ok(Object.keys(compactStoredSample(sample)).every(key=>whitelist.includes(key)));
+ assert.doesNotMatch(JSON.stringify(compactStoredSample(sample)),/shadow|presentation|unexpected|STRENGTHENING/);
+ const unavailable={...sample,status:'UNAVAILABLE' as const,price:null,reason:'PROVIDER_UNAVAILABLE'};
+ assert.deepEqual(Object.keys(compactStoredSample(unavailable)).sort(),['at','liquidity','mc','price','reason','status']);
+ assert.equal(compactStoredSample(unavailable).reason,'PROVIDER_UNAVAILABLE');
+});
