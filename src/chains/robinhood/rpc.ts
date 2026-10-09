@@ -16,6 +16,18 @@ export function robinhoodRpcFailureCooldown(error:unknown, normalMs:number):numb
  const message=error instanceof Error?error.message:String(error);
  return /(?:Status:|status(?:Code)?[=: ]+|HTTP[ :]+)\s*(?:403|429)\b/i.test(message)?Math.max(normalMs,300_000):normalMs;
 }
+// A method/parameter rejection is not evidence that the entire node is down.
+export function robinhoodRpcFailurePolicy(error: unknown): 'ACCESS' | 'METHOD' | 'PARAMETERS' | 'PROVIDER' {
+ const message = error instanceof Error ? error.message : String(error);
+ if (/(?:Status:|status(?:Code)?[=: ]+|HTTP[ :]+)\s*(?:403|429)\b/i.test(message)) return 'ACCESS';
+ if (/method[^\n]*(?:does not exist|not available|not supported|not found)|(?:code[=: ]+)?-32601\b/i.test(message)) return 'METHOD';
+ if (/invalid parameters|invalid params|(?:code[=: ]+)?-32602\b/i.test(message)) return 'PARAMETERS';
+ return 'PROVIDER';
+}
+export function robinhoodRpcOperationMethod(operation: string): string {
+ return operation === 'getLogs' || operation === 'getLogsChunk' ? 'eth_getLogs'
+  : operation === 'blockNumber' ? 'eth_blockNumber' : operation === 'getBlock' ? 'eth_getBlockByNumber' : operation;
+}
 const RPC_FAILURE_THRESHOLD = Math.max(1, Number(process.env.ROBINHOOD_RPC_FAILURE_THRESHOLD ?? 2));
 const RPC_BUSY_WAIT_MS = Math.max(10, Number(process.env.ROBINHOOD_RPC_BUSY_WAIT_MS ?? 25));
 
@@ -24,7 +36,7 @@ const robinhoodArchiveRpcUrl = String(process.env.ROBINHOOD_ARCHIVE_RPC_URL ?? '
 export const robinhoodArchiveClient = createPublicClient({ chain: robinhoodChain, transport: http(robinhoodArchiveRpcUrl, { timeout: 12_000, retryCount: 2, retryDelay: 500 }) });
 const robinhoodRpcUrls = [...new Set([String(process.env.ROBINHOOD_RPC_URL ?? '').trim(), robinhoodArchiveRpcUrl, OFFICIAL_RPC, String(process.env.ROBINHOOD_RPC_FALLBACK_URL ?? '').trim(), PUBLICNODE_RPC].filter(Boolean))];
 const robinhoodRpcClients = robinhoodRpcUrls.map(url => ({ url, client: createPublicClient({ chain: robinhoodChain, transport: http(url, { timeout: 10_000, retryCount: 1, retryDelay: 350 }) }) }));
-type RpcProviderHealth = { failures: number; cooldownUntil: number; inFlight: number };
+type RpcProviderHealth = { failures: number; cooldownUntil: number; inFlight: number; unsupported: Map<string, number> };
 const rpcProviderHealth = new Map<string, RpcProviderHealth>();
 const RPC_BLOCK_NUMBER_CACHE_MS = Math.max(250, Number(process.env.ROBINHOOD_BLOCK_NUMBER_CACHE_MS ?? 1_000));
 let blockNumberCache: { value: bigint; expiresAt: number } | null = null;
@@ -35,12 +47,15 @@ const RPC_STATIC_CACHE_MS = Math.max(1_000, Number(process.env.ROBINHOOD_RPC_STA
 function stableRpcKey(args:any){try{return JSON.stringify(args,(_k,v)=>typeof v==='bigint'?v.toString():v);}catch{return '';}}
 function cacheableRpcMethod(method:string){return ['eth_chainId','eth_getTransactionReceipt','eth_getTransactionByHash','eth_getCode'].includes(method);}
 function conciseRpcError(error:unknown){return (error instanceof Error?error.message:String(error)).replace(/\s+/g,' ').slice(0,220);}
-function providerHealth(url:string){const e=rpcProviderHealth.get(url);if(e)return e;const c={failures:0,cooldownUntil:0,inFlight:0};rpcProviderHealth.set(url,c);return c;}
+function providerHealth(url:string){const e=rpcProviderHealth.get(url);if(e)return e;const c={failures:0,cooldownUntil:0,inFlight:0,unsupported:new Map<string, number>()};rpcProviderHealth.set(url,c);return c;}
 function markProviderSuccess(url:string){const h=providerHealth(url);if(h.failures||h.cooldownUntil)console.info('[RobinhoodRpc] provider recovered',{provider:url});h.failures=0;h.cooldownUntil=0;}
-function markProviderFailure(url:string,error:unknown){const h=providerHealth(url);h.failures+=1;const cooldownMs=robinhoodRpcFailureCooldown(error,RPC_COOLDOWN_MS);if(h.failures>=RPC_FAILURE_THRESHOLD||cooldownMs>RPC_COOLDOWN_MS){h.cooldownUntil=Math.max(h.cooldownUntil,Date.now()+cooldownMs);console.warn('[RobinhoodRpc] provider circuit opened',{provider:url,failures:h.failures,cooldownMs});}}
-async function runProvider<T>(url:string,client:(typeof robinhoodRpcClients)[number]['client'],run:(client:(typeof robinhoodRpcClients)[number]['client'])=>Promise<T>):Promise<T>{const h=providerHealth(url);h.inFlight+=1;try{const r=await run(client);markProviderSuccess(url);return r;}catch(e){markProviderFailure(url,e);throw e;}finally{h.inFlight=Math.max(0,h.inFlight-1);}}
+function markProviderFailure(url:string,error:unknown,operation:string){const h=providerHealth(url);const scope=robinhoodRpcFailurePolicy(error);
+ if(scope==='METHOD'){const method=robinhoodRpcOperationMethod(operation);if(h.unsupported.size<32||h.unsupported.has(method))h.unsupported.set(method,Date.now()+300_000);return;}
+ if(scope==='PARAMETERS')return;
+ h.failures+=1;const cooldownMs=robinhoodRpcFailureCooldown(error,RPC_COOLDOWN_MS);if(h.failures>=RPC_FAILURE_THRESHOLD||cooldownMs>RPC_COOLDOWN_MS){h.cooldownUntil=Math.max(h.cooldownUntil,Date.now()+cooldownMs);console.warn('[RobinhoodRpc] provider circuit opened',{provider:url,failures:h.failures,cooldownMs});}}
+async function runProvider<T>(url:string,operation:string,client:(typeof robinhoodRpcClients)[number]['client'],run:(client:(typeof robinhoodRpcClients)[number]['client'])=>Promise<T>):Promise<T>{const h=providerHealth(url);h.inFlight+=1;try{const r=await run(client);markProviderSuccess(url);return r;}catch(e){markProviderFailure(url,e,operation);throw e;}finally{h.inFlight=Math.max(0,h.inFlight-1);}}
 function sleep(ms:number){return new Promise<void>(resolve=>setTimeout(resolve,ms));}
-async function withRobinhoodRpcFailover<T>(operation:string,run:(client:(typeof robinhoodRpcClients)[number]['client'])=>Promise<T>):Promise<T>{let lastError:unknown=null;for(let pass=0;pass<2;pass+=1){const now=Date.now();let eligible=0,busy=0;for(const {url,client} of robinhoodRpcClients){const h=providerHealth(url);if(h.cooldownUntil>now)continue;eligible+=1;if(h.inFlight>0){busy+=1;continue;}try{return await runProvider(url,client,run);}catch(error){lastError=error;console.warn(`[RobinhoodRpc] ${operation} provider failed; trying next provider`,{provider:url,reason:conciseRpcError(error)});}}if(eligible>0&&busy===eligible&&pass===0){await sleep(RPC_BUSY_WAIT_MS);continue;}break;}const now=Date.now();const probe=[...robinhoodRpcClients].filter(({url})=>providerHealth(url).inFlight===0).sort((a,b)=>providerHealth(a.url).cooldownUntil-providerHealth(b.url).cooldownUntil)[0];if(probe&&now>=nextCooldownProbeAt&&robinhoodRpcClients.every(({url})=>providerHealth(url).cooldownUntil>now)){nextCooldownProbeAt=now+RPC_COOLDOWN_MS;try{return await runProvider(probe.url,probe.client,run);}catch(error){lastError=error;console.warn(`[RobinhoodRpc] ${operation} cooldown probe failed`,{provider:probe.url,reason:conciseRpcError(error)});}}throw lastError??new Error(`No healthy Robinhood RPC provider available for ${operation}`);}
+async function withRobinhoodRpcFailover<T>(operation:string,run:(client:(typeof robinhoodRpcClients)[number]['client'])=>Promise<T>):Promise<T>{let lastError:unknown=null;for(let pass=0;pass<2;pass+=1){const now=Date.now();let eligible=0,busy=0;for(const {url,client} of robinhoodRpcClients){const h=providerHealth(url);if(h.cooldownUntil>now||(h.unsupported.get(robinhoodRpcOperationMethod(operation))??0)>now)continue;eligible+=1;if(h.inFlight>0){busy+=1;continue;}try{return await runProvider(url,operation,client,run);}catch(error){lastError=error;console.warn(`[RobinhoodRpc] ${operation} provider failed; trying next provider`,{provider:url,reason:conciseRpcError(error)});}}if(eligible>0&&busy===eligible&&pass===0){await sleep(RPC_BUSY_WAIT_MS);continue;}break;}const now=Date.now();const probe=[...robinhoodRpcClients].filter(({url})=>providerHealth(url).inFlight===0&&(providerHealth(url).unsupported.get(robinhoodRpcOperationMethod(operation))??0)<=now).sort((a,b)=>providerHealth(a.url).cooldownUntil-providerHealth(b.url).cooldownUntil)[0];if(probe&&now>=nextCooldownProbeAt&&robinhoodRpcClients.every(({url})=>providerHealth(url).cooldownUntil>now)){nextCooldownProbeAt=now+RPC_COOLDOWN_MS;try{return await runProvider(probe.url,operation,probe.client,run);}catch(error){lastError=error;console.warn(`[RobinhoodRpc] ${operation} cooldown probe failed`,{provider:probe.url,reason:conciseRpcError(error)});}}throw lastError??new Error(`No healthy Robinhood RPC provider available for ${operation}`);}
 async function getLogsFromProviders(args:any,operation='getLogs'):Promise<any[]>{return withRobinhoodRpcFailover(operation,async client=>await client.getLogs(args as any) as any[]);}
 function canChunkLogRange(args:any):args is {fromBlock:bigint;toBlock:bigint}&Record<string,unknown>{return typeof args?.fromBlock==='bigint'&&typeof args?.toBlock==='bigint'&&args.toBlock>=args.fromBlock;}
 function logIdentity(log:any){return `${String(log?.transactionHash??'')}:${String(log?.logIndex??'')}:${String(log?.blockNumber??'')}:${String(log?.address??'')}`;}
