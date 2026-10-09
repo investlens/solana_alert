@@ -11,9 +11,9 @@ export type CompactAlertBaseline = {
 };
 export type CompactTrackingRow = {
   chain: string; token: string; feed: string; pair_id: string; price_unit: string;
-  baseline_price: number; started_at: string; checkpoint: number; retried: boolean; lease: string;
+  baseline_price: number; baseline_liquidity?: number | null; samples?: CompactSample[]; started_at: string; checkpoint: number; retried: boolean; lease: string;
 };
-export type CompactSample = { status: 'MEASURED' | 'UNAVAILABLE'; price: number | null; mc: number | null; liquidity: number | null; at: string; reason?: string };
+export type CompactSample = { status: 'MEASURED' | 'UNAVAILABLE'; price: number | null; mc: number | null; liquidity: number | null; at: string; reason?: string; shadow?: 'STRENGTHENING' | 'DETERIORATING' | 'UNCONFIRMED' };
 const positive = (value: unknown): number | null => { if (value == null || value === '') return null; const n = Number(value); return Number.isFinite(n) && n > 0 ? n : null; };
 const seen = new Map<string, number>();
 const excluded = new Map<string, { chain: string; feed: string; count: number }>();
@@ -69,6 +69,17 @@ export function classifyCompactOutcome(baseline: number, samples: CompactSample[
   const low = Math.min(0,...roi); const final = roi[2];
   return final >= 25 && low >= -30 ? 'WINNER' : final <= -50 || low <= -80 ? 'FAILED' : 'NEUTRAL';
 }
+// Prospective shadow status uses only evidence available at this checkpoint.
+// Price and LP can co-move mechanically; this is not independent demand proof.
+export function compactShadowStatus(row: CompactTrackingRow, sample: CompactSample): NonNullable<CompactSample['shadow']> {
+  if (row.price_unit !== 'USD' || sample.status !== 'MEASURED' || !positive(sample.price)
+    || !positive(row.baseline_price) || !positive(sample.liquidity) || !positive(row.baseline_liquidity)
+    || !Number.isFinite(Date.parse(row.started_at)) || !Number.isFinite(Date.parse(sample.at)) || Date.parse(sample.at) <= Date.parse(row.started_at)) return 'UNCONFIRMED';
+  const priceRatio = sample.price! / row.baseline_price;
+  const lpRatio = sample.liquidity! / row.baseline_liquidity!;
+  if (priceRatio <= 0.5 || lpRatio <= 0.5) return 'DETERIORATING';
+  return priceRatio > 1 && lpRatio >= 1 ? 'STRENGTHENING' : 'UNCONFIRMED';
+}
 async function measure(row: CompactTrackingRow): Promise<RunnerSample> {
   const sample: CompactSample = { status:'UNAVAILABLE',price:null,mc:null,liquidity:null,at:new Date().toISOString() };
   if (compactCheckpointIsLate(row, Date.now())) return {...sample,reason:'MISSED_CHECKPOINT_WINDOW'};
@@ -110,12 +121,13 @@ export async function runCompactOutcomeCycle(): Promise<void> {
     for (const row of (data ?? []) as CompactTrackingRow[]) {
       const sample = await measure(row);
       const retry = sample.status==='UNAVAILABLE' && sample.reason!=='MISSED_CHECKPOINT_WINDOW' && !row.retried;
-      // Names are presentation-only; preserve the existing six-field DB sample.
+      // Reuse the existing bounded checkpoint JSON; no new requests, rows or timer.
       const {name,symbol,...storedSample}=sample;
+      storedSample.shadow = compactShadowStatus(row, sample);
       const result = await supabase.rpc('alpha_finish_compact_check',{p_chain:row.chain,p_token:row.token,p_lease:row.lease,p_sample:storedSample,p_retry:retry}).abortSignal(AbortSignal.timeout(2000));
       if (result.error) throw result.error;
       if(['CHECKPOINT','WINNER','FAILED','NEUTRAL','INCOMPLETE'].includes(result.data))void processCompactRunner(row,sample).catch(()=>console.warn('[RunnerCard] milestone delivery unavailable'));
-      console.log('[CompactOutcomes] CHECKPOINT',{chain:row.chain,token:row.token,slot:row.checkpoint,result:result.data});
+      console.log('[CompactOutcomes] CHECKPOINT',{chain:row.chain,token:row.token,slot:row.checkpoint,result:result.data,shadow:storedSample.shadow});
     }
     console.log('[CompactOutcomes] CYCLE',{claimed:data?.length??0,maxActive:20,maxPerMinute:2});
   } catch { pausedUntil=Date.now()+60000; console.warn('[CompactOutcomes] cycle unavailable; paused for 60s'); }
