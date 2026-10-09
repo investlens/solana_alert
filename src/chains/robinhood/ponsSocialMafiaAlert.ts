@@ -1,7 +1,9 @@
 import { recordFeedDelivery } from '../../services/feedDeliveryHealth.js';
 import { buildPromotionEventCard } from '../../ui/promotionEventCard.js';
 import { discloseRobinhoodKeyStats, cachedRobinhoodAlertStats } from '../../services/alertKeyStatsService.js';
-import { discloseRobinhoodOwnership } from '../../services/alertOwnershipService.js';
+import { withOwnershipDisclosure, type OwnershipDisclosure } from '../../ui/ownershipDisclosure.js';
+import type { AlertKeyStats } from '../../ui/alertKeyStats.js';
+import { robinhoodOwnership, discloseRobinhoodOwnership } from '../../services/alertOwnershipService.js';
 import { discloseAlertDexPaid } from '../../services/alertDexPaidDisclosure.js';
 import { enabledLiveRecipients } from '../../services/liveAlertPreferences.js';
 import { getWatchCheckpoint, setWatchCheckpoint, claimSharedDelivery } from '../../services/sharedJsonCache.js';
@@ -238,6 +240,37 @@ export function buildProtocolDiscoveryAlertText(args: {
   ].join('\n');
 }
 
+// Social publication is identity evidence, not proof of a live market. Reuse
+// existing per-token enrichment; no new polling, persistence or security checks.
+export function socialMafiaMarketGate(stats: AlertKeyStats | null, ownership: OwnershipDisclosure,
+  flow: { confirmedDevBurnPercent: number | null; otherDevTransferPercent: number | null; evidenceStatus: string; scannedAt: number } | null,
+  now=Date.now()): {qualified:boolean; reason:string; missing:boolean} {
+  const wait=(reason:string,missing=false)=>({qualified:false,reason,missing});
+  const finite=(v:unknown):v is number=>typeof v==='number'&&Number.isFinite(v);
+  if(!stats || !finite(stats.price)||stats.price<=0 || !finite(stats.marketCap)||stats.marketCap<=0)
+    return wait('MARKET_EVIDENCE_UNAVAILABLE',true);
+  if(!finite(stats.volume5m)||!finite(stats.buys)||!finite(stats.sells)
+    ||!Number.isInteger(stats.buys)||!Number.isInteger(stats.sells)||stats.buys<0||stats.sells<0)
+    return wait('RECENT_ACTIVITY_UNAVAILABLE',true);
+  if(stats.volume5m<100 || stats.buys<2 || stats.buys<=stats.sells)return wait('WEAK_OR_SELL_DOMINATED_ACTIVITY');
+  if(finite(stats.move5m)&&stats.move5m<0 || finite(stats.move1h)&&stats.move1h<=-20)return wait('FALLING_MARKET');
+  if(stats.preBond===true) {
+    if(!finite(stats.curveReserve))return wait('CURVE_RESERVE_UNAVAILABLE',true);
+    if(stats.curveReserve<100)return wait('DRAINED_CURVE');
+  } else {
+    if(!finite(stats.liquidity))return wait('LIQUIDITY_UNAVAILABLE',true);
+    if(stats.liquidity<2000)return wait('THIN_MARKET');
+  }
+  if(!finite(ownership.devPercent)||ownership.devPercent<0||ownership.devPercent>100
+    ||!finite(ownership.devObservedAt)||ownership.devObservedAt>now||now-ownership.devObservedAt>120000)
+    return wait('CURRENT_CREATOR_BALANCE_UNAVAILABLE',true);
+  const freshFlow=flow && flow.evidenceStatus==='COMPLETE'&&finite(flow.scannedAt)&&flow.scannedAt<=now&&now-flow.scannedAt<=120000;
+  if(freshFlow&&finite(flow.otherDevTransferPercent)&&flow.otherDevTransferPercent>=0.5)return wait('CREATOR_OUTFLOW_OBSERVED');
+  const burned=freshFlow&&finite(flow.confirmedDevBurnPercent)&&flow.confirmedDevBurnPercent>=0.5&&flow.confirmedDevBurnPercent<=100;
+  if(ownership.devPercent<0.1&&!burned)return wait('CREATOR_BALANCE_DEPLETED_WITHOUT_VERIFIED_BURN');
+  return {qualified:true,reason:'CURRENT_ACTIVITY_AND_CREATOR_EVIDENCE',missing:false};
+}
+
 async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   const { launch, launchpad } = item;
   const token = normalize(launch.token_address);
@@ -280,7 +313,6 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   }
 
   if (!protocol) recordLaunchSocialEligibility(token, identity?.confirmed === true);
-  recordFeedDelivery(healthFeed, 'QUALIFIED');
 
   // Independent on-chain identity and verified valuation; never require a DEX index.
   const partial: {
@@ -331,7 +363,19 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
     });
   };
   const initial = await boundedSocialMafiaContext(work, 1_500);
-  let text = await discloseRobinhoodOwnership(render(initial), token, launch.deployer_address, launch.curve_address);
+  const ownership = await robinhoodOwnership(token, launch.deployer_address, launch.curve_address);
+  let text = withOwnershipDisclosure(render(initial), ownership);
+  text = await discloseRobinhoodKeyStats(text,token,!partial.market,'Trusted PONS route');
+  if (route === 'SOCIAL_MAFIA') {
+    const quality = socialMafiaMarketGate(cachedRobinhoodAlertStats(token), ownership, partial.dev);
+    if (!quality.qualified) {
+      recordFeedDelivery(healthFeed, quality.missing ? 'DATA_UNAVAILABLE' : 'CONDITION_WAIT');
+      console.log('[SocialMafia] QUALITY_WAIT', {token, reason:quality.reason, retryMinutes:15});
+      return false;
+    }
+    text += '\nActivity check <b>Recent buying + creator evidence</b>';
+  }
+  recordFeedDelivery(healthFeed, 'QUALIFIED');
 
   const deliveryClaim = await claimSharedDelivery(`alphaos:social:delivered:${token}`, 24 * 60 * 60_000);
   if (deliveryClaim === 'EXISTS') return true;
@@ -348,7 +392,6 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
     ? {price:partial.market.priceUsd, pair:partial.market.pairAddress, unit:'USD' as const, marketCap:partial.market.marketCapUsd, liquidity:partial.market.liquidityUsd}
     : {price:partial.curveRatio, pair:launch.curve_address, unit:'ETH_RESERVE_RATIO' as const};
   const deliveryStartedAt = Date.now();
-  text = await discloseRobinhoodKeyStats(text,token,!partial.market,'Trusted PONS route');
   const results = await Promise.allSettled(chats.map(async chatId => {
     await waitForRecipientDelivery(chatId, deliveryStartedAt);
     let accepted: AlphaosDelivery;
@@ -367,6 +410,7 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   if (initial == null) void boundedSocialMafiaContext(work, 12_000).then(async values => {
     let enriched = await discloseRobinhoodOwnership(render(values), token, launch.deployer_address, launch.curve_address);
     enriched = await discloseRobinhoodKeyStats(enriched,token,!partial.market,'Trusted PONS route');
+    if(route==='SOCIAL_MAFIA') enriched += '\nActivity check <b>Recent buying + creator evidence</b>';
     if (enriched === text) return;
     const botToken = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
     await Promise.allSettled(results.map(async (result, index) => {
