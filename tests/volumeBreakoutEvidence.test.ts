@@ -53,6 +53,27 @@ test('diagnostics distinguish malformed market data from a readable nonqualifyin
  }finally{globalThis.fetch=original;}
 });
 
+test('optional rolling movements and volume do not invalidate measured completed-day evidence',()=>{
+ const p=structuredClone(payload);p.data.attributes.volume_usd.h24=null as any;p.data.attributes.price_change_percentage.h1=null as any;
+ const snapshot=poolVolumeSnapshot(p,'robinhood','0xtoken','0xpool',now)!;
+ assert.ok(snapshot);assert.equal(snapshot.move1h,null);assert.equal(snapshot.volume24h,null);
+ const candles=Array.from({length:8},(_,i)=>[(boundary-(i+1)*day)/1000,1,2,0.5,1.1,i===0?15000:5000]);
+ assert.ok(qualifyVolumeBreakout(snapshot,completedVolumeWindow(candles,now,boundary-10*day)!,now));
+});
+
+test('fresh exact-pair scanner market avoids duplicate snapshot requests but still requires complete history',async()=>{
+ const {readVolumeBreakoutResult}=await import('../src/services/volumeBreakoutEvidence.js');
+ const original=globalThis.fetch;let calls=0;const b=Math.floor(Date.now()/day)*day;
+ const m={chain:'robinhood' as const,tokenAddress:'0x'+'a'.repeat(40),pairAddress:'0x'+'b'.repeat(40),name:'Test',symbol:'TEST',priceUsd:1,liquidityUsd:20000,marketCapUsd:100000,volume5mUsd:100,buys5m:2,sells5m:1,pairCreatedAt:b-10*day,timestamp:Date.now()};
+ const candles=Array.from({length:8},(_,i)=>[(b-(i+1)*day)/1000,1,2,0.5,1.1,i===0?15000:5000]);
+ try {
+  globalThis.fetch=async(input)=>{calls++;assert.match(String(input),/\/ohlcv\/day/);return Response.json({data:{attributes:{ohlcv_list:candles}}});};
+  assert.equal((await readVolumeBreakoutResult('robinhood',m.tokenAddress,m.pairAddress,m)).reason,'QUALIFIED');
+  assert.equal((await readVolumeBreakoutResult('robinhood',m.tokenAddress,m.pairAddress,m)).reason,'QUALIFIED');
+  assert.equal(calls,1);
+ }finally{globalThis.fetch=original;}
+});
+
 test('historical lookup reuses daily baseline, rejects HTTP errors and respects backoff',async()=>{
  const {readVolumeBreakout}=await import('../src/services/volumeBreakoutEvidence.js');
  const original=globalThis.fetch; let dailyCalls=0;
