@@ -22,3 +22,17 @@ test('late checkpoints remain missing instead of backfilling with a later price'
  assert.equal(compactCheckpointIsLate(row,Date.parse('2026-10-02T00:19:00Z')),false);
  assert.equal(compactCheckpointIsLate(row,Date.parse('2026-10-02T00:21:00Z')),true);
 });
+
+test('shadow status is prospective, USD only, and requires comparable price and liquidity', async () => {
+ const { compactShadowStatus } = await import('../src/services/compactAlertOutcomes.js');
+ const r = {chain:'robinhood',token:'0x'+'a'.repeat(40),feed:'BOOST',pair_id:'0x'+'b'.repeat(40),
+  price_unit:'USD',baseline_price:1,baseline_liquidity:10000,started_at:'2026-10-09T06:00:00Z',checkpoint:0,retried:false,lease:'test'};
+ const s = {status:'MEASURED' as const,price:1.2,mc:10000,liquidity:11000,at:'2026-10-09T06:15:00Z'};
+ assert.equal(compactShadowStatus(r,s),'STRENGTHENING');
+ assert.equal(compactShadowStatus(r,{...s,price:.4}),'DETERIORATING');
+ assert.equal(compactShadowStatus(r,{...s,liquidity:4000}),'DETERIORATING');
+ for(const bad of [{...r,price_unit:'ETH_RESERVE_RATIO'},{...r,baseline_liquidity:null},{...r,started_at:'bad'}])
+  assert.equal(compactShadowStatus(bad,s),'UNCONFIRMED');
+ for(const bad of [{...s,status:'UNAVAILABLE' as const},{...s,liquidity:null},{...s,at:r.started_at}])
+  assert.equal(compactShadowStatus(r,bad),'UNCONFIRMED');
+});
