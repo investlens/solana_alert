@@ -200,3 +200,25 @@ test('comparison source requires actionable semantics and checks both successful
   assert.match(source, /ACTIONABLE_TYPES/); assert.match(source, /opportunity_deliveries/);
   assert.doesNotMatch(source, /ACTIONABLE_TYPES = new Set\([^)]*BOOST/s);
 });
+
+test('private fast start persists reactivation without waiting for the subscriber database',async()=>{
+ const {createBot}=await import('../src/bot/index.js');
+ let finish!:()=>void;const slow=new Promise<void>(resolve=>{finish=resolve;});let enrolled:any=null,replied=false;
+ const bot=createBot(async args=>{enrolled=args;await slow;});
+ const {Context}=await import('telegraf');
+ const ctx:any=new Context({update_id:1,message:{message_id:1,date:1,from:{id:424242,is_bot:false,first_name:'Returning User'},chat:{id:424242,type:'private',first_name:'Returning User'},text:'/start'}},bot.telegram,{id:99,is_bot:true,first_name:'Test',username:'test_bot',can_join_groups:true,can_read_all_group_messages:false,supports_inline_queries:false});
+ ctx.reply=(async()=>{replied=true;return {} as any;}) as any;
+ try {
+  await bot.middleware()(ctx,async()=>{});
+  assert.equal(replied,true);assert.equal(enrolled.telegramId,'424242');
+  assert.equal(enrolled.firstName,'Returning User');
+ }finally{finish();}
+});
+test('group fast start does not enroll a group member for private alerts',async()=>{
+ const {createBot}=await import('../src/bot/index.js');let writes=0;
+ const bot=createBot(async()=>{writes++;});
+ const {Context}=await import('telegraf');
+ const ctx:any=new Context({update_id:2,message:{message_id:1,date:1,from:{id:424242,is_bot:false,first_name:'Returning User'},chat:{id:-123,type:'supergroup',title:'Test group'},text:'/start'}},bot.telegram,{id:99,is_bot:true,first_name:'Test',username:'test_bot',can_join_groups:true,can_read_all_group_messages:false,supports_inline_queries:false});
+ ctx.reply=(async()=>({} as any)) as any;
+ await bot.middleware()(ctx,async()=>{});assert.equal(writes,0);
+});
