@@ -1,5 +1,6 @@
+import type { ChainMarketSnapshot } from '../chains/shared/types.js';
 // Pool-specific evidence: one completed signal day and seven preceding days; no overlap or synthetic zeros.
-export type VolumeBreakoutEvidence = { price: number; marketCap: number | null; fdv: number | null; liquidity: number; volume24h: number; move24h: number; move1h: number; dailyAverage: number; multiple: number; pairCreatedAt: number; at: number; dayStart: number; signalMove: number; signalVolume: number };
+export type VolumeBreakoutEvidence = { price: number; marketCap: number | null; fdv: number | null; liquidity: number; volume24h: number | null; move24h: number | null; move1h: number | null; marketSource?: string; dailyAverage: number; multiple: number; pairCreatedAt: number; at: number; dayStart: number; signalMove: number; signalVolume: number };
 const DAY = 86400;
 const positive = (v: unknown): number | null => typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null;
 const numeric = (v: unknown): number | null => typeof v === 'number' && Number.isFinite(v) ? v : null;
@@ -46,8 +47,23 @@ export function poolVolumeSnapshot(payload: any, network: string, token: string,
   const move24h = numeric(num(a.price_change_percentage?.h24)), move1h = numeric(num(a.price_change_percentage?.h1));
   const marketCap = positive(num(a.market_cap_usd)), fdv = positive(num(a.fdv_usd));
   const pairCreatedAt = Date.parse(a.pool_created_at ?? '');
-  if (!price || !liquidity || !volume24h || move24h == null || move1h == null || (!marketCap && !fdv) || !Number.isFinite(pairCreatedAt)) return null;
+  if (!price || !liquidity || (!marketCap && !fdv) || !Number.isFinite(pairCreatedAt)) return null;
   return { price, liquidity, volume24h, move24h, move1h, marketCap, fdv, pairCreatedAt, at };
+}
+// Reuse only a fresh, exact-pair snapshot already validated by the chain scanner.
+// This avoids a second market request; GeckoTerminal still supplies all eight
+// completed daily candles. Unknown optional movements remain null, never zero.
+export function scannerVolumeSnapshot(m: ChainMarketSnapshot, network: string, token: string, pool: string, now = Date.now()) {
+  const at = m.timestamp;
+  if (m.chain !== network || m.tokenAddress.toLowerCase() !== token.toLowerCase()
+    || m.pairAddress?.toLowerCase() !== pool.toLowerCase() || !/^0x[a-f0-9]{40}$/i.test(pool)
+    || !Number.isFinite(at) || now < at || now - at > 90_000
+    || !positive(m.priceUsd) || !positive(m.liquidityUsd) || !Number.isFinite(m.pairCreatedAt)
+    || (!positive(m.marketCapUsd) && !positive(m.fdvUsd))) return null;
+  return { price: m.priceUsd, liquidity: m.liquidityUsd,
+    volume24h: positive(m.volume24hUsd), move24h: null, move1h: numeric(m.priceChange1h),
+    marketCap: positive(m.marketCapUsd), fdv: positive(m.fdvUsd), pairCreatedAt: m.pairCreatedAt!, at,
+    marketSource: 'DEXScreener' };
 }
 export function qualifyVolumeBreakout(snapshot: NonNullable<ReturnType<typeof poolVolumeSnapshot>>, window: CompletedVolumeWindow, now = Date.now()): VolumeBreakoutEvidence | null {
   if (!Number.isFinite(window.dailyAverage) || window.dailyAverage < 1000 || now < snapshot.at || now - snapshot.at > 90_000
@@ -72,7 +88,7 @@ async function json(url: string): Promise<any> {
   return response.json();
 }
 export type VolumeBreakoutRead = {evidence:VolumeBreakoutEvidence|null;reason:'QUALIFIED'|'CONDITION_WAIT'|'INVALID_IDENTITY'|'CAPACITY_LIMITED'|'PROVIDER_BACKOFF'|'SNAPSHOT_UNAVAILABLE'|'INCOMPLETE_WEEK'|'PROVIDER_UNAVAILABLE'};
-export async function readVolumeBreakoutResult(network: string, token: string, pool: string): Promise<VolumeBreakoutRead> {
+export async function readVolumeBreakoutResult(network: string, token: string, pool: string, market?: ChainMarketSnapshot): Promise<VolumeBreakoutRead> {
   if (!['robinhood', 'arc', 'solana'].includes(network) || !token || !pool) return {evidence:null,reason:'INVALID_IDENTITY'};
   const key = `${network}:${token}:${pool}:${Math.floor(Date.now() / 86400000)}`;
   for (const [k, v] of history) if (v.expires <= Date.now()) history.delete(k);
@@ -81,7 +97,8 @@ export async function readVolumeBreakoutResult(network: string, token: string, p
   pending.add(key);
   try {
     const base = `https://api.geckoterminal.com/api/v2/networks/${network}/pools/${encodeURIComponent(pool)}`;
-    const snapshot = poolVolumeSnapshot(await json(base), network, token, pool, Date.now());
+    const snapshot = (market && scannerVolumeSnapshot(market, network, token, pool))
+      || poolVolumeSnapshot(await json(base), network, token, pool, Date.now());
     if (!snapshot)return {evidence:null,reason:'SNAPSHOT_UNAVAILABLE'};
     if(snapshot.liquidity < 2000)return {evidence:null,reason:'CONDITION_WAIT'};
     let cached = history.get(key);
