@@ -59,3 +59,9 @@ test('momentum card escapes metadata and clearly labels sampled risk evidence',(
  assert.match(card,/not a complete holder census/);assert.match(card,/not a buy\/sell signal/);
  assert.ok(telegramCaptionLength(card)<=1024,`caption length ${telegramCaptionLength(card)}`);
 });
+
+import {assertSolanaMainnet,SOLANA_MAINNET_GENESIS} from '../src/chains/solana/pumpfunEvidence.js';
+test('RPC chain identity rejects testnet or an unverified provider',()=>{
+ assert.doesNotThrow(()=>assertSolanaMainnet(SOLANA_MAINNET_GENESIS));
+ assert.throws(()=>assertSolanaMainnet('testnet'));
+});

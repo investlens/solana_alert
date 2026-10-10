@@ -49,6 +49,7 @@ function rpc() {
  return connection;
 }
 export async function readPumpEvidence(mint:string,pair:string):Promise<PumpEvidence> {
+ await checkPumpRpc();
  const mintKey=new PublicKey(mint),poolKey=new PublicKey(pair);
  const [curveKey]=PublicKey.findProgramAddressSync([Buffer.from('bonding-curve'),mintKey.toBuffer()],PUMP_PROGRAM);
  const accounts=await rpc().getMultipleAccountsInfoAndContext([curveKey,mintKey,poolKey],'confirmed');
@@ -81,4 +82,12 @@ export async function readPumpEvidence(mint:string,pair:string):Promise<PumpEvid
  const percent=(value:bigint)=>Number(value*1_000_000n/token.supply)/10_000;
  return {creator:curve.creator,devPercent:percent(owned),top10SamplePercent:percent(total),supply:Number(token.supply)/10**token.decimals,slot:accounts.context.slot,observedAt:Date.now()};
 }
-export async function checkPumpRpc():Promise<void> {await rpc().getSlot('confirmed');}
+export const SOLANA_MAINNET_GENESIS='5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d';
+export function assertSolanaMainnet(genesis:string):void {if(genesis!==SOLANA_MAINNET_GENESIS)throw new Error('Solana mainnet identity not verified');}
+let verifiedUntil=0;
+export async function checkPumpRpc():Promise<void> {
+ if(Date.now()<verifiedUntil)return;
+ assertSolanaMainnet(await rpc().getGenesisHash());
+ await rpc().getSlot('confirmed');
+ verifiedUntil=Date.now()+5*60_000;
+}
