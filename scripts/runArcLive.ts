@@ -7,7 +7,7 @@ import { consistentArcVolume5m, fetchArcBoostFeed } from '../src/chains/arc/boos
 import { governedDexScreenerJson } from '../src/services/dexscreenerRequestGovernor.js';
 import { withOwnershipDisclosure } from '../src/ui/ownershipDisclosure.js';
 import { enabledLiveRecipients, type LiveFeedKey } from '../src/services/liveAlertPreferences.js';
-import { arcMarketNumber } from '../src/chains/arc/market.js';
+import { arcMarketNumber, arcMarketRetryAt } from '../src/chains/arc/market.js';
 import { waitForRecipientDelivery, recordDeliveryAccepted } from '../src/services/recipientDeliveryTiming.js';
 import { recordCompactAlert } from '../src/services/compactAlertOutcomes.js';
 import { arcBoostSafetyFromEvidence, processArcBoostObservation } from '../src/chains/arc/boostSafety.js';
@@ -15,7 +15,7 @@ import {arcDeliverySafety,isArcPromotionFeed,ARC_PROMOTION_WARNING} from '../src
 import 'dotenv/config';
 import { verifyArcMainnet, getArcBlockNumber, getArcLogs, readArcContract } from '../src/chains/arc/rpc.js';
 import { discoverArcV4Pools } from '../src/chains/arc/uniswap.js';
-import { normalizeArcPoolCandidate } from '../src/chains/arc/candidate.js';
+import { normalizeArcPoolCandidate, isArcErc20LogAddress } from '../src/chains/arc/candidate.js';
 import { enrichArcCandidate, canRetryArcEnrichment } from '../src/chains/arc/enrichment.js';
 import { enrichArcMarket } from '../src/chains/arc/market.js';
 import { assessArcForAlert } from '../src/chains/arc/alertGate.js';
@@ -94,6 +94,9 @@ async function processArcBurns(fromBlock: bigint, toBlock: bigint): Promise<void
       const txHash = String(log.transactionHash ?? '');
       const identity = `${txHash}:${Number(log.logIndex ?? 0)}`;
       if (!token || burnDelivered.has(identity)) continue;
+      // Native/system transfer logs are not ERC-20 burns. Their totalSupply
+      // calls return empty data and must not cool down a healthy RPC provider.
+      if (!isArcErc20LogAddress(token)) continue;
       // A standard ERC-20 Transfer has two indexed address topics plus a
       // 32-byte non-indexed value. Some ARC contracts emit Transfer-like logs
       // with no data; they cannot prove a burn amount and should be ignored
@@ -395,7 +398,7 @@ async function processMarketRetries(): Promise<void> {
 
     const market = await enrichArcMarket(pending.enriched);
     if (market.marketDataSource == null) {
-      pendingMarketRetries.set(key, { ...pending, retryAt: Date.now() + MARKET_RETRY_DELAY_MS });
+      pendingMarketRetries.set(key, { ...pending, retryAt: Math.max(Date.now() + MARKET_RETRY_DELAY_MS, arcMarketRetryAt(pending.enriched)) });
       console.log('[ArcLive] PRE_BOND_WAIT', { assetId: pending.enriched.assetId, ageMin: ((Date.now() - pending.firstSeenAt) / 60_000).toFixed(1), reason: 'PAIR_NOT_INDEXED' });
       continue;
     }
