@@ -271,7 +271,7 @@ export async function deliverAlphaSemanticEvent(args: {
 
       // DEX payment claims survive DB outages, restarts and concurrent workers.
       // Keep an ambiguous Telegram result claimed rather than risk a duplicate.
-      if (dependencies === productionDependencies && args.event.type === 'DEX_PAID') {
+      if (dependencies === productionDependencies && ['DEX_PAID','PUMPFUN_MOMENTUM'].includes(args.event.type)) {
         if (!await claimDexRecipient(args.event.eventIdentity, user.telegram_id)) continue;
       }
 
