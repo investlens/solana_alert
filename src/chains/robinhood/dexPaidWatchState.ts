@@ -83,7 +83,7 @@ export function rememberDexPaidCandidate(candidates:Map<string,DexPaidCandidate>
     const incomingPons=token.source==='PONS';
     const victim=incomingPons
       ? (promotions.length>promotionReserve ? promotions[0] : launches[0] ?? promotions[0])
-      : (promotions.length<promotionReserve ? launches[0] ?? promotions[0] : promotions[0]);
+      : (promotions.length<promotionReserve ? launches[0] ?? promotions[0] : promotions.find(([,c])=>c.lastCheckedAt>0));
     if(!victim)return false;
     candidates.delete(victim[0]);
   }

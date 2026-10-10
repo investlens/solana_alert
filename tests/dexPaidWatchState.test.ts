@@ -89,3 +89,17 @@ test('source scheduling uses spare checks when either lane is empty',()=>{
  assert.equal(result.selected.length,3);assert.equal(new Set(result.selected).size,3);
  assert.equal(result.selected[0],rows[0]);
 });
+
+test('feed refreshes cannot evict promotion candidates before their first payment check',()=>{
+ const queue=new Map();
+ const make=(i:number)=>({...token,tokenAddress:'0x'+i.toString(16).padStart(40,'0'),source:'DEXSCREENER' as const});
+ for(let i=0;i<18;i++)rememberDexPaidCandidate(queue,{...make(i),source:'PONS'},now+i,24);
+ for(let i=18;i<24;i++)rememberDexPaidCandidate(queue,make(i),now+i,24);
+ assert.equal(rememberDexPaidCandidate(queue,make(24),now+24,24),false);
+ const checked=queue.get(make(18).tokenAddress);checked.lastCheckedAt=now+30;
+ assert.equal(rememberDexPaidCandidate(queue,make(24),now+31,24),true);
+ assert.equal(queue.has(make(18).tokenAddress),false);
+ // The next promotion cannot churn out the unexamined replacement.
+ assert.equal(rememberDexPaidCandidate(queue,make(25),now+32,24),false);
+ assert.ok(queue.has(make(24).tokenAddress));assert.equal(queue.size,24);
+});
