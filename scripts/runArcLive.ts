@@ -622,9 +622,10 @@ async function main() {
     await new Promise(resolve => setTimeout(resolve, POLL_MS));
     try {
     void runRejectedCandidateReview();
-    await processMarketRetries();
+    // Promotion events get the request budget before speculative unindexed pools.
     await processArcBoosts();
     await arcDexPaid.tick();
+    await processMarketRetries();
     const current = await getArcBlockNumber();
     if (current <= last) continue;
 
