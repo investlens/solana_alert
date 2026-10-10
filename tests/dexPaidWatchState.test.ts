@@ -53,3 +53,11 @@ test('hour-long recovery keeps a 45-minute PONS candidate but expires at one hou
  assert.equal(seedDexPaidWatch([{launch}],now,24,[launch.factory_address]).length,1);
  assert.equal(seedDexPaidWatch([{launch:{...launch,block_timestamp:new Date(now-60*60000).toISOString()}}],now,24,[launch.factory_address]).length,0);
 });
+
+test('unused PONS capacity remains available to promotion candidates',()=>{
+ const queue=new Map();
+ for(let i=0;i<40;i++)rememberDexPaidCandidate(queue,{...token,tokenAddress:'0x'+(i+1).toString(16).padStart(40,'0'),source:'DEXSCREENER'},now+i,24);
+ assert.equal(queue.size,24);
+ rememberDexPaidCandidate(queue,token,now+41,24);
+ assert.equal(queue.size,24);assert.equal(queue.get(token.tokenAddress).token.source,'PONS');
+});
