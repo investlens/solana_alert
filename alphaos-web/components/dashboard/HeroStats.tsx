@@ -147,13 +147,16 @@ export default function HeroStats() {
   }
 
   useEffect(() => {
-    void loadStats();
+    const initialLoad = window.setTimeout(() => {
+      void loadStats();
+    }, 0);
 
     const interval = window.setInterval(() => {
       void loadStats();
     }, 60_000);
 
     return () => {
+      window.clearTimeout(initialLoad);
       window.clearInterval(interval);
     };
   }, []);
