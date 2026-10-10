@@ -14,6 +14,7 @@ export const LIVE_ALERT_FEEDS = [
   {key:'ARC_BOOST', chain:'ARC', name:'Boost', description:'Promotion with mandatory sellability evidence.'},
   {key:'ARC_OPPORTUNITY', chain:'ARC', name:'Opportunity', description:'Market conditions with mandatory sellability evidence.'},
   {key:'ARC_SUPPLY_BURN', chain:'ARC', name:'Supply Burn', description:'Verified burn with mandatory sellability evidence.'},
+  {key:'SOLANA_PUMPFUN_MOMENTUM', chain:'Solana / Pump.fun', name:'Pump.fun Momentum', description:'Verified Pump.fun origin, PumpSwap volume expansion and positive price; sampled ownership checks.'},
 ] as const;
 export type LiveFeedKey = typeof LIVE_ALERT_FEEDS[number]['key'];
 type Preferences = Record<LiveFeedKey, boolean>;
@@ -62,6 +63,7 @@ export async function enabledLiveRecipients(users:string[],key:LiveFeedKey, chec
   return users.filter((_,index)=>flags[index]);
 }
 export function semanticLiveFeed(type:string,chain:string):LiveFeedKey|null {
+  if(chain==='solana' && type==='PUMPFUN_MOMENTUM')return 'SOLANA_PUMPFUN_MOMENTUM';
   if(chain!=='robinhood' && chain!=='pons')return null;
   if(type==='DEX_PAID')return 'DEX_PAID';
   if(/BOOST/.test(type))return 'RH_BOOST';
