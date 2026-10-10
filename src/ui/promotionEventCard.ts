@@ -35,7 +35,7 @@ export function buildPromotionEventCard(args:PromotionCardArgs) {
  const top=lines.find(l=>/Top 10(?:\s| ·)/i.test(l))??'Top 10 <b>Unavailable</b>';
  const creator=s?.creator && /^0x[a-f0-9]{40}$/i.test(s.creator) && !/^0x0{40}$/i.test(s.creator)
    ? `Creator <a href="https://robinhoodchain.blockscout.com/address/${s.creator}">${s.creator.slice(0,8)}…${s.creator.slice(-4)}</a>`
-   : lines.find(l=>/^Creator\s/.test(l.replace(/<[^>]+>/g,'').replace(/^[^A-Za-z]+/,'')));
+   : lines.find(l=>/^Creator\s+0x/i.test(l.replace(/<[^>]+>/g,'').replace(/^[^A-Za-z]+/,'')));
  const age=args.paymentTimestamp&&Number.isFinite(args.paymentTimestamp)?Math.max(0,Math.floor((Date.now()-(args.paymentTimestamp<1e10?args.paymentTimestamp*1000:args.paymentTimestamp))/60000)):null;
  const trusted=args.launchType==='PONS'||args.launchType==='FLAP';
  const risk=trusted?`Verified ${args.launchType} origin · ownership and market risks remain`:esc(args.securityNote??'Sellability unverified · validate selling before investing.');
@@ -52,7 +52,7 @@ export function buildPromotionEventCard(args:PromotionCardArgs) {
  ...(!metrics.length?['Market snapshot pending']:[]),'',
  '<b>OWNERSHIP</b>',...(creator?[creator]:[]),dev,top,
  ...(lines.some(l=>/Creator wallet balance only/.test(l))?['Zero creator balance does not prove a sale or burn.']:[]),
- ...lines.filter(l=>/Concentrated dev holding/.test(l)),
+ ...lines.filter(l=>/Concentrated dev holding|^Creator balance change|^Dev observed|^Holder sample observed/.test(l)),
  ...lines.filter(l=>/^(?:Burned|Verified dev burn)\s/i.test(l.replace(/<[^>]+>/g,'').replace(/^[^A-Za-z]+/,''))&&!/Unavailable|Unverified/i.test(l)),'',
  '<b>RISK</b>',risk,
  ...(socials.length?['',socials.join(' · ')]:[]),'',
