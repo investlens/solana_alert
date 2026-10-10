@@ -1,3 +1,4 @@
+import { observeCreatorBalance } from './creatorBalanceObservation.js';
 import { getIndexedCreatorHolding } from './indexedCreatorHolding.js';
 import { resolveCreatorIdentity, resolvePonsCreatorFromSources } from './verifiedCreatorIdentity.js';
 import { getPonsLaunchState, getIndexedVerifiedPonsLaunch } from '../chains/robinhood/ponsLaunchState.js';
@@ -61,7 +62,8 @@ export async function robinhoodOwnership(token: string, creator?: string | null,
         top10ObservedAt:holders.status === 'fulfilled' ? holders.value.scannedAt : undefined,
         top10Percent: holders.status === 'fulfilled' && holders.value.sampledWallets.length ? holders.value.top10Pct : null,
         top10Coverage: holders.status === 'fulfilled' && holders.value.sampledWallets.length ? 'INDEXED_SAMPLE' as const : 'UNAVAILABLE' as const };
-    })().then(value => {
+    })().then(rawValue => {
+      const value = observeCreatorBalance(token,rawValue);
       if (cache.size >= 200) cache.delete(cache.keys().next().value!);
       cache.set(key, {at: Date.now(), value}); return value;
     }).finally(() => { pending.delete(key); partial.delete(key); });

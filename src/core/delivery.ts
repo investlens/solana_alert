@@ -1,4 +1,4 @@
-import { forgetRuntimeSubscriber } from '../services/runtimeSubscriberRegistry.js';
+import { mergeRuntimeSubscribers, forgetRuntimeSubscriber } from '../services/runtimeSubscriberRegistry.js';
 import { cacheDeliveryRecipients } from '../services/recipientDeliveryTiming.js';
 import { supabase } from '../services/supabase.js';
 import {
@@ -35,7 +35,7 @@ export async function getDeliverableUsers(): Promise<DeliverableUser[]> {
     throw error;
   }
 
-  const users = (data ?? []) as DeliverableUser[];
+  const users = mergeRuntimeSubscribers((data ?? []) as DeliverableUser[]);
   cacheDeliveryRecipients(users);
 
   console.log('deliverable users loaded:', {

@@ -5,7 +5,7 @@ import { Markup, Telegraf } from 'telegraf';
 import { config } from '../config.js';
 import { getContextAccess } from './accessControl.js';
 import { ALPHAOS_SUBSCRIPTION_PLAN, subscriptionsEnabled, isClosedPaymentEntry, publicSubscriptionStatusText } from '../product/subscriptionPlan.js';
-import { rememberRuntimeSubscriber } from '../services/runtimeSubscriberRegistry.js';
+import { rememberRuntimeSubscriber, persistStartedSubscriber } from '../services/runtimeSubscriberRegistry.js';
 import { intelligenceMenu, mainAlphaMenu, tradingMenu } from './menus.js';
 import { registerAddressScreening } from './addressScreening.js';
 import { registerBotCommands } from './commands.js';
@@ -191,7 +191,7 @@ export function createBot(persistSubscriber:typeof upsertUser=upsertUser) {
   // Reply without waiting for Supabase, but persist private enrollment in the background.
   bot.use(async (ctx, next) => {
     const text = String((ctx.message as any)?.text ?? '').trim();
-    const isStart = /^\/start(?:@\S+)?$/.test(text);
+    const isStart = /^\/start(?:@\S+)?(?:\s+\S+)?$/.test(text);
     if (!isStart) return next();
 
     const access = await getContextAccess(ctx);
@@ -200,7 +200,7 @@ export function createBot(persistSubscriber:typeof upsertUser=upsertUser) {
 
     console.log('[TelegramCommand] /start received', { telegramId, isAdmin });
     if(telegramId && ctx.chat?.type==='private') {
-      void persistSubscriber({telegramId,username:ctx.from?.username,firstName:ctx.from?.first_name})
+      void persistStartedSubscriber({telegramId,username:ctx.from?.username,firstName:ctx.from?.first_name},persistSubscriber)
         .catch(error=>console.warn('[TelegramSubscriber] Private registration failed; runtime enrollment retained.', {
           telegramId,reason:error instanceof Error?error.message:String(error),
         }));
