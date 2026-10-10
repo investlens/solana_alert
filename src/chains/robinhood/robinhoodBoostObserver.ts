@@ -89,7 +89,7 @@ export function recordAcceptedAdminBoostNotification(tokenAddress: string, total
 
 async function boostRecipients(): Promise<string[]> {
   const now = Date.now();
-  if (now - boostRecipientCacheAt > BOOST_RECIPIENT_CACHE_MS) {
+  { // Resolve once per event, not per polling cycle or per recipient.
     const next = new Set<string>();
     if (config.adminTelegramId) next.add(String(config.adminTelegramId));
     for (const user of runtimeDeliverableUsers({ allRealtime: true })) {
