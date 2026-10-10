@@ -11,6 +11,7 @@ import { decorateDexPaidAlert, discloseAlertDexPaid } from './alertDexPaidDisclo
 import { discloseRobinhoodOwnership, cachedRobinhoodOwnership } from './alertOwnershipService.js';
 import { liveFeedEnabled, semanticLiveFeed } from './liveAlertPreferences.js';
 import { claimSharedDelivery } from './sharedJsonCache.js';
+import { acquireRecipientClaim, retryTelegramRejection, telegramExplicitRejection } from './recipientDeliveryClaim.js';
 import { recordCompactAlert } from './compactAlertOutcomes.js';
 import { recordRecoveryAlertAudit } from './recoveryAlertAudit.js';
 import { waitForRecipientDelivery, isUndelayedRiskEvent, recipientDelayMs, recordDeliveryAccepted } from './recipientDeliveryTiming.js';
@@ -261,6 +262,9 @@ export async function deliverAlphaSemanticEvent(args: {
   let delivered = 0; let failed = 0; let accepted = 0;
   for (const user of users) {
     if (!hasCapability(accessProfileForUser(user), 'opportunities.realtime')) continue;
+    let recipientClaim: Awaited<ReturnType<typeof acquireRecipientClaim>> | undefined;
+    let sendStarted = false;
+    let telegramAccepted = false;
     try {
       const liveFeed = semanticLiveFeed(args.event.type, args.event.chain);
       if (dependencies === productionDependencies && liveFeed && !await liveFeedEnabled(user.telegram_id, liveFeed)) continue;
@@ -272,14 +276,34 @@ export async function deliverAlphaSemanticEvent(args: {
       // DEX payment claims survive DB outages, restarts and concurrent workers.
       // Keep an ambiguous Telegram result claimed rather than risk a duplicate.
       if (dependencies === productionDependencies && ['DEX_PAID','PUMPFUN_MOMENTUM'].includes(args.event.type)) {
-        if (!await claimDexRecipient(args.event.eventIdentity, user.telegram_id)) continue;
+        recipientClaim = await acquireRecipientClaim(args.event.eventIdentity, user.telegram_id);
+        if (recipientClaim.state !== 'CLAIMED') {
+          if (liveFeed) recordFeedDelivery(liveFeed, recipientClaim.state === 'DELIVERED' ? 'DEDUPLICATED' : 'UNCONFIRMED');
+          console.warn('[AlphaSemanticDelivery] Recipient claim skipped', JSON.stringify({eventIdentity:args.event.eventIdentity,
+            telegramId:user.telegram_id,state:recipientClaim.state}));
+          continue;
+        }
       }
+      const send = async () => {
+        sendStarted = true;
+        args.onSendStarted?.();
+        const result = await retryTelegramRejection(() => dependencies.send(user.telegram_id, deliveryMessage, deliveryButtons));
+        telegramAccepted = true;
+        if (recipientClaim?.state === 'CLAIMED') {
+          try { await recipientClaim.finish(typeof result === 'number' ? result : null); }
+          catch (error) { console.error('[AlphaSemanticDelivery] Accepted recipient confirmation unavailable', JSON.stringify({
+            eventIdentity:args.event.eventIdentity,telegramId:user.telegram_id,reason:String(error)})); }
+        }
+        return result;
+      };
 
       if (ephemeralMode) {
-        if (!claimEphemeralDelivery(args.event, user)) continue;
+        if (!claimEphemeralDelivery(args.event, user)) {
+          if (recipientClaim?.state === 'CLAIMED') await recipientClaim.release();
+          continue;
+        }
         try {
-          args.onSendStarted?.();
-          const sendResult = await dependencies.send(user.telegram_id, deliveryMessage, deliveryButtons);
+          const sendResult = await send();
           if(dependencies===productionDependencies && typeof sendResult==='number' && enrichmentTargets.length<50)enrichmentTargets.push({chatId:user.telegram_id,messageId:sendResult});
           if (dependencies === productionDependencies) recordDeliveryAccepted(user, deliveryStartedAt, args.event.eventIdentity, isUndelayedRiskEvent(args.event.type));
           delivered += 1; accepted += 1;
@@ -291,7 +315,10 @@ export async function deliverAlphaSemanticEvent(args: {
             telegramMessageId: Number.isFinite(Number(sendResult)) ? Number(sendResult) : null,
           });
         } catch (error) {
-          releaseEphemeralDelivery(args.event, user);
+          if (telegramExplicitRejection(error)) {
+            releaseEphemeralDelivery(args.event, user);
+            if (recipientClaim?.state === 'CLAIMED') await recipientClaim.release().catch(() => undefined);
+          }
           failed += 1;
           args.onFailure?.(error);
           args.onRecipientFailure?.(user, error, 'telegram_send');
@@ -308,9 +335,12 @@ export async function deliverAlphaSemanticEvent(args: {
       }
 
       const leaseToken = createLeaseToken();
-      if (!await dependencies.reserve(args.event, user, leaseToken)) continue;
+      if (!await dependencies.reserve(args.event, user, leaseToken)) {
+        if (recipientClaim?.state === 'CLAIMED') await recipientClaim.release();
+        continue;
+      }
       const result = await deliverReservedTelegram({
-        send: async () => { args.onSendStarted?.(); const result=await dependencies.send(user.telegram_id, deliveryMessage, deliveryButtons);
+        send: async () => { const result=await send();
           if(dependencies===productionDependencies && typeof result==='number' && enrichmentTargets.length<50)enrichmentTargets.push({chatId:user.telegram_id,messageId:result});return result; },
         complete: sendResult => dependencies.complete(args.event, user, leaseToken,
           Number.isFinite(Number(sendResult)) ? Number(sendResult) : null),
@@ -318,6 +348,8 @@ export async function deliverAlphaSemanticEvent(args: {
       });
       if (result.sent) { if (dependencies === productionDependencies) recordDeliveryAccepted(user, deliveryStartedAt, args.event.eventIdentity, isUndelayedRiskEvent(args.event.type)); accepted += 1; args.onTelegramAccepted?.(user); }
       if (result.recorded) { delivered += 1; continue; }
+      if (!result.sent && telegramExplicitRejection(result.error) && recipientClaim?.state === 'CLAIMED')
+        await recipientClaim.release().catch(() => undefined);
       failed += 1;
       args.onRecipientFailure?.(user, result.error, result.sent ? 'delivery_completion' : 'telegram_send');
       if (result.sent) await dependencies.sentUnconfirmed(args.event, user, leaseToken).catch(error =>
@@ -330,6 +362,8 @@ export async function deliverAlphaSemanticEvent(args: {
         telegramErrorCategory: reason.includes('text is too long') ? 'MESSAGE_TOO_LONG' : telegramRecipientUnavailable(result.error) ? 'RECIPIENT_BLOCKED' : 'PROCESSING_FAILED',
         telegramId: user.telegram_id, sent: result.sent, reason });
     } catch (error) {
+      if (!sendStarted && !telegramAccepted && recipientClaim?.state === 'CLAIMED')
+        await recipientClaim.release().catch(() => undefined);
       failed += 1;
       args.onFailure?.(error);
       args.onRecipientFailure?.(user, error, 'recipient_setup');
