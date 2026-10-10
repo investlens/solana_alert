@@ -11,6 +11,7 @@ export type PonsPublicContext = {
   phase?: number | null; venue?: string | null; poolId?: string | null;
   marketCapUsd?:number|null; volumeTotalUsd?:number|null; curveReserveUsd?:number|null; progressPct?:number|null; createdAt?:number|null;
   volume5mUsd?:number|null; buys5m?:number|null; sells5m?:number|null;
+  creatorSales?: {count:number;tokens:number;latestTx:string;observedAt:number};
 
 };
 
@@ -76,6 +77,7 @@ export function parsePonsPublicContext(html: string, token: string, factory: str
         createdAt:finiteNonnegative(launch.createdAt)&&launch.createdAt>0&&launch.createdAt<=end?launch.createdAt*1000:null,
         volume5mUsd:recent&&quoteUsd?recent.reduce((sum:number,t:any)=>sum+t.quoteAmount*quoteUsd,0):null,
         buys5m:recent?recent.filter((t:any)=>t.side==='buy').length:null,sells5m:recent?recent.filter((t:any)=>t.side==='sell').length:null,
+        creatorSales:parsePonsCreatorSales(items,launch.deployer,now),
         twitter:typeof launch.socials?.twitter==='string'?launch.socials.twitter:null,telegram:typeof launch.socials?.telegram==='string'?launch.socials.telegram:null};
     }
     const d = value.initialDetails;
@@ -219,15 +221,16 @@ export async function getCreatorHoldingEvidence(token: string, creator: string, 
   if(![token,creator].every(value=>/^0x[a-fA-F0-9]{40}$/.test(value)) || /^0x0{40}$/i.test(creator))return null;
   return holdingEvidence(`${token.toLowerCase()}:${creator.toLowerCase()}:${blockTag??''}`);
 }
-async function readCreatorHoldingEvidence(token: string, creator: string, blockTag?: `0x${string}`): Promise<HoldingEvidence | null> {
+export async function readCreatorHoldingEvidence(token: string, creator: string, blockTag?: `0x${string}`, request:typeof requestRobinhoodRpcResilient=requestRobinhoodRpcResilient): Promise<HoldingEvidence | null> {
   try {
     // Both values come from the same block; identity alone cannot prove holdings.
-    const block = blockTag ?? await requestRobinhoodRpcResilient({ method: 'eth_blockNumber', params: [] });
-    const call = (data: string) => requestRobinhoodRpcResilient({ method: 'eth_call', params: [{ to: token, data }, block] });
-    const [balance, supply] = await Promise.all([
-      call(encodeFunctionData({ abi, functionName: 'balanceOf', args: [creator as Address] })),
-      call(encodeFunctionData({ abi, functionName: 'totalSupply' })),
-    ]);
+    const block = blockTag ?? await request({ method: 'eth_blockNumber', params: [] });
+    if(!/^0x[0-9a-f]+$/i.test(String(block)))return null;
+    const call = (data: string) => request({ method: 'eth_call', params: [{ to: token, data }, block] });
+    // Providers have one in-flight slot. Parallel calls can reject one another.
+    const balance = await call(encodeFunctionData({ abi, functionName: 'balanceOf', args: [creator as Address] }));
+    const supply = await call(encodeFunctionData({ abi, functionName: 'totalSupply' }));
+    if(![balance,supply].every(v=>/^0x[0-9a-f]+$/i.test(String(v))))return null;
     const b = BigInt(String(balance)); const s = BigInt(String(supply));
     const percent=creatorHoldingPercentFromRaw(b,s);
     return percent!=null ? {percent,block:BigInt(String(block)).toString(),observedAt:Date.now()} : null;
@@ -274,4 +277,19 @@ export async function getScreenCreatorBalance(token: string, creator: string): P
       new Promise<null>(resolve=>{timer=setTimeout(()=>resolve(null),4_000);})]);
     return evidence?.percent ?? null;
   } finally {if(timer)clearTimeout(timer);}
+}
+
+// Only report exact-creator sales present in the current PONS page. Pagination
+// never establishes lifetime totals or that the creator has not sold elsewhere.
+export function parsePonsCreatorSales(items:unknown,creator:string,now=Date.now()):PonsPublicContext['creatorSales'] {
+ if(!Array.isArray(items)||items.length>100||!/^0x[a-f0-9]{40}$/i.test(creator))return undefined;
+ const seen=new Set<string>(); let count=0,tokens=0,latest=0,latestTx='';
+ for(const t of items){
+  if(t?.trader?.toLowerCase?.()!==creator.toLowerCase()||t.side!=='sell')continue;
+  if(!/^0x[a-f0-9]{64}$/i.test(t.txHash??'')||typeof t.id!=='string'||!t.id.startsWith(t.txHash+':')
+   ||!finiteNonnegative(t.tokenAmount)||t.tokenAmount<=0||!finiteNonnegative(t.timestamp)||t.timestamp<=0||t.timestamp>now/1000)return undefined;
+  if(seen.has(t.id))continue;seen.add(t.id);count++;tokens+=t.tokenAmount;
+  if(t.timestamp>latest){latest=t.timestamp;latestTx=t.txHash;}
+ }
+ return count&&Number.isFinite(tokens)?{count,tokens,latestTx,observedAt:now}:undefined;
 }
