@@ -1,3 +1,4 @@
+import { startPumpfunMomentumWorker } from './chains/solana/pumpfunMomentumWorker.js';
 import { startPumpPortalCreatorFeed } from './core/pumpPortalCreatorFeed.js';
 import { startRuntimeHealthHeartbeat } from './services/runtimeHealthHeartbeat.js';
 import { startShadowDecisionOutcomeGrader } from './intelligence/shadowDecisionOutcomeGrader.js';
@@ -48,7 +49,10 @@ void startTelegramPollingEarly().catch((error) => {
   });
 });
 
-if (enabled('PUMPPORTAL_CREATOR_FEED_ENABLED', false)) {
+if (enabled('PUMPFUN_MOMENTUM_ENABLED', false)) {
+  // Single free creation/migration connection; no per-launch database writes.
+  startPumpfunMomentumWorker();
+} else if (enabled('PUMPPORTAL_CREATOR_FEED_ENABLED', false)) {
   void startPumpPortalCreatorFeed().catch((error) => {
     console.log('[PumpPortalCreatorFeed] startup error', {
       error: error instanceof Error ? error.message : String(error),

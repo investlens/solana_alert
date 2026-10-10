@@ -54,7 +54,7 @@ export function buildAlphaReportUrl(tokenMint: string, context?: { engine?: stri
 async function sendTelegramRequest(chatId: string, text: string, buttons?: InlineButton[][]): Promise<number | null> {
   if (!chatId) return null;
   text = cleanAlertCard(text);
-  if (/DEX PAID DETECTED|BOOST DETECTED|BOOST INCREASED|MAX BOOST 500\+|ARC OPPORTUNITY|TRADE SETUP WATCH|SUPPLY BURN|SOCIAL MAFIA ALERT/.test(text.split('\n')[0])) text = withResearchDisclosure(text);
+  if (/PUMPFUN MOMENTUM WATCH|DEX PAID DETECTED|BOOST DETECTED|BOOST INCREASED|MAX BOOST 500\+|ARC OPPORTUNITY|TRADE SETUP WATCH|SUPPLY BURN|SOCIAL MAFIA ALERT/.test(text.split('\n')[0])) text = withResearchDisclosure(text);
   if (/<code>/.test(text)) buttons = cleanAlertButtons(buttons, text);
 
   const body: Record<string, unknown> = {
@@ -73,13 +73,13 @@ async function sendTelegramRequest(chatId: string, text: string, buttons?: Inlin
 
   // Only bounded market cards become photos; interactive screens stay as text.
   // Images exist in memory only. The caption stays within Telegram's limit.
-  const category = text.match(/(?:DEX PAID DETECTED|BOOST DETECTED|BOOST INCREASED|MAX BOOST 500\+|ARC OPPORTUNITY|TRADE SETUP WATCH|SUPPLY BURN|SOCIAL MAFIA ALERT)/)?.[0];
+  const category = text.match(/(?:PUMPFUN MOMENTUM WATCH|DEX PAID DETECTED|BOOST DETECTED|BOOST INCREASED|MAX BOOST 500\+|ARC OPPORTUNITY|TRADE SETUP WATCH|SUPPLY BURN|SOCIAL MAFIA ALERT)/)?.[0];
   if (category && telegramCaptionLength(text) <= 1024) {
     const ticker = text.match(/<b>\$([A-Za-z_][A-Za-z0-9_]{0,23})\b/)?.[1] ?? text.match(/\(\$([A-Za-z_][A-Za-z0-9_]{0,23})\)<\/b>/)?.[1];
     const identityName = text.match(/<b>\$[^<]+<\/b> · ([^\n]+)/)?.[1] ?? text.match(/<b>([^<\n]+) \(\$[^)]+\)<\/b>/)?.[1];
     const name = identityName?.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
     const image = await buildAlphaosAlertCard({ symbol: ticker, name, category,
-      chainLabel: /ARC OPPORTUNITY/.test(category) ? 'ARC' : 'ALPHAOS / TOKEN RESEARCH',
+      chainLabel: /PUMPFUN MOMENTUM/.test(category) ? 'SOLANA / PUMP.FUN' : /ARC OPPORTUNITY/.test(category) ? 'ARC' : 'ALPHAOS / TOKEN RESEARCH',
       badge: 'INFORMATION / DYOR', footer: 'Promotion and market activity do not establish token safety.' }).catch(() => null);
     return (await sendAlphaosPhotoAlert({ botToken: config.botToken, chatId, text,
       keyboard: buttons ?? [], image })).messageId;
