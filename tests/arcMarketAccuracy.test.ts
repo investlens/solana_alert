@@ -47,3 +47,26 @@ test('ARC valuation parser preserves unknown and genuine zero separately', async
   for (const value of [null, undefined, '', ' ', NaN, -1]) assert.equal(arcMarketNumber(value), null);
   assert.equal(arcMarketNumber(0), 0); assert.equal(arcMarketNumber('12000'), 12000);
 });
+
+test('unindexed ARC pools yield checks until cooldown expiry then recover with exact-pool data', async () => {
+  const { arcMarketRetryAt } = await import('../src/chains/arc/market.js');
+  const address='0x'+'d'.repeat(40); const poolId='0x'+'e'.repeat(64);
+  const original=globalThis.fetch; const originalNow=Date.now;
+  let clock=originalNow();let calls=0;let indexed=false;Date.now=()=>clock;
+  const request:typeof fetch=async()=>{calls++;return new Response(JSON.stringify(indexed ? [{chainId:'arc',baseToken:{address},pairAddress:poolId,marketCap:1000}] : []));};
+  resetDexScreenerGovernorForTests({fetch:request});
+  try {
+    const token={assetId:address,poolId} as any;
+    assert.equal((await enrichArcMarket(token)).marketDataSource,null);
+    const initialCalls=calls;assert.equal(arcMarketRetryAt(token),clock+60_000);
+    clock+=15_000;await enrichArcMarket(token);assert.equal(calls,initialCalls);
+    indexed=true;clock+=45_001;
+    const recovered=await enrichArcMarket(token);assert.equal(recovered.marketDataSource,'DEXSCREENER');assert.equal(recovered.marketCapUsd,1000);
+  } finally {globalThis.fetch=original;Date.now=originalNow;resetDexScreenerGovernorForTests();}
+});
+
+test('ARC native/system addresses never qualify for ERC20 burn reads', async () => {
+  const { isArcErc20LogAddress }=await import('../src/chains/arc/candidate.js');
+  for(const address of ['0xfffffffffffffffffffffffffffffffffffffffe','0x'+'0'.repeat(40),'garbage']) assert.equal(isArcErc20LogAddress(address),false);
+  assert.equal(isArcErc20LogAddress('0x'+'a'.repeat(40)),true);
+});

@@ -7,6 +7,12 @@ const QUOTES = new Set([
   ZERO,
 ]);
 
+export function isArcErc20LogAddress(address: string): boolean {
+  const token = address.toLowerCase();
+  return /^0x[a-f0-9]{40}$/.test(token) && token !== ZERO
+    && token !== '0xfffffffffffffffffffffffffffffffffffffffe';
+}
+
 export type ArcLaunchCandidate = {
   chain: 'arc';
   source: 'uniswap_v4';

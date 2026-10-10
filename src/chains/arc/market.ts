@@ -42,6 +42,9 @@ export const arcMarketNumber = (value: unknown): number | null => {
 const n = arcMarketNumber;
 
 const unindexedUntil = new Map<string, number>();
+export function arcMarketRetryAt(token: Pick<ArcTokenEnrichment, 'assetId' | 'poolId'>): number {
+  return unindexedUntil.get(`${token.assetId.toLowerCase()}:${token.poolId?.toLowerCase() ?? ''}`) ?? 0;
+}
 export async function enrichArcMarket(token: ArcTokenEnrichment): Promise<ArcMarketEnrichment> {
   try {
     const retryKey = `${token.assetId.toLowerCase()}:${token.poolId?.toLowerCase() ?? ''}`;
