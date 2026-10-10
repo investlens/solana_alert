@@ -143,9 +143,9 @@ function escapeHtml(value: unknown): string {
   return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function refreshRecipientsInBackground(): void {
+function refreshRecipientsInBackground(force = false): void {
   ensureAdminRecipient();
-  if (recipientRefreshInFlight || Date.now() - recipientCacheAt < RECIPIENT_CACHE_MS) return;
+  if (recipientRefreshInFlight || (!force && Date.now() - recipientCacheAt < RECIPIENT_CACHE_MS)) return;
 
   recipientRefreshInFlight = (async () => {
     try {
@@ -198,8 +198,8 @@ async function sendTelegram(chatId: string, text: string, tokenAddress: string, 
 
 export async function directTelegramRecipients(text: string, tokenAddress: string, socials?: RobinhoodTokenSocials, preBond = false, setupControls = false, baseline?: CompactAlertBaseline, options?: { skipKeyStats?: boolean }): Promise<{ delivered: number; failed: number }> {
   ensureAdminRecipient();
-  refreshRecipientsInBackground();
-  if (setupControls && recipientRefreshInFlight) {
+  refreshRecipientsInBackground(true);
+  if (recipientRefreshInFlight) {
     await Promise.race([recipientRefreshInFlight, new Promise<void>(resolve => { const timer = setTimeout(resolve, 3_000); timer.unref(); })]);
   }
   const recipients = await enabledLiveRecipients([...recipientCache], setupControls ? 'RH_TRADE_SETUP' : 'RH_MOMENTUM');
