@@ -69,11 +69,14 @@ async function tick(readMarket = readSetupMarket): Promise<void> {
   if (running) return;
   running = true;
   try {
+    // Expired watches must yield their slots before priority selection.
+    for (const [token, item] of candidates) if (Date.now() - item.launchedAt > MAX_AGE) candidates.delete(token);
+    for (const [token, launch] of deferredAdmissions) if (!isTradeSetupLaunchAdmissible(launch, Date.now(), MAX_AGE)) deferredAdmissions.delete(token);
     // Give confirmed social candidates a slot before spending scarce checks
     // on unknown identity candidates; do not increase concurrent work.
     const confirmed = [...deferredAdmissions].find(([token]) => launchSocialEligibility(token) === true);
     if (confirmed && candidates.size >= MAX_CANDIDATES) {
-      const replace = [...candidates].find(([token]) => launchSocialEligibility(token) !== true);
+      const replace = [...candidates].find(([token, item]) => launchSocialEligibility(token) !== true && !item.trend.dip && (item.trend.rising ?? 0) === 0);
       if (replace) {
         candidates.delete(replace[0]);
         deferredAdmissions.delete(confirmed[0]);
@@ -81,16 +84,20 @@ async function tick(readMarket = readSetupMarket): Promise<void> {
         admitCandidate(confirmed[1]);
       }
     }
-    // Rotate one inactive slot every two minutes, keeping the same work budget.
-    // Recovery candidates retain their history; newly promoted watches start fresh.
+    // Rotate up to three flat mature watches every two minutes. Preserve
+    // observed pullbacks/rising structure and the ten-check cycle budget.
     if (deferredAdmissions.size && candidates.size >= MAX_CANDIDATES && Date.now() - lastRotationAt >= 2 * 60_000) {
-      const inactive = [...candidates].find(([, item]) => Date.now() - item.launchedAt >= MIN_AGE && !item.trend.dip && (item.trend.rising ?? 0) === 0);
-      const next = [...deferredAdmissions].find(([, launch]) => isTradeSetupLaunchAdmissible(launch, Date.now(), MAX_AGE));
-      if (inactive && next) {
-        candidates.delete(inactive[0]); deferredAdmissions.delete(next[0]);
-        // Retire flat candidates instead of replaying their history from zero.
-        admitCandidate(next[1]); lastRotationAt = Date.now();
-        console.log(`[TradeSetup] ROTATED reason=NO_PULLBACK candidates=${candidates.size} pending=${deferredAdmissions.size}`);
+      const inactive = [...candidates].filter(([, item]) => Date.now() - item.launchedAt >= MIN_AGE && !item.trend.dip && (item.trend.rising ?? 0) === 0).slice(0, 3);
+      let rotated = 0;
+      for (const [token] of inactive) {
+        const next = deferredAdmissions.entries().next().value;
+        if (!next) break;
+        candidates.delete(token); deferredAdmissions.delete(next[0]);
+        admitCandidate(next[1]); rotated++;
+      }
+      if (rotated) {
+        lastRotationAt = Date.now();
+        console.log(`[TradeSetup] ROTATED reason=FLAT_OR_UNAVAILABLE count=${rotated} candidates=${candidates.size} pending=${deferredAdmissions.size}`);
       }
     }
     // Observe before maturity, but never alert before maturity. Fairness uses
@@ -203,10 +210,16 @@ export function queuePonsTradeSetup(launch: PonsLaunch): void {
   if (String(process.env.PONS_TRADE_SETUP_ENABLED ?? 'true').toLowerCase() !== 'true') return;
   const launchedAt = Date.parse(launch.block_timestamp);
   const token = launch.token_address.toLowerCase();
-  if (!isTradeSetupLaunchAdmissible(launch, Date.now()) || candidates.has(token)) return;
+  if (!isTradeSetupLaunchAdmissible(launch, Date.now()) || candidates.has(token) || deferredAdmissions.has(token)) return;
   recordFeedDelivery('TRADE_SETUP_WATCH', 'DISCOVERED');
   if (candidates.size >= MAX_CANDIDATES) {
-    if (deferredAdmissions.size < 50) deferredAdmissions.set(token, launch);
+    for (const [key, pending] of deferredAdmissions) if (!isTradeSetupLaunchAdmissible(pending, Date.now(), MAX_AGE)) deferredAdmissions.delete(key);
+    if (deferredAdmissions.size >= 50) {
+      console.log(`[TradeSetup] CAPACITY_WAIT candidates=${candidates.size} pending=${deferredAdmissions.size} token=${token}`);
+      recordFeedDelivery('TRADE_SETUP_WATCH', 'CONDITION_WAIT');
+      return;
+    }
+    deferredAdmissions.set(token, launch);
     console.log(`[TradeSetup] DEFERRED candidates=${candidates.size} pending=${deferredAdmissions.size} token=${token}`); return;
   }
   admitCandidate(launch);

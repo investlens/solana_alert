@@ -1,4 +1,5 @@
 import { config } from '../config.js';
+import { createEnhancedTransactionReader } from './enhancedTransactionReader.js';
 import type { AuthorityInfo } from '../types.js';
 
 type HeliusTokenMetadataResponse = Array<{
@@ -139,49 +140,10 @@ export type HeliusEnhancedTx = {
   }>;
 };
 
-const enhancedTxBackoffUntil = new Map<string, number>();
+const enhancedTransactionReader = createEnhancedTransactionReader<HeliusEnhancedTx>(() => config.heliusApiKey);
 
-export async function fetchEnhancedTransactionsForAddress(
-  address: string,
-  limit = 50
-): Promise<HeliusEnhancedTx[]> {
-  if (!config.heliusApiKey) return [];
-
-  const backoffUntil = enhancedTxBackoffUntil.get(address) ?? 0;
-
-  if (backoffUntil > now()) {
-    const waitSec = Math.ceil((backoffUntil - now()) / 1000);
-    console.log(`Helius enhanced tx backoff active for ${address}: ${waitSec}s remaining`);
-    return [];
-  }
-
-  const safeLimit = Math.max(1, Math.min(limit, 100));
-
-  const url =
-    `https://api-mainnet.helius-rpc.com/v0/addresses/${address}/transactions` +
-    `?api-key=${config.heliusApiKey}&limit=${safeLimit}`;
-
-  try {
-    const res = await fetch(url);
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-
-      if (res.status === 429) {
-        enhancedTxBackoffUntil.set(address, now() + HELIUS_BACKOFF_MS);
-        console.log(`Helius enhanced tx 429 for ${address}, backing off 5 minutes`);
-        return [];
-      }
-
-      console.error(`Helius enhanced tx failed ${res.status}:`, text);
-      return [];
-    }
-
-    return (await res.json()) as HeliusEnhancedTx[];
-  } catch (error) {
-    console.error('fetchEnhancedTransactionsForAddress error:', error);
-    return [];
-  }
+export async function fetchEnhancedTransactionsForAddress(address: string, limit = 50): Promise<HeliusEnhancedTx[]> {
+  return enhancedTransactionReader(address, limit);
 }
 
 let holderRiskBackoffUntil = 0;

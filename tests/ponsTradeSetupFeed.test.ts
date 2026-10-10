@@ -127,3 +127,28 @@ test('recovered trend retains observed levels but requires new consecutive confi
     {peak:2,low:1,dip:true,confirmations:0,previous:null});
   assert.equal(recoveredSetupTrend({peak:NaN,low:1,dip:true,confirmations:2,previous:null}).dip,false);
 });
+
+test('three flat mature watches rotate without increasing cycle reads or queue size', async () => {
+  resetTradeSetupSchedulingForTests();
+  const original=Date.now; let clock=original(); Date.now=()=>clock;
+  const tokens=Array.from({length:25},(_,i)=>'0x'+(i+500).toString(16).padStart(40,'0'));
+  try {
+    for(const token of tokens) queuePonsTradeSetup({...launch,token_address:token,block_timestamp:new Date(clock).toISOString()});
+    clock+=31*60_000; let reads=0;
+    await tickTradeSetupForTests(async()=>{reads++;return null;});
+    const state=tradeSetupSchedulingStateForTests();
+    assert.equal(state.candidates.length,20); assert.equal(state.deferred.length,2);
+    assert.equal(reads,10); for(const token of tokens.slice(20,23)) assert.ok(state.candidates.includes(token));
+  } finally {Date.now=original;resetTradeSetupSchedulingForTests();}
+});
+
+test('expired watches yield capacity before selecting any provider checks', async () => {
+  resetTradeSetupSchedulingForTests();
+  const original=Date.now; let clock=original(); Date.now=()=>clock;
+  try {
+    queuePonsTradeSetup({...launch,block_timestamp:new Date(clock).toISOString()});
+    clock+=121*60_000;let reads=0;
+    await tickTradeSetupForTests(async()=>{reads++;return null;});
+    assert.equal(reads,0);assert.equal(tradeSetupSchedulingStateForTests().candidates.length,0);
+  } finally {Date.now=original;resetTradeSetupSchedulingForTests();}
+});
