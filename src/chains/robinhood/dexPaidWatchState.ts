@@ -66,19 +66,39 @@ export function seedDexPaidWatch(value: unknown, now: number, limit: number, fac
   return restoreDexPaidWatch({version:1,candidates:entries.sort((a,b)=>b.lastSeenAt-a.lastSeenAt).slice(0,24)},now,limit);
 }
 
-// Keep the same total/check budget. Promotion refreshes cannot evict a PONS
-// launch or downgrade its authoritative source. Unused slots remain available.
+// Keep the same total/check budget, reserving one quarter for promotion feeds.
+// PONS retains the other three quarters when both sources are busy; neither
+// refresh can starve the other source or downgrade authoritative PONS lineage.
 export function rememberDexPaidCandidate(candidates:Map<string,DexPaidCandidate>, token:RobinhoodDiscoveredToken, now:number, limit:number):boolean {
   const key=token.tokenAddress.toLowerCase(), previous=candidates.get(key);
   if(previous){
     const authoritative=previous.token.source==='PONS' && token.source!=='PONS' ? previous.token : token;
     candidates.set(key,{token:authoritative,lastSeenAt:now,lastCheckedAt:previous.lastCheckedAt});return true;
   }
-  const promotions=[...candidates.entries()].filter(([,c])=>c.token.source!=='PONS').sort((a,b)=>a[1].lastSeenAt-b[1].lastSeenAt);
+  const ordered=[...candidates.entries()].sort((a,b)=>a[1].lastSeenAt-b[1].lastSeenAt);
+  const promotions=ordered.filter(([,c])=>c.token.source!=='PONS');
+  const launches=ordered.filter(([,c])=>c.token.source==='PONS');
+  const promotionReserve=Math.max(1,Math.ceil(limit/4));
   if(candidates.size>=limit){
-    if(promotions.length)candidates.delete(promotions[0][0]);
-    else if(token.source!=='PONS')return false;
-    else {const oldest=[...candidates.entries()].sort((a,b)=>a[1].lastSeenAt-b[1].lastSeenAt)[0];candidates.delete(oldest[0]);}
+    const incomingPons=token.source==='PONS';
+    const victim=incomingPons
+      ? (promotions.length>promotionReserve ? promotions[0] : launches[0] ?? promotions[0])
+      : (promotions.length<promotionReserve ? launches[0] ?? promotions[0] : promotions[0]);
+    if(!victim)return false;
+    candidates.delete(victim[0]);
   }
   candidates.set(key,{token,lastSeenAt:now,lastCheckedAt:0});return true;
+}
+
+// Three launch checks then one promotion check. New launch arrivals cannot
+// perpetually outrank retained promotions with a nonzero lastCheckedAt.
+export function selectDexPaidCandidates(candidates: Iterable<DexPaidCandidate>, checks:number, cursor:number) {
+  const ordered=[...candidates].sort((a,b)=>a.lastCheckedAt-b.lastCheckedAt);
+  const selected:DexPaidCandidate[]=[];
+  for(let i=0;i<checks && selected.length<ordered.length;i++) {
+    const promotion=(cursor++ % 4)===3;
+    const available=ordered.filter(c=>!selected.includes(c));
+    selected.push(available.find(c=>(c.token.source!=='PONS')===promotion) ?? available[0]);
+  }
+  return {selected,cursor:cursor%4};
 }

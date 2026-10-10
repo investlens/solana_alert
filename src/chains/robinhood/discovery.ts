@@ -60,8 +60,8 @@ export type RobinhoodDiscoveryCandidate = {
 async function fetchJson<T>(
   url: string,
 ): Promise<T> {
-  return (await governedDexScreenerJson<T>({ url, caller: 'robinhood_discovery', priority: 'BACKGROUND',
-    endpoint: url === TOKEN_PROFILES_URL ? 'PROFILES' : 'BOOSTS', cacheTtlMs: url === TOKEN_PROFILES_URL ? 60_000 : 90_000 })).value;
+  return (await governedDexScreenerJson<T>({ url, caller: 'robinhood_discovery', priority: url === TOKEN_BOOSTS_URL ? 'HIGH' : 'BACKGROUND',
+    endpoint: url === TOKEN_PROFILES_URL ? 'PROFILES' : 'BOOSTS', cacheTtlMs: url === TOKEN_PROFILES_URL ? 60_000 : 15_000 })).value;
 }
 
 function calculateBuyRatio(
@@ -187,7 +187,7 @@ Promise<RobinhoodBoostEntry[]> {
       >(TOKEN_BOOSTS_URL);
 
     if (!Array.isArray(boosts)) {
-      return [];
+      throw new Error('Malformed DexScreener boost feed');
     }
 
     return boosts
@@ -223,7 +223,7 @@ Promise<RobinhoodBoostEntry[]> {
       error,
     );
 
-    return [];
+    throw error;
   }
 }
 
@@ -314,7 +314,7 @@ export async function discoverRobinhoodCandidates(
   ] =
     await Promise.all([
       fetchRobinhoodProfiles(),
-      fetchRobinhoodBoosts(),
+      fetchRobinhoodBoosts().catch(() => []),
     ]);
 
     const boostAddresses =
