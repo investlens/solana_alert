@@ -206,7 +206,7 @@ test('private fast start persists reactivation without waiting for the subscribe
  let finish!:()=>void;const slow=new Promise<void>(resolve=>{finish=resolve;});let enrolled:any=null,replied=false;
  const bot=createBot(async args=>{enrolled=args;await slow;});
  const {Context}=await import('telegraf');
- const ctx:any=new Context({update_id:1,message:{message_id:1,date:1,from:{id:424242,is_bot:false,first_name:'Returning User'},chat:{id:424242,type:'private',first_name:'Returning User'},text:'/start'}},bot.telegram,{id:99,is_bot:true,first_name:'Test',username:'test_bot',can_join_groups:true,can_read_all_group_messages:false,supports_inline_queries:false});
+ const ctx:any=new Context({update_id:1,message:{message_id:1,date:1,from:{id:424242,is_bot:false,first_name:'Returning User'},chat:{id:424242,type:'private',first_name:'Returning User'},text:'/start invite_123'}},bot.telegram,{id:99,is_bot:true,first_name:'Test',username:'test_bot',can_join_groups:true,can_read_all_group_messages:false,supports_inline_queries:false});
  ctx.reply=(async()=>{replied=true;return {} as any;}) as any;
  try {
   await bot.middleware()(ctx,async()=>{});
