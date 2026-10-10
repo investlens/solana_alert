@@ -1,3 +1,4 @@
+import { createSocialIdentityTracker, confirmSocialMarket, SOCIAL_CONFIRMATION_SPACING_MS, type SocialMarketObservation } from './socialMarketConfirmation.js';
 import { recordFeedDelivery } from '../../services/feedDeliveryHealth.js';
 import { buildPromotionEventCard } from '../../ui/promotionEventCard.js';
 import { discloseRobinhoodKeyStats, cachedRobinhoodAlertStats } from '../../services/alertKeyStatsService.js';
@@ -43,13 +44,14 @@ export type SocialMafiaSocials = {
   telegramLabel: string;
 };
 
-type QueuedLaunch = { launch: PonsLaunch; launchpad: VerifiedLaunchpadContext; createdAt: number; nextAt: number; attempt: number; eligibility?: boolean | null };
+type QueuedLaunch = { launch: PonsLaunch; launchpad: VerifiedLaunchpadContext; createdAt: number; nextAt: number; attempt: number; eligibility?: boolean | null; marketObservation?: SocialMarketObservation; confirmationDue?: boolean; followUpAt?: number; confirmationChecks?: number };
 const SCREEN_INTERVAL_MS = 15 * 60_000;
 const SCREEN_LIFETIME_MS = 60 * 60_000;
 let wakeTimer: ReturnType<typeof setTimeout> | null = null;
 const queue: QueuedLaunch[] = [];
 const processing = new Map<string, QueuedLaunch>();
 const seen = new Map<string, number>();
+const socialIdentities = createSocialIdentityTracker(MAX_QUEUE);
 let active = 0;
 let recipientCacheAt = 0;
 let recipientCache = new Set<string>();
@@ -241,7 +243,7 @@ export function buildProtocolDiscoveryAlertText(args: {
 }
 
 // Social publication is identity evidence, not proof of a live market. Reuse
-// existing per-token enrichment; no new polling, persistence or security checks.
+// bounded per-token enrichment; no broad polling or independent security checks.
 export function socialMafiaMarketGate(stats: AlertKeyStats | null, ownership: OwnershipDisclosure,
   flow: { confirmedDevBurnPercent: number | null; otherDevTransferPercent: number | null; evidenceStatus: string; scannedAt: number } | null,
   now=Date.now()): {qualified:boolean; reason:string; missing:boolean} {
@@ -273,6 +275,7 @@ export function socialMafiaMarketGate(stats: AlertKeyStats | null, ownership: Ow
 
 async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   const { launch, launchpad } = item;
+  item.followUpAt = undefined;
   const token = normalize(launch.token_address);
 
   // Social Mafia is intentionally launchpad-only. Callers must supply a verified
@@ -284,6 +287,7 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   const rawSocials = { twitter: pons?.twitter || onchainSocials.twitter, telegram: pons?.telegram || onchainSocials.telegram };
   const socials = resolveSocialMafiaSocials({...rawSocials, allowMissingTelegram: true});
   if (!socials) {
+    item.marketObservation = undefined;
     item.eligibility = socialsReadFailed || onchainSocials.readStatus === 'UNAVAILABLE' ? null : false;
     if (item.attempt >= 4 && item.eligibility === false) recordLaunchSocialEligibility(token, false);
     console.log('[SocialMafia] skipped; a valid X profile is required', {
@@ -294,6 +298,7 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
     return false;
   }
 
+  const sharedIdentity = socialIdentities.observe(token, socials.xHandle, item.createdAt + SCREEN_LIFETIME_MS);
   const earlyMetadata = !pons?.name ? await getRobinhoodTokenMetadata(token, { signal: AbortSignal.timeout(8_000) }).catch(() => null) : null;
   // Protocol discovery explicitly does not claim social identity. Avoid spending
   // scarce public-X requests on a feed whose rules only require metadata links.
@@ -306,6 +311,7 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   item.eligibility = identity ? socialEvidenceEligibility(identity) : null;
   const route = protocol ? 'PROTOCOL_DISCOVERY' : protocolDiscoveryRoute(pons?.name || earlyMetadata?.name, identity?.confirmed === true);
   if (!route) {
+    item.marketObservation = undefined;
     recordFeedDelivery(healthFeed, item.eligibility === null ? 'DATA_UNAVAILABLE' : 'CONDITION_WAIT');
     if (item.attempt >= 4 && item.eligibility === false) recordLaunchSocialEligibility(token, false);
     console.log('[SocialMafia] suppressed; social contract not confirmed', { token, reason: identity?.reason ?? 'PROTOCOL_SOCIAL_OWNERSHIP_UNVERIFIED' });
@@ -365,17 +371,31 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   const initial = await boundedSocialMafiaContext(work, 1_500);
   const ownership = await robinhoodOwnership(token, launch.deployer_address, launch.curve_address);
   let text = withOwnershipDisclosure(render(initial), ownership);
-  text = await discloseRobinhoodKeyStats(text,token,!partial.market,'Trusted PONS route');
+  text = await discloseRobinhoodKeyStats(text,token,!partial.market,'Trusted PONS route',undefined,route === 'SOCIAL_MAFIA');
   // Keep the exact qualified snapshot through image rendering and release delays.
   const deliveryStats = cachedRobinhoodAlertStats(token);
   if (route === 'SOCIAL_MAFIA') {
     const quality = socialMafiaMarketGate(deliveryStats, ownership, partial.dev);
     if (!quality.qualified) {
+      item.marketObservation = undefined;
       recordFeedDelivery(healthFeed, quality.missing ? 'DATA_UNAVAILABLE' : 'CONDITION_WAIT');
       console.log('[SocialMafia] QUALITY_WAIT', {token, reason:quality.reason, retryMinutes:15});
       return false;
     }
-    text += '\nActivity check <b>Recent buying + creator evidence</b>';
+    const confirmation = confirmSocialMarket(deliveryStats!, item.marketObservation,
+      `${socials.xHandle.toLowerCase()}|${socials.telegramUrl.toLowerCase()}`, Date.now(), partial.market?.timestamp);
+    item.marketObservation = confirmation.observation;
+    if (!confirmation.ready) {
+      recordFeedDelivery(healthFeed, 'CONDITION_WAIT');
+      if (confirmation.observation && (item.confirmationChecks ?? 0) < 2)
+        item.followUpAt = Date.now() + SOCIAL_CONFIRMATION_SPACING_MS + 1_000;
+      console.log('[SocialMafia] CONFIRMATION_WAIT', {token,reason:confirmation.reason,
+        retryMinutes:item.followUpAt ? 2 : 15});
+      return false;
+    }
+    text += '\nActivity check <b>Buying sustained across two spaced checks</b>';
+    if (sharedIdentity) text += '\nIdentity reuse <b>Multiple contracts use this X profile · verify this CA</b>';
+    if (!socials.telegramUrl) text += '\nCommunity links <b>X only · Telegram not provided</b>';
   }
   recordFeedDelivery(healthFeed, 'QUALIFIED');
 
@@ -409,16 +429,15 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
     recordDeliveryAccepted(chatId, deliveryStartedAt, `pons:social:${token}`);
     return accepted;
   }));
-  if (initial == null) void boundedSocialMafiaContext(work, 12_000).then(async values => {
+  // Keep Social Mafia's qualified market/ownership snapshot intact after fan-out.
+  if (initial == null && route !== 'SOCIAL_MAFIA') void boundedSocialMafiaContext(work, 12_000).then(async values => {
     let enriched = await discloseRobinhoodOwnership(render(values), token, launch.deployer_address, launch.curve_address);
     enriched = await discloseRobinhoodKeyStats(enriched,token,!partial.market,'Trusted PONS route');
-    if(route==='SOCIAL_MAFIA') enriched += '\nActivity check <b>Recent buying + creator evidence</b>';
     if (enriched === text) return;
     const botToken = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
     await Promise.allSettled(results.map(async (result, index) => {
       if (result.status !== 'fulfilled' || result.value == null) return;
-      const compact = route==='SOCIAL_MAFIA'?buildPromotionEventCard({kind:'SOCIAL_MAFIA',text:enriched,token,launchType:launchpad.id,stats:cachedRobinhoodAlertStats(token),securityNote:null,buttons:buildSocialMafiaActions(token,launchpad,socials)}):null;
-      const card = await discloseAlertDexPaid(compact?.text??enriched, compact?.buttons??buildSocialMafiaActions(token, launchpad, socials), token);
+      const card = await discloseAlertDexPaid(enriched, buildSocialMafiaActions(token, launchpad, socials), token);
       const edit = alphaosEnrichmentEdit(result.value, chats[index], card.text, card.buttons);
       await fetch(`https://api.telegram.org/bot${botToken}/${edit.method}`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(5_000),
@@ -465,19 +484,31 @@ function drain(): void {
   while (active < MAX_CONCURRENT && queue.length > 0 && queue[0].nextAt <= now) {
     const item = queue.shift()!;
     // Skip missed intervals rather than issuing a burst of catch-up requests.
-    item.attempt = Math.min(4, Math.max(item.attempt + 1, Math.floor((now - item.createdAt) / SCREEN_INTERVAL_MS)));
+    if (item.confirmationDue) {
+      item.confirmationChecks = (item.confirmationChecks ?? 0) + 1;
+      item.attempt = Math.min(4, Math.max(item.attempt, Math.floor((now - item.createdAt) / SCREEN_INTERVAL_MS)));
+    }
+    else {
+      item.attempt = Math.min(4, Math.max(item.attempt + 1, Math.floor((now - item.createdAt) / SCREEN_INTERVAL_MS)));
+      item.confirmationChecks = 0;
+    }
+    item.confirmationDue = false;
     active += 1;
     processing.set(item.launch.token_address.toLowerCase(), item);
     void processLaunch(item)
       .catch(error => {
         item.eligibility = null;
+        item.marketObservation = undefined;
+        item.followUpAt = undefined;
         console.warn('[SocialMafia] screening failed', { token: normalize(item.launch.token_address),
           reason: error instanceof Error ? error.message : String(error) });
         return false;
       })
       .then(done => {
         if (!done && item.attempt < 4 && Date.now() < item.createdAt + SCREEN_LIFETIME_MS) {
-          item.nextAt = item.createdAt + (item.attempt + 1) * SCREEN_INTERVAL_MS;
+          const regularAt = item.createdAt + (item.attempt + 1) * SCREEN_INTERVAL_MS;
+          item.confirmationDue = item.followUpAt != null && item.followUpAt < regularAt;
+          item.nextAt = item.confirmationDue ? item.followUpAt! : regularAt;
           if (queue.length < MAX_QUEUE) queue.push(item);
         } else if (!done) finishSocialScreen(item);
       })
@@ -534,6 +565,7 @@ export function socialMafiaScreeningStatus() {
 export function drainPonsSocialMafiaForTests(): void { drain(); }
 
 export function resetPonsSocialMafiaForTests(): void {
+  socialIdentities.clear();
   if (wakeTimer) clearTimeout(wakeTimer);
   wakeTimer = null;
   queue.length = 0;
@@ -560,7 +592,9 @@ async function boundedSocialMafiaContext<T>(work: Promise<T>, milliseconds: numb
 
 export async function saveSocialWatchCheckpoint(): Promise<void> {
   const items = [...queue, ...processing.values()].filter(item => item.launchpad.id === 'PONS')
-    .slice(0, MAX_QUEUE).map(({ launch, createdAt, nextAt, attempt, eligibility }) => ({ launch, createdAt, nextAt, attempt, eligibility }));
+    .slice(0, MAX_QUEUE).map(({ launch, createdAt, nextAt, attempt, eligibility, confirmationDue }) => ({ launch, createdAt,
+      // Ephemeral market observations are deliberately not persisted. Resume a regular screen after restart.
+      nextAt:confirmationDue ? createdAt + (attempt + 1) * SCREEN_INTERVAL_MS : nextAt, attempt, eligibility }));
   await setWatchCheckpoint('alphaos:watch:social:v1', items, new Date().toISOString(), SCREEN_LIFETIME_MS);
 }
 export async function restoreSocialWatchCheckpoint(load = () => getWatchCheckpoint<Array<Omit<QueuedLaunch, 'launchpad'>>>('alphaos:watch:social:v1')): Promise<void> {

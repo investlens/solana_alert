@@ -46,7 +46,7 @@ export function buildPromotionEventCard(args:PromotionCardArgs) {
  const paid=lines.find(l=>/^(?:Dex Paid|DEX Paid)\s/i.test(l.replace(/<[^>]+>/g,'')));
  const title=args.kind==='SOCIAL_MAFIA'?'🕶️ <b>SOCIAL MAFIA</b>':args.kind==='DEX_PAID'?'💎 <b>DEX PAID DETECTED</b>':/BOOST INCREASED/.test(args.text)?'🚀 <b>BOOST INCREASED</b>':'🚀 <b>BOOST DETECTED</b>';
  const text=[title,`<b>${identity}</b>`,`Robinchain${args.launchType?' · '+esc(args.launchType):''}`,
- ...(args.kind==='SOCIAL_MAFIA'?lines.filter(l=>/^(?:Contract evidence|X announcement|Telegram type|Evidence|Activity check)\s/.test(l.replace(/<[^>]+>/g,''))):args.kind==='DEX_PAID'?[`Payment <b>Confirmed</b>${age==null?'':` · ${age}m ago`}`]:[boost??'Boost purchase detected',...(paid?[paid]:[])]),'',
+ ...(args.kind==='SOCIAL_MAFIA'?lines.filter(l=>/^(?:Contract evidence|X announcement|Telegram type|Evidence|Activity check|Identity reuse|Community links)\s/.test(l.replace(/<[^>]+>/g,''))):args.kind==='DEX_PAID'?[`Payment <b>Confirmed</b>${age==null?'':` · ${age}m ago`}`]:[boost??'Boost purchase detected',...(paid?[paid]:[])]),'',
  '<b>MARKET</b>',...new Set(metrics),...(unavailable.length?['Market data incomplete · use Full Intel to recheck']:[]),
  ...(s?.preBond?['Bonding curve · no DEX market yet']:!s?.chartUrl?['Trading venue unconfirmed']:[]),
  ...(!metrics.length?['Market snapshot pending']:[]),'',
