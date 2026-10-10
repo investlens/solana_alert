@@ -318,7 +318,7 @@ describe('existing-token scanner provider short-circuit', () => {
   });
 
   it('uses a sustainable bounded quota while retaining the 20-second cycle envelope', () => {
-    assert.equal(EXISTING_TOKEN_SCANNER_SUSTAINABLE_QUOTA, 6);
+    assert.equal(EXISTING_TOKEN_SCANNER_SUSTAINABLE_QUOTA, 12);
     assert.equal(EXISTING_TOKEN_SCANNER_QUEUE_WAIT_MS, 10_000);
     assert.equal(DEXSCREENER_REQUESTS_PER_SECOND, 2);
     resetDexScreenerGovernorForTests({ maxConcurrency: 2, rateLimitPerSecond: 2 });

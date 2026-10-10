@@ -132,6 +132,24 @@ export function socialEvidenceEligibility(result: SocialContractConfirmation): b
 export function createSocialContractVerifier(readHtml = readPublicSocialHtml, now = Date.now) {
   const cache = new Map<string, { result: SocialContractConfirmation; expires: number }>();
   const pending = new Map<string, Promise<SocialContractConfirmation>>();
+  const pages = new Map<string, { html: string | null; expires: number }>();
+  const pagePending = new Map<string, Promise<string | null>>();
+  // A copied profile referenced by several tokens is fetched once, but each
+  // token still gets its own exact CA/chain/author verification. No DB writes.
+  const readPage = async (url: string): Promise<string | null> => {
+    for (const [id, entry] of pages) if (entry.expires <= now()) pages.delete(id);
+    const cached = pages.get(url);
+    if (cached) return cached.html;
+    const inflight = pagePending.get(url);
+    if (inflight) return inflight;
+    const work = readHtml(url).catch(() => null).then(html => {
+      if (pages.size >= 10) pages.delete(pages.keys().next().value!);
+      pages.set(url, { html, expires: now() + (html ? 30_000 : 60_000) });
+      return html;
+    }).finally(() => pagePending.delete(url));
+    pagePending.set(url, work);
+    return work;
+  };
   let requests: number[] = [];
   const anchors=new Map<string,{links:string[];expires:number}>();
   return async (args: { token: string; xHandle: string; telegramUrl: string }): Promise<SocialContractConfirmation> => {
@@ -148,7 +166,7 @@ export function createSocialContractVerifier(readHtml = readPublicSocialHtml, no
     const anchorKey=args.xHandle.toLowerCase();
     for(const [id,entry] of anchors)if(entry.expires<=time)anchors.delete(id);
     const read=async(url:string)=>{
-      const html=await readHtml(url);
+      const html=await readPage(url);
       if(html&&url===`https://x.com/${args.xHandle}`){const links=xProjectLinks(html,args.xHandle);if(links.length){if(anchors.size>=100)anchors.delete(anchors.keys().next().value!);anchors.set(anchorKey,{links,expires:now()+3600000});}}
       return html;
     };

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createPumpCandidateQueue,selectPumpMarket,addPumpObservation,evaluatePumpMomentum,type PumpMarket } from './pumpfunMomentum.js';
 import { checkPumpRpc,readPumpEvidence,type PumpEvidence } from './pumpfunEvidence.js';
-import { governedDexScreenerJson } from '../../services/dexscreenerRequestGovernor.js';
+import { governedDexScreenerJson, DexScreenerQueueCapacityError, DexScreenerProviderBackoffError } from '../../services/dexscreenerRequestGovernor.js';
 import { deliverAlphaSemanticEvent } from '../../services/alphaSemanticDeliveryService.js';
 import { withResearchDisclosure } from '../../ui/researchDisclosure.js';
 const escape=(s:string)=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -23,6 +23,9 @@ export function pumpMomentumCard(m:PumpMarket,e:PumpEvidence,ratio:number) {
   '',`<code>${m.mint}</code>`,`DEXScreener + confirmed Solana RPC · ${new Date(m.observedAt).toISOString().slice(11,19)} UTC`,
  ].join('\n'));
 }
+export function pumpMarketReadFailure(error: unknown): 'MARKET_BUDGET_WAIT' | 'MARKET_PROVIDER_UNAVAILABLE' {
+ return error instanceof DexScreenerQueueCapacityError || error instanceof DexScreenerProviderBackoffError ? 'MARKET_BUDGET_WAIT' : 'MARKET_PROVIDER_UNAVAILABLE';
+}
 let started=false;
 export function startPumpfunMomentumWorker() {
  if(started)return;started=true;
@@ -36,16 +39,17 @@ export function startPumpfunMomentumWorker() {
   socket.onerror=()=>console.warn('[PumpMomentum] DISCOVERY_ERROR');
   socket.onclose=()=>{socket=null;if(!reconnecting)reconnecting=setTimeout(()=>{reconnecting=null;connect();},30_000);};
  };
- const read=async(url:string,endpoint:string)=>(await governedDexScreenerJson<unknown>({url,endpoint,caller:'pumpfun_momentum',priority:'BACKGROUND',cacheKey:`pump:${createHash('sha256').update(url).digest('hex')}`,cacheTtlMs:25_000,httpTimeoutMs:4000,queueWaitTimeoutMs:1000}));
+ const read=async(url:string,endpoint:string)=>(await governedDexScreenerJson<unknown>({url,endpoint,caller:'pumpfun_momentum',priority:'BACKGROUND',cacheKey:`pump:${createHash('sha256').update(url).digest('hex')}`,cacheTtlMs:25_000,httpTimeoutMs:4000,queueWaitTimeoutMs:4000}));
  const tick=async()=>{
-  if(running)return;running=true;let indexed=0,qualified=0,accepted=0,failed=0,evidenceChecks=0;const reasons:Record<string,number>={};
+  if(running)return;running=true;let indexed=0,qualified=0,accepted=0,failed=0,evidenceChecks=0;const reasons:Record<string,number>={};const cycleStarted=Date.now();
   const reason=(r:string)=>{reasons[r]=(reasons[r]??0)+1;};
   try {
-   if(Date.now()-lastProfiles>=120_000) {lastProfiles=Date.now();try{const feed=(await read('https://api.dexscreener.com/token-profiles/latest/v1','PROFILES')).value;if(Array.isArray(feed))for(const item of feed)if(item?.chainId==='solana')queue.seed(String(item.tokenAddress??''));}catch{failed++;}}
+   if(Date.now()-lastProfiles>=120_000) {lastProfiles=Date.now();try{const feed=(await read('https://api.dexscreener.com/token-profiles/latest/v1','PROFILES')).value;if(Array.isArray(feed))for(const item of feed)if(item?.chainId==='solana')queue.seed(String(item.tokenAddress??''));}catch(error){const r=pumpMarketReadFailure(error);reason(r);if(r==='MARKET_PROVIDER_UNAVAILABLE')failed++;}}
    const candidates=queue.list();
    for(let at=0;at<candidates.length;at+=30) {
+    if(Date.now()-cycleStarted>=20_000){reason('MARKET_BUDGET_WAIT');break;}
     const batch=candidates.slice(at,at+30);let response:Awaited<ReturnType<typeof read>>;
-    try{response=await read(`https://api.dexscreener.com/tokens/v1/solana/${batch.map(v=>v.mint).join(',')}`,'TOKEN_BATCH_SOLANA');}catch{failed++;continue;}
+    try{response=await read(`https://api.dexscreener.com/tokens/v1/solana/${batch.map(v=>v.mint).join(',')}`,'TOKEN_BATCH_SOLANA');}catch(error){const r=pumpMarketReadFailure(error);reason(r);if(r==='MARKET_PROVIDER_UNAVAILABLE')failed++;continue;}
     const observed=Date.parse(response.fetchedAt);
     for(const candidate of batch) {
      candidate.lastChecked=Date.now();const m=selectPumpMarket(response.value,candidate.mint,observed);

@@ -108,3 +108,13 @@ test('author-bound public profile metadata can confirm a contract without readin
  assert.equal((await verifySocialContract(args,async()=>html)).confirmed,true);
  for(const bad of [html.replace('href="https://x.com/RevenueFamily"','href="https://x.com/Other"'),html.replace('@RevenueFamily','@Other'),html.replace('https://x.com/RevenueFamily','https://evil.example/RevenueFamily'),`<script>${html}</script>`,html.replace(`Robinchain CA: ${token}`,'Log in to X')])assert.equal((await verifySocialContract(args,async()=>bad)).confirmed,false);
 });
+
+test('copied X profile is read once across tokens while CA verification remains token-specific', async () => {
+  const { createSocialContractVerifier } = await import('../src/chains/robinhood/socialContractConfirmation.js');
+  let calls=0; let clock=0;
+  const html=`<link rel="canonical" href="https://x.com/RevenueFamily"><meta property="og:title" content="Revenue (@RevenueFamily) / X"><meta name="description" content="Robinchain CA: ${token}">`;
+  const verify=createSocialContractVerifier(async url=>{if(url.includes("x.com")){calls++;return html;}return null;},()=>clock);
+  const [legit,clone]=await Promise.all([verify(args),verify({...args,token:other})]);
+  assert.equal(calls,1); assert.equal(legit.confirmed,true); assert.equal(clone.confirmed,false);
+  clock=60_001; await verify({...args,token:other}); assert.equal(calls,2);
+});
