@@ -2,7 +2,7 @@ import { getSharedJson, setSharedJson } from './sharedJsonCache.js';
 import { escapeTelegramHtml as esc } from '../ui/escapeHtml.js';
 
 export type DeliveryStage = 'ENABLED' | 'MUTED' | 'PREFERENCES_UNAVAILABLE' | 'ACCEPTED' | 'PROCESSING_FAILED'
-  | 'DISCOVERED' | 'EVALUATED' | 'DATA_UNAVAILABLE' | 'CONDITION_WAIT' | 'RISK_REJECTED' | 'QUALIFIED';
+  | 'DISCOVERED' | 'EVALUATED' | 'DATA_UNAVAILABLE' | 'CONDITION_WAIT' | 'RISK_REJECTED' | 'QUALIFIED' | 'DEDUPLICATED' | 'UNCONFIRMED';
 export type FeedHealthSnapshot = { startedAt: number; observedAt: number; feeds: Record<string, Partial<Record<DeliveryStage, number>>> };
 const startedAt = Date.now();
 const feeds: FeedHealthSnapshot['feeds'] = {};
@@ -52,6 +52,7 @@ export function renderFeedHealth(rows: Array<{ name: string; snapshot: FeedHealt
     for (const [feed, row] of Object.entries(snapshot.feeds).slice(0, 16)) {
       if (lines.join('\n').length > 3000) { lines.push('Additional feed counters omitted from this compact view.'); break; }
       lines.push(`${esc(feed.replace(/_/g, ' '))}: eligible ${row.ENABLED ?? 0} · muted ${row.MUTED ?? 0} · preference errors ${row.PREFERENCES_UNAVAILABLE ?? 0} · accepted ${row.ACCEPTED ?? 0} · processing errors ${row.PROCESSING_FAILED ?? 0}`);
+      if (row.DEDUPLICATED || row.UNCONFIRMED) lines.push(`Already confirmed ${row.DEDUPLICATED ?? 0} · unconfirmed claims ${row.UNCONFIRMED ?? 0} (requires delivery review)`);
       if (row.EVALUATED || row.DISCOVERED) lines.push(`Screening: discovered ${row.DISCOVERED ?? 0} · evaluated ${row.EVALUATED ?? 0} · data unavailable ${row.DATA_UNAVAILABLE ?? 0} · waiting ${row.CONDITION_WAIT ?? 0} · risk rejects ${row.RISK_REJECTED ?? 0} · qualified ${row.QUALIFIED ?? 0}`);
     }
     lines.push('');
