@@ -1,5 +1,6 @@
 export type OwnershipDisclosure = {
   devPercent: number | null;
+  devInitialPercent?:number; devInitialObservedAt?:number;
   devSource?:'RPC'|'BLOCKSCOUT_INDEXED';
   creator?: string | null;
   devObservedAt?:number;devBlock?:string;top10ObservedAt?:number;
@@ -25,6 +26,7 @@ export function withOwnershipDisclosure(text: string, evidence: OwnershipDisclos
     `👥 Top 10${evidence.top10Coverage === 'INDEXED_SAMPLE' ? ' · indexed sample' : evidence.top10Coverage === 'PROVIDER_REPORTED' ? ' · provider wallet sample' : ''}  <b>${top == null ? 'Unavailable' : top.toFixed(2) + '%'}</b>`,
     ...(dev != null && Number.isFinite(evidence.devObservedAt) ? [`Dev observed ${new Date(evidence.devObservedAt!).toISOString().slice(11,19)} UTC${evidence.devBlock ? ' · on-chain block '+evidence.devBlock.replace(/[^0-9]/g,'') : ' · provider reported'}`] : []),
     ...(top != null && Number.isFinite(evidence.top10ObservedAt) ? [`Holder sample observed ${new Date(evidence.top10ObservedAt!).toISOString().slice(11,19)} UTC`] : []),
+    ...(dev != null && validOwnershipPercent(evidence.devInitialPercent) != null && Number.isFinite(evidence.devInitialObservedAt) && Number.isFinite(evidence.devObservedAt) && evidence.devObservedAt! > evidence.devInitialObservedAt! ? [`Creator balance change <b>${dev-evidence.devInitialPercent!>=0?'+':''}${(dev-evidence.devInitialPercent!).toFixed(2)} pp</b> since ${new Date(evidence.devInitialObservedAt!).toISOString().slice(11,19)} UTC · observed wallet balance, not proof of selling`] : []),
     ...(effectiveDev != null && effectiveDev >= 10 ? ['⚠️ Concentrated dev holding · potential sell pressure'] : []),
     ...(evidence.devSource==='BLOCKSCOUT_INDEXED'?['Explorer indexed balance · live block not confirmed']:[]),
     ...(effectiveDev === 0 ? ['Creator wallet balance only · sale, transfer or burn not established'] : []),
