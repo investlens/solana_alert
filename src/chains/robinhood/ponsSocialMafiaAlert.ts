@@ -130,7 +130,7 @@ export function resolveSocialMafiaSocials(args: {
 }
 
 async function recipients(): Promise<string[]> {
-  if (Date.now() - recipientCacheAt < RECIPIENT_CACHE_MS && recipientCache.size > 0) return [...recipientCache];
+  // Refresh once per qualifying event, including starts received by another worker.
   const next = new Set<string>();
   const admin = String(process.env.ADMIN_TELEGRAM_ID ?? process.env.OWNER_CHAT_ID ?? '').trim();
   if (admin) next.add(admin);
@@ -155,11 +155,11 @@ async function recipients(): Promise<string[]> {
 
 async function sendTelegram(args: {
   chatId: string; text: string; tokenAddress: string; launchpad: VerifiedLaunchpadContext;
-  socials: SocialMafiaSocials; image: Buffer | null;
+  socials: SocialMafiaSocials; image: Buffer | null; stats: AlertKeyStats | null;
 }): Promise<AlphaosDelivery> {
   const botToken = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
   if (!botToken) throw new Error('missing Telegram bot token');
-  const compact = /SOCIAL MAFIA/.test(args.text) ? buildPromotionEventCard({kind:'SOCIAL_MAFIA',text:args.text,token:args.tokenAddress,launchType:args.launchpad.id,stats:cachedRobinhoodAlertStats(args.tokenAddress),securityNote:null,buttons:buildSocialMafiaActions(args.tokenAddress,args.launchpad,args.socials)}) : null;
+  const compact = /SOCIAL MAFIA/.test(args.text) ? buildPromotionEventCard({kind:'SOCIAL_MAFIA',text:args.text,token:args.tokenAddress,launchType:args.launchpad.id,stats:args.stats,securityNote:null,buttons:buildSocialMafiaActions(args.tokenAddress,args.launchpad,args.socials)}) : null;
   const card = await discloseAlertDexPaid(compact?.text??args.text, compact?.buttons??buildSocialMafiaActions(args.tokenAddress, args.launchpad, args.socials), args.tokenAddress);
   return sendAlphaosPhotoAlert({ botToken, chatId: args.chatId, text: card.text, image: args.image, keyboard: card.buttons });
 }
@@ -366,8 +366,10 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   const ownership = await robinhoodOwnership(token, launch.deployer_address, launch.curve_address);
   let text = withOwnershipDisclosure(render(initial), ownership);
   text = await discloseRobinhoodKeyStats(text,token,!partial.market,'Trusted PONS route');
+  // Keep the exact qualified snapshot through image rendering and release delays.
+  const deliveryStats = cachedRobinhoodAlertStats(token);
   if (route === 'SOCIAL_MAFIA') {
-    const quality = socialMafiaMarketGate(cachedRobinhoodAlertStats(token), ownership, partial.dev);
+    const quality = socialMafiaMarketGate(deliveryStats, ownership, partial.dev);
     if (!quality.qualified) {
       recordFeedDelivery(healthFeed, quality.missing ? 'DATA_UNAVAILABLE' : 'CONDITION_WAIT');
       console.log('[SocialMafia] QUALITY_WAIT', {token, reason:quality.reason, retryMinutes:15});
@@ -395,7 +397,7 @@ async function processLaunch(item: QueuedLaunch): Promise<boolean> {
   const results = await Promise.allSettled(chats.map(async chatId => {
     await waitForRecipientDelivery(chatId, deliveryStartedAt);
     let accepted: AlphaosDelivery;
-    try { accepted = await sendTelegram({chatId, text, tokenAddress: token, launchpad, socials, image}); }
+    try { accepted = await sendTelegram({chatId, text, tokenAddress: token, launchpad, socials, image, stats:deliveryStats}); }
     catch (error) {
       if (telegramRecipientUnavailable(error)) {
         await markTelegramUserBlocked(chatId);
