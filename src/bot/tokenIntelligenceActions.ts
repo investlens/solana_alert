@@ -39,7 +39,7 @@ export function registerTokenIntelligenceActions(bot: Telegraf<any>) {
     catch { await ctx.reply('Wallet-link research is busy or unavailable. Please retry shortly.').catch(()=>{}); }
     finally { activeReplies.delete(key); }
   });
-  bot.action(/^COPY_CA_(0x[a-fA-F0-9]{40})$/, async ctx => {
+  bot.action(/^COPY_CA_(0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/, async ctx => {
     const token = String(ctx.match[1]);
     await ctx.answerCbQuery('Contract address ready').catch(() => {});
     await ctx.reply(`<code>${token}</code>`, { parse_mode: 'HTML' }).catch(() => {});
