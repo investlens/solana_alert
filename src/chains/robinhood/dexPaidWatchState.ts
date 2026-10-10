@@ -67,16 +67,14 @@ export function seedDexPaidWatch(value: unknown, now: number, limit: number, fac
 }
 
 // Keep the same total/check budget. Promotion refreshes cannot evict a PONS
-// launch or downgrade its authoritative source. Reserve a quarter for promotions.
+// launch or downgrade its authoritative source. Unused slots remain available.
 export function rememberDexPaidCandidate(candidates:Map<string,DexPaidCandidate>, token:RobinhoodDiscoveredToken, now:number, limit:number):boolean {
   const key=token.tokenAddress.toLowerCase(), previous=candidates.get(key);
   if(previous){
     const authoritative=previous.token.source==='PONS' && token.source!=='PONS' ? previous.token : token;
     candidates.set(key,{token:authoritative,lastSeenAt:now,lastCheckedAt:previous.lastCheckedAt});return true;
   }
-  const promotionLimit=Math.max(1,Math.floor(limit/4));
   const promotions=[...candidates.entries()].filter(([,c])=>c.token.source!=='PONS').sort((a,b)=>a[1].lastSeenAt-b[1].lastSeenAt);
-  if(token.source!=='PONS' && promotions.length>=promotionLimit)candidates.delete(promotions[0][0]);
   if(candidates.size>=limit){
     if(promotions.length)candidates.delete(promotions[0][0]);
     else if(token.source!=='PONS')return false;
