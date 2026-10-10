@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {restoreDexPaidWatch,snapshotDexPaidWatch,seedDexPaidWatch,dexPaidFeedCandidates,dexPaidWatchLimit,recentDexPayment,DEX_PAID_PAYMENT_MAX_AGE_SECONDS} from '../src/chains/robinhood/dexPaidWatchState.js';
+import {restoreDexPaidWatch,snapshotDexPaidWatch,seedDexPaidWatch,dexPaidFeedCandidates,dexPaidWatchLimit,recentDexPayment,DEX_PAID_PAYMENT_MAX_AGE_SECONDS,rememberDexPaidCandidate} from '../src/chains/robinhood/dexPaidWatchState.js';
 const now=Date.now();
 const token={chain:'robinhood' as const,tokenAddress:'0x'+'a'.repeat(40),discoveredAt:now-1000,source:'PONS' as const,sourceType:'LAUNCHPAD' as const,sources:[]};
 test('restart checkpoint preserves scheduling and strips bulky unneeded metadata',()=>{
@@ -8,7 +8,7 @@ test('restart checkpoint preserves scheduling and strips bulky unneeded metadata
  const restored=restoreDexPaidWatch(snapshotDexPaidWatch([original],now,24),now+1000,24);
  assert.equal(restored.length,1);assert.equal(restored[0].lastCheckedAt,original.lastCheckedAt);
  assert.equal(restored[0].token.metadata,undefined);
- assert.equal(restoreDexPaidWatch({version:1,candidates:[{...original,lastSeenAt:now-1800000}]},now,24).length,0);
+ assert.equal(restoreDexPaidWatch({version:1,candidates:[{...original,lastSeenAt:now-3600000}]},now,24).length,0);
 });
 test('promotion discovery includes older-token profiles and custom candidates without inventing PONS lineage',()=>{
  const rows=dexPaidFeedCandidates([{chainId:'robinhood',tokenAddress:token.tokenAddress},
@@ -36,5 +36,20 @@ test('cold start seeds only recent verified factory launches from the existing R
  const launch={chain:'robinhood',token_address:token.tokenAddress,factory_address:factory,block_timestamp:new Date(now-1000).toISOString()};
  assert.equal(seedDexPaidWatch([{launch}],now,24,[factory]).length,1);
  assert.equal(seedDexPaidWatch([{launch}],now,24,[]).length,0);
- assert.equal(seedDexPaidWatch([{launch:{...launch,block_timestamp:new Date(now-1800001).toISOString()}}],now,24,[factory]).length,0);
+ assert.equal(seedDexPaidWatch([{launch:{...launch,block_timestamp:new Date(now-3600001).toISOString()}}],now,24,[factory]).length,0);
+});
+
+test('promotion refresh never evicts or downgrades authoritative PONS launches',()=>{
+ const queue=new Map();
+ for(let i=0;i<18;i++)rememberDexPaidCandidate(queue,{...token,tokenAddress:'0x'+i.toString(16).padStart(40,'0')},now,24);
+ for(let i=18;i<60;i++)rememberDexPaidCandidate(queue,{...token,tokenAddress:'0x'+i.toString(16).padStart(40,'0'),source:'DEXSCREENER'},now+i,24);
+ assert.equal(queue.size,24);assert.equal([...queue.values()].filter(c=>c.token.source==='PONS').length,18);
+ const entry=[...queue.values()][0];entry.lastCheckedAt=now-200;
+ rememberDexPaidCandidate(queue,{...entry.token,source:'DEXSCREENER'},now+1,24);
+ assert.equal(queue.get(entry.token.tokenAddress).token.source,'PONS');assert.equal(queue.get(entry.token.tokenAddress).lastCheckedAt,now-200);
+});
+test('hour-long recovery keeps a 45-minute PONS candidate but expires at one hour',()=>{
+ const launch={chain:'robinhood',token_address:token.tokenAddress,factory_address:'0x'+'b'.repeat(40),block_timestamp:new Date(now-45*60000).toISOString()};
+ assert.equal(seedDexPaidWatch([{launch}],now,24,[launch.factory_address]).length,1);
+ assert.equal(seedDexPaidWatch([{launch:{...launch,block_timestamp:new Date(now-60*60000).toISOString()}}],now,24,[launch.factory_address]).length,0);
 });
