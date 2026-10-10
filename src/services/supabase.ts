@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { runtimeDeliverableUsers } from './runtimeSubscriberRegistry.js';
+import { runtimeDeliverableUsers, mergeRuntimeSubscribers } from './runtimeSubscriberRegistry.js';
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -207,12 +207,7 @@ function resilientUsersBody(cachedBody?: string | null): string {
     }
   }
 
-  for (const row of runtimeDeliverableUsers({ allRealtime: testingRealtimeEnabled() })) {
-    const id = String(row?.telegram_id ?? '');
-    if (id) merged.set(id, row);
-  }
-
-  return JSON.stringify(normalizeTestingRecipients([...merged.values()]));
+  return JSON.stringify(normalizeTestingRecipients(mergeRuntimeSubscribers([...merged.values()])));
 }
 
 function runtimeUsersResponse(reason: string): Response {
