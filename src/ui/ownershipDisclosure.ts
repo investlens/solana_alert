@@ -1,5 +1,7 @@
+import type { CreatorActivity } from '../services/creatorActivityEvidence.js';
 export type OwnershipDisclosure = {
   devPercent: number | null;
+  activity?:CreatorActivity|null;
   devInitialPercent?:number; devInitialObservedAt?:number;
   devSource?:'RPC'|'BLOCKSCOUT_INDEXED';
   creator?: string | null;
@@ -29,6 +31,10 @@ export function withOwnershipDisclosure(text: string, evidence: OwnershipDisclos
     ...(dev != null && validOwnershipPercent(evidence.devInitialPercent) != null && Number.isFinite(evidence.devInitialObservedAt) && Number.isFinite(evidence.devObservedAt) && evidence.devObservedAt! > evidence.devInitialObservedAt! ? [`Creator balance change <b>${dev-evidence.devInitialPercent!>=0?'+':''}${(dev-evidence.devInitialPercent!).toFixed(2)} pp</b> since ${new Date(evidence.devInitialObservedAt!).toISOString().slice(11,19)} UTC · observed wallet balance, not proof of selling`] : []),
     ...(effectiveDev != null && effectiveDev >= 10 ? ['⚠️ Concentrated dev holding · potential sell pressure'] : []),
     ...(evidence.devSource==='BLOCKSCOUT_INDEXED'?['Explorer indexed balance · live block not confirmed']:[]),
+    ...(evidence.activity?.reportedSales ? [`Creator sold <b>${evidence.activity.reportedSales} trade(s)</b> · PONS reported, recent page${/^0x[a-f0-9]{64}$/i.test(evidence.activity.saleTx??'')?' · <a href="https://robinhoodchain.blockscout.com/tx/'+evidence.activity.saleTx+'">Transaction</a>':''}`]:[]),
+    ...(evidence.activity?.burns ? [`Creator burned <b>${evidence.activity.burns} transfer(s)</b> · burn-address destinations`]:[]),
+    ...(evidence.activity?.outflows ? [`Creator outflows <b>${evidence.activity.outflows} transfer(s)</b> · may include sales`]:[]),
+    ...(evidence.activity?.fromBlock ? [`Activity coverage · blocks ${evidence.activity.fromBlock}–${evidence.activity.toBlock}; partial history`]:[]),
     ...(effectiveDev === 0 ? ['Creator wallet balance only · sale, transfer or burn not established'] : []),
   ].join('\n');
   const contractMarker = clean.indexOf('<b>CONTRACT</b>');

@@ -1,7 +1,7 @@
 import type { RobinhoodDiscoveredToken } from './discovery/types.js';
 export const DEX_PAID_PAYMENT_MAX_AGE_SECONDS = Math.max(120, Math.min(600,
   Number(process.env.DEX_PAID_MAX_PAYMENT_AGE_SECONDS ?? 600) || 600));
-export const DEX_PAID_WATCH_TTL_MS = 30 * 60_000;
+export const DEX_PAID_WATCH_TTL_MS = 60 * 60_000;
 export type DexPaidCandidate = { token: RobinhoodDiscoveredToken; lastSeenAt: number; lastCheckedAt: number };
 const address = (value: unknown): value is string => typeof value === 'string' && /^0x[a-fA-F0-9]{40}$/.test(value);
 export function dexPaidWatchLimit(intervalMs: number, checks: number): number {
@@ -64,4 +64,21 @@ export function seedDexPaidWatch(value: unknown, now: number, limit: number, fac
       lastSeenAt:created,lastCheckedAt:0});
   }
   return restoreDexPaidWatch({version:1,candidates:entries.sort((a,b)=>b.lastSeenAt-a.lastSeenAt).slice(0,24)},now,limit);
+}
+
+// Keep the same total/check budget. Promotion refreshes cannot evict a PONS
+// launch or downgrade its authoritative source. Unused slots remain available.
+export function rememberDexPaidCandidate(candidates:Map<string,DexPaidCandidate>, token:RobinhoodDiscoveredToken, now:number, limit:number):boolean {
+  const key=token.tokenAddress.toLowerCase(), previous=candidates.get(key);
+  if(previous){
+    const authoritative=previous.token.source==='PONS' && token.source!=='PONS' ? previous.token : token;
+    candidates.set(key,{token:authoritative,lastSeenAt:now,lastCheckedAt:previous.lastCheckedAt});return true;
+  }
+  const promotions=[...candidates.entries()].filter(([,c])=>c.token.source!=='PONS').sort((a,b)=>a[1].lastSeenAt-b[1].lastSeenAt);
+  if(candidates.size>=limit){
+    if(promotions.length)candidates.delete(promotions[0][0]);
+    else if(token.source!=='PONS')return false;
+    else {const oldest=[...candidates.entries()].sort((a,b)=>a[1].lastSeenAt-b[1].lastSeenAt)[0];candidates.delete(oldest[0]);}
+  }
+  candidates.set(key,{token,lastSeenAt:now,lastCheckedAt:0});return true;
 }

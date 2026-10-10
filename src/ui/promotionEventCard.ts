@@ -52,7 +52,7 @@ export function buildPromotionEventCard(args:PromotionCardArgs) {
  ...(!metrics.length?['Market snapshot pending']:[]),'',
  '<b>OWNERSHIP</b>',...(creator?[creator]:[]),dev,top,
  ...(lines.some(l=>/Creator wallet balance only/.test(l))?['Zero creator balance does not prove a sale or burn.']:[]),
- ...lines.filter(l=>/Concentrated dev holding|^Creator balance change|^Dev observed|^Holder sample observed/.test(l)),
+ ...lines.filter(l=>/Concentrated dev holding|^Creator balance change|^Dev observed|^Holder sample observed|^Creator sold|^Creator burned|^Creator outflows|^Activity coverage/.test(l)),
  ...lines.filter(l=>/^(?:Burned|Verified dev burn)\s/i.test(l.replace(/<[^>]+>/g,'').replace(/^[^A-Za-z]+/,''))&&!/Unavailable|Unverified/i.test(l)),'',
  '<b>RISK</b>',risk,
  ...(socials.length?['',socials.join(' · ')]:[]),'',

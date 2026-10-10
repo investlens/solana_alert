@@ -2,13 +2,13 @@ import { getPonsFactoryDeployments } from './ponsContracts.js';
 import { governedDexScreenerJson } from '../../services/dexscreenerRequestGovernor.js';
 import { fetchRobinhoodBoosts } from './discovery.js';
 import { getSharedJson, setSharedJson } from '../../services/sharedJsonCache.js';
-import { DEX_PAID_WATCH_TTL_MS, dexPaidFeedCandidates, dexPaidWatchLimit, restoreDexPaidWatch, seedDexPaidWatch, snapshotDexPaidWatch, type DexPaidCandidate } from './dexPaidWatchState.js';
+import { DEX_PAID_WATCH_TTL_MS, rememberDexPaidCandidate, dexPaidFeedCandidates, dexPaidWatchLimit, restoreDexPaidWatch, seedDexPaidWatch, snapshotDexPaidWatch, type DexPaidCandidate } from './dexPaidWatchState.js';
 import { discoverFromPons } from './discovery/launchpads/pons.js';
 import type { RobinhoodDiscoveredToken } from './discovery/types.js';
 import { processRobinhoodDexPaidSignal } from './robinhoodObserver.js';
 
 const INTERVAL_MS = Math.max(10_000, Number(process.env.DEX_PAID_FAST_LANE_INTERVAL_MS ?? 15_000));
-const CANDIDATE_TTL_MS = Math.max(5 * 60_000, Number(process.env.DEX_PAID_FAST_LANE_CANDIDATE_TTL_MS ?? 30 * 60_000));
+const CANDIDATE_TTL_MS = Math.max(5 * 60_000, Number(process.env.DEX_PAID_FAST_LANE_CANDIDATE_TTL_MS ?? DEX_PAID_WATCH_TTL_MS));
 const MAX_CHECKS_PER_CYCLE = Math.max(1, Math.min(4, Number(process.env.DEX_PAID_FAST_LANE_MAX_CHECKS ?? 2)));
 const LIVE_LOOKBACK_BLOCKS = BigInt(Math.max(50, Number(process.env.DEX_PAID_FAST_LANE_LOOKBACK_BLOCKS ?? 300)));
 const STARTUP_LOOKBACK_BLOCKS = BigInt(Math.max(Number(LIVE_LOOKBACK_BLOCKS), Number(process.env.DEX_PAID_FAST_LANE_STARTUP_LOOKBACK_BLOCKS ?? 2_000)));
@@ -25,6 +25,16 @@ let nextFeedDiscoveryAt = 0;
 async function discoverPromotionFeeds() {
   if(Date.now()<nextFeedDiscoveryAt)return;
   nextFeedDiscoveryAt=Date.now()+60_000;
+  // Reuse the existing one-hour launch queue continuously, not only on startup.
+  const launches=await getSharedJson<unknown>('alphaos:watch:social:v1',1_000);
+  const seeds=seedDexPaidWatch(launches?.value,Date.now(),WATCH_LIMIT,
+    getPonsFactoryDeployments().filter(f=>f.enabled).map(f=>f.address));
+  // Oldest first gives newer launches priority when the bounded watch is full.
+  for(const entry of [...seeds].reverse()) {
+    const k=key(entry.token.tokenAddress);
+    if(!candidates.has(k))rememberDexPaidCandidate(candidates,entry.token,entry.lastSeenAt,WATCH_LIMIT);
+  }
+  console.info('[DexPaidFastLane] PONS_WATCH_REFRESH',{seeded:seeds.length,cap:WATCH_LIMIT,dbWrites:0});
   const results=await Promise.allSettled([
     governedDexScreenerJson<unknown>({url:'https://api.dexscreener.com/token-profiles/latest/v1',
       caller:'dex_paid_profile_discovery',endpoint:'PROFILES',priority:'NORMAL',cacheTtlMs:60_000,
@@ -46,19 +56,15 @@ function enabled(): boolean {
 function key(address: string) { return address.trim().toLowerCase(); }
 
 function remember(token: RobinhoodDiscoveredToken) {
-  const k = key(token.tokenAddress);
-  const previous = candidates.get(k);
-  if (!previous && candidates.size >= WATCH_LIMIT) {
-    const oldest = [...candidates.entries()].sort((a,b)=>a[1].lastSeenAt-b[1].lastSeenAt)[0];
-    candidates.delete(oldest[0]);
-    console.log('[DexPaidFastLane] WATCH_CAP_EVICTION', {cap:WATCH_LIMIT});
-  }
-  candidates.set(k, { token, lastSeenAt: Date.now(), lastCheckedAt: previous?.lastCheckedAt ?? 0 });
+  const before=candidates.size, existed=candidates.has(key(token.tokenAddress));
+  const admitted=rememberDexPaidCandidate(candidates,token,Date.now(),WATCH_LIMIT);
+  if(!admitted)console.info('[DexPaidFastLane] PROMOTION_DEFERRED_PONS_PROTECTED',{cap:WATCH_LIMIT});
+  else if(!existed && before>=WATCH_LIMIT && candidates.size===before)console.info('[DexPaidFastLane] WATCH_ROTATED',{cap:WATCH_LIMIT,source:token.source});
 }
 
 function prune() {
   const cutoff = Date.now() - CANDIDATE_TTL_MS;
-  for (const [k, candidate] of candidates) if (candidate.lastSeenAt < cutoff) candidates.delete(k);
+  for (const [k, candidate] of candidates) if (candidate.lastSeenAt < (candidate.token.source==='PONS'?Date.now()-DEX_PAID_WATCH_TTL_MS:cutoff)) candidates.delete(k);
 }
 
 async function cycle() {

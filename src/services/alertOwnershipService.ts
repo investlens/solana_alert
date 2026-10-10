@@ -1,3 +1,4 @@
+import { creatorActivityEvidence } from './creatorActivityEvidence.js';
 import { observeCreatorBalance } from './creatorBalanceObservation.js';
 import { getIndexedCreatorHolding } from './indexedCreatorHolding.js';
 import { resolveCreatorIdentity, resolvePonsCreatorFromSources } from './verifiedCreatorIdentity.js';
@@ -31,7 +32,7 @@ export async function robinhoodOwnership(token: string, creator?: string | null,
     started++;
     partial.set(key, {...reusable});
     work = (async () => {
-      const [dev, holders] = await Promise.allSettled([
+      const [dev] = await Promise.allSettled([
         (async () => {
           if(reusable.devPercent!=null && reusable.creator)return {percent:reusable.devPercent,observedAt:reusable.devObservedAt,block:reusable.devBlock,source:reusable.devSource};
           const identity = await resolveCreatorIdentity(token, creator ?? reusable.creator, {
@@ -50,6 +51,9 @@ export async function robinhoodOwnership(token: string, creator?: string | null,
           const block = direct?.block;
           Object.assign(partial.get(key)!,{devPercent:value?.percent ?? null,devObservedAt:value?.observedAt,devBlock:block,devSource:direct?'RPC':value?'BLOCKSCOUT_INDEXED':undefined}); return value?{...value,block,source:direct?'RPC' as const:'BLOCKSCOUT_INDEXED' as const}:null;
         })(),
+      ]);
+      // Prioritize creator identity/balance before optional holder RPC/indexer work.
+      const [holders] = await Promise.allSettled([
         pool ? scanRobinhoodHolderRisk(token, { poolAddress: pool, timeoutMs: 1_500 }).then(result => {
           if (result.sampledWallets.length) { partial.get(key)!.top10Percent = result.top10Pct; partial.get(key)!.top10Coverage = 'INDEXED_SAMPLE'; partial.get(key)!.top10ObservedAt=result.scannedAt; }
           return result;
@@ -73,8 +77,10 @@ export async function robinhoodOwnership(token: string, creator?: string | null,
   try { return await Promise.race([work, new Promise<OwnershipDisclosure>(resolve => { timer = setTimeout(() => resolve({...partial.get(key) ?? empty()}), 3_500); })]); }
   finally { if (timer) clearTimeout(timer); }
 }
-export async function discloseRobinhoodOwnership(text: string, token: string, creator?: string | null, pool?: string | null, cachedOnly = false): Promise<string> {
+export async function discloseRobinhoodOwnership(text: string, token: string, creator?: string | null, pool?: string | null, cachedOnly = false, includeActivity = false): Promise<string> {
   const cached = cache.get(`${token.toLowerCase()}:${(pool ?? '').toLowerCase()}:${(creator ?? '').toLowerCase()}`);
   const fresh = cached && Date.now() - cached.at < 30_000 ? cached.value : reusableOwnership(cache.entries(),token,creator,pool);
-  return withOwnershipDisclosure(text, cachedOnly ? fresh : await robinhoodOwnership(token, creator, pool));
+  const evidence = cachedOnly ? fresh : await robinhoodOwnership(token, creator, pool);
+  if(includeActivity && evidence.creator) evidence.activity=await creatorActivityEvidence(token,evidence.creator,evidence.devBlock);
+  return withOwnershipDisclosure(text,evidence);
 }
