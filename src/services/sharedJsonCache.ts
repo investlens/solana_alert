@@ -1,7 +1,11 @@
 import { createClient, type RedisClientType } from 'redis';
 let client:RedisClientType|null=null;let connecting:Promise<void>|null=null;let disabledUntil=0;
 async function getClient(connectTimeoutMs=1500):Promise<RedisClientType|null>{
- const url=process.env.REDIS_URL?.trim();if(!url||Date.now()<disabledUntil)return null;
+ const url=process.env.REDIS_URL?.trim();if(!url)return null;
+ // A background startup connection can recover during the backoff window.
+ // Do not keep rejecting an already-ready connection for another 30 seconds.
+ if(client?.isReady)return client;
+ if(Date.now()<disabledUntil)return null;
  if(!client){client=createClient({url,socket:{connectTimeout:5000}});client.on('error',()=>console.warn('[SharedCache] Redis connection unavailable'));}
  if(client.isReady)return client;
  let timer:ReturnType<typeof setTimeout>|undefined;
