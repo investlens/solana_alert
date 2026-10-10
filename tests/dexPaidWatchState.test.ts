@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {restoreDexPaidWatch,snapshotDexPaidWatch,seedDexPaidWatch,dexPaidFeedCandidates,dexPaidWatchLimit,recentDexPayment,DEX_PAID_PAYMENT_MAX_AGE_SECONDS,rememberDexPaidCandidate} from '../src/chains/robinhood/dexPaidWatchState.js';
+import {restoreDexPaidWatch,snapshotDexPaidWatch,seedDexPaidWatch,dexPaidFeedCandidates,dexPaidWatchLimit,recentDexPayment,DEX_PAID_PAYMENT_MAX_AGE_SECONDS,rememberDexPaidCandidate,selectDexPaidCandidates} from '../src/chains/robinhood/dexPaidWatchState.js';
 const now=Date.now();
 const token={chain:'robinhood' as const,tokenAddress:'0x'+'a'.repeat(40),discoveredAt:now-1000,source:'PONS' as const,sourceType:'LAUNCHPAD' as const,sources:[]};
 test('restart checkpoint preserves scheduling and strips bulky unneeded metadata',()=>{
@@ -39,7 +39,7 @@ test('cold start seeds only recent verified factory launches from the existing R
  assert.equal(seedDexPaidWatch([{launch:{...launch,block_timestamp:new Date(now-3600001).toISOString()}}],now,24,[factory]).length,0);
 });
 
-test('promotion refresh never evicts or downgrades authoritative PONS launches',()=>{
+test('promotion refresh preserves the reserved PONS capacity and authoritative lineage',()=>{
  const queue=new Map();
  for(let i=0;i<18;i++)rememberDexPaidCandidate(queue,{...token,tokenAddress:'0x'+i.toString(16).padStart(40,'0')},now,24);
  for(let i=18;i<60;i++)rememberDexPaidCandidate(queue,{...token,tokenAddress:'0x'+i.toString(16).padStart(40,'0'),source:'DEXSCREENER'},now+i,24);
@@ -60,4 +60,32 @@ test('unused PONS capacity remains available to promotion candidates',()=>{
  assert.equal(queue.size,24);
  rememberDexPaidCandidate(queue,token,now+41,24);
  assert.equal(queue.size,24);assert.equal(queue.get(token.tokenAddress).token.source,'PONS');
+});
+
+test('a full launch watch admits promotions and launch reseeding cannot reclaim their reserved slots',()=>{
+ const queue=new Map();
+ const make=(i:number,source:'PONS'|'DEXSCREENER')=>({...token,tokenAddress:'0x'+i.toString(16).padStart(40,'0'),source});
+ for(let i=0;i<24;i++)rememberDexPaidCandidate(queue,make(i,'PONS'),now+i,24);
+ for(let i=24;i<30;i++)assert.equal(rememberDexPaidCandidate(queue,make(i,'DEXSCREENER'),now+i,24),true);
+ for(let i=30;i<100;i++)rememberDexPaidCandidate(queue,make(i,'PONS'),now+i,24);
+ assert.equal(queue.size,24);
+ assert.equal([...queue.values()].filter(c=>c.token.source==='PONS').length,18);
+ for(let i=24;i<30;i++)assert.ok(queue.has(make(i,'DEXSCREENER').tokenAddress));
+});
+test('ongoing new launches cannot starve already checked promotion candidates',()=>{
+ const queue=new Map();let cursor=0;const checked=new Set<string>();
+ for(let i=0;i<24;i++)rememberDexPaidCandidate(queue,{...token,tokenAddress:'0x'+i.toString(16).padStart(40,'0'),source:i<18?'PONS':'DEXSCREENER'},now+i,24);
+ for(const c of queue.values())c.lastCheckedAt=now-1000;
+ for(let cycle=0;cycle<12;cycle++){
+  rememberDexPaidCandidate(queue,{...token,tokenAddress:'0x'+(100+cycle).toString(16).padStart(40,'0')},now+cycle+100,24);
+  const result=selectDexPaidCandidates(queue.values(),2,cursor);cursor=result.cursor;
+  for(const c of result.selected){c.lastCheckedAt=now+cycle+100; if(c.token.source==='DEXSCREENER')checked.add(c.token.tokenAddress);}
+ }
+ assert.equal(checked.size,6);assert.equal(queue.size,24);
+});
+test('source scheduling uses spare checks when either lane is empty',()=>{
+ const rows=[0,1,2].map(i=>({token:{...token,tokenAddress:'0x'+i.toString(16).padStart(40,'0')},lastSeenAt:now,lastCheckedAt:i}));
+ const result=selectDexPaidCandidates(rows,4,3);
+ assert.equal(result.selected.length,3);assert.equal(new Set(result.selected).size,3);
+ assert.equal(result.selected[0],rows[0]);
 });

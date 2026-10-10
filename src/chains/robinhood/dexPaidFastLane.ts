@@ -2,7 +2,7 @@ import { getPonsFactoryDeployments } from './ponsContracts.js';
 import { governedDexScreenerJson } from '../../services/dexscreenerRequestGovernor.js';
 import { fetchRobinhoodBoosts } from './discovery.js';
 import { getSharedJson, setSharedJson } from '../../services/sharedJsonCache.js';
-import { DEX_PAID_WATCH_TTL_MS, rememberDexPaidCandidate, dexPaidFeedCandidates, dexPaidWatchLimit, restoreDexPaidWatch, seedDexPaidWatch, snapshotDexPaidWatch, type DexPaidCandidate } from './dexPaidWatchState.js';
+import { DEX_PAID_WATCH_TTL_MS, rememberDexPaidCandidate, selectDexPaidCandidates, dexPaidFeedCandidates, dexPaidWatchLimit, restoreDexPaidWatch, seedDexPaidWatch, snapshotDexPaidWatch, type DexPaidCandidate } from './dexPaidWatchState.js';
 import { discoverFromPons } from './discovery/launchpads/pons.js';
 import type { RobinhoodDiscoveredToken } from './discovery/types.js';
 import { processRobinhoodDexPaidSignal } from './robinhoodObserver.js';
@@ -22,6 +22,7 @@ let running = false;
 let timer: ReturnType<typeof setInterval> | null = null;
 let firstCycle = true;
 let nextFeedDiscoveryAt = 0;
+let selectionCursor = 0;
 async function discoverPromotionFeeds() {
   if(Date.now()<nextFeedDiscoveryAt)return;
   nextFeedDiscoveryAt=Date.now()+60_000;
@@ -58,7 +59,7 @@ function key(address: string) { return address.trim().toLowerCase(); }
 function remember(token: RobinhoodDiscoveredToken) {
   const before=candidates.size, existed=candidates.has(key(token.tokenAddress));
   const admitted=rememberDexPaidCandidate(candidates,token,Date.now(),WATCH_LIMIT);
-  if(!admitted)console.info('[DexPaidFastLane] PROMOTION_DEFERRED_PONS_PROTECTED',{cap:WATCH_LIMIT});
+  if(!admitted)console.info('[DexPaidFastLane] WATCH_ADMISSION_DEFERRED',{cap:WATCH_LIMIT});
   else if(!existed && before>=WATCH_LIMIT && candidates.size===before)console.info('[DexPaidFastLane] WATCH_ROTATED',{cap:WATCH_LIMIT,source:token.source});
 }
 
@@ -94,9 +95,9 @@ async function cycle() {
     prune();
 
     await setSharedJson(CHECKPOINT_KEY, snapshotDexPaidWatch(candidates.values(), Date.now(), WATCH_LIMIT), new Date().toISOString(), DEX_PAID_WATCH_TTL_MS);
-    const selected = [...candidates.values()]
-      .sort((a, b) => a.lastCheckedAt - b.lastCheckedAt)
-      .slice(0, MAX_CHECKS_PER_CYCLE);
+    const selection = selectDexPaidCandidates(candidates.values(), MAX_CHECKS_PER_CYCLE, selectionCursor);
+    const selected = selection.selected;
+    selectionCursor = selection.cursor;
 
     let detected = 0; let failed = 0;
     for (const candidate of selected) {
@@ -117,6 +118,8 @@ async function cycle() {
     console.log('[DexPaidFastLane] cycle', {
       discovered: batch.tokens.length,
       candidates: candidates.size,
+      promotionCandidates: [...candidates.values()].filter(c=>c.token.source!=='PONS').length,
+      promotionChecks: selected.filter(c=>c.token.source!=='PONS').length,
       checked: selected.length,
       detected,
       failed,
