@@ -41,8 +41,13 @@ export const arcMarketNumber = (value: unknown): number | null => {
 
 const n = arcMarketNumber;
 
+const unindexedUntil = new Map<string, number>();
 export async function enrichArcMarket(token: ArcTokenEnrichment): Promise<ArcMarketEnrichment> {
   try {
+    const retryKey = `${token.assetId.toLowerCase()}:${token.poolId?.toLowerCase() ?? ''}`;
+    const now = Date.now();
+    for (const [key, until] of unindexedUntil) if (until <= now) unindexedUntil.delete(key);
+    if ((unindexedUntil.get(retryKey) ?? 0) > now) throw new Error('Unindexed candidate awaiting next market check');
     const pairUrl = `https://api.dexscreener.com/token-pairs/v1/arc/${encodeURIComponent(token.assetId)}`;
     let pairs: Pair[] = [];
     try {
@@ -103,7 +108,13 @@ export async function enrichArcMarket(token: ArcTokenEnrichment): Promise<ArcMar
     });
 
     const best = matching.sort((a, b) => (n(b.liquidity?.usd) ?? 0) - (n(a.liquidity?.usd) ?? 0))[0];
-    if (!best) throw new Error('No verified Arc candidate pool returned by market provider');
+    if (!best) {
+      // Empty but successful reads do not need two HTTP requests every 15 seconds.
+      // Positive market snapshots keep their existing freshness and identity rules.
+      if (unindexedUntil.size >= 100) unindexedUntil.delete(unindexedUntil.keys().next().value!);
+      unindexedUntil.set(retryKey, now + 60_000);
+      throw new Error('No verified Arc candidate pool returned by market provider');
+    }
 
     return {
       ...token,
