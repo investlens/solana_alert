@@ -7,7 +7,7 @@ async function renderPreferences(ctx:any):Promise<void> {
   const prefs=await liveAlertPreferences(user);
   const lines=['⚙️ <b>ALERT SETTINGS</b>','','Choose the feeds you want to receive.','✅ ON · ⭕ OFF. Changes apply to upcoming alerts.','Free: 30-second release delay · Pro: priority delivery.','Risk warnings remain separate from discovery preferences.',''];
   const rows:any[][]=[];
-  for(const chain of ['Robinchain / PONS','ARC']) {
+  for(const chain of ['Robinchain / PONS','ARC','Solana / Pump.fun']) {
     lines.push(`<b>${chain}</b>`);
     const feeds=LIVE_ALERT_FEEDS.filter(feed=>feed.chain===chain);
     for(const feed of feeds)lines.push(`${prefs[feed.key]?'✅':'⭕'} <b>${feed.name}</b> — ${feed.description}`);
