@@ -9,7 +9,7 @@ test('all alert families retain stats, unknowns and risk evidence with compact s
  assert.doesNotMatch(out,/\n{3,}/);
  assert.doesNotMatch(out,/KEY STATS/);
  assert.equal((out.match(/<b>STATS<\/b>/g)||[]).length,1);
- for(const evidence of ['HIGH RUG RISK','$45K','Unavailable','not a guarantee','10%','25%',ca,'06:15:00 UTC'])assert.ok(out.includes(evidence),title+': '+evidence);
+ for(const evidence of ['LP lock: <b>Unlocked</b>','$45K','Unavailable','not a guarantee','10%','25%',ca,'06:15:00 UTC'])assert.ok(out.includes(evidence),title+': '+evidence);
  assert.ok(out.indexOf('Dex Paid')<out.indexOf('<b>STATS</b>'));
  assert.equal(cleanAlertCard(out),out,'edits should not duplicate/reorder blocks');
  }
@@ -27,7 +27,7 @@ test('menu content is preserved apart from excessive blank lines',()=>{
 test('empty legacy stats cannot swallow risk; supplemental numbers precede risk',()=>{
  const out=cleanAlertCard(`<b>BOOST DETECTED</b>\n<b>STATS</b>\n<b>RISK</b>\nVerified PONS origin\n\n<b>KEY STATS</b>\nPrice <b>$0.01</b>\nLP lock status <b>Not independently checked</b>\nSource DEXScreener · PONS-mapped graduated pool · Checked 13:07:00 UTC\n\n<b>CONTRACT</b>\n<code>${ca}</code>`);
  assert.ok(out.indexOf('Price')<out.indexOf('<b>RISK</b>'));
- assert.ok(out.indexOf('LP lock status')>out.indexOf('<b>RISK</b>'));
+ assert.ok(out.indexOf('LP lock:')>out.indexOf('<b>RISK</b>'));
  assert.ok(out.indexOf('DEXScreener')>out.indexOf(ca));
  assert.equal(cleanAlertCard(out),out);
 });
