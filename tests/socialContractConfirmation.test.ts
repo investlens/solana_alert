@@ -118,3 +118,13 @@ test('copied X profile is read once across tokens while CA verification remains 
   assert.equal(calls,1); assert.equal(legit.confirmed,true); assert.equal(clone.confirmed,false);
   clock=60_001; await verify({...args,token:other}); assert.equal(calls,2);
 });
+
+test('metadata website anchors require matching X author, reciprocal link and exact-chain contract',async()=>{
+ const profile='<link rel="canonical" href="https://x.com/RevenueFamily"><meta property="og:title" content="Revenue (@RevenueFamily) / X"><meta name="description" content="Official website https://project.example/">';
+ const page=`<a href="https://x.com/RevenueFamily">X</a><p>Robinchain CA: ${token}</p>`;
+ const check=(html:string,site=page)=>verifySocialContract(args,async url=>url.includes('x.com')?html:site);
+ assert.equal((await check(profile)).evidenceSource,'Website');
+ for(const bad of [profile.replace('@RevenueFamily','@Other'),profile.replace('x.com/RevenueFamily','x.com/Other'),`<script>${profile}</script>`])assert.equal((await check(bad)).confirmed,false);
+ assert.equal((await check(profile,page.replace(token,other))).confirmed,false);
+ assert.equal((await check(profile,page.replace('x.com/RevenueFamily','x.com/Other'))).confirmed,false);
+});
