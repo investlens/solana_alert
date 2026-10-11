@@ -1,13 +1,14 @@
 // Read-only: no signed or broadcast transactions. Never print a credential-bearing endpoint.
 import {randomBytes} from 'node:crypto';
-import {arcFundingProbe,validateArcFundingProbe} from '../src/chains/arc/simulationCapability.js';
+import {arcFundingProbe,validateArcFundingProbe,readArcProbeResponse} from '../src/chains/arc/simulationCapability.js';
 import type {Address} from 'viem';
 const endpoint=process.env.ARC_SIMULATION_RPC_URL;
 if(!endpoint)throw Error('Set ARC_SIMULATION_RPC_URL privately to the ARC endpoint being validated');
+const signal=AbortSignal.timeout(12000); // One shared deadline for both requests; no retries or polling.
 const rpc=async(method:string,params:unknown[])=>{
- const response=await fetch(endpoint,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(12000)});
+ const response=await fetch(endpoint,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal});
  if(!response.ok)throw Error(`ARC probe HTTP ${response.status}`);
- const payload=await response.json() as any;if(payload.error||payload.result==null)throw Error(`ARC probe rejected ${method} (code ${payload.error?.code??'unknown'})`);return payload.result;
+ const payload=await readArcProbeResponse(response);if(payload.error||payload.result==null)throw Error(`ARC probe rejected ${method} (code ${payload.error?.code??'unknown'})`);return payload.result;
 };
 try{
  const chainId=await rpc('eth_chainId',[]),wallet=('0x'+randomBytes(20).toString('hex')) as Address,recipient=('0x'+randomBytes(20).toString('hex')) as Address;

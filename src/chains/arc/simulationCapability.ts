@@ -13,3 +13,15 @@ export function validateArcFundingProbe(chainId:unknown,result:any):boolean {
   return balance(0)===100_000_000n&&balance(2)===99_000_000n&&balance(3)===1_000_000n;
  }catch{return false;}
 }
+
+// Bound RPC response memory and stop reading oversized provider replies.
+export async function readArcProbeResponse(response:Response):Promise<any>{
+ const cap=100*1024;
+ if(!response.body)throw Error('ARC probe returned no response body');
+ const reader=response.body.getReader(),chunks:Uint8Array[]=[];let bytes=0;
+ try{
+  for(;;){const {done,value}=await reader.read();if(done)break;bytes+=value.byteLength;if(bytes>cap)throw Error('ARC probe response exceeds 100 KiB limit');chunks.push(value);}
+  const joined=new Uint8Array(bytes);let offset=0;for(const chunk of chunks){joined.set(chunk,offset);offset+=chunk.byteLength;}
+  return JSON.parse(new TextDecoder().decode(joined));
+ }finally{await reader.cancel().catch(()=>{});reader.releaseLock();}
+}

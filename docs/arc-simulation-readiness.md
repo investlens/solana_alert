@@ -11,3 +11,5 @@ Run: ARC_SIMULATION_RPC_URL=<privately configured endpoint> node --import tsx sc
 Primary provider documentation: https://www.quicknode.com/docs/arc/eth_simulateV1 .
 
 Ordered rollout: finish ARC independent exit verification first; then expand Solana; then Base. The existing Solana Pump.fun/PumpSwap worker already checks mint/freeze authority and sampled ownership but explicitly says exit quote and linked-wallet risk are not checked. It is not full Solana coverage and must not be enabled as though every agreed security check passed. No Base integration is claimed by this patch. Other-chain code and alert timing are unchanged.
+
+Resource limits: manually invoked only; exactly two RPC requests at most, one shared 12-second deadline, no retries, no polling or background worker, and 100 KiB maximum response per request. No raw response, receipt or history is written to the database. Existing observed-selling collection remains one active candidate, two starts/minute, at most twelve receipts and 100 compact expiring cache entries.

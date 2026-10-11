@@ -3,3 +3,10 @@ const word=(n:bigint)=>'0x'+n.toString(16).padStart(64,'0');
 const valid=()=>[{calls:[{status:'0x1',returnData:word(100_000_000n)},{status:'0x1',returnData:'0x'},{status:'0x1',returnData:word(99_000_000n)},{status:'0x1',returnData:word(1_000_000n)}]}];
 test('ARC capability requires chain, native/ERC20 scales and sequential settlement',()=>{assert.equal(validateArcFundingProbe('0x13b2',valid()),true);for(const mutate of [r=>r[0].calls[0].returnData=word(100n*10n**18n),r=>r[0].calls[2].returnData=word(100_000_000n),r=>r[0].calls[3].status='0x0',r=>r[0].calls.pop(),r=>r[0].calls[1].error={}]){const r=valid();mutate(r);assert.equal(validateArcFundingProbe('0x13b2',r),false);}assert.equal(validateArcFundingProbe('0x1',valid()),false);});
 test('probe overrides test EOA balances only, never pool, token code or token balances',()=>{const a='0x1111111111111111111111111111111111111111',b='0x2222222222222222222222222222222222222222';const request=arcFundingProbe(a,b)[0] as any;assert.deepEqual(Object.keys(request.blockStateCalls[0].stateOverrides),[a,b]);assert.equal(request.blockStateCalls[0].stateOverrides[a].balance,'0x56bc75e2d63100000');assert.equal(request.blockStateCalls[0].calls[1].value,'0xde0b6b3a7640000');});
+test('ARC probe parses small replies and cancels oversized streaming responses',async()=>{
+ const {readArcProbeResponse}=await import('../src/chains/arc/simulationCapability.js');
+ assert.deepEqual(await readArcProbeResponse(new Response('{"result":"0x13b2"}')),{result:'0x13b2'});
+ let cancelled=false,reads=0;
+ const stream=new ReadableStream({pull(controller){reads++;controller.enqueue(new Uint8Array(60*1024));},cancel(){cancelled=true;}});
+ await assert.rejects(readArcProbeResponse(new Response(stream)),/100 KiB/);assert.equal(cancelled,true);assert.ok(reads<=3);
+});
