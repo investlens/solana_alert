@@ -27,3 +27,10 @@ test('ownership baseline preserves confirmed zero and rejects stale, incomplete 
  assert.equal(row.creator_evidence?.address, ownership.creator);
  assert.match(row.dev_holding_evidence!, /80764517/);
 });
+test('recipient audit stores lean confirmed acceptance and deduplicates recipient identities',async()=>{
+ const {recoveryRecipientRows}=await import('../src/services/recoveryAlertAudit.js');
+ const good={telegramId:'123',tier:'free',messageId:42,acceptedAt:'2026-10-11T06:00:00Z'};
+ const rows=recoveryRecipientRows(9,[good,good,{...good,telegramId:'bad'},{...good,telegramId:'124',acceptedAt:'bad'}]);
+ assert.equal(rows.length,1);assert.equal(rows[0].alert_event_id,9);assert.equal(rows[0].metadata.telegram_message_id,42);
+ assert.ok(JSON.stringify(rows).length<400);
+});
