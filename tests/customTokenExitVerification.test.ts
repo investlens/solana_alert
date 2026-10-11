@@ -55,3 +55,31 @@ test('concurrent checks for a token coalesce without duplicate simulation',async
  const f=fixture();const results=await Promise.all([f.verify({chain:'robinhood',token}),f.verify({chain:'robinhood',token})]);
  assert.ok(results.every(r=>r.allowed));assert.equal(f.wallets,3);
 });
+
+test('ARC uses native-18 funding and ERC20-6 swaps without wrapping or token overrides',async()=>{
+ const arc=EXIT_CHAIN_CONFIG.arc,sorted=[token.toLowerCase(),arc.quote.toLowerCase()].sort() as Address[];
+ const arcPair=keccak256(encodeAbiParameters(parseAbiParameters('address,address,uint24,int24,address'),[sorted[0],sorted[1],3000,60,'0x0000000000000000000000000000000000000000']));
+ for(const mode of ['valid','wrong-decimals','missing-alias','partial-sell','unsupported']){
+  let simulations=0;
+  const verify=createCustomExitVerifier({arcNativeQuoteSimulationEnabled:true,now:()=>2_000_000_000_000,wallet:()=>('0x'+'1'.repeat(40)) as Address,
+   pairs:async()=>[{chainId:'arc',baseToken:{address:token},quoteToken:{address:arc.quote},pairAddress:arcPair,dexId:'uniswap'}],
+   rpc:async(_chain,method,params)=>{
+    if(method==='eth_chainId')return '0x13b2';if(method==='eth_blockNumber')return '0x123456';
+    if(mode==='unsupported')throw Error('method not supported: eth_simulateV1');
+    simulations++;assert.equal(method,'eth_simulateV1');assert.equal(params[1],'0x123456');
+    const spec=(params[0] as any).blockStateCalls[0],calls=spec.calls,wallet=calls[0].from;
+    assert.deepEqual(Object.keys(spec.stateOverrides),[wallet]);assert.deepEqual(Object.keys(spec.stateOverrides[wallet]),['balance']);
+    const native=BigInt(spec.stateOverrides[wallet].balance),input=native/10n**12n;
+    assert.ok(arc.sizes.includes(input as never));assert.ok(calls.every((c:any)=>c.from===wallet&&c.value==='0x0'));
+    assert.equal(decodeFunctionData({abi:parseAbi(['function decimals() view returns(uint8)']),data:calls[2].data}).functionName,'decimals');
+    return [{calls:calls.map((_c:any,i:number)=>({status:'0x1',returnData:[0,1,2,6,7,11,12].includes(i)?encoded(i===1?(mode==='missing-alias'?0n:input):i===2?(mode==='wrong-decimals'?18n:6n):i===6?1000n:i===11?input*995n/1000n:i===12&&mode==='partial-sell'?1n:0n):'0x'}))}];
+   }});
+  const r=await verify({chain:'arc',token,pairId:arcPair});assert.equal(r.allowed,mode==='valid',mode);
+  if(mode==='valid'){assert.equal(simulations,6);assert.equal(r.maxLossPercent,0.5);}
+ }
+});
+
+test('ARC simulation stays disabled by default even when provider is available',async()=>{
+ const f=fixture();assert.equal((await f.verify({chain:'arc',token})).allowed,false);
+ assert.equal(f.requests.some(r=>r.method==='eth_simulateV1'),false);
+});
