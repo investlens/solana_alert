@@ -1,0 +1,7 @@
+{
+  "name": "alphaos-ai-watchdog",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node run.mjs", "test": "node --test watchdog.test.mjs" },
+  "engines": { "node": ">=22" }
+}
