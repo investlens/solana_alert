@@ -29,3 +29,14 @@ test('premium ARC boost formatter preserves unchecked warning and removes safety
  const rendered=polishArcTelegramPresentation(text).text;
  assert.match(rendered,/verified simulated exit/);assert.doesNotMatch(rendered,/No honeypot|flag detected/);
 });
+test('every ARC positive feed requires an exit; unlocked and unknown LP produce risky alerts',async()=>{
+ for(const feed of ['ARC_BOOST','ARC_DEX_PAID','ARC_OPPORTUNITY','ARC_SUPPLY_BURN']){
+  for(const lpStatus of ['LOCKED','BURNED','UNLOCKED','UNKNOWN'] as const){
+   const result=await arcDeliverySafety(feed,'token',async()=>({allowed:true,reason:'flags passed'}),async()=>({allowed:true,reason:'Same-wallet exit simulated',observedAt:Date.now(),lpStatus}));
+   assert.equal(result.allowed,true);
+   assert.equal(result.reason.includes('RISKY ALERT'),lpStatus==='UNLOCKED'||lpStatus==='UNKNOWN');
+  }
+  const result=await arcDeliverySafety(feed,'token',async()=>({allowed:true,reason:'flags passed'}),async()=>({allowed:false,reason:'Exit unverified',observedAt:Date.now()}));
+  assert.equal(result.allowed,false);
+ }
+});
