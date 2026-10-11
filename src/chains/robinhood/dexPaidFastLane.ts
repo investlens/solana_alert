@@ -1,3 +1,6 @@
+import { seedRobinhoodStreamBoost } from './robinhoodBoostObserver.js';
+import { startPromotionStreams } from './promotionStreams.js';
+import { createPromotionPriorityQueue } from './promotionPriorityQueue.js';
 import { getPonsFactoryDeployments } from './ponsContracts.js';
 import { governedDexScreenerJson } from '../../services/dexscreenerRequestGovernor.js';
 import { fetchRobinhoodBoosts } from './discovery.js';
@@ -23,6 +26,23 @@ let timer: ReturnType<typeof setInterval> | null = null;
 let firstCycle = true;
 let nextFeedDiscoveryAt = 0;
 let selectionCursor = 0;
+const priority=createPromotionPriorityQueue();
+const boostPending=new Map<string,{tokenAddress:string;amount:number;totalAmount:number;snapshot:boolean}>();
+let urgentActive=0,lastUrgentWindow=0,urgentStarts=0;
+const streamBoostSeen=new Map<string,number>();
+function startUrgentProcessing(){
+ const window=Math.floor(Date.now()/60000);if(window!==lastUrgentWindow){lastUrgentWindow=window;urgentStarts=0;}
+ // At most 12 additional starts/minute and two concurrent tasks. No database sweep.
+ while(urgentActive<2&&urgentStarts<12){
+  const boost=boostPending.values().next().value;
+  const token=boost?null:priority.next();if(!boost&&!token)break;
+  if(boost)boostPending.delete(boost.tokenAddress);
+  urgentActive++;urgentStarts++;
+  const work=boost?import('./robinhoodBoostObserver.js').then(m=>m.processRobinhoodStreamBoost(boost,boost.snapshot))
+   :processRobinhoodDexPaidSignal({chain:'robinhood',tokenAddress:token!,discoveredAt:Date.now(),source:'DEXSCREENER',sourceType:'INDEXER',sources:[]}).then(found=>priority.finish(token!,found));
+  void work.catch(()=>console.warn('[PromotionStreams] candidate processing unavailable')).finally(()=>{urgentActive--;});
+ }
+}
 async function discoverPromotionFeeds() {
   if(Date.now()<nextFeedDiscoveryAt)return;
   nextFeedDiscoveryAt=Date.now()+60_000;
@@ -145,6 +165,20 @@ export function startDexPaidFastLane() {
     discovery: 'PONS + Robinchain profiles + boosts', noTokenAgeLimit: true,
     stalePaymentAlertsSuppressedAfterSeconds: Number(process.env.DEX_PAID_MAX_PAYMENT_AGE_SECONDS ?? 600),
   });
+  startPromotionStreams((kind,rows,snapshot)=>{
+    if(kind==='paid'){const dropped=priority.admit(rows);if(dropped)console.warn('[PromotionStreams] paid capacity deferred',{dropped});}
+    else for(const row of rows){
+      if(snapshot)seedRobinhoodStreamBoost({tokenAddress:row.tokenAddress,amount:row.amount!,totalAmount:row.totalAmount!});
+      if(streamBoostSeen.get(row.tokenAddress)===row.totalAmount)continue;
+      if(streamBoostSeen.size>=500)streamBoostSeen.delete(streamBoostSeen.keys().next().value!);
+      streamBoostSeen.set(row.tokenAddress,row.totalAmount!);
+      if(boostPending.size>=64&&!boostPending.has(row.tokenAddress)){console.warn('[PromotionStreams] boost capacity deferred');continue;}
+      const previous=boostPending.get(row.tokenAddress);
+      if(!previous||row.totalAmount!>previous.totalAmount)boostPending.set(row.tokenAddress,{tokenAddress:row.tokenAddress,amount:row.amount!,totalAmount:row.totalAmount!,snapshot:previous?previous.snapshot&&snapshot:snapshot});
+    }
+    startUrgentProcessing();
+  });
+  const urgentTimer=setInterval(startUrgentProcessing,1000);urgentTimer.unref();
   void cycle();
   timer = setInterval(() => void cycle(), INTERVAL_MS);
 }
