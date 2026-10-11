@@ -1,4 +1,5 @@
 import { RESEARCH_DISCLOSURE, withResearchDisclosure } from './researchDisclosure.js';
+import { lpLockNote } from './lpLockNote.js';
 export type CardButton = { text: string; url?: string; callback_data?: string };
 
 // Presentation only: preserve every metric, warning, URL and callback. No reads or writes.
@@ -7,6 +8,16 @@ export function cleanAlertCard(text: string): string {
   const title = clean.split('\n').find(line => line.trim()) ?? '';
   const isCard = /<code>/.test(clean) && /ALPHA|ALERT|BOOST|DEX PAID|SETUP|OPPORTUNITY|BURN|TRADE|CONTRACT SCREEN|CREATOR|PROTOCOL|MOMENTUM|TREND|MONITOR|TOKEN|WALLET/i.test(title);
   if (!isCard) return clean;
+  clean = clean.split('\n').map(line => {
+    const plain = line.replace(/<[^>]*>/g, '').trim();
+    if (/^⚠️ LP unlocked · HIGH RUG RISK$/i.test(plain)) return lpLockNote('UNLOCKED');
+    const legacy = plain.match(/^LP (?:lock status|status)\s+(.+)$/i);
+    if (!legacy) return line;
+    const status = legacy[1];
+    // Preserve detailed lock coverage/expiry evidence, rather than overstate it.
+    if (!/^(?:LOCKED|BURNED|UNLOCKED|UNKNOWN|Unverified|Unavailable|Not independently checked|Bonding curve)$/i.test(status)) return line;
+    return lpLockNote(status, /^Bonding curve$/i.test(status));
+  }).join('\n');
   clean = clean.replace(RESEARCH_DISCLOSURE, '').trim();
   // An empty STATS heading must not capture the following RISK section.
   clean = clean.replace(/<b>STATS<\/b>\s*(?=<b>(?:RISK(?: COVERAGE)?|SAFETY|SECURITY|SOCIALS|SOCIAL LINKS|OWNERSHIP|CONTRACT)<\/b>)/g, '');
@@ -38,7 +49,7 @@ export function cleanAlertCard(text: string): string {
   // Route risk disclosures out of the supplemental market stats block.
   const risk: string[] = [];
   clean = clean.split('\n').filter(line => {
-    if (/^(?:Sellability|LP status|LP lock status)\s/.test(line)) { risk.push(line); return false; }
+    if (/^(?:Sellability|LP status|LP lock status)\s/.test(line) || /^(?:⚠️\s*)?LP lock:\s/.test(line)) { risk.push(line); return false; }
     return true;
   }).join('\n');
   if (risk.length) {

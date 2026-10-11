@@ -1,4 +1,5 @@
 import { escapeAlphaHtml } from './alphaNotification.js';
+import { lpLockNote } from './lpLockNote.js';
 export type AlertKeyStats = {
   pairAddress?:string|null;
   price?: number|null; marketCap?: number|null; fdv?:number|null; liquidity?:number|null;
@@ -31,7 +32,7 @@ export function withAlertKeyStats(text:string, stats:AlertKeyStats):string {
   const compactSupply=stats.supply && Number.isFinite(supply) && supply>=1000 ? (supply/(supply>=1e9?1e9:supply>=1e6?1e6:1e3)).toLocaleString('en-US',{maximumFractionDigits:2})+(supply>=1e9?'B':supply>=1e6?'M':'K') : stats.supply;
   add(/Total supply/i,'Total supply',compactSupply??'Unavailable');
   add(/Sellability\s/i,'Sellability',stats.sellability??'Unverified');
-  add(/LP (?:lock )?status\s/i,'LP lock status',stats.preBond?'Bonding curve':!stats.lp || stats.lp==='Unverified'?'Not independently checked':stats.lp);
+  if (!/LP (?:lock(?::| status)?|status|unlocked)\s/i.test(plain)) lines.push(lpLockNote(stats.lp, stats.preBond));
   add(/Dex Paid|DEX Paid|DEX PAID DETECTED/i,'DEX Paid',stats.dexPaid??'Unavailable');
   if (!/SOCIALS|SOCIAL LINKS|href="https:\/\/(?:x.com|t.me)/i.test(clean)) lines.push('Socials <b>Unavailable</b>');
   if(!stats.source) lines.push('Source <b>Unavailable</b> · missing stats are not confirmed');
