@@ -16,7 +16,11 @@ const pending = new Map<string, Promise<OwnershipDisclosure>>();
 const partial = new Map<string, OwnershipDisclosure>();
 let windowStart = 0, started = 0;
 export function cachedRobinhoodOwnership(token:string,creator?:string|null,pool?:string|null):OwnershipDisclosure {
-  return reusableOwnership(cache.entries(),token,creator,pool);
+  // A balance may finish before the optional holder sample. Reuse the same
+  // measured partial evidence shown on the card rather than dropping it.
+  const entries = [...cache.entries(), ...[...partial.entries()].map(([key,value]) =>
+    [key,{at:value.devObservedAt ?? 0,value}] as [string,{at:number;value:OwnershipDisclosure}])];
+  return reusableOwnership(entries,token,creator,pool);
 }
 // Per token, never per recipient. No database writes or background holder sweeps.
 export async function robinhoodOwnership(token: string, creator?: string | null, pool?: string | null): Promise<OwnershipDisclosure> {
