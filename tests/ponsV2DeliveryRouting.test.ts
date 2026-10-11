@@ -9,7 +9,7 @@ const token = '0xf0c0fc281314a48ae4e52a9db08731cb6a38ca25';
 const factory = '0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e';
 test('actual missed V2 indexed origin routes trusted without a V1 view or honeypot provider', async () => {
   const original = supabase.from;
-  const builder = { select: () => builder, eq: () => builder, ilike: () => builder,
+  const builder = { select: () => builder, eq: () => builder, in: () => builder, order: () => builder, ilike: () => builder,
     limit: () => builder, abortSignal: () => builder, maybeSingle:async()=>({ data: {token_address: token, factory_address: factory,
       deployer_address:'0x82f55f91d68b248021c64fbe5ccd931f999bbd51'}, error: null }) };
   supabase.from = (() => builder) as unknown as typeof original;
