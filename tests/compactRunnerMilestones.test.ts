@@ -60,3 +60,9 @@ test('DIALN runner separates reached milestone from current multiple and formats
  assert.ok(text.replace(/<[^>]*>/g,'').length<1024);
  assert.equal(compactRunnerButtons(baseline)[2][0].text,'🔔 AlphaOS');
 });
+
+test('custom runner exit is checked before claiming any milestone',async()=>{
+ let claims=0,sends=0;
+ await processCompactRunner({...row,chain:'arc'},sample(.01),{verifyExit:async()=>({allowed:false,reason:'Exit unverified',observedAt:Date.now()}),claim:async()=>{claims++;return 'CLAIMED';},deliver:async()=>{sends++;}});
+ assert.equal(claims,0);assert.equal(sends,0);
+});
