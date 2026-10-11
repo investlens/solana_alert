@@ -1,3 +1,4 @@
+import { boundedBackground } from '../../services/boundedBackground.js';
 import { getPonsFactoryDeployments } from './ponsContracts.js';
 import { governedDexScreenerJson } from '../../services/dexscreenerRequestGovernor.js';
 import { fetchRobinhoodBoosts } from './discovery.js';
@@ -23,6 +24,7 @@ let timer: ReturnType<typeof setInterval> | null = null;
 let firstCycle = true;
 let nextFeedDiscoveryAt = 0;
 let selectionCursor = 0;
+const deliveries = boundedBackground(2);
 async function discoverPromotionFeeds() {
   if(Date.now()<nextFeedDiscoveryAt)return;
   nextFeedDiscoveryAt=Date.now()+60_000;
@@ -102,7 +104,12 @@ async function cycle() {
     let detected = 0; let failed = 0;
     for (const candidate of selected) {
       candidate.lastCheckedAt = Date.now();
-      try { detected += Number(await processRobinhoodDexPaidSignal(candidate.token)); }
+      try {
+        const admitted = deliveries.start(key(candidate.token.tokenAddress), () => processRobinhoodDexPaidSignal(candidate.token),
+          () => console.warn('[DexPaidFastLane] background candidate processing failed'));
+        if (!admitted) { candidate.lastCheckedAt = 0; continue; }
+        detected++;
+      }
       catch (error) {
         failed += 1;
         console.warn('[DexPaidFastLane] candidate check failed', {
@@ -121,7 +128,8 @@ async function cycle() {
       promotionCandidates: [...candidates.values()].filter(c=>c.token.source!=='PONS').length,
       promotionChecks: selected.filter(c=>c.token.source!=='PONS').length,
       checked: selected.length,
-      detected,
+      scheduled: detected,
+      activeProcessing: deliveries.size,
       failed,
       durationMs: Date.now() - startedAt,
     });
