@@ -15,7 +15,7 @@ export async function arcDeliverySafety(feed:string,token:string,check:(token:st
   // An injected verifier remains available for independent simulator validation and tests.
   const exit=verifyExit===verifyCustomTokenExit?{allowed:false,reason:'Exit unverified: ARC simulation unavailable',observedAt:Date.now()} as ExitVerification:await verifyExit({chain:'arc',token,pairId:expectedPool});
   if(exit.allowed)return {...safety,allowed:true,sellabilityVerified:true,sellabilityMethod:'SIMULATED_EXIT',reason:exit.reason+' · '+arcLiquidityDisclosure(exit.lpStatus),lpStatus:exit.lpStatus};
-  if(!safety.allowed || /revert|confirmed|failed|restriction/i.test(exit.reason))return {...safety,allowed:false,sellabilityVerified:false,reason:exit.reason};
+  if(!safety.allowed || /revert|confirmed|failed|restriction/i.test(exit.reason))return {...safety,allowed:false,sellabilityVerified:false,reason:!safety.allowed?safety.reason:exit.reason};
   const observed=await observe(token,safety.creator,expectedPool);
   if(!observed.allowed)return {...safety,allowed:false,sellabilityVerified:false,reason:exit.reason+' · '+observed.reason};
   // ERC20 LP-holder claims do not establish protection of a V4 pool's NFT positions.

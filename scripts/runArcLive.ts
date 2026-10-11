@@ -1,3 +1,4 @@
+import {loadArcSecurity} from '../src/chains/arc/securityProvider.js';
 import { recordFeedDelivery } from '../src/services/feedDeliveryHealth.js';
 import { recordRejectedCandidate, runRejectedCandidateReview } from '../src/services/rejectedCandidateReview.js';
 import { withAlertKeyStats, type AlertKeyStats } from '../src/ui/alertKeyStats.js';
@@ -460,19 +461,7 @@ function burnLike(holder: Record<string, unknown>): boolean {
     tag.includes('burn') || tag.includes('dead') || tag.includes('null address') || tag.includes('black hole');
 }
 
-async function loadArcSellSafety(tokenAddress: string): Promise<ArcBoostSecurity> {
-  try {
-    const url = `https://api.gopluslabs.io/api/v1/token_security/5042?contract_addresses=${encodeURIComponent(tokenAddress)}`;
-    const response = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(4_000) });
-    if (!response.ok) return { allowed: false, reason: `honeypot provider unavailable (HTTP ${response.status}); LP check intentionally skipped for BOOST`, devHoldingPercent: null };
-    const payload = await response.json() as { result?: Record<string, Record<string, unknown>> };
-    const key = tokenAddress.toLowerCase();
-    const security = payload.result?.[key] ?? payload.result?.[Object.keys(payload.result ?? {}).find(k => k.toLowerCase() === key) ?? ''];
-    return arcBoostSafetyFromEvidence(security);
-  } catch (error) {
-    return { allowed: false, reason: `honeypot check unavailable: ${error instanceof Error ? error.message : String(error)}; LP check intentionally skipped for BOOST`, devHoldingPercent: null };
-  }
-}
+const loadArcSellSafety=loadArcSecurity;
 
 const arcSellSafetyCache = new Map<string, { at: number; result: ArcBoostSecurity }>();
 const arcSellSafetyPending = new Map<string, Promise<ArcBoostSecurity>>();
@@ -485,6 +474,7 @@ async function checkArcBoostSecurity(tokenAddress: string): Promise<ArcBoostSecu
   if (arcSellSafetyPending.size >= 2) return { allowed: false, reason: 'sellability check busy' };
   const work = loadArcSellSafety(tokenAddress).then(raw => {
     const result = {...raw, observedAt:Date.now()};
+    if(!result.allowed)console.warn('[ArcSecurity] withheld',{token:tokenAddress,reason:result.reason});
     if (arcSellSafetyCache.size >= 100) arcSellSafetyCache.delete(arcSellSafetyCache.keys().next().value!);
     arcSellSafetyCache.set(key, { at: Date.now(), result });
     return result;
