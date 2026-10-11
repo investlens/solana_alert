@@ -1,3 +1,5 @@
+import {lpLockNote} from '../ui/lpLockNote.js';
+import {automaticRunnerExitGate} from './automaticRunnerExitGate.js';
 import type {CompactTrackingRow,CompactSample} from './compactAlertOutcomes.js';
 import {escapeTelegramHtml as esc} from '../ui/escapeHtml.js';
 import {deliverRunnerRecipient} from './runnerRecipientDelivery.js';
@@ -10,7 +12,7 @@ import {sendAlphaosPhotoAlert} from '../ui/alphaosPhotoDelivery.js';
 import {waitForRecipientDelivery,recordDeliveryAccepted} from './recipientDeliveryTiming.js';
 import {withResearchDisclosure} from '../ui/researchDisclosure.js';
 export const RUNNER_MULTIPLES=[2,5,10,50,100] as const;
-export type RunnerSample=CompactSample & {name?:string;symbol?:string};
+export type RunnerSample=CompactSample & {name?:string;symbol?:string;exitNote?:string;lpStatus?:string};
 export function runnerSourceFeed(chain:string,feed:string):LiveFeedKey|null {
  if(chain==='arc')return /DEX_PAID/.test(feed)?'ARC_DEX_PAID':/BOOST/.test(feed)?'ARC_BOOST':/BURN/.test(feed)?'ARC_SUPPLY_BURN':feed==='ARC_OPPORTUNITY'?'ARC_OPPORTUNITY':null;
  if(chain!=='robinhood')return null;
@@ -49,6 +51,7 @@ export function renderCompactRunner(row:CompactTrackingRow,sample:RunnerSample,m
   `Highest sampled price <b>${price(peakPrice)}</b> · <b>${(peakPrice/row.baseline_price).toFixed(2)}×</b>`,
   `Latest multiple <b>${actual.toFixed(2)}×</b> · <b>+${((actual-1)*100).toFixed(1)}%</b>`,
   ...(sample.liquidity!=null&&Number.isFinite(sample.liquidity)&&sample.liquidity>=0?[`Liquidity <b>${money(sample.liquidity)}</b>`]:[]),
+  ...(sample.exitNote?[sample.exitNote,lpLockNote(sample.lpStatus)]:[]),
   '',`Alert baseline ${at(row.started_at)}`,`Observed ${at(sample.at)}`,
   ...(thin?['⚠️ Liquidity is thin or unconfirmed; quoted gains may not be executable.']:[]),
   'Sampled price change, not realised profit; excludes fees/slippage. Sampled peak is not lifetime ATH.',
@@ -61,7 +64,7 @@ export function compactRunnerButtons(row:CompactTrackingRow){
    {text:'📋 Copy CA',callback_data:`COPY_CA_${row.token}`}],
   [{text:'🔔 AlphaOS',url:'https://t.me/AlphaOSResearchBot'}]];
 }
-type Dependencies={claim:typeof claimSharedDelivery;deliver:(row:CompactTrackingRow,sample:RunnerSample,multiple:number)=>Promise<void>};
+type Dependencies={verifyExit?:typeof automaticRunnerExitGate;claim:typeof claimSharedDelivery;deliver:(row:CompactTrackingRow,sample:RunnerSample,multiple:number)=>Promise<void>};
 async function deliver(row:CompactTrackingRow,sample:RunnerSample,multiple:number){
  const botToken=process.env.TELEGRAM_BOT_TOKEN?.trim();if(!botToken)throw Error('Runner delivery unavailable');
  const users=await getDeliverableUsers();const targets=new Set(users.filter(u=>!u.is_blocked).map(u=>String(u.telegram_id)));
@@ -81,7 +84,7 @@ async function deliver(row:CompactTrackingRow,sample:RunnerSample,multiple:numbe
  }catch{console.warn('[RunnerCard] recipient delivery unconfirmed');}}
  console.log('[RunnerCard] DELIVERY',{chain:row.chain,multiple,accepted,failed:recipients.length-accepted});
 }
-const production:Dependencies={claim:async(key)=>{
+const production:Dependencies={verifyExit:automaticRunnerExitGate,claim:async(key)=>{
  // Respect milestones claimed by the previous release. New milestones use
  // recipient claims, so one rejected recipient cannot consume everyone else's.
  try{return await runSharedAtomic("return redis.call('EXISTS', KEYS[1])",[key],[])===1?'EXISTS':'CLAIMED';}
@@ -93,6 +96,7 @@ export async function processCompactRunner(row:CompactTrackingRow,sample:RunnerS
  const crossings=runnerCrossings(row,sample);if(!crossings.length)return;
  if(deps===production)activeDeliveries++;
  try{
+ if(deps.verifyExit){const exit=await deps.verifyExit(row);if(!exit.allowed){console.warn('[RunnerCard] WITHHELD custom exit unverified');return;}if(exit.pairId)sample={...sample,exitNote:exit.reason,lpStatus:exit.lpStatus};}
  const highest=crossings[crossings.length-1];const prefix=`alphaos:runner:${row.chain}:${row.token.toLowerCase()}:${row.started_at}`;
  // Claim the highest observed milestone first; a gap directly to 10x emits one
  // card and silently consumes lower milestones. Claims survive worker restarts.

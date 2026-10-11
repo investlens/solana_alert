@@ -1,3 +1,4 @@
+import {verifyCustomTokenExit,customPoolRisk,type ExitRequest,type ExitVerification} from '../../services/customTokenExitVerification.js';
 type LaunchSecurityRoute = 'TRUSTED_LAUNCHPAD' | 'CUSTOM_SECURITY_REQUIRED';
 
 export type BoostLiquidityDecision = {
@@ -13,10 +14,13 @@ export type BoostSecurityGateDecision = {
   reason: string;
   cached: boolean;
   sellabilityVerified?: boolean;
+  exitPairId?:string;
+  exitUnverified?:boolean;
 };
 
 type CachedGate = { expiresAt: number; value: BoostSecurityGateDecision };
 const cache = new Map<string, CachedGate>();
+const evidenceCache=new Map<string,Record<string,unknown>>();
 const SAFE_TTL_MS = 30_000;
 const BLOCKED_TTL_MS = 60_000;
 
@@ -40,6 +44,10 @@ async function fetchCustomLiquidityProtection(tokenAddress: string, requireExpli
     const result = payload.result ?? {};
     const security = result[key] ?? result[Object.keys(result).find(v => normalize(v) === key) ?? ''];
     if (!security) return { allowed: allowUnknownSellability, status: 'UNKNOWN', reason: 'Sellability and LP protection unverified: provider data unavailable. Validate liquidity and selling before buying.' };
+
+    if(evidenceCache.size>=200)evidenceCache.delete(evidenceCache.keys().next().value!);
+    evidenceCache.set(key,security);
+    const poolRisk=customPoolRisk(security);if(poolRisk)return {allowed:false,status:'UNKNOWN',reason:poolRisk};
 
     // Hard safety failures remain non-negotiable. A BOOST never overrides
     // honeypot or sell-restriction evidence.
@@ -92,7 +100,8 @@ async function fetchCustomLiquidityProtection(tokenAddress: string, requireExpli
 
 /**
  * Fast route for a factory-verified trusted launchpad; hard security route otherwise.
- * BOOST blocks unknown security; DEX Paid may explicitly request warning-only unknown evidence.
+ * Custom automatic alerts require actual same-wallet exit verification; legacy
+ * allowUnknownSellability never overrides that check.
  * Unlocked LP is allowed only as a prominently disclosed high-risk BOOST.
  * The custom check is cached so repeated BOOST increments do not repeatedly hit providers.
  */
@@ -101,7 +110,7 @@ export async function routeBoostSecurity(args: {
   verifiedTrustedLaunchpad: boolean;
   requireExplicitSellability?: boolean;
   allowUnknownSellability?: boolean;
-}): Promise<BoostSecurityGateDecision> {
+}, verifyExit:(request:ExitRequest)=>Promise<ExitVerification> = verifyCustomTokenExit): Promise<BoostSecurityGateDecision> {
   if (args.verifiedTrustedLaunchpad) return {
     allowed: true,
     route: 'TRUSTED_LAUNCHPAD',
@@ -115,7 +124,10 @@ export async function routeBoostSecurity(args: {
   const prior = cache.get(key);
   if (prior && prior.expiresAt > now) return { ...prior.value, cached: true };
 
-  const liquidity = await fetchCustomLiquidityProtection(args.tokenAddress, args.requireExplicitSellability, args.allowUnknownSellability);
+  evidenceCache.delete(normalize(args.tokenAddress));
+  const liquidity = await fetchCustomLiquidityProtection(args.tokenAddress, false, true);
+  const exit=liquidity.allowed?await verifyExit({chain:'robinhood',token:args.tokenAddress,security:evidenceCache.get(normalize(args.tokenAddress))}):null;
+  if(exit){liquidity.allowed=exit.allowed;liquidity.reason=exit.reason+' · '+(liquidity.status==='UNLOCKED'?'⚠️ LP unlocked — liquidity removable.':liquidity.status==='UNKNOWN'?'LP lock: Unable to verify.':liquidity.reason);}
   const warning = liquidity.allowed && liquidity.status === 'UNLOCKED';
   const value: BoostSecurityGateDecision = {
     allowed: liquidity.allowed,
@@ -127,11 +139,13 @@ export async function routeBoostSecurity(args: {
         : `custom security ${liquidity.status === 'UNKNOWN' ? 'warning' : 'passed'}: ${liquidity.reason}`
       : `custom security blocked: ${liquidity.reason}`,
     cached: false,
-    sellabilityVerified: liquidity.allowed && /Sellability checks passed|LP PROTECTED|LP UNLOCKED/.test(liquidity.reason),
+    sellabilityVerified: exit?.allowed===true,
+    exitPairId:exit?.pairId,
+    exitUnverified:exit!=null&&!exit.allowed,
   };
   if (cache.size >= 200 && !cache.has(key)) cache.delete(cache.keys().next().value!);
   cache.set(key, { expiresAt: now + (value.allowed ? SAFE_TTL_MS : BLOCKED_TTL_MS), value });
   return value;
 }
 
-export function clearBoostSecurityRouterCacheForTests(): void { cache.clear(); }
+export function clearBoostSecurityRouterCacheForTests(): void { cache.clear(); evidenceCache.clear(); }

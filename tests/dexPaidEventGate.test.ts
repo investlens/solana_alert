@@ -20,10 +20,10 @@ test('unknown provenance does not override custom security; stale payments stop 
  const stale=await createDexPaidEventGate({...deps,paid:async()=>({...paid,latestPaymentTimestamp:now-601000})})(token);
  assert.equal(stale.allowed,false);assert.deepEqual(stale.reasons,['PAYMENT_OUTSIDE_WINDOW']);assert.equal(calls,1);
 });
-test('custom event route requires explicit negative honeypot and sell restriction flags',async()=>{
+test('provider flags alone cannot establish a full custom exit',async()=>{
  const prior=globalThis.fetch;
  try {
-  for(const [flags,allowed] of [[{},false],[{is_honeypot:'0',cannot_sell_all:'0'},true],[{is_honeypot:'1',cannot_sell_all:'0'},false]] as const){
+  for(const [flags,allowed] of [[{},false],[{is_honeypot:'0',cannot_sell_all:'0'},false],[{is_honeypot:'1',cannot_sell_all:'0'},false]] as const){
    clearBoostSecurityRouterCacheForTests();
    globalThis.fetch=(async()=>new Response(JSON.stringify({result:{[token]:{...flags,lp_holders:[{address:'0x000000000000000000000000000000000000dead',percent:'1'}]}}}),{status:200})) as typeof fetch;
    assert.equal((await routeBoostSecurity({tokenAddress:token,verifiedTrustedLaunchpad:false,requireExplicitSellability:true})).allowed,allowed);
@@ -36,16 +36,16 @@ test('verified sellability allows missing LP evidence with a warning, but sellin
  try{
   for(const [flags,allowed]of [[{is_honeypot:'0',cannot_sell_all:'0'},true],[{is_honeypot:'0',cannot_sell_all:'1'},false]]as const){
    clearBoostSecurityRouterCacheForTests();globalThis.fetch=(async()=>new Response(JSON.stringify({result:{[token]:flags}}),{status:200}))as typeof fetch;
-   const result=await routeBoostSecurity({tokenAddress:token,verifiedTrustedLaunchpad:false,requireExplicitSellability:true});
-   assert.equal(result.allowed,allowed);if(allowed){assert.equal(result.liquidity?.status,'UNKNOWN');assert.match(result.reason,/LP protection unverified/);}
+   const result=await routeBoostSecurity({tokenAddress:token,verifiedTrustedLaunchpad:false,requireExplicitSellability:true},async()=>({allowed:true,reason:'Same-wallet exit simulated',observedAt:now}));
+   assert.equal(result.allowed,allowed);if(allowed){assert.equal(result.liquidity?.status,'UNKNOWN');assert.match(result.reason,/Unable to verify/);}
   }
  }finally{globalThis.fetch=prior;clearBoostSecurityRouterCacheForTests();}
 });
 
- test('DEX policy warns for unknown data, blocks confirmed honeypots, and leaves BOOST fail-closed',async()=>{
+ test('DEX and BOOST withhold unverifiable custom exits regardless of legacy unknown flags',async()=>{
  const original=globalThis.fetch;
  try {
-  for(const [payload,allowed] of [[{},true],[{is_honeypot:'0'},true],[{is_honeypot:'1'},false],[{cannot_sell_all:'1'},false],[{is_honeypot:'0',cannot_sell_all:'0'},true]] as const){
+  for(const [payload,allowed] of [[{},false],[{is_honeypot:'0'},false],[{is_honeypot:'1'},false],[{cannot_sell_all:'1'},false],[{is_honeypot:'0',cannot_sell_all:'0'},false]] as const){
    clearBoostSecurityRouterCacheForTests();
    globalThis.fetch=(async()=>new Response(JSON.stringify({result:{[token]:payload}}))) as typeof fetch;
    const dex=await routeBoostSecurity({tokenAddress:token,verifiedTrustedLaunchpad:false,requireExplicitSellability:true,allowUnknownSellability:true});
@@ -55,8 +55,8 @@ test('verified sellability allows missing LP evidence with a warning, but sellin
   }
   clearBoostSecurityRouterCacheForTests();globalThis.fetch=async()=>{throw Error('provider timeout');};
   const warning=await routeBoostSecurity({tokenAddress:token,verifiedTrustedLaunchpad:false,requireExplicitSellability:true,allowUnknownSellability:true});
-  assert.equal(warning.allowed,true);assert.equal(warning.sellabilityVerified,false);
+  assert.equal(warning.allowed,false);assert.equal(warning.sellabilityVerified,false);
   const gate=createDexPaidEventGate({paid:async()=>paid,launch:async()=>null,custom:async()=>warning,now:()=>now});
-  assert.match((await gate(token)).securityNote!,/Sellability unverified/);
+  assert.match((await gate(token)).securityNote!,/Exit unverified/);
  }finally{globalThis.fetch=original;clearBoostSecurityRouterCacheForTests();}
 });
