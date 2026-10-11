@@ -7,14 +7,14 @@ type PoolKey={currency0:Address;currency1:Address;fee:number;tickSpacing:number;
 type Call={from:Address;to:Address;data:Hex;value?:Hex;gas:Hex;gasPrice:Hex};
 type SimCall={status?:string;returnData?:Hex;error?:unknown};
 type SimBlock={calls?:SimCall[]};
-type Dependencies={rpc:(chain:ExitRequest['chain'],method:string,params:unknown[],signal:AbortSignal)=>Promise<any>;pairs:(request:ExitRequest,signal:AbortSignal)=>Promise<any[]>;now:()=>number;wallet:()=>Address;security?:(request:ExitRequest,signal:AbortSignal)=>Promise<Record<string,unknown>|undefined>};
+type Dependencies={arcNativeQuoteSimulationEnabled?:boolean;rpc:(chain:ExitRequest['chain'],method:string,params:unknown[],signal:AbortSignal)=>Promise<any>;pairs:(request:ExitRequest,signal:AbortSignal)=>Promise<any[]>;now:()=>number;wallet:()=>Address;security?:(request:ExitRequest,signal:AbortSignal)=>Promise<Record<string,unknown>|undefined>};
 const ZERO='0x0000000000000000000000000000000000000000' as Address;
 const PERMIT2='0x000000000022D473030F116dDEE9F6B43aC78BA3' as Address;
 export const EXIT_CHAIN_CONFIG={
  robinhood:{id:4663,rpc:'https://robinhood-rpc.publicnode.com',quote:'0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73' as Address,router:'0x8876789976decbfcbbbe364623c63652db8c0904' as Address,sizes:[10n**15n,10n**16n,5n*10n**16n]},
- arc:{id:5042,rpc:'https://rpc.mainnet.arc.io',quote:'0x3600000000000000000000000000000000000000' as Address,router:'0x4fcA4a51Ab4F23A7447b3284fBd7D73289A89Fb1' as Address,sizes:[10n*10n**18n,100n*10n**18n,500n*10n**18n]},
+ arc:{id:5042,rpc:'https://rpc.mainnet.arc.io',quote:'0x3600000000000000000000000000000000000000' as Address,router:'0x4fcA4a51Ab4F23A7447b3284fBd7D73289A89Fb1' as Address,sizes:[10n*10n**6n,100n*10n**6n,500n*10n**6n]},
 } as const;
-const ERC20=parseAbi(['function balanceOf(address) view returns (uint256)','function approve(address,uint256) returns (bool)','function deposit() payable']);
+const ERC20=parseAbi(['function balanceOf(address) view returns (uint256)','function approve(address,uint256) returns (bool)','function deposit() payable','function decimals() view returns (uint8)']);
 const PERMIT_ABI=parseAbi(['function approve(address token,address spender,uint160 amount,uint48 expiration)']);
 const ROUTER=parseAbi(['function execute(bytes commands,bytes[] inputs,uint256 deadline) payable']);
 const poolParameters=parseAbiParameters('address currency0,address currency1,uint24 fee,int24 tickSpacing,address hooks');
@@ -86,11 +86,10 @@ export function createCustomExitVerifier(deps:Dependencies){
     const security=request.security??await deps.security?.(request,signal);
     const evidenceRisk=customPoolRisk(security);if(evidenceRisk)return blocked(evidenceRisk);
     if(Number(BigInt(await deps.rpc(request.chain,'eth_chainId',[],signal)))!==config.id)throw Error('RPC chain identity mismatch');
-    // ARC's public RPC currently lacks eth_simulateV1. Probe before enrichment,
-    // and fail closed rather than presenting provider flags as execution proof.
-    if(request.chain==='arc'){
-     await deps.rpc(request.chain,'eth_simulateV1',[{blockStateCalls:[{calls:[{to:ZERO,data:'0x'}]}],validation:false},'latest'],signal);
-     throw Error('ARC native quote funding not independently supported');
+    // ARC requires a provider that supports sequential simulation, plus the
+    // native-18/ERC20-6 balance alias. Keep disabled until real-pool validation.
+    if(request.chain==='arc'&&!deps.arcNativeQuoteSimulationEnabled){
+     return blocked('ARC native-USDC exit simulation is not validated; automatic alert withheld.');
     }
     const pairs=(await deps.pairs(request,signal)).filter(p=>p?.chainId===request.chain&&String(p.baseToken?.address??'').toLowerCase()===request.token.toLowerCase());
     const pool=request.pairId?pairs.find(p=>String(p.pairAddress).toLowerCase()===request.pairId!.toLowerCase()):pairs.sort((a,b)=>Number(b.liquidity?.usd??0)-Number(a.liquidity?.usd??0))[0];
@@ -114,13 +113,18 @@ export function createCustomExitVerifier(deps:Dependencies){
      ];
      // ONLY the test EOA's native balance is overridden. Token code, token
      // balances, router and pool state are never fabricated or overwritten.
-     const simulate=(calls:Call[])=>deps.rpc(request.chain,'eth_simulateV1',[{blockStateCalls:[{stateOverrides:{[wallet]:{balance:toHex(amount)}},calls}],validation:false},block],signal);
-     const buy=[read(token),read(config.quote),call(config.quote,encodeFunctionData({abi:ERC20,functionName:'deposit'}),toHex(amount)),...approvals(config.quote),call(config.router,swapData(key,config.quote,token,amount,deadline)),read(token),read(config.quote)];
+     const simulate=(calls:Call[])=>deps.rpc(request.chain,'eth_simulateV1',[{blockStateCalls:[{stateOverrides:{[wallet]:{balance:toHex(request.chain==='arc'?amount*10n**12n:amount)}},calls}],validation:false},block],signal);
+     const funding=request.chain==='arc'
+      ?call(config.quote,encodeFunctionData({abi:ERC20,functionName:'decimals'}))
+      :call(config.quote,encodeFunctionData({abi:ERC20,functionName:'deposit'}),toHex(amount));
+     const buy=[read(token),read(config.quote),funding,...approvals(config.quote),call(config.router,swapData(key,config.quote,token,amount,deadline)),read(token),read(config.quote)];
      const bought=complete(await simulate(buy),buy.length);
-     if(balance(bought[0])!==0n||balance(bought[1])!==0n||balance(bought[7])!==0n)throw Error('Test wallet balance or buy debit unverified');
+     if(request.chain==='arc'&&balance(bought[2])!==6n)throw Error('ARC quote decimal scale unverified');
+     if(balance(bought[0])!==0n||balance(bought[1])!==(request.chain==='arc'?amount:0n)||balance(bought[7])!==0n)throw Error('Test wallet balance or buy debit unverified');
      const tokens=balance(bought[6]);if(tokens<=0n)throw Error('Buy received no tokens');
      const roundtrip=[...buy,...approvals(token),call(config.router,swapData(key,token,config.quote,tokens,deadline)),read(config.quote),read(token)];
      const exited=complete(await simulate(roundtrip),roundtrip.length);
+     if(request.chain==='arc'&&(balance(exited[1])!==amount||balance(exited[2])!==6n))throw Error('ARC round-trip funding unverified');
      if(balance(exited[6])!==tokens||balance(exited[12])!==0n)throw Error('Full same-wallet sell unverified');
      const loss=roundTripLoss(amount,balance(exited[11]));maxLoss=Math.max(maxLoss,loss);
      if(loss>10)throw Error('Exit loss exceeds 10% at a tested size');
@@ -134,6 +138,7 @@ export function createCustomExitVerifier(deps:Dependencies){
  };
 }
 export const verifyCustomTokenExit=createCustomExitVerifier({
+ arcNativeQuoteSimulationEnabled:process.env.ARC_CUSTOM_EXIT_SIMULATION_ENABLED==='true',
  now:Date.now,wallet:()=>('0x'+keccak256(toHex(crypto.randomUUID())).slice(-40)) as Address,
  rpc:async(chain,method,params,signal)=>{
   const config=EXIT_CHAIN_CONFIG[chain];
