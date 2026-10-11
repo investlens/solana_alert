@@ -1,5 +1,7 @@
 import type {CompactTrackingRow,CompactSample} from './compactAlertOutcomes.js';
 import {escapeTelegramHtml as esc} from '../ui/escapeHtml.js';
+import {deliverRunnerRecipient} from './runnerRecipientDelivery.js';
+import {runSharedAtomic} from './sharedJsonCache.js';
 import {claimSharedDelivery} from './sharedJsonCache.js';
 import {getDeliverableUsers} from '../core/delivery.js';
 import {enabledLiveRecipients, type LiveFeedKey} from './liveAlertPreferences.js';
@@ -68,12 +70,18 @@ async function deliver(row:CompactTrackingRow,sample:RunnerSample,multiple:numbe
  let accepted=0;
  for(const chatId of recipients){try{
   await waitForRecipientDelivery(chatId,started);
-  await sendAlphaosPhotoAlert({botToken,chatId,text,keyboard:compactRunnerButtons(row),image});
-  recordDeliveryAccepted(chatId,started,`runner:${row.chain}:${row.token}:${multiple}`);accepted++;
+  const identity=`runner:${row.chain}:${row.token.toLowerCase()}:${row.started_at}`;
+  const sent=await deliverRunnerRecipient(identity,chatId,runnerCrossings(row,sample),async()=>
+    (await sendAlphaosPhotoAlert({botToken,chatId,text,keyboard:compactRunnerButtons(row),image})).messageId);
+  if(sent){recordDeliveryAccepted(chatId,started,`${identity}:${multiple}`);accepted++;}
  }catch{console.warn('[RunnerCard] recipient delivery unconfirmed');}}
  console.log('[RunnerCard] DELIVERY',{chain:row.chain,multiple,accepted,failed:recipients.length-accepted});
 }
-const production:Dependencies={claim:claimSharedDelivery,deliver};
+const production:Dependencies={claim:async(key)=>{
+ // Preserve legacy dedup; new milestones claim per recipient.
+ try{return await runSharedAtomic("return redis.call('EXISTS', KEYS[1])",[key],[])===1?'EXISTS':'CLAIMED';}
+ catch{return 'UNAVAILABLE';}
+},deliver};
 let activeDeliveries=0;
 export async function processCompactRunner(row:CompactTrackingRow,sample:RunnerSample,deps=production):Promise<void>{
  if(deps===production && activeDeliveries>=2)return;
@@ -84,7 +92,7 @@ export async function processCompactRunner(row:CompactTrackingRow,sample:RunnerS
  // Claim the highest observed milestone first; a gap directly to 10x emits one
  // card and silently consumes lower milestones. Claims survive worker restarts.
  if(await deps.claim(`${prefix}:${highest}`,7*24*60*60_000)!=='CLAIMED')return;
- for(const lower of crossings.slice(0,-1))if(await deps.claim(`${prefix}:${lower}`,7*24*60*60_000)==='UNAVAILABLE')return;
+ for(const lower of deps===production?[]:crossings.slice(0,-1))if(await deps.claim(`${prefix}:${lower}`,7*24*60*60_000)==='UNAVAILABLE')return;
  await deps.deliver(row,sample,highest);
  }finally{if(deps===production)activeDeliveries--;}
 }
