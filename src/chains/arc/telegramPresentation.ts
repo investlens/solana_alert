@@ -53,8 +53,8 @@ function compactArcBoost(text: string): string {
     `👨‍💻 <b>Dev holding</b>  ${dev}`,
     '',
     '<b>SAFETY</b>',
-    /NOT CHECKED|Not checked/.test(text)
-      ? '⚠️ Liquidity, honeypot and sellability NOT CHECKED. Verify selling and liquidity yourself before investing.'
+    /NOT CHECKED|Not checked|verified simulated exit/.test(text)
+      ? (/verified simulated exit/.test(text)?'Custom alerts require a verified simulated exit. LP lock: unable to verify; execution can change.':'⚠️ Liquidity, honeypot and sellability NOT CHECKED. Verify selling and liquidity yourself before investing.')
       : '✅ No honeypot / cannot-sell flag detected',
     '',
     ca ? '<b>CONTRACT</b>' : '',

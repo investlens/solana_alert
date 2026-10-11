@@ -1,4 +1,4 @@
-export type ArcBoostSafety = { allowed: boolean; reason: string; sellabilityBlocked?: boolean; sellabilityVerified?: boolean; creator?: string | null; devHoldingPercent?: number | null; top10Percent?: number | null };
+export type ArcBoostSafety = { lpStatus?:'LOCKED'|'BURNED'|'UNLOCKED'|'UNKNOWN';allowed: boolean; reason: string; sellabilityBlocked?: boolean; sellabilityVerified?: boolean; creator?: string | null; devHoldingPercent?: number | null; top10Percent?: number | null };
 export function arcBoostSafetyFromEvidence(evidence: Record<string, unknown> | null | undefined): ArcBoostSafety {
   if (!evidence) return { allowed: false, reason: 'honeypot evidence unavailable' };
   // GoPlus percentages are fractions of supply. Owner is not necessarily creator.
@@ -34,5 +34,5 @@ export async function processArcBoostObservation(totals: Map<string, number>, bo
 // DEX payments surface missing evidence as a warning; confirmed exit restrictions still block.
 export function arcDexPaidSafety<T extends ArcBoostSafety>(safety: T): T & ArcBoostSafety {
  if(safety.allowed || safety.sellabilityBlocked)return safety;
- return {...safety,allowed:true,sellabilityVerified:false,reason:'Sellability unverified: provider data unavailable or incomplete. Validate selling before investing.'};
+ return {...safety,allowed:false,sellabilityVerified:false,reason:'Exit unverified; automatic alert withheld.'};
 }

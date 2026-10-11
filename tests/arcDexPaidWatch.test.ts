@@ -17,10 +17,10 @@ test('bounded ARC payment watcher checks security, deduplicates and performs no 
 });
 
 import {arcBoostSafetyFromEvidence,arcDexPaidSafety}from '../src/chains/arc/boostSafety.js';
-test('ARC DEX warns for unavailable security but cannot override confirmed exit restrictions',()=>{
+test('ARC DEX withholds unavailable security but cannot override confirmed exit restrictions',()=>{
  for(const evidence of [null,{}, {is_honeypot:'0'}]){
   const boost=arcBoostSafetyFromEvidence(evidence);assert.equal(boost.allowed,false);
-  const paid=arcDexPaidSafety(boost);assert.equal(paid.allowed,true);assert.equal(paid.sellabilityVerified,false);assert.match(paid.reason,/unverified/);
+  const paid=arcDexPaidSafety(boost);assert.equal(paid.allowed,false);assert.equal(paid.sellabilityVerified,false);assert.match(paid.reason,/unverified/);
  }
  for(const evidence of [{is_honeypot:'1'},{cannot_sell_all:'1'}])assert.equal(arcDexPaidSafety(arcBoostSafetyFromEvidence(evidence)).allowed,false);
  assert.equal(arcDexPaidSafety(arcBoostSafetyFromEvidence({is_honeypot:'0',cannot_sell_all:'0'})).sellabilityVerified,true);
