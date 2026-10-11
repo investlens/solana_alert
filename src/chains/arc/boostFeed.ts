@@ -1,10 +1,10 @@
 import { governedDexScreenerJson } from '../../services/dexscreenerRequestGovernor.js';
 
-export async function fetchArcBoostFeed() {
+export async function fetchArcBoostFeed(source:'LATEST'|'TOP'='LATEST') {
   const { value } = await governedDexScreenerJson<unknown>({
-    url: 'https://api.dexscreener.com/token-boosts/latest/v1',
+    url: `https://api.dexscreener.com/token-boosts/${source==='TOP'?'top':'latest'}/v1`,
     caller: 'arc_boost_feed', endpoint: 'BOOSTS', priority: 'NORMAL',
-    cacheTtlMs: 15_000, queueWaitTimeoutMs: 1_000, httpTimeoutMs: 4_000,
+    cacheTtlMs: source==='TOP'?60_000:15_000, queueWaitTimeoutMs: 1_000, httpTimeoutMs: 4_000,
   });
   if (!Array.isArray(value)) throw new Error('Malformed Boost feed: expected array');
   return value.filter(item => item?.chainId === 'arc' && /^0x[a-fA-F0-9]{40}$/.test(String(item.tokenAddress))
