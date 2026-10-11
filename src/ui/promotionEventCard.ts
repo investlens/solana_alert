@@ -1,6 +1,7 @@
 import { escapeAlphaHtml as esc } from './alphaNotification.js';
 import { cleanAlertButtons, type CardButton } from './alertCardLayout.js';
 import { withAlertKeyStats, type AlertKeyStats } from './alertKeyStats.js';
+import { lpLockNote } from './lpLockNote.js';
 export type PromotionCardArgs = {text:string;token:string;launchType:string|null;stats:AlertKeyStats|null;securityNote:string|null;buttons:CardButton[][];paymentTimestamp?:number|null;kind:'BOOST'|'DEX_PAID'|'SOCIAL_MAFIA'};
 export function buildPromotionEventCard(args:PromotionCardArgs) {
  const s=args.stats, lines=args.text.split('\n');
@@ -38,7 +39,9 @@ export function buildPromotionEventCard(args:PromotionCardArgs) {
    : lines.find(l=>/^Creator\s+0x/i.test(l.replace(/<[^>]+>/g,'').replace(/^[^A-Za-z]+/,'')));
  const age=args.paymentTimestamp&&Number.isFinite(args.paymentTimestamp)?Math.max(0,Math.floor((Date.now()-(args.paymentTimestamp<1e10?args.paymentTimestamp*1000:args.paymentTimestamp))/60000)):null;
  const trusted=args.launchType==='PONS'||args.launchType==='FLAP';
- const risk=trusted?`Verified ${args.launchType} origin · ownership and market risks remain`:esc(args.securityNote??'Sellability unverified · validate selling before investing.');
+ const securityNote=(args.securityNote??'Sellability unverified · validate selling before investing.')
+   .replace(/^⚠️\s*LP\s+UNLOCKED(?:\s*·\s*liquidity can be removed\.|:\s*liquidity can be pulled\.)\s*/i,'');
+ const risk=trusted?`Verified ${args.launchType} origin · ownership and market risks remain`:esc(securityNote);
  const socials=[s?.twitter&&/^https:\/\/(?:x\.com|twitter\.com)\//i.test(s.twitter)?`<a href="${esc(s.twitter)}">X</a>`:null,s?.telegram&&/^https:\/\/t\.me\//i.test(s.telegram)?`<a href="${esc(s.telegram)}">Telegram</a>`:null].filter(Boolean);
  // Preserve already-rendered clickable socials when public metadata is unavailable.
  if(!socials.length)for(const l of lines)if(/href="https:\/\/(?:x\.com|twitter\.com|t\.me)\//i.test(l))socials.push(l);
@@ -54,7 +57,7 @@ export function buildPromotionEventCard(args:PromotionCardArgs) {
  ...(lines.some(l=>/Creator wallet balance only/.test(l))?['Zero creator balance does not prove a sale or burn.']:[]),
  ...lines.filter(l=>/Concentrated dev holding|^Creator balance change|^Dev observed|^Holder sample observed|^Creator sold|^Creator burned|^Creator outflows|^Activity coverage/.test(l)),
  ...lines.filter(l=>/^(?:Burned|Verified dev burn)\s/i.test(l.replace(/<[^>]+>/g,'').replace(/^[^A-Za-z]+/,''))&&!/Unavailable|Unverified/i.test(l)),'',
- '<b>RISK</b>',risk,
+ '<b>RISK</b>',lpLockNote(s?.lp ?? (/^⚠️?\s*LP\s+UNLOCKED\b/i.test(args.securityNote??'')?'UNLOCKED':null),s?.preBond),...(risk?[risk]:[]),
  ...(socials.length?['',socials.join(' · ')]:[]),'',
  `<code>${esc(args.token)}</code>`,args.kind==='SOCIAL_MAFIA'?'<i>Project acknowledgement · market risks remain · DYOR</i>':'<i>Promotion event · DYOR</i>',
  ...(s?.source?[`${esc(s.source)}${s.checkedAt?' · '+esc(s.checkedAt)+' UTC':''}`]:[])].join('\n');
