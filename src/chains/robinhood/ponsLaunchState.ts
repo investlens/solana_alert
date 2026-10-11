@@ -46,45 +46,50 @@ async function rawEthCall(args: { address: Address; data: Hex }): Promise<Hex> {
   return result as Hex;
 }
 
-async function indexedFactoryForToken(token: Address): Promise<Address | null> {
-  try {
-    const { data, error } = await supabase
-      .from('pons_launches')
-      .select('factory_address')
-      .eq('chain', 'robinhood')
-      .ilike('token_address', token.toLowerCase())
-      .order('block_number', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (error) throw error;
-    const factoryAddress = String(data?.factory_address ?? '').trim();
-    return factoryAddress && isApprovedPonsOrigin(token, token, factoryAddress) ? getAddress(factoryAddress) : null;
-  } catch (error) {
-    console.warn('[PonsLaunchState] indexed factory lookup failed; using active factory fallback', {
-      token,
-      reason: error instanceof Error ? error.message : String(error),
-    });
-    return null;
-  }
+async function indexedFactoryForToken(token:Address):Promise<Address|null>{
+ const launch=await getIndexedVerifiedPonsLaunch(token);
+ return launch?getAddress(launch.factory):null;
 }
 
-export async function getIndexedVerifiedPonsLaunch(tokenAddress: string): Promise<{exists:true;token:string;deployer:string|null;generation:'v1'|'v2'}|null> {
+type IndexedPonsLaunch={exists:true;token:string;deployer:string|null;generation:'v1'|'v2';factory:string};
+const indexedLaunchCache=new Map<string,{value:IndexedPonsLaunch|null;expires:number}>();
+const indexedLaunchInflight=new Map<string,Promise<IndexedPonsLaunch|null>>();
+export function resetIndexedPonsCacheForTests(){indexedLaunchCache.clear();indexedLaunchInflight.clear();}
+export async function getIndexedVerifiedPonsLaunch(tokenAddress:string):Promise<IndexedPonsLaunch|null>{
+ const key=getAddress(tokenAddress).toLowerCase(),cached=indexedLaunchCache.get(key);
+ if(cached&&cached.expires>Date.now())return cached.value;
+ const active=indexedLaunchInflight.get(key);if(active)return active;
+ const request=readIndexedVerifiedPonsLaunch(tokenAddress);indexedLaunchInflight.set(key,request);
+ try{const value=await request;
+  for(const [id,entry] of indexedLaunchCache)if(entry.expires<=Date.now())indexedLaunchCache.delete(id);
+  if(indexedLaunchCache.size>=200&&!indexedLaunchCache.has(key))indexedLaunchCache.delete(indexedLaunchCache.keys().next().value!);
+  indexedLaunchCache.set(key,{value,expires:Date.now()+(value?60000:15000)});return value;
+ }finally{indexedLaunchInflight.delete(key);}
+}
+
+async function readIndexedVerifiedPonsLaunch(tokenAddress:string):Promise<IndexedPonsLaunch|null> {
   const token = getAddress(tokenAddress);
   try {
-    const { data, error } = await supabase
-      .from('pons_launches')
-      .select('token_address,factory_address,deployer_address')
-      .eq('chain', 'robinhood')
-      .eq('protocol', 'pons')
-      .ilike('token_address', token.toLowerCase())
-      .limit(1)
-      .abortSignal(AbortSignal.timeout(1500)).maybeSingle();
+    const shared=await getSharedJson<{token?:string;factory?:string;creator?:string}>(`alphaos:pons:verified:${token.toLowerCase()}`);
+    const proof=shared?.value;
+    if(proof&&isApprovedPonsOrigin(token,proof.token,proof.factory)){
+      const generation=getPonsFactoryDeployments().find(f=>f.address.toLowerCase()===proof.factory!.toLowerCase())!.generation;
+      const deployer=typeof proof.creator==='string'&&/^0x[a-f0-9]{40}$/i.test(proof.creator)&&!/^0x0{40}$/i.test(proof.creator)?proof.creator:null;
+      return {exists:true,token,deployer,generation,factory:proof.factory!};
+    }
+    const query=()=>supabase.from('pons_launches').select('token_address,factory_address,deployer_address')
+      .eq('chain','robinhood').eq('protocol','pons');
+    let {data,error}=await query().in('token_address',[...new Set([token.toLowerCase(),token])])
+      .order('block_number',{ascending:false}).limit(1).abortSignal(AbortSignal.timeout(1500)).maybeSingle();
+    // Preserve compatibility with historical noncanonical mixed-case rows.
+    if(!error&&!data)({data,error}=await query().ilike('token_address',token.toLowerCase())
+      .order('block_number',{ascending:false}).limit(1).abortSignal(AbortSignal.timeout(1500)).maybeSingle());
     if (error) throw error;
     if (!isApprovedPonsOrigin(token, data?.token_address, data?.factory_address)) return null;
     const deployer = typeof data?.deployer_address === 'string' && /^0x[a-f0-9]{40}$/i.test(data.deployer_address)
       && !/^0x0{40}$/i.test(data.deployer_address) ? data.deployer_address : null;
     const generation = getPonsFactoryDeployments().find(factory => factory.address.toLowerCase() === data!.factory_address.toLowerCase())!.generation;
-    return {exists:true,token,deployer,generation};
+    return {exists:true,token,deployer,generation,factory:data!.factory_address};
   } catch (error) {
     console.warn('[PonsLaunchState] indexed PONS provenance lookup failed', {
       token,
