@@ -155,7 +155,7 @@ async function ensureBoostBaseline() {
   boostBaselinePromise = (async () => {
     try {
       const boosts = await fetchRobinhoodBoosts();
-      for (const boost of boosts) boostTotals.set(normalize(boost.tokenAddress), boost.totalAmount);
+      for (const boost of boosts) if (!boostTotals.has(normalize(boost.tokenAddress))) boostTotals.set(normalize(boost.tokenAddress), boost.totalAmount);
       boostBaselineReady = true;
       console.log('[RobinhoodBoostObserver] LIVE_ONLY_BASELINE_READY', { tokens: boosts.length, supabase: 'bypassed' });
       console.log('[RobinhoodBoostObserver] BASELINE_ABSORBED_SILENTLY', { tokens: boosts.length, recoveryAlertsSuppressed: true });
@@ -658,4 +658,16 @@ async function boostDeveloperEvidence(token: string, creator?: string) {
       burnEvidence: dev?.evidenceStatus === 'COMPLETE' && dev.totalBurnPercent != null ? 'VERIFIED' as const : 'UNAVAILABLE' as const,
       burnedPercent: dev?.evidenceStatus === 'COMPLETE' ? dev.totalBurnPercent : null };
   } finally { if (timer) clearTimeout(timer); }
+}
+
+// Stream snapshots are historical state. Absorb unseen totals without alerting.
+// Reconnect increases for already-known tokens still use the canonical delivery guard.
+export async function processRobinhoodStreamBoost(boost:{tokenAddress:string;amount:number;totalAmount:number},snapshot:boolean):Promise<void> {
+ const key=normalize(boost.tokenAddress);
+ if(snapshot&&!boostTotals.has(key)){boostTotals.set(key,boost.totalAmount);return;}
+ await processBoost(boost);
+}
+
+export function seedRobinhoodStreamBoost(boost:{tokenAddress:string;amount:number;totalAmount:number}):void {
+ const key=normalize(boost.tokenAddress);if(!boostTotals.has(key))boostTotals.set(key,boost.totalAmount);
 }
