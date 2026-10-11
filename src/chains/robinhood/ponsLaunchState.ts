@@ -75,7 +75,8 @@ async function readIndexedVerifiedPonsLaunch(tokenAddress:string):Promise<Indexe
     if(proof&&isApprovedPonsOrigin(token,proof.token,proof.factory)){
       const generation=getPonsFactoryDeployments().find(f=>f.address.toLowerCase()===proof.factory!.toLowerCase())!.generation;
       const deployer=typeof proof.creator==='string'&&/^0x[a-f0-9]{40}$/i.test(proof.creator)&&!/^0x0{40}$/i.test(proof.creator)?proof.creator:null;
-      return {exists:true,token,deployer,generation,factory:proof.factory!};
+      // An origin proof without a creator must not hide an indexed creator.
+      if(deployer)return {exists:true,token,deployer,generation,factory:proof.factory!};
     }
     const query=()=>supabase.from('pons_launches').select('token_address,factory_address,deployer_address')
       .eq('chain','robinhood').eq('protocol','pons');
