@@ -1,4 +1,5 @@
 import {
+  decodeEventLog,
   decodeFunctionResult,
   encodeFunctionData,
   getAddress,
@@ -10,6 +11,7 @@ import {
   type Hex,
 } from 'viem';
 
+import { ponsLogRange } from './ponsLogRanges.js';
 import { PONS_CONTRACTS, getPonsFactoryDeployments } from './ponsContracts.js';
 import { requestRobinhoodRpcResilient } from './rpc.js';
 import { supabase } from '../../services/supabase.js';
@@ -99,6 +101,9 @@ export function isApprovedPonsOrigin(token: string, evidenceToken: unknown, fact
 }
 
 const eventVerificationCache = new Map<string, { value: boolean; expiresAt: number }>();
+let provenanceWindow=0, provenanceStarted=0;
+let provenanceActive=false;
+const eventScanCursors = new Map<string, bigint>();
 const PONS_TRUE_CACHE_MS = 30 * 24 * 60 * 60 * 1000;
 const PONS_FALSE_CACHE_MS = 60 * 60 * 1000;
 
@@ -113,31 +118,53 @@ function eventSignature(eventDeclaration: string): string {
   return `${name}(${params})`;
 }
 
+export function ponsEventCreator(log: unknown, eventDeclaration: string): string | null {
+  try {
+    const value = log as {data:Hex;topics:[Hex,...Hex[]]};
+    const decoded = decodeEventLog({abi:parseAbi([eventDeclaration]),data:value.data,topics:value.topics}) as unknown as {args:{deployer?:string}};
+    const creator = decoded.args.deployer;
+    return creator && /^0x[a-f0-9]{40}$/i.test(creator) && !/^0x0{40}$/i.test(creator) ? creator : null;
+  } catch { return null; }
+}
+
 async function verifyPonsLaunchEvent(token: Address): Promise<boolean> {
   const key = token.toLowerCase();
   const cached = eventVerificationCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
 
+  if(Date.now()-provenanceWindow>=60_000){provenanceWindow=Date.now();provenanceStarted=0;}
+  // Indexed/shared provenance is checked before this bounded fallback. At most
+  // two fallback tokens per minute, four log requests each, one token at a time.
+  if(provenanceActive || provenanceStarted>=2)return false;
+  provenanceStarted++;provenanceActive=true;
+  try {
   const tokenTopic = padHex(token, { size: 32 });
   let providerUnavailable = false;
+  let scanIncomplete = false;
+  const latest = BigInt(await requestRobinhoodRpcResilient<string>({method:'eth_blockNumber',params:[]}));
   for (const deployment of getPonsFactoryDeployments()) {
-    if (deployment.startBlock == null) continue;
+    if (!deployment.enabled || deployment.startBlock == null) continue;
     try {
       const topic0 = keccak256(toHex(eventSignature(deployment.tokenLaunchedEvent)));
+      const cursorKey = `${key}:${deployment.address.toLowerCase()}`;
+      const end = eventScanCursors.get(cursorKey) ?? (deployment.endBlock != null && deployment.endBlock < latest ? deployment.endBlock : latest);
+      const range = ponsLogRange(deployment.startBlock, end);
+      if (!range) continue;
       const logs = await requestRobinhoodRpcResilient<unknown[]>({
         method: 'eth_getLogs',
         params: [{
           address: deployment.address,
-          fromBlock: `0x${deployment.startBlock.toString(16)}`,
-          toBlock: 'latest',
+          fromBlock: `0x${range.from.toString(16)}`,
+          toBlock: `0x${range.to.toString(16)}`,
           topics: [topic0, tokenTopic],
         }],
       });
-      if (Array.isArray(logs) && logs.length > 0) {
+      if (!Array.isArray(logs)) throw new Error('Invalid PONS log response');
+      if (logs.length > 0) {
         eventVerificationCache.set(key, { value: true, expiresAt: Date.now() + PONS_TRUE_CACHE_MS });
         void setSharedJson(
           `alphaos:pons:verified:${key}`,
-          { factory: deployment.address, protocolVersion: deployment.generation, provenance: 'TOKEN_LAUNCHED_EVENT' },
+          { token: key, creator: ponsEventCreator(logs[0], deployment.tokenLaunchedEvent), factory: deployment.address, protocolVersion: deployment.generation, provenance: 'TOKEN_LAUNCHED_EVENT' },
           new Date().toISOString(),
           PONS_TRUE_CACHE_MS,
         );
@@ -148,6 +175,11 @@ async function verifyPonsLaunchEvent(token: Address): Promise<boolean> {
         });
         return true;
       }
+      // Advance only after a successful empty response. Incomplete scans are
+      // retried after a short cache interval, without declaring non-PONS origin.
+      if (eventScanCursors.size >= 800 && !eventScanCursors.has(cursorKey)) eventScanCursors.delete(eventScanCursors.keys().next().value!);
+      eventScanCursors.set(cursorKey, range.next ?? deployment.startBlock - 1n);
+      scanIncomplete ||= range.next != null;
     } catch (error) {
       providerUnavailable = true;
       console.warn('[PonsLaunchState] event provenance verification unavailable for factory', {
@@ -158,8 +190,10 @@ async function verifyPonsLaunchEvent(token: Address): Promise<boolean> {
     }
   }
 
-  eventVerificationCache.set(key, { value: false, expiresAt: Date.now() + (providerUnavailable ? 60_000 : PONS_FALSE_CACHE_MS) });
+  if (eventVerificationCache.size >= 200 && !eventVerificationCache.has(key)) eventVerificationCache.delete(eventVerificationCache.keys().next().value!);
+  eventVerificationCache.set(key, { value: false, expiresAt: Date.now() + (providerUnavailable || scanIncomplete ? 60_000 : PONS_FALSE_CACHE_MS) });
   return false;
+  } finally {provenanceActive=false;}
 }
 
 export async function isVerifiedPonsLaunch(tokenAddress: string): Promise<boolean> {
