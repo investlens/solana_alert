@@ -7,7 +7,7 @@ import { recordOpportunityAndEmit } from '../../services/opportunityService.js';
 import { qualifyPremiumOpportunity } from '../../services/opportunityDeliveryService.js';
 import { runDatabaseWork, isTransientDatabaseError } from '../../services/databaseLoadGovernor.js';
 import { supabase } from '../../services/supabase.js';
-import { getRobinhoodMarketSnapshot } from './market.js';
+import { getRobinhoodMarketSnapshot, prefetchRobinhoodScannerPairs } from './market.js';
 import { DexScreenerHttpTimeoutError, DexScreenerMalformedResponseError, DexScreenerProviderHttpError,
   DexScreenerQueueCapacityError, getDexScreenerBackoffState, isDexScreenerProviderBackoffError,
   recordDexScreenerCallerOutcome } from '../../services/dexscreenerRequestGovernor.js';
@@ -167,14 +167,14 @@ async function loadUniverse() {
 }
 
 async function scanToken(entry: ExistingTokenUniverseEntry) {
+  const market = await getRobinhoodMarketSnapshot(entry.token, { priority: 'BACKGROUND', caller: 'existing_token_scanner', queueWaitTimeoutMs: EXISTING_TOKEN_SCANNER_QUEUE_WAIT_MS });
+  if (!market) { recordDexScreenerCallerOutcome('existing_token_scanner', 'BACKGROUND', 'NO_USABLE_PAIR'); throw new ExistingTokenNoUsablePairError(); }
   const { data: contexts, error } = await supabase.from('opportunities').select('strategy_key,raw_data').eq('chain', 'robinhood').eq('asset_id', entry.token).order('updated_at', { ascending: false }).limit(20);
   if (error) throw error;
   const monitor = contexts?.find(row => row.strategy_key === 'EXISTING_TOKEN_MONITOR');
   const prior = (monitor?.raw_data ?? {}) as ExistingTokenMonitorData;
   const existingRisk = (contexts ?? []).map(row => (row.raw_data ?? {}) as Record<string, unknown>)
     .find(raw => raw.confirmedDevSell === true || raw.criticalSecurity === true || raw.liquidityCritical === true) ?? {};
-  const market = await getRobinhoodMarketSnapshot(entry.token, { priority: 'BACKGROUND', caller: 'existing_token_scanner', queueWaitTimeoutMs: EXISTING_TOKEN_SCANNER_QUEUE_WAIT_MS });
-  if (!market) { recordDexScreenerCallerOutcome('existing_token_scanner', 'BACKGROUND', 'NO_USABLE_PAIR'); throw new ExistingTokenNoUsablePairError(); }
   void considerRobinhoodVolumeBreakout(market).catch(() => console.warn('[VolumeBreakout] CHECK_FAILED'));
   const observedAt = new Date(market.timestamp).toISOString();
   const minimumSeparationSeconds = entry.tier === 'HOT' ? config.existingTokenHotScanSeconds : config.existingTokenWarmScanSeconds;
@@ -273,22 +273,34 @@ export async function runExistingTokenProviderBatch<T>(entries: ExistingTokenUni
   return { completed, failed, providerBackoff, skipped: Math.max(0, entries.length - completed.length - failed.length) };
 }
 
+export function selectExistingTokenBatchCandidates(entries:ExistingTokenUniverseEntry[],found:Set<string>,max:number){
+ const ready=entries.filter(e=>found.has(normalize(e.token))),unknown=entries.filter(e=>!found.has(normalize(e.token)));
+ // Reserve a quarter for individual verification so omitted rows cannot starve.
+ const reserve=Math.min(unknown.length,Math.max(1,Math.ceil(max/4)));
+ const chosen=new Set([...ready.slice(0,max-reserve),...unknown.slice(0,Math.max(reserve,max-ready.length))]);
+ return entries.filter(e=>chosen.has(e)).slice(0,max);
+}
+
 export async function refreshExistingTokenOpportunityScanner() {
   if (scannerRunning) return { skipped: true };
   scannerRunning = true; const started = Date.now();
   const metrics = { health: 'HEALTHY', universe: 0, due: 0, selected: 0, scanned_success: 0, no_market: 0, failed: 0,
     queue_deferred: 0, quota_deferred: 0, cycle_deferred: 0, provider_backoff_deferred: 0, remaining_due: 0, candidates: 0, qualified: 0,
-    actionable_emitted: 0, failure_reasons: {} as Record<string, number>, provider_backoff: false, duration_ms: 0 };
+    actionable_emitted: 0, market_batch_candidates: 0, market_batch_ready: 0, failure_reasons: {} as Record<string, number>, provider_backoff: false, duration_ms: 0 };
   try {
     const universe = await loadUniverse(); metrics.universe = universe.length;
     const quota = Math.min(config.existingTokenMaxPerCycle, EXISTING_TOKEN_SCANNER_SUSTAINABLE_QUOTA);
-    const due = selectDueExistingTokens(universe, { max: quota }); hotCursor = due.nextHotCursor; warmCursor = due.nextWarmCursor;
-    metrics.due = due.dueCount; metrics.selected = due.selected.length; metrics.quota_deferred = Math.max(0, due.dueCount - due.selected.length);
+    const due = selectDueExistingTokens(universe, { max: Math.min(config.existingTokenMaxPerCycle,quota*2,30) }); hotCursor = due.nextHotCursor; warmCursor = due.nextWarmCursor;
+    metrics.due = due.dueCount;metrics.selected=Math.min(quota,due.selected.length);metrics.quota_deferred=Math.max(0,due.dueCount-metrics.selected);
     if (getDexScreenerBackoffState().active) {
       metrics.health = 'DEGRADED'; metrics.failed = 1; metrics.provider_backoff = true; metrics.provider_backoff_deferred = due.selected.length;
       metrics.failure_reasons.RATE_LIMITED = 1; metrics.remaining_due = due.dueCount; return metrics;
     }
-    const batch = await runExistingTokenProviderBatch(due.selected, scanToken);
+    let selected=due.selected.slice(0,quota);
+    try{metrics.market_batch_candidates=due.selected.length;const found=await prefetchRobinhoodScannerPairs(due.selected.map(e=>e.token));metrics.market_batch_ready=found.size;selected=selectExistingTokenBatchCandidates(due.selected,found,quota);}
+    catch{console.warn('[ExistingTokenScanner] batch prefetch unavailable; individual scanning retained');}
+    metrics.selected=selected.length;metrics.quota_deferred=Math.max(0,due.dueCount-selected.length);
+    const batch = await runExistingTokenProviderBatch(selected, scanToken);
     recordCompletedExistingTokenScans(batch.completed.map(row => row.entry));
     for (const { result } of batch.completed) { metrics.scanned_success++; metrics.candidates += Number(result.candidate); metrics.qualified += Number(result.qualified); metrics.actionable_emitted += Number(result.emitted); }
     for (const { entry, error } of batch.failed) {

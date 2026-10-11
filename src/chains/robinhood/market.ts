@@ -67,6 +67,26 @@ export function robinhoodPairFetchedAt(pairs: DexScreenerPair[]): number | null 
   const at = Date.parse(pairFetchMetadata.get(pairs)?.fetchedAt ?? '');
   return Number.isFinite(at) ? at : null;
 }
+const scannerBatchPairs = new Map<string,{pairs:DexScreenerPair[];expires:number}>();
+// One bounded background read. Missing batch rows are unknown, never negative evidence.
+export async function prefetchRobinhoodScannerPairs(tokens:string[]):Promise<Set<string>> {
+  const addresses=[...new Set(tokens.filter(t=>/^0x[a-f0-9]{40}$/i.test(t)).map(t=>t.toLowerCase()))].slice(0,30);
+  if(!addresses.length)return new Set();
+  const result=await governedDexScreenerJson<unknown>({url:`https://api.dexscreener.com/tokens/v1/robinhood/${addresses.join(',')}`,
+    caller:'existing_token_scanner',endpoint:'TOKEN_PAIRS_ROBINHOOD_BATCH',priority:'BACKGROUND',
+    cacheKey:`robinhood-scanner-batch:${addresses.join(',')}`,cacheTtlMs:ROBINHOOD_MARKET_CACHE_MS,queueWaitTimeoutMs:1000,httpTimeoutMs:2500});
+  if(!Array.isArray(result.value))throw new DexScreenerMalformedResponseError('DexScreener batch response was not an array');
+  const now=Date.now();for(const [key,value] of scannerBatchPairs)if(value.expires<=now)scannerBatchPairs.delete(key);
+  const found=new Set<string>();
+  for(const address of addresses){
+    const pairs=result.value.filter((p):p is DexScreenerPair=>!!p&&typeof p==='object'&&p.chainId==='robinhood'&&p.baseToken?.address?.toLowerCase()===address);
+    if(!robinhoodMarketSnapshotFromPairs(address,pairs))continue;
+    pairFetchMetadata.set(pairs,{fetchedAt:result.fetchedAt,source:result.source});
+    if(scannerBatchPairs.size>=100&&!scannerBatchPairs.has(address))scannerBatchPairs.delete(scannerBatchPairs.keys().next().value!);
+    scannerBatchPairs.set(address,{pairs,expires:Date.parse(result.fetchedAt)+ROBINHOOD_MARKET_CACHE_MS});found.add(address);
+  }
+  return found;
+}
 const quoteUsdCache = new Map<string, { expiresAt: number; observation: QuoteUsdObservation }>();
 
 function finiteNumber(
@@ -119,6 +139,9 @@ export async function fetchRobinhoodPairs(
   if (!address) {
     return [];
   }
+
+  const batched=scannerBatchPairs.get(address.toLowerCase());
+  if(options.caller==='existing_token_scanner'&&batched&&batched.expires>Date.now())return batched.pairs;
 
   const url =
     'https://api.dexscreener.com/' +
