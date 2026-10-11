@@ -9,7 +9,7 @@ import {getDeliverableUsers} from '../core/delivery.js';
 import {enabledLiveRecipients, type LiveFeedKey} from './liveAlertPreferences.js';
 import {buildAlphaosAlertCard} from '../ui/alphaosAlertCard.js';
 import {sendAlphaosPhotoAlert} from '../ui/alphaosPhotoDelivery.js';
-import {waitForRecipientDelivery,recordDeliveryAccepted} from './recipientDeliveryTiming.js';
+import {recipientDelayMs,waitForRecipientDelivery,recordDeliveryAccepted} from './recipientDeliveryTiming.js';
 import {withResearchDisclosure} from '../ui/researchDisclosure.js';
 export const RUNNER_MULTIPLES=[2,5,10,50,100] as const;
 export type RunnerSample=CompactSample & {name?:string;symbol?:string;exitNote?:string;lpStatus?:string};
@@ -69,7 +69,8 @@ async function deliver(row:CompactTrackingRow,sample:RunnerSample,multiple:numbe
  const botToken=process.env.TELEGRAM_BOT_TOKEN?.trim();if(!botToken)throw Error('Runner delivery unavailable');
  const users=await getDeliverableUsers();const targets=new Set(users.filter(u=>!u.is_blocked).map(u=>String(u.telegram_id)));
  const admin=String(process.env.ADMIN_TELEGRAM_ID??process.env.OWNER_CHAT_ID??'').trim();if(admin)targets.add(admin);
- const recipients=await enabledLiveRecipients([...targets],runnerSourceFeed(row.chain,row.feed)!);
+ const recipients=(await enabledLiveRecipients([...targets],runnerSourceFeed(row.chain,row.feed)!))
+  .sort((a,b)=>recipientDelayMs(users.find(u=>String(u.telegram_id)===a)??{telegram_id:a})-recipientDelayMs(users.find(u=>String(u.telegram_id)===b)??{telegram_id:b}));
  if(!recipients.length)return;
  const image=await buildAlphaosAlertCard({symbol:sample.symbol,name:sample.name,category:`${multiple}X RUNNER`,chainLabel:row.chain==='arc'?'ARC':'ROBINCHAIN',badge:`${multiple}X MILESTONE REACHED`,footer:'Sampled price move. Not trade profit or a buy signal.'}).catch(()=>null);
  const text=renderCompactRunner(row,sample,multiple),started=Date.now();
@@ -102,6 +103,7 @@ export async function processCompactRunner(row:CompactTrackingRow,sample:RunnerS
  // card and silently consumes lower milestones. Claims survive worker restarts.
  if(await deps.claim(`${prefix}:${highest}`,7*24*60*60_000)!=='CLAIMED')return;
  for(const lower of deps===production?[]:crossings.slice(0,-1))if(await deps.claim(`${prefix}:${lower}`,7*24*60*60_000)==='UNAVAILABLE')return;
+ if(deps===production)void import('./winnerPublisher.js').then(m=>m.publishWinner(row,sample)).catch(()=>console.warn('[WinnerPublisher] publication unavailable; alerts unaffected'));
  await deps.deliver(row,sample,highest);
  }finally{if(deps===production)activeDeliveries--;}
 }

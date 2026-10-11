@@ -58,11 +58,11 @@ export default function MissionBrief() {
 
   const brief = useMemo(() => {
     const active = items.filter((item) => !["REJECTED", "EXPIRED"].includes(item.status));
-    const strongest = [...active].sort((a, b) => b.confidence - a.confidence)[0] ?? null;
+    const strongest = [...active].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))[0] ?? null;
     const lowRisk = active.filter((item) => item.riskLevel === "LOW").length;
     const highRisk = active.filter((item) => item.riskLevel === "HIGH").length;
     const averageConfidence = active.length
-      ? Math.round(active.reduce((sum, item) => sum + item.confidence, 0) / active.length)
+      ? Math.round(active.reduce((sum, item) => sum + (item.confidence ?? 0), 0) / active.length)
       : 0;
     return { active, strongest, lowRisk, highRisk, averageConfidence };
   }, [items]);
