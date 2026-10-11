@@ -18,3 +18,8 @@ test('method and parameter errors do not classify a provider as unreachable; acc
  assert.equal(robinhoodRpcOperationMethod('blockNumber'), 'eth_blockNumber');
  assert.equal(robinhoodRpcOperationMethod('eth_call'), 'eth_call');
 });
+
+test('deterministic contract reverts are distinct from provider outages',()=>{
+ assert.equal(robinhoodRpcFailurePolicy(new Error('execution reverted')), 'CONTRACT');
+ assert.equal(robinhoodRpcFailurePolicy(new Error('HTTP 503')), 'PROVIDER');
+});
