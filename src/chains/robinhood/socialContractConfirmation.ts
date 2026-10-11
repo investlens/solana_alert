@@ -189,6 +189,20 @@ export function xProjectLinks(html:string,handle:string):string[] {
  const clean=html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace(/<!--[\s\S]*?-->/g,'');
  const regions=[...clean.matchAll(/<(?:div|span)\b[^>]*data-testid=["'](?:UserDescription|UserUrl)["'][^>]*>([\s\S]*?)<\/(?:div|span)>/gi)].map(m=>m[1]);
  const links=regions.flatMap(region=>[...region.matchAll(/(?:href|data-expanded-url|title)=["'](https:\/\/[^"']+)["']/gi)].map(m=>m[1].replace(/&amp;/g,'&')));
+ const metaAttr=(tag:string,name:string)=>tag.match(new RegExp(`\\b${name}=["']([^"']*)["']`,'i'))?.[1];
+ const metas=[...clean.matchAll(/<meta\b[^>]*>/gi)].map(m=>m[0]);
+ const meta=(name:string)=>metas.find(tag=>(metaAttr(tag,'property')??metaAttr(tag,'name'))?.toLowerCase()===name);
+ const canonical=[...clean.matchAll(/<link\b[^>]*>/gi)].map(m=>m[0]).find(tag=>metaAttr(tag,'rel')?.toLowerCase()==='canonical');
+ const profile=canonical?metaAttr(canonical,'href'):metaAttr(meta('og:url')??'','content');
+ const title=plainText(metaAttr(meta('og:title')??'','content')??'');
+ try{const u=new URL(profile??'');
+  if(u.protocol==='https:'&&['x.com','twitter.com'].includes(u.hostname)&&u.pathname.replace(/\/$/,'').toLowerCase()===`/${handle.toLowerCase()}`
+   &&new RegExp(`(?:^|[^A-Za-z0-9_])@${handle}(?:$|[^A-Za-z0-9_])`,'i').test(title)){
+   const description=plainText(metaAttr(meta('og:description')??meta('description')??'','content')??'');
+   links.push(...(description.match(/https:\/\/[^\s<>"']+/gi)??[]));
+  }
+ }catch{/* Login shells and unrelated metadata never anchor a website. */}
+
  return [...new Set(links.filter(url=>{try{const u=new URL(url);return !u.username&&!u.password&&!u.port&&!['x.com','twitter.com','t.co'].includes(u.hostname)&&u.hostname.includes('.');}catch{return false;}}))].slice(0,3);
 }
 export function projectContractConflict(statement:string,token:string):boolean {

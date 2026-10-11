@@ -1,3 +1,4 @@
+import {readVolumeHistoryCheckpoint,saveVolumeHistoryCheckpoint} from './volumeHistoryCheckpoint.js';
 import type { ChainMarketSnapshot } from '../chains/shared/types.js';
 // Pool-specific evidence: one completed signal day and seven preceding days; no overlap or synthetic zeros.
 export type VolumeBreakoutEvidence = { price: number; marketCap: number | null; fdv: number | null; liquidity: number; volume24h: number | null; move24h: number | null; move1h: number | null; marketSource?: string; dailyAverage: number; multiple: number; pairCreatedAt: number; at: number; dayStart: number; signalMove: number; signalVolume: number };
@@ -76,6 +77,7 @@ type Cached = { expires: number; window: CompletedVolumeWindow | null };
 const history = new Map<string, Cached>();
 const pending = new Set<string>();
 let minute = 0, requests = 0, backoffUntil = 0;
+let restoredHistory=false,lastHistorySave=0;
 async function json(url: string): Promise<any> {
   const now = Date.now();
   if (now < backoffUntil) throw new Error('provider backoff');
@@ -95,6 +97,7 @@ export async function readVolumeBreakoutResult(network: string, token: string, p
   if (pending.has(key) || pending.size >= 1) return {evidence:null,reason:'CAPACITY_LIMITED'};
   pending.add(key);
   try {
+    if(!restoredHistory){restoredHistory=true;for(const [id,entry] of await readVolumeHistoryCheckpoint())history.set(id,entry);}
     const base = `https://api.geckoterminal.com/api/v2/networks/${network}/pools/${encodeURIComponent(pool)}`;
     const snapshot = (market && scannerVolumeSnapshot(market, network, token, pool))
       || poolVolumeSnapshot(await json(base), network, token, pool, Date.now());
@@ -112,6 +115,7 @@ export async function readVolumeBreakoutResult(network: string, token: string, p
       if (history.size >= 100) history.delete(history.keys().next().value!);
       cached = { window, expires: window == null ? Date.now() + 10 * 60000 : (boundary + DAY) * 1000 };
       history.set(key, cached);
+      if(window!=null&&Date.now()-lastHistorySave>=30000){lastHistorySave=Date.now();await saveVolumeHistoryCheckpoint(history);}
     }
     if(cached.window==null)return {evidence:null,reason:'INCOMPLETE_WEEK'};
     const evidence=qualifyVolumeBreakout(snapshot,cached.window);return {evidence,reason:evidence?'QUALIFIED':'CONDITION_WAIT'};
