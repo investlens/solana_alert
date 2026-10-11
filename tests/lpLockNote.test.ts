@@ -28,3 +28,10 @@ test('legacy lock rows become concise risk notes and keep detailed verified evid
  assert.match(render('BURNED'),/LP lock: <b>Burned/);
  assert.match(render('50% locked until 2027'),/50% locked until 2027/);
 });
+test('promotion cards carry gate LP evidence even when market cache has no lock result',()=>{
+ const args={kind:'BOOST' as const,token,launchType:'UNKNOWN',stats:{},securityNote:'custom security warning: ⚠️ HIGH RISK — LP UNLOCKED: 100% removable.',buttons:[],text:'Price $0.1'};
+ assert.match(buildPromotionEventCard({...args,lpStatus:'UNLOCKED'}).text,/LP lock: <b>Unlocked/);
+ assert.match(buildPromotionEventCard({...args,lpStatus:'BURNED',securityNote:'LP PROTECTED'}).text,/LP lock: <b>Burned/);
+ assert.match(buildPromotionEventCard({...args,lpStatus:'LOCKED',securityNote:'LP PROTECTED'}).text,/LP lock: <b>Locked/);
+ assert.match(buildPromotionEventCard({...args,lpStatus:'UNKNOWN'}).text,/LP lock: <b>Unable to verify/);
+});

@@ -13,7 +13,7 @@ import { liveFeedEnabled, semanticLiveFeed } from './liveAlertPreferences.js';
 import { claimSharedDelivery } from './sharedJsonCache.js';
 import { acquireRecipientClaim, retryTelegramRejection, telegramExplicitRejection } from './recipientDeliveryClaim.js';
 import { recordCompactAlert } from './compactAlertOutcomes.js';
-import { recordRecoveryAlertAudit } from './recoveryAlertAudit.js';
+import { recordRecoveryAlertAudit, type AcceptedRecoveryRecipient } from './recoveryAlertAudit.js';
 import { waitForRecipientDelivery, isUndelayedRiskEvent, recipientDelayMs, recordDeliveryAccepted } from './recipientDeliveryTiming.js';
 import { getDeliverableUsers, markTelegramUserBlocked, type DeliverableUser } from '../core/delivery.js';
 import { accessProfileForUser, hasCapability } from '../product/capabilities.js';
@@ -167,12 +167,14 @@ export async function deliverAlphaSemanticEvent(args: {
   }
 
   let boostSecurityNote: string | null = null;
+  let lpStatus: string | null = null;
   if (dependencies === productionDependencies && args.event.type === 'BOOST' && args.event.chain.toLowerCase() === 'robinhood') {
     const origin = await getVerifiedRobinhoodLaunchpad(args.event.assetId).catch(() => null);
     const trusted = origin !== null;
     const safety = await routeBoostSecurity({tokenAddress:args.event.assetId, verifiedTrustedLaunchpad:trusted, requireExplicitSellability:true, allowUnknownSellability:true});
     if (!safety.allowed) { console.warn('[AlphaSemanticDelivery] Boost sellability blocked', {reason:safety.reason}); return {delivered:0,failed:0}; }
-    launchType = origin?.launchType ?? 'CUSTOM';
+    launchType = origin?.launchType ?? 'UNKNOWN';
+    lpStatus = safety.liquidity?.status ?? null;
     boostSecurityNote = safety.reason;
   }
   let paidOwnership: OwnershipDisclosure | null = null;
@@ -191,6 +193,7 @@ export async function deliverAlphaSemanticEvent(args: {
       });
       return { delivered: 0, failed: 0 };
     }
+    lpStatus=safety.lpStatus ?? null;
     launchType=safety.launchType ?? 'UNKNOWN';paidCreator=safety.ponsDeployer;paidSecurityNote=safety.securityNote ?? null;
     if(safety.devHoldingPercent!=null||safety.top10Percent!=null)paidOwnership = {devPercent: safety.devHoldingPercent ?? null, top10Percent: safety.top10Percent ?? null,
       top10Coverage: safety.top10Percent == null ? 'UNAVAILABLE' : 'INDEXED_SAMPLE'};
@@ -252,7 +255,7 @@ export async function deliverAlphaSemanticEvent(args: {
   if (dependencies === productionDependencies && ['DEX_PAID','BOOST'].includes(args.event.type) && args.event.chain==='robinhood') {
     const raw=args.event.rawSnapshot ?? getEphemeralSemanticEventEvidence(args.event.eventIdentity);
     const card=buildPromotionEventCard({kind:args.event.type as 'DEX_PAID'|'BOOST',text:deliveryMessage,token:args.event.assetId,launchType,
-      stats:cachedRobinhoodAlertStats(args.event.assetId),securityNote:paidSecurityNote??boostSecurityNote,buttons:deliveryButtons??[],
+      stats:cachedRobinhoodAlertStats(args.event.assetId),securityNote:paidSecurityNote??boostSecurityNote,lpStatus,buttons:deliveryButtons??[],
       paymentTimestamp:typeof raw?.paymentTimestamp==='number'?raw.paymentTimestamp:null});
     deliveryMessage=card.text;deliveryButtons=card.buttons;
   }
@@ -260,6 +263,7 @@ export async function deliverAlphaSemanticEvent(args: {
   const renderedCharacters = deliveryMessage.length;
   const renderedBytes = Buffer.byteLength(deliveryMessage, 'utf8');
   let delivered = 0; let failed = 0; let accepted = 0;
+  const acceptedRecipients:AcceptedRecoveryRecipient[]=[];
   for (const user of users) {
     if (!hasCapability(accessProfileForUser(user), 'opportunities.realtime')) continue;
     let recipientClaim: Awaited<ReturnType<typeof acquireRecipientClaim>> | undefined;
@@ -289,6 +293,7 @@ export async function deliverAlphaSemanticEvent(args: {
         args.onSendStarted?.();
         const result = await retryTelegramRejection(() => dependencies.send(user.telegram_id, deliveryMessage, deliveryButtons));
         telegramAccepted = true;
+        if(ephemeralMode)acceptedRecipients.push({telegramId:String(user.telegram_id),tier:user.tier,messageId:typeof result==='number'?result:null,acceptedAt:new Date().toISOString()});
         if (recipientClaim?.state === 'CLAIMED') {
           try { await recipientClaim.finish(typeof result === 'number' ? result : null); }
           catch (error) { console.error('[AlphaSemanticDelivery] Accepted recipient confirmation unavailable', JSON.stringify({
@@ -374,14 +379,14 @@ export async function deliverAlphaSemanticEvent(args: {
   }
   if(dependencies===productionDependencies && args.event.chain==='robinhood' && ['DEX_PAID','BOOST'].includes(args.event.type)) {
     const raw=args.event.rawSnapshot ?? getEphemeralSemanticEventEvidence(args.event.eventIdentity);
-    const evidence:PromotionCardArgs={kind:args.event.type as 'DEX_PAID'|'BOOST',text:deliveryMessage,token:args.event.assetId,launchType,stats:cachedRobinhoodAlertStats(args.event.assetId),securityNote:paidSecurityNote??boostSecurityNote,buttons:deliveryButtons??[],paymentTimestamp:typeof raw?.paymentTimestamp==='number'?raw.paymentTimestamp:null};
+    const evidence:PromotionCardArgs={kind:args.event.type as 'DEX_PAID'|'BOOST',text:deliveryMessage,token:args.event.assetId,launchType,stats:cachedRobinhoodAlertStats(args.event.assetId),securityNote:paidSecurityNote??boostSecurityNote,lpStatus,buttons:deliveryButtons??[],paymentTimestamp:typeof raw?.paymentTimestamp==='number'?raw.paymentTimestamp:null};
     schedulePromotionCardEnrichment(args.event.eventIdentity,evidence,enrichmentTargets,deliveryMessage);
   }
   if (dependencies === productionDependencies) {
     const feed = semanticLiveFeed(args.event.type,args.event.chain);
     if (feed) { recordFeedDelivery(feed,'ACCEPTED',accepted); recordFeedDelivery(feed,'PROCESSING_FAILED',failed); }
   }
-  if (dependencies === productionDependencies && accepted > 0) void recordRecoveryAlertAudit(args.event, accepted, baselineOwnership, ownershipCapturedAt, ephemeralMode);
+  if (dependencies === productionDependencies && accepted > 0) void recordRecoveryAlertAudit(args.event, accepted, baselineOwnership, ownershipCapturedAt, ephemeralMode, acceptedRecipients);
   if (dependencies === productionDependencies && isPositiveSemanticEvent(args.event.type)) {
     const raw = args.event.rawSnapshot ?? getEphemeralSemanticEventEvidence(args.event.eventIdentity) ?? {};
     const stats=outcomeStats;

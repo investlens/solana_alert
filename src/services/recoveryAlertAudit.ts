@@ -1,5 +1,6 @@
 import { normalizeNotificationMarketContext } from '../ui/notificationMarketContext.js';
 import { validOwnershipPercent, type OwnershipDisclosure } from '../ui/ownershipDisclosure.js';
+import { resolveVerifiedSemanticEntryPrice } from './alphaSemanticEventService.js';
 import type { UserFacingSemanticEvent } from './alphaSemanticDeliveryService.js';
 export function capturedOwnershipEvidence(ownership: OwnershipDisclosure | null | undefined, now = Date.now()) {
   const creator = ownership?.creator;
@@ -15,12 +16,13 @@ export function capturedOwnershipEvidence(ownership: OwnershipDisclosure | null 
 export function buildRecoveryAlertAudit(event: UserFacingSemanticEvent, acceptedRecipients: number, now = new Date(), ownership?: OwnershipDisclosure | null, capturedAt = now.getTime()) {
   if (acceptedRecipients <= 0 || !event.eventIdentity || !event.assetId) return null;
   const market = normalizeNotificationMarketContext(event.rawSnapshot);
+  const price = resolveVerifiedSemanticEntryPrice(event.rawSnapshot ?? {}, event.assetId);
   const evidence = capturedOwnershipEvidence(ownership, capturedAt);
   return {
     event_identity: event.eventIdentity, asset_id: event.assetId, chain: event.chain,
     strategy_key: event.strategyKey ?? null, lifecycle_action: 'OBSERVE', lifecycle_state: 'RECOVERY_DELIVERED',
     alert_type: event.type, semantic_event_type: event.type, symbol: market.symbol, token_name: market.name,
-    price: market.price, market_cap: market.marketCap, fdv: market.fdv,
+    price: market.price, price_provenance: price.provenance, valuation_type: market.marketCap != null ? 'MARKET_CAP' : market.fdv != null ? 'FDV' : null, valuation_provenance: market.valuationSource ?? null, market_cap: market.marketCap, fdv: market.fdv,
     liquidity: market.liquidity, volume_5m: market.volume5m,
     chart_available: Boolean(market.chartUrl), alerted_at: now.toISOString(),
     dev_holding_percent: evidence?.percent ?? null, dev_holding_source: evidence ? 'ON_CHAIN_BALANCE' : null,
@@ -29,9 +31,15 @@ export function buildRecoveryAlertAudit(event: UserFacingSemanticEvent, accepted
     raw_snapshot: { deliveryMode: 'RECOVERY', acceptedRecipients, performanceBaselineVerified: false },
   };
 }
+export type AcceptedRecoveryRecipient={telegramId:string;tier:string;messageId:number|null;acceptedAt:string};
+export function recoveryRecipientRows(eventId:number,recipients:AcceptedRecoveryRecipient[]) {
+ return [...new Map(recipients.filter(r=>/^[-]?[0-9]+$/.test(r.telegramId)&&['admin','paid','free'].includes(r.tier)&&Number.isFinite(Date.parse(r.acceptedAt)))
+  .map(r=>[r.telegramId,r])).values()].slice(0,500).map(r=>({alert_event_id:eventId,telegram_id:r.telegramId,tier_at_delivery:r.tier,
+    delivery_channel:'telegram',delivered_at:r.acceptedAt,metadata:{state:'DELIVERED',recovery:true,...(r.messageId!=null?{telegram_message_id:r.messageId}:{})}}));
+}
 let active = false; let pauseUntil = 0;
 // One compact audit row per accepted event; never retry Telegram to repair audit.
-export async function recordRecoveryAlertAudit(event: UserFacingSemanticEvent, accepted: number, ownership?: OwnershipDisclosure | null, capturedAt = Date.now(), recovery = true): Promise<void> {
+export async function recordRecoveryAlertAudit(event: UserFacingSemanticEvent, accepted: number, ownership?: OwnershipDisclosure | null, capturedAt = Date.now(), recovery = true, recipients:AcceptedRecoveryRecipient[]=[]): Promise<void> {
   const row = buildRecoveryAlertAudit(event, accepted, new Date(), ownership, capturedAt);
   if (!row || (!recovery && !row.creator_evidence) || active || Date.now() < pauseUntil) return;
   active = true;
@@ -43,6 +51,13 @@ export async function recordRecoveryAlertAudit(event: UserFacingSemanticEvent, a
           dev_holding_source: row.dev_holding_source, dev_holding_evidence: row.dev_holding_evidence }).eq('event_identity', event.eventIdentity);
     const { error } = await write.abortSignal(AbortSignal.timeout(1500));
     if (error) throw error;
+    if(recovery && recipients.length){
+      const parent=await supabase.from('alpha_alert_events').select('id').eq('event_identity',event.eventIdentity).limit(1).abortSignal(AbortSignal.timeout(1500)).maybeSingle();
+      if(parent.error)throw parent.error;
+      if(!parent.data)throw new Error('Recovery audit event unavailable');
+      const rows=recoveryRecipientRows(Number(parent.data.id),recipients);
+      if(rows.length){const result=await supabase.from('alpha_alert_event_deliveries').upsert(rows,{onConflict:'alert_event_id,telegram_id,delivery_channel',ignoreDuplicates:true}).abortSignal(AbortSignal.timeout(1500));if(result.error)throw result.error;}
+    }
     console.log('[RecoveryAlertAudit] RECORDED', { type: event.type, token: event.assetId, accepted });
   } catch (error) {
     pauseUntil = Date.now() + 60_000;

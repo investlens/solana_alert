@@ -56,7 +56,7 @@ export function poolVolumeSnapshot(payload: any, network: string, token: string,
 export function scannerVolumeSnapshot(m: ChainMarketSnapshot, network: string, token: string, pool: string, now = Date.now()) {
   const at = m.timestamp;
   if (m.chain !== network || m.tokenAddress.toLowerCase() !== token.toLowerCase()
-    || m.pairAddress?.toLowerCase() !== pool.toLowerCase() || !/^0x[a-f0-9]{40}$/i.test(pool)
+    || m.pairAddress?.toLowerCase() !== pool.toLowerCase() || !/^0x(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(pool)
     || !Number.isFinite(at) || now < at || now - at > 90_000
     || !positive(m.priceUsd) || !positive(m.liquidityUsd) || !Number.isFinite(m.pairCreatedAt)
     || (!positive(m.marketCapUsd) && !positive(m.fdvUsd))) return null;
@@ -92,7 +92,6 @@ export async function readVolumeBreakoutResult(network: string, token: string, p
   if (!['robinhood', 'arc', 'solana'].includes(network) || !token || !pool) return {evidence:null,reason:'INVALID_IDENTITY'};
   const key = `${network}:${token}:${pool}:${Math.floor(Date.now() / 86400000)}`;
   for (const [k, v] of history) if (v.expires <= Date.now()) history.delete(k);
-  if(Date.now()<backoffUntil)return {evidence:null,reason:'PROVIDER_BACKOFF'};
   if (pending.has(key) || pending.size >= 1) return {evidence:null,reason:'CAPACITY_LIMITED'};
   pending.add(key);
   try {
@@ -100,6 +99,10 @@ export async function readVolumeBreakoutResult(network: string, token: string, p
     const snapshot = (market && scannerVolumeSnapshot(market, network, token, pool))
       || poolVolumeSnapshot(await json(base), network, token, pool, Date.now());
     if (!snapshot)return {evidence:null,reason:'SNAPSHOT_UNAVAILABLE'};
+    // Pools younger than eight completed UTC days cannot supply this evidence.
+    // Skip the history request entirely rather than repeatedly polling an impossible week.
+    const completedBoundary=Math.floor(Date.now()/86400000)*86400000;
+    if(snapshot.pairCreatedAt>completedBoundary-8*86400000)return {evidence:null,reason:'INCOMPLETE_WEEK'};
     if(snapshot.liquidity < 2000)return {evidence:null,reason:'CONDITION_WAIT'};
     let cached = history.get(key);
     if (!cached) {
