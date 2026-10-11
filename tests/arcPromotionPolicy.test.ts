@@ -10,9 +10,9 @@ test('ARC boost and DEX paid require exit evidence and block confirmed honeypots
    assert.equal(blocked.allowed,false);assert.equal(blocked.reason,reason);
   }
   const unknown=await arcDeliverySafety(feed,'token',async()=>{calls++;return {allowed:false,reason:'missing data'};},async()=>({allowed:false,reason:'Exit unverified',observedAt:Date.now()}));
-  assert.equal(unknown.allowed,false);assert.match(unknown.reason,/unverified/);
+  assert.equal(unknown.allowed,false);assert.match(unknown.reason,/missing data/);
   const unavailable=await arcDeliverySafety(feed,'token',async()=>{calls++;throw new Error('provider timeout');},async()=>({allowed:false,reason:'Exit unverified',observedAt:Date.now()}));
-  assert.equal(unavailable.allowed,false);assert.match(unavailable.reason,/unverified/);
+  assert.equal(unavailable.allowed,false);assert.match(unavailable.reason,/Provider check unavailable/);
   const verified=await arcDeliverySafety(feed,'token',async()=>{calls++;return {allowed:true,sellabilityVerified:true,reason:'flags clear',devHoldingPercent:10,top10Percent:30};},async()=>({allowed:true,reason:'Simulated exit · LP lock unverified',observedAt:Date.now()}));
   assert.equal(verified.allowed,true);assert.match(verified.reason,/LP lock unverified/);
   assert.equal(verified.devHoldingPercent,10);assert.equal(verified.top10Percent,30);assert.equal(calls,5);
