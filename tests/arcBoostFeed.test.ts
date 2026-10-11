@@ -41,3 +41,10 @@ test('ARC Boost keeps available social links after compact formatting',()=>{
  const card=polishArcTelegramPresentation('BOOST DETECTED · ARC\n<b>SA</b>\n<a href="https://x.com/superant">X</a>');
  assert.match(card.text,/https:\/\/x.com\/superant/);
 });
+
+test('ARC top feed has an independent bounded cache and preserves chain filtering',async()=>{
+ const urls:string[]=[];resetDexScreenerGovernorForTests({fetch:async url=>{urls.push(String(url));return Response.json([{chainId:'arc',tokenAddress:'0x'+'1'.repeat(40),amount:10,totalAmount:30},{chainId:'solana',tokenAddress:'wrong',amount:10,totalAmount:30}]);}});
+ assert.equal((await fetchArcBoostFeed('TOP')).length,1);await fetchArcBoostFeed('TOP');await fetchArcBoostFeed();
+ assert.equal(urls.length,2);assert.match(urls[0],/token-boosts\/top/);assert.match(urls[1],/token-boosts\/latest/);
+ resetDexScreenerGovernorForTests();
+});
