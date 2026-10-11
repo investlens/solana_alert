@@ -17,7 +17,7 @@ test('pending PONS payment is compact, uses available identity, full CA and no i
 test('confirmed exact-pool card retains real zero metrics, risk and ownership warnings',()=>{
  const pool='0x'+'b'.repeat(40),url=`https://dexscreener.com/robinhood/${pool}`;
  const card=buildDexPaidEventCard({text:'💵 <b>Price</b> $0.01\nMC <b>$10K</b>\nVol · 5m <b>$0</b>\nDev holding <b>10.00%</b>\nTop 10 <b>40.00%</b>\n⚠️ Concentrated dev holding · potential sell pressure',token,launchType:'CUSTOM',stats:{name:'A<&',symbol:'A',chartUrl:url},securityNote:'⚠️ LP unlocked · liquidity can be removed.',buttons:[]});
- assert.match(card.text,/A&lt;&amp;/);assert.match(card.text,/\$0\.01/);assert.match(card.text,/Vol · 5m <b>\$0/);assert.match(card.text,/Concentrated dev/);assert.match(card.text,/LP unlocked/);
+ assert.match(card.text,/A&lt;&amp;/);assert.match(card.text,/\$0\.01/);assert.match(card.text,/Vol · 5m <b>\$0/);assert.match(card.text,/Concentrated dev/);assert.match(card.text,/LP lock: <b>Unlocked/);
  assert.equal(card.buttons.flat()[0].url,url);
 });
 test('pending venue retains PONS identity and socials without inventing a market quote',()=>{
