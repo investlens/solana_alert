@@ -8,6 +8,7 @@ export type DexPaidAlertSafetyResult = {
   marketCapUsd:number|null;liquidityUsd:number|null;pairAgeMinutes:number|null;
   paymentAgeSeconds:number|null;sellImpactPercent:number|null;ponsDeployer:string|null;
   devHoldingPercent?:number|null;top10Percent?:number|null;
+  exitPairId?:string;
   launchType?:'PONS'|'FLAP'|'CUSTOM'|'UNKNOWN';securityNote?:string;
   lpStatus?:'LOCKED'|'BURNED'|'UNLOCKED'|'UNKNOWN'|null;
 };
@@ -39,15 +40,12 @@ export function createDexPaidEventGate(deps:Dependencies) {
         return base;
       }
       const custom=await deps.custom(token);
+      base.exitPairId=custom.exitPairId;
       base.lpStatus=custom.liquidity?.status ?? null;
       base.allowed=custom.allowed;base.launchType=launch?'CUSTOM':'UNKNOWN';
       base.checks.push({key:'CUSTOM_SELLABILITY',passed:custom.allowed,detail:custom.reason});
       if(!custom.allowed)base.reasons.push(custom.reason);
-      base.securityNote=custom.sellabilityVerified === false
-        ? '⚠️ Sellability unverified · security provider data unavailable or incomplete. Validate selling before investing.'
-        : custom.liquidity?.status==='UNLOCKED'
-        ? '⚠️ LP unlocked · liquidity can be removed. Honeypot/sell-restriction checks passed.'
-        : custom.liquidity?.status === 'UNKNOWN' ? 'Sellability checks passed · LP protection unverified; validate before investing.' : 'Honeypot/sell-restriction checks passed · payment does not establish trading quality.';
+      base.securityNote=custom.reason;
       return base;
     }catch(error){base.reasons.push(`EVENT_GATE_UNAVAILABLE: ${error instanceof Error?error.message:String(error)}`);return base;}
   };

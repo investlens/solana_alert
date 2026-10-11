@@ -131,6 +131,7 @@ export async function deliverAlphaSemanticEvent(args: {
 }, dependencies: SemanticDeliveryDependencies = productionDependencies): Promise<{ delivered: number; failed: number }> {
   const ephemeralMode = dependencies === productionDependencies && (args.event.ephemeral === true || args.event.id < 0);
   let launchType: LaunchClassification | null = null;
+  let exitPairId:string|undefined;
   if (dependencies === productionDependencies && !(['DEX_PAID','BOOST'].includes(args.event.type) && args.event.chain.toLowerCase() === 'robinhood') && isPositiveSemanticEvent(args.event.type) &&
       ['robinhood', 'solana'].includes(args.event.chain.toLowerCase())) {
     let raw: Record<string, unknown> | null = args.event.rawSnapshot ??
@@ -156,6 +157,7 @@ export async function deliverAlphaSemanticEvent(args: {
       ? await evaluateRobinhoodPositiveAlertSecurity({ tokenAddress: args.event.assetId, raw })
       : evaluatePositiveAlertSecurity({ launchType: 'CUSTOM', raw });
     launchType = security.launchType;
+    if(security.allowed && args.event.chain.toLowerCase()==='robinhood' && !['PONS','FLAP'].includes(security.launchType)){const exit=await routeBoostSecurity({tokenAddress:args.event.assetId,verifiedTrustedLaunchpad:false});if(!exit.allowed){console.warn('[AlphaSemanticDelivery] WITHHELD custom positive exit unverified');return {delivered:0,failed:0};}exitPairId=exit.exitPairId;}
     if (!security.allowed) {
       console.warn('[AlphaSemanticDelivery] Positive alert suppressed by fail-closed liquidity security.', {
         alertEventId: args.event.id, semanticEventType: args.event.type, token: args.event.assetId,
@@ -174,6 +176,7 @@ export async function deliverAlphaSemanticEvent(args: {
     const safety = await routeBoostSecurity({tokenAddress:args.event.assetId, verifiedTrustedLaunchpad:trusted, requireExplicitSellability:true, allowUnknownSellability:true});
     if (!safety.allowed) { console.warn('[AlphaSemanticDelivery] Boost sellability blocked', {reason:safety.reason}); return {delivered:0,failed:0}; }
     launchType = origin?.launchType ?? 'UNKNOWN';
+    exitPairId=safety.exitPairId;
     lpStatus = safety.liquidity?.status ?? null;
     boostSecurityNote = safety.reason;
   }
@@ -193,6 +196,7 @@ export async function deliverAlphaSemanticEvent(args: {
       });
       return { delivered: 0, failed: 0 };
     }
+    exitPairId=safety.exitPairId;
     lpStatus=safety.lpStatus ?? null;
     launchType=safety.launchType ?? 'UNKNOWN';paidCreator=safety.ponsDeployer;paidSecurityNote=safety.securityNote ?? null;
     if(safety.devHoldingPercent!=null||safety.top10Percent!=null)paidOwnership = {devPercent: safety.devHoldingPercent ?? null, top10Percent: safety.top10Percent ?? null,
@@ -259,6 +263,7 @@ export async function deliverAlphaSemanticEvent(args: {
       paymentTimestamp:typeof raw?.paymentTimestamp==='number'?raw.paymentTimestamp:null});
     deliveryMessage=card.text;deliveryButtons=card.buttons;
   }
+  if(exitPairId){const cardPool=cachedRobinhoodAlertStats(args.event.assetId)?.chartUrl?.split('/').pop()?.split(/[?#]/)[0];if(cardPool?.toLowerCase()!==exitPairId.toLowerCase()){console.warn('[AlphaSemanticDelivery] WITHHELD checked exit pool differs from card venue');return {delivered:0,failed:0};}}
   const enrichmentTargets: PromotionEditTarget[] = [];
   const renderedCharacters = deliveryMessage.length;
   const renderedBytes = Buffer.byteLength(deliveryMessage, 'utf8');

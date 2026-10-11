@@ -419,7 +419,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
     allowed: security.allowed, reason: security.reason, cached: security.cached,
   });
   if (!security.allowed) {
-    const disposition = recordBoostSecurityBlock(boostTotals, verificationRetries, tokenKey, boost.totalAmount, security.liquidity?.status === 'UNKNOWN', Date.now());
+    const disposition = recordBoostSecurityBlock(boostTotals, verificationRetries, tokenKey, boost.totalAmount, security.exitUnverified === true || security.liquidity?.status === 'UNKNOWN', Date.now());
     console.log('[RobinhoodBoostObserver] BOOST_VERIFICATION_DISPOSITION', { token: tokenKey, disposition });
     console.warn('[RobinhoodBoostObserver] BOOST_BLOCKED_SECURITY', {
       token: tokenKey, eventType: canonical.type, totalBoost: boost.totalAmount, reason: security.reason,
