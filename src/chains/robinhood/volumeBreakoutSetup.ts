@@ -54,7 +54,7 @@ export async function considerRobinhoodVolumeBreakout(m: ChainMarketSnapshot, re
     recordFeedDelivery('RH_TRADE_SETUP', evidence ? 'EVALUATED' : result.reason==='CONDITION_WAIT'?'CONDITION_WAIT':'DATA_UNAVAILABLE');
     if (!evidence) { console.log(`[VolumeBreakout] WAIT token=${token} reason=${result.reason} dbCandleWrites=0`); continue; }
     const launch = await getVerifiedRobinhoodLaunchpad(token).catch(() => null);
-    const gate = await routeBoostSecurity({ tokenAddress: token, verifiedTrustedLaunchpad: !!launch, requireExplicitSellability: true });
+    const gate = await routeBoostSecurity({ tokenAddress: token, pairId:m.pairAddress!, verifiedTrustedLaunchpad: !!launch, requireExplicitSellability: true });
     if (!gate.allowed || Date.now() - evidence.at > 90000) continue;
     const claim = await claimSharedDelivery(`alphaos:volume-breakout:delivered:robinhood:${token}:${evidence.dayStart}`, 24 * 3600000);
     if (claim !== 'CLAIMED') continue;

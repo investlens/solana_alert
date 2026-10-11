@@ -57,7 +57,7 @@ export function buildPromotionEventCard(args:PromotionCardArgs) {
  ...(lines.some(l=>/Creator wallet balance only/.test(l))?['Zero creator balance does not prove a sale or burn.']:[]),
  ...lines.filter(l=>/Concentrated dev holding|^Creator balance change|^Dev observed|^Holder sample observed|^Creator sold|^Creator burned|^Creator outflows|^Activity coverage/.test(l)),
  ...lines.filter(l=>/^(?:Burned|Verified dev burn)\s/i.test(l.replace(/<[^>]+>/g,'').replace(/^[^A-Za-z]+/,''))&&!/Unavailable|Unverified/i.test(l)),'',
- '<b>RISK</b>',lpLockNote(args.lpStatus ?? s?.lp ?? (/\bLP\s+UNLOCKED\b/i.test(args.securityNote??'')?'UNLOCKED':null),s?.preBond),...(risk?[risk]:[]),
+ '<b>RISK</b>',...(trusted?[]:[lpLockNote(args.lpStatus ?? s?.lp ?? (/\bLP\s+UNLOCKED\b/i.test(args.securityNote??'')?'UNLOCKED':null),s?.preBond)]),...(risk?[risk]:[]),
  ...(socials.length?['',socials.join(' · ')]:[]),'',
  `<code>${esc(args.token)}</code>`,args.kind==='SOCIAL_MAFIA'?'<i>Project acknowledgement · market risks remain · DYOR</i>':'<i>Promotion event · DYOR</i>',
  ...(s?.source?[`${esc(s.source)}${s.checkedAt?' · '+esc(s.checkedAt)+' UTC':''}`]:[])].join('\n');

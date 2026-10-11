@@ -1,4 +1,4 @@
-import {verifyCustomTokenExit,customPoolRisk,type ExitRequest,type ExitVerification} from '../../services/customTokenExitVerification.js';
+import {verifyCustomTokenExit,customPoolRisk,observedLpStatus,type ExitRequest,type ExitVerification} from '../../services/customTokenExitVerification.js';
 type LaunchSecurityRoute = 'TRUSTED_LAUNCHPAD' | 'CUSTOM_SECURITY_REQUIRED';
 
 export type BoostLiquidityDecision = {
@@ -25,14 +25,6 @@ const SAFE_TTL_MS = 30_000;
 const BLOCKED_TTL_MS = 60_000;
 
 function normalize(value: string): string { return value.trim().toLowerCase(); }
-function numericPercent(value: unknown): number { const n = Number(value); return Number.isFinite(n) && n >= 0 ? n : 0; }
-function burnLikeLpHolder(holder: Record<string, unknown>): boolean {
-  const address = String(holder.address ?? holder.token_account ?? '').toLowerCase();
-  const tag = String(holder.tag ?? '').toLowerCase();
-  return address === '0x0000000000000000000000000000000000000000'
-    || address === '0x000000000000000000000000000000000000dead'
-    || tag.includes('burn') || tag.includes('dead') || tag.includes('null address') || tag.includes('black hole');
-}
 
 async function fetchCustomLiquidityProtection(tokenAddress: string, requireExplicitSellability = false, allowUnknownSellability = false): Promise<BoostLiquidityDecision> {
   const url = `https://api.gopluslabs.io/api/v1/token_security/4663?contract_addresses=${encodeURIComponent(tokenAddress)}`;
@@ -64,32 +56,9 @@ async function fetchCustomLiquidityProtection(tokenAddress: string, requireExpli
     if (requireExplicitSellability && (String(security.is_honeypot) !== '0' || String(security.cannot_sell_all) !== '0'))
       return {allowed:allowUnknownSellability,status:'UNKNOWN',reason:'Sellability unverified: honeypot/sell-restriction evidence incomplete. Validate selling before investing.'};
 
-    const holders = Array.isArray(security.lp_holders) ? security.lp_holders as Record<string, unknown>[] : [];
-    if (!holders.length) return { allowed: true, status: 'UNKNOWN', reason: 'Sellability checks passed · LP protection unverified; liquidity may be removable. Validate before investing.' };
+    const status=observedLpStatus(security);
+    return {allowed:true,status,reason:`LP ${status}`};
 
-    let protectedPct = 0, burnedPct = 0, unlockedPct = 0;
-    for (const holder of holders) {
-      const pct = numericPercent(holder.percent);
-      const locked = String(holder.is_locked ?? '0') === '1';
-      const burned = burnLikeLpHolder(holder);
-      if (locked || burned) protectedPct += pct;
-      if (burned) burnedPct += pct;
-      if (!locked && !burned) unlockedPct += pct;
-    }
-    if (protectedPct >= 0.95) return {
-      allowed: true,
-      status: burnedPct >= 0.95 ? 'BURNED' : 'LOCKED',
-      reason: `LP PROTECTED: ${(protectedPct * 100).toFixed(1)}% of observed LP locked/burned`,
-    };
-
-    // Unlocked liquidity is a disclosed market risk, not automatically a
-    // malicious contract. Allow the BOOST to surface with an explicit warning
-    // after the hard honeypot/sellability checks above have passed.
-    return {
-      allowed: true,
-      status: 'UNLOCKED',
-      reason: `⚠️ HIGH RISK — LP UNLOCKED: only ${(protectedPct * 100).toFixed(1)}% protected; ${(unlockedPct * 100).toFixed(1)}% remains removable by LP holders. Sellability checks passed, but liquidity can be pulled. DYOR.`,
-    };
   } catch (error) {
     // BOOST remains fail-closed; DEX payments can disclose unknown evidence. We only warn-and-allow BOOST when we
     // positively know the token passed hard sellability/honeypot checks and
@@ -107,6 +76,7 @@ async function fetchCustomLiquidityProtection(tokenAddress: string, requireExpli
  */
 export async function routeBoostSecurity(args: {
   tokenAddress: string;
+  pairId?: string;
   verifiedTrustedLaunchpad: boolean;
   requireExplicitSellability?: boolean;
   allowUnknownSellability?: boolean;
@@ -119,15 +89,15 @@ export async function routeBoostSecurity(args: {
     cached: false,
   };
 
-  const key = normalize(args.tokenAddress) + (args.requireExplicitSellability ? ':explicit-sellability' : '') + (args.allowUnknownSellability ? ':dex-warn-unknown' : '');
+  const key = normalize(args.tokenAddress) + ':' + (args.pairId?.toLowerCase() ?? '') + (args.requireExplicitSellability ? ':explicit-sellability' : '') + (args.allowUnknownSellability ? ':dex-warn-unknown' : '');
   const now = Date.now();
   const prior = cache.get(key);
   if (prior && prior.expiresAt > now) return { ...prior.value, cached: true };
 
   evidenceCache.delete(normalize(args.tokenAddress));
   const liquidity = await fetchCustomLiquidityProtection(args.tokenAddress, false, true);
-  const exit=liquidity.allowed?await verifyExit({chain:'robinhood',token:args.tokenAddress,security:evidenceCache.get(normalize(args.tokenAddress))}):null;
-  if(exit){liquidity.allowed=exit.allowed;liquidity.reason=exit.reason+' · '+(liquidity.status==='UNLOCKED'?'⚠️ LP unlocked — liquidity removable.':liquidity.status==='UNKNOWN'?'LP lock: Unable to verify.':liquidity.reason);}
+  const exit=liquidity.allowed?await verifyExit({chain:'robinhood',token:args.tokenAddress,pairId:args.pairId,security:evidenceCache.get(normalize(args.tokenAddress))}):null;
+  if(exit){liquidity.allowed=exit.allowed;liquidity.status=exit.lpStatus ?? liquidity.status;liquidity.reason=exit.reason+' · '+(liquidity.status==='UNLOCKED'?'RISKY ALERT — LIQUIDITY NOT LOCKED. Liquidity can be withdrawn; you may lose your investment. Trade at your own risk.':liquidity.status==='UNKNOWN'?'RISKY ALERT — LP LOCK STATUS UNAVAILABLE. LP lock: Unable to verify. Liquidity protection is unverified; you may lose your investment. Trade at your own risk.':liquidity.reason);}
   const warning = liquidity.allowed && liquidity.status === 'UNLOCKED';
   const value: BoostSecurityGateDecision = {
     allowed: liquidity.allowed,
