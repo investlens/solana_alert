@@ -28,7 +28,7 @@ export function runnerCrossings(row:CompactTrackingRow,sample:RunnerSample):numb
   ||typeof sample.price!=='number'||!Number.isFinite(sample.price)||sample.price<=0)return [];
  return RUNNER_MULTIPLES.filter(m=>sample.price!>=row.baseline_price*m);
 }
-const price=(n:number)=>`$${n>=1?n.toLocaleString('en-US',{maximumFractionDigits:6}):n.toPrecision(6)}`;
+const price=(n:number)=>`$${n>=1?n.toLocaleString('en-US',{maximumFractionDigits:6}):n.toLocaleString('en-US',{useGrouping:false,maximumSignificantDigits:6})}`;
 const money=(n:number)=>n>=1e6?`$${(n/1e6).toFixed(2)}M`:n>=1e3?`$${(n/1e3).toFixed(1)}K`:`$${n.toFixed(2)}`;
 const at=(v:string)=>new Date(v).toISOString().replace('T',' ').slice(0,19)+' UTC';
 export function renderCompactRunner(row:CompactTrackingRow,sample:RunnerSample,multiple:number):string {
@@ -38,7 +38,7 @@ export function renderCompactRunner(row:CompactTrackingRow,sample:RunnerSample,m
  const identity=sample.name?esc(sample.name.slice(0,48)):esc(row.token.slice(0,8)+'…'+row.token.slice(-4));
  const thin=sample.liquidity==null||!Number.isFinite(sample.liquidity)||sample.liquidity<2_000;
  return withResearchDisclosure([
-  `<b>${label} · ${multiple}× SINCE ALERT</b>`,`${identity}${sample.symbol?' ($'+esc(sample.symbol.slice(0,20))+')':''}`,
+  `<b>${label} · ${multiple}× MILESTONE REACHED</b>`,`${identity}${sample.symbol?' ($'+esc(sample.symbol.slice(0,20))+')':''}`,
   `${row.chain==='arc'?'ARC':'Robinchain'} · ${esc(row.feed.replace(/_/g,' '))}`,'',
   ...(sample.mc!=null&&Number.isFinite(sample.mc)&&sample.mc>0?[`Market cap <b>${money(sample.mc)}</b>`]:[]),
   `Alert price <b>${price(row.baseline_price)}</b>`,`Observed price <b>${price(sample.price!)}</b>`,
@@ -46,8 +46,7 @@ export function renderCompactRunner(row:CompactTrackingRow,sample:RunnerSample,m
   ...(sample.liquidity!=null&&Number.isFinite(sample.liquidity)&&sample.liquidity>=0?[`Liquidity <b>${money(sample.liquidity)}</b>`]:[]),
   '',`Alert baseline ${at(row.started_at)}`,`Observed ${at(sample.at)}`,
   ...(thin?['⚠️ Liquidity is thin or unconfirmed; quoted gains may not be executable.']:[]),
-  'Sampled gross price move, not realised profit. Fees and slippage excluded.',
-  'Checkpoint coverage · not lifetime ATH. Do not chase past performance.',
+  'Sampled price change, not realised profit; excludes fees/slippage. Sampled peak is not lifetime ATH.',
   '',`<code>${esc(row.token)}</code>`,
  ].join('\n'));
 }
@@ -55,7 +54,7 @@ export function compactRunnerButtons(row:CompactTrackingRow){
  return [[{text:'📊 Chart',url:`https://dexscreener.com/${row.chain}/${row.pair_id}`}],
   [{text:'🔎 Explorer',url:`https://${row.chain==='arc'?'explorer.arc.io':'robinhoodchain.blockscout.com'}/token/${row.token}`},
    {text:'📋 Copy CA',callback_data:`COPY_CA_${row.token}`}],
-  [{text:'🔔 Open AlphaOS',url:'https://t.me/AlphaOSResearchBot'}]];
+  [{text:'🔔 AlphaOS',url:'https://t.me/AlphaOSResearchBot'}]];
 }
 type Dependencies={claim:typeof claimSharedDelivery;deliver:(row:CompactTrackingRow,sample:RunnerSample,multiple:number)=>Promise<void>};
 async function deliver(row:CompactTrackingRow,sample:RunnerSample,multiple:number){
@@ -64,7 +63,7 @@ async function deliver(row:CompactTrackingRow,sample:RunnerSample,multiple:numbe
  const admin=String(process.env.ADMIN_TELEGRAM_ID??process.env.OWNER_CHAT_ID??'').trim();if(admin)targets.add(admin);
  const recipients=await enabledLiveRecipients([...targets],runnerSourceFeed(row.chain,row.feed)!);
  if(!recipients.length)return;
- const image=await buildAlphaosAlertCard({symbol:sample.symbol,name:sample.name,category:`${multiple}X RUNNER`,chainLabel:row.chain==='arc'?'ARC':'ROBINCHAIN',badge:`${multiple}X SINCE ALERT`,footer:'Sampled price move. Not trade profit or a buy signal.'}).catch(()=>null);
+ const image=await buildAlphaosAlertCard({symbol:sample.symbol,name:sample.name,category:`${multiple}X RUNNER`,chainLabel:row.chain==='arc'?'ARC':'ROBINCHAIN',badge:`${multiple}X MILESTONE REACHED`,footer:'Sampled price move. Not trade profit or a buy signal.'}).catch(()=>null);
  const text=renderCompactRunner(row,sample,multiple),started=Date.now();
  // Sequential fan-out keeps Telegram concurrency bounded. No ambiguous-send retries.
  let accepted=0;
