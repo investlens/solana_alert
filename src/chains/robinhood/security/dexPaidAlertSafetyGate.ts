@@ -9,6 +9,7 @@ export type DexPaidAlertSafetyResult = {
   paymentAgeSeconds:number|null;sellImpactPercent:number|null;ponsDeployer:string|null;
   devHoldingPercent?:number|null;top10Percent?:number|null;
   launchType?:'PONS'|'FLAP'|'CUSTOM'|'UNKNOWN';securityNote?:string;
+  lpStatus?:'LOCKED'|'BURNED'|'UNLOCKED'|'UNKNOWN'|null;
 };
 type Dependencies = {
   paid:(token:string)=>Promise<RobinhoodDexPaidResult>;
@@ -38,6 +39,7 @@ export function createDexPaidEventGate(deps:Dependencies) {
         return base;
       }
       const custom=await deps.custom(token);
+      base.lpStatus=custom.liquidity?.status ?? null;
       base.allowed=custom.allowed;base.launchType=launch?'CUSTOM':'UNKNOWN';
       base.checks.push({key:'CUSTOM_SELLABILITY',passed:custom.allowed,detail:custom.reason});
       if(!custom.allowed)base.reasons.push(custom.reason);
