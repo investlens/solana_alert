@@ -1,6 +1,11 @@
-export type ArcBoostSafety = { lpStatus?:'LOCKED'|'BURNED'|'UNLOCKED'|'UNKNOWN';allowed: boolean; reason: string; sellabilityBlocked?: boolean; sellabilityVerified?: boolean; creator?: string | null; devHoldingPercent?: number | null; top10Percent?: number | null };
+import type {ArcObservedSelling} from './observedSelling.js';
+export type ArcBoostSafety = { sellabilityMethod?:'SIMULATED_EXIT'|'OBSERVED_SELLS'; observedSelling?:ArcObservedSelling; lpStatus?:'LOCKED'|'BURNED'|'UNLOCKED'|'UNKNOWN';allowed: boolean; reason: string; sellabilityBlocked?: boolean; sellabilityVerified?: boolean; creator?: string | null; devHoldingPercent?: number | null; top10Percent?: number | null };
 export function arcBoostSafetyFromEvidence(evidence: Record<string, unknown> | null | undefined): ArcBoostSafety {
   if (!evidence) return { allowed: false, reason: 'honeypot evidence unavailable' };
+  for (const field of ['buy_tax','sell_tax','transfer_tax']) {
+    const value=evidence[field];
+    if(value!=null && value!=='' && Number.isFinite(Number(value)) && Number(value)>0.10) return {allowed:false,sellabilityBlocked:true,reason:'Excessive reported token fee'};
+  }
   // GoPlus percentages are fractions of supply. Owner is not necessarily creator.
   const fraction = (value: unknown): number | null => {
     if (!['string', 'number'].includes(typeof value) || (typeof value === 'string' && !value.trim())) return null;

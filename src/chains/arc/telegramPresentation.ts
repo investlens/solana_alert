@@ -53,9 +53,7 @@ function compactArcBoost(text: string): string {
     `👨‍💻 <b>Dev holding</b>  ${dev}`,
     '',
     '<b>SAFETY</b>',
-    /NOT CHECKED|Not checked|verified simulated exit/.test(text)
-      ? (/verified simulated exit/.test(text)?'Custom alerts require a verified simulated exit. LP lock: unable to verify; execution can change.':'⚠️ Liquidity, honeypot and sellability NOT CHECKED. Verify selling and liquidity yourself before investing.')
-      : '✅ No honeypot / cannot-sell flag detected',
+    ...[...text.matchAll(/⚠️ ([^\n]+)/g)].map(match => `⚠️ ${match[1]}`),
     '',
     ca ? '<b>CONTRACT</b>' : '',
     ca ? `<code>${ca}</code>` : '',
@@ -83,7 +81,7 @@ function compactArcBurn(text: string): string {
     '',
     '<b>SAFETY</b>',
     '✅ Verified on-chain supply reduction',
-    '✅ LP protection verified',
+    'Liquidity protection: see current risk disclosure',
     '',
     ca ? '<b>CONTRACT</b>' : '',
     ca ? `<code>${ca}</code>` : '',
@@ -127,6 +125,9 @@ export function polishArcTelegramPresentation(text: string, buttons?: ArcInlineB
   else if (text.includes('BOOST DETECTED · ARC')) polished = compactArcBoost(text);
   else if (text.includes('AlphaOS · ARC SUPPLY BURN')) polished = compactArcBurn(text);
   else return { text: originalText, buttons };
+  const evidenceLines=originalText.split('\n').filter(line=>/^Observed sells|^Creator excluded/.test(line));
+  for(const line of evidenceLines)if(!polished.includes(line))polished+='\n'+line;
+  for(const warning of [...originalText.matchAll(/⚠️ ([^\n]+)/g)].map(match=>`⚠️ ${match[1]}`))if(!polished.includes(warning))polished+='\n'+warning;
   const socials = originalText.split('\n').filter(line => /<a href="https:\/\/(?:x\.com|twitter\.com|t\.me)\//i.test(line));
   if (socials.length) polished += '\n\n<b>SOCIALS</b>\n' + socials.join('\n');
   if (keyStats) polished = polished.includes('<b>CONTRACT</b>') ? polished.replace('<b>CONTRACT</b>',keyStats+'\n\n<b>CONTRACT</b>') : polished+'\n\n'+keyStats;
