@@ -76,7 +76,9 @@ export function createArcObservedVerifier(deps:Dependencies){
     const toBlock=head-2n,fromBlock=toBlock>600n?toBlock-600n:0n;
     const logs=await deps.logs({address:MANAGER,event:ARC_SWAP,args:{id:poolId},fromBlock,toBlock});
     if(logs.length>200)return blocked('ARC sell window exceeds bounded log budget');
-    const hashes=[...new Set(logs.filter(l=>!l.removed&&l.transactionHash&&l.blockNumber!=null&&l.blockNumber>=fromBlock&&l.blockNumber<=toBlock&&same(l.args?.id,poolId)).sort((a,b)=>a.blockNumber>b.blockNumber?-1:1).map(l=>l.transactionHash as Hex))].slice(0,12);
+    const minimumQuote=5_000_000n*(same(pool.quoteToken.address,ARC_NATIVE_USDC)?1_000_000_000_000n:1n);
+    const tokenIs0=same(poolKey.currency0,token);
+    const hashes=[...new Set(logs.filter(l=>!l.removed&&l.transactionHash&&l.blockNumber!=null&&l.blockNumber>=fromBlock&&l.blockNumber<=toBlock&&same(l.args?.id,poolId)&&(tokenIs0?l.args?.amount0:l.args?.amount1)<0n&&(tokenIs0?l.args?.amount1:l.args?.amount0)>=minimumQuote).sort((a,b)=>a.blockNumber>b.blockNumber?-1:1).map(l=>l.transactionHash as Hex))].slice(0,12);
     const sales:ObservedSale[]=[],blocks=new Map<bigint,any>(),codes=new Map<string,Hex|undefined>();
     for(const hash of hashes){
      if(deps.now()>deadline)break;
