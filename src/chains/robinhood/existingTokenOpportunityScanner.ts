@@ -290,7 +290,7 @@ export async function refreshExistingTokenOpportunityScanner() {
   try {
     const universe = await loadUniverse(); metrics.universe = universe.length;
     const quota = Math.min(config.existingTokenMaxPerCycle, EXISTING_TOKEN_SCANNER_SUSTAINABLE_QUOTA);
-    const due = selectDueExistingTokens(universe, { max: Math.min(config.existingTokenMaxPerCycle,quota*2,30) }); hotCursor = due.nextHotCursor; warmCursor = due.nextWarmCursor;
+    const due = selectDueExistingTokens(universe, { max: Math.min(quota*2,30) }); hotCursor = due.nextHotCursor; warmCursor = due.nextWarmCursor;
     metrics.due = due.dueCount;metrics.selected=Math.min(quota,due.selected.length);metrics.quota_deferred=Math.max(0,due.dueCount-metrics.selected);
     if (getDexScreenerBackoffState().active) {
       metrics.health = 'DEGRADED'; metrics.failed = 1; metrics.provider_backoff = true; metrics.provider_backoff_deferred = due.selected.length;
