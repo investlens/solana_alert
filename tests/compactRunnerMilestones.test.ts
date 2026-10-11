@@ -23,7 +23,7 @@ test('unavailable claims and ambiguous Telegram acceptance never create duplicat
  await assert.rejects(processCompactRunner(row,sample(.002),deps));await processCompactRunner(row,sample(.003),deps);assert.equal(sends,1);
 });
 test('card shows original/observed evidence and never calls sampled price changes profit or ATH',()=>{
- const text=renderCompactRunner(row,sample(.01),10);assert.match(text,/MEGA RUNNER/);assert.match(text,/10× SINCE ALERT/);assert.match(text,/Market cap/);assert.match(text,/Alert price/);assert.match(text,/Observed price/);assert.match(text,/not realised profit/);assert.match(text,/not lifetime ATH/);assert.match(text,/not a buy\/sell signal/);assert.ok(text.replace(/<[^>]*>/g,'').length<1024);
+ const text=renderCompactRunner(row,sample(.01),10);assert.match(text,/MEGA RUNNER/);assert.match(text,/10× MILESTONE REACHED/);assert.match(text,/Market cap/);assert.match(text,/Alert price/);assert.match(text,/Observed price/);assert.match(text,/not realised profit/);assert.match(text,/not lifetime ATH/);assert.match(text,/not a buy\/sell signal/);assert.ok(text.replace(/<[^>]*>/g,'').length<1024);
  assert.match(renderCompactRunner(row,{...sample(.002),liquidity:1,name:'<script>'},2),/Liquidity is thin/);assert.doesNotMatch(renderCompactRunner(row,{...sample(.002),name:'<script>'},2),/<script>/);
  const arc={...row,chain:'arc'};assert.equal(runnerSourceFeed('arc','BOOST'),'ARC_BOOST');assert.match(compactRunnerButtons(arc)[1][0].url!,/explorer.arc.io/);assert.match(compactRunnerButtons(arc)[0][0].url!,/dexscreener.com\/arc/);
 });
@@ -42,9 +42,21 @@ test('50x and 100x require exact thresholds and send once through normal progres
  assert.deepEqual(sent,[100]);assert.equal(claimed.size,5);
  for(const m of [50,100]){
   const text=renderCompactRunner(row,sample(m*.001),m);
-  assert.match(text,new RegExp(m+'× SINCE ALERT'));assert.match(text,/Alert price/);assert.match(text,/not realised profit/);
+  assert.match(text,new RegExp(m+'× MILESTONE REACHED'));assert.match(text,/Alert price/);assert.match(text,/not realised profit/);
   assert.ok(text.replace(/<[^>]*>/g,'').length<1024);
  }
  assert.match(renderCompactRunner(row,sample(.05),50),/ULTRA RUNNER/);
  assert.match(renderCompactRunner(row,sample(.1),100),/LEGENDARY RUNNER/);
+});
+
+// Real runner values must remain readable without changing threshold decisions.
+test('DIALN runner separates reached milestone from current multiple and formats small prices as decimals',()=>{
+ const baseline={...row,baseline_price:0.000000984,feed:'DEX_PAID'};
+ const text=renderCompactRunner(baseline,{...sample(0.000008166),mc:816618,liquidity:249815.59},5);
+ assert.match(text,/5× MILESTONE REACHED/);assert.match(text,/8.30×/);assert.match(text,/\+729.9%/);
+ assert.match(text,/Alert price <b>\$0.000000984<\/b>/);
+ assert.match(text,/Observed price <b>\$0.000008166<\/b>/);
+ assert.doesNotMatch(text,/\$[0-9.]+e[-+]/i);
+ assert.ok(text.replace(/<[^>]*>/g,'').length<1024);
+ assert.equal(compactRunnerButtons(baseline)[2][0].text,'🔔 AlphaOS');
 });
