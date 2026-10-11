@@ -77,7 +77,7 @@ test('fresh exact-pair scanner market avoids duplicate snapshot requests but sti
 test('young pools skip impossible history requests and V4 snapshots retain exact pool identity',async()=>{
  const {readVolumeBreakoutResult,scannerVolumeSnapshot}=await import('../src/services/volumeBreakoutEvidence.js');
  const original=globalThis.fetch;let calls=0;
- const m={chain:'robinhood' as const,tokenAddress:'0x'+'c'.repeat(40),pairAddress:'0x'+'d'.repeat(64),priceUsd:1,liquidityUsd:20000,marketCapUsd:100000,volume5mUsd:100,buys5m:2,sells5m:1,pairCreatedAt:Date.now()-day,timestamp:Date.now()};
+ const m={chain:'robinhood' as const,tokenAddress:'0x'+'c'.repeat(40),pairAddress:'0x'+'d'.repeat(64),name:'Test',symbol:'TEST',priceUsd:1,liquidityUsd:20000,marketCapUsd:100000,volume5mUsd:100,buys5m:2,sells5m:1,pairCreatedAt:Date.now()-day,timestamp:Date.now()};
  try{globalThis.fetch=async()=>{calls++;throw Error('unnecessary history request');};
  assert.ok(scannerVolumeSnapshot(m,'robinhood',m.tokenAddress,m.pairAddress));
  assert.equal((await readVolumeBreakoutResult('robinhood',m.tokenAddress,m.pairAddress,m)).reason,'INCOMPLETE_WEEK');assert.equal(calls,0);
@@ -102,7 +102,7 @@ test('historical lookup reuses daily baseline, rejects HTTP errors and respects 
   assert.equal(await readVolumeBreakout('robinhood','0xtoken','0xother'),null);
   let calls=0;globalThis.fetch=async()=>{calls++;throw new Error('unexpected');};
   assert.equal(await readVolumeBreakout('robinhood','0xtoken','0xthird'),null);assert.equal(calls,0);
-  const m={chain:'robinhood' as const,tokenAddress:'0x'+'a'.repeat(40),pairAddress:'0x'+'b'.repeat(40),priceUsd:1,liquidityUsd:20000,marketCapUsd:100000,volume5mUsd:100,buys5m:2,sells5m:1,pairCreatedAt:b-10*day,timestamp:Date.now()};
+  const m={chain:'robinhood' as const,tokenAddress:'0x'+'a'.repeat(40),pairAddress:'0x'+'b'.repeat(40),name:'Test',symbol:'TEST',priceUsd:1,liquidityUsd:20000,marketCapUsd:100000,volume5mUsd:100,buys5m:2,sells5m:1,pairCreatedAt:b-10*day,timestamp:Date.now()};
   const {readVolumeBreakoutResult}=await import('../src/services/volumeBreakoutEvidence.js');
   assert.equal((await readVolumeBreakoutResult('robinhood',m.tokenAddress,m.pairAddress,m)).reason,'QUALIFIED');assert.equal(calls,0);
  } finally { globalThis.fetch=original; }
