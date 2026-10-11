@@ -1,3 +1,4 @@
+import {robinhoodAlertSafety} from './robinhoodAlertSafety.js';
 import { waitForRecipientDelivery, recipientDelayMs, recordDeliveryAccepted } from './recipientDeliveryTiming.js';
 import {
   resolveTokenOpenTarget,
@@ -1120,6 +1121,12 @@ async function deliverOpportunity(
   }
   const criticalReason = action === 'EXIT' ? criticalAvoidReason(opportunity.raw_data) : null;
 
+  let customSafetyNote='';
+  if (opportunity.chain==='robinhood' && ['BUY','CHECK_ENTRY'].includes(action)) {
+    const {origin,security}=await robinhoodAlertSafety(opportunity.asset_id);
+    if (!security.allowed) return;
+    if (!origin) customSafetyNote='\n\n'+security.reason;
+  }
   const deliveryStartedAt = Date.now();
   const users = (await getDeliverableUsers()).sort((a, b) => recipientDelayMs(a, deliveryStartedAt) - recipientDelayMs(b, deliveryStartedAt));
 
@@ -1202,7 +1209,7 @@ async function deliverOpportunity(
           opportunity,
           comparison,
           notificationDecision,
-        ),
+        ) + customSafetyNote,
         buildButtons(
           opportunity,
           tokenTarget,

@@ -10,6 +10,8 @@ export type PositiveAlertSecurityDecision = {
 };
 
 const POSITIVE_SEMANTIC_EVENT_TYPES = new Set([
+  'DEV_BURN',
+  'VERIFIED_BURN',
   'BOOST',
   'DEX_PAID',
   'VOLUME_SURGE',

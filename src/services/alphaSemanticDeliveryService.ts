@@ -4,6 +4,7 @@ import type { PromotionCardArgs } from '../ui/promotionEventCard.js';
 import { recordFeedDelivery } from './feedDeliveryHealth.js';
 import { buildPromotionEventCard } from '../ui/promotionEventCard.js';
 import { discloseRobinhoodKeyStats, cachedRobinhoodAlertStats } from './alertKeyStatsService.js';
+import {robinhoodAlertSafety} from './robinhoodAlertSafety.js';
 import { routeBoostSecurity } from '../chains/robinhood/boostSecurityRouter.js';
 import { getVerifiedRobinhoodLaunchpad } from '../chains/robinhood/trustedLaunchpad.js';
 import { withOwnershipDisclosure, type OwnershipDisclosure } from '../ui/ownershipDisclosure.js';
@@ -18,7 +19,6 @@ import { waitForRecipientDelivery, isUndelayedRiskEvent, recipientDelayMs, recor
 import { getDeliverableUsers, markTelegramUserBlocked, type DeliverableUser } from '../core/delivery.js';
 import { accessProfileForUser, hasCapability } from '../product/capabilities.js';
 import { evaluateDexPaidAlertSafety } from '../chains/robinhood/security/dexPaidAlertSafetyGate.js';
-import { evaluateRobinhoodPositiveAlertSecurity } from '../chains/robinhood/launchSecurity.js';
 import { evaluatePositiveAlertSecurity, isPositiveSemanticEvent, labelLaunchType, type LaunchClassification } from '../security/positiveAlertSecurity.js';
 import { createLeaseToken, DELIVERY_LEASE_SECONDS } from './reservationLease.js';
 import { DEX_PAID_STRATEGY_KEY, isStrategyEnabledForUser, X_REPUTED_MENTION_STRATEGY_KEY } from './strategyService.js';
@@ -132,39 +132,25 @@ export async function deliverAlphaSemanticEvent(args: {
   const ephemeralMode = dependencies === productionDependencies && (args.event.ephemeral === true || args.event.id < 0);
   let launchType: LaunchClassification | null = null;
   let exitPairId:string|undefined;
-  if (dependencies === productionDependencies && !(['DEX_PAID','BOOST'].includes(args.event.type) && args.event.chain.toLowerCase() === 'robinhood') && isPositiveSemanticEvent(args.event.type) &&
-      ['robinhood', 'solana'].includes(args.event.chain.toLowerCase())) {
-    let raw: Record<string, unknown> | null = args.event.rawSnapshot ??
-      (ephemeralMode ? getEphemeralSemanticEventEvidence(args.event.eventIdentity) : null);
-    if (!raw && !ephemeralMode) {
-      try {
-        raw = await loadSemanticRawSnapshot(args.event.id);
-      } catch (error) {
-        console.warn('[AlphaSemanticDelivery] Security evidence unavailable; positive alert suppressed fail-closed.', {
-          alertEventId: args.event.id, token: args.event.assetId,
-          reason: error instanceof Error ? error.message : String(error),
-        });
-        return { delivered: 0, failed: 0 };
+  let positiveSecurityNote: string | null = null;
+  if (dependencies === productionDependencies && isPositiveSemanticEvent(args.event.type) &&
+      !(['DEX_PAID','BOOST'].includes(args.event.type) && args.event.chain.toLowerCase() === 'robinhood')) {
+    if (args.event.chain.toLowerCase() === 'robinhood') {
+      // Provenance comes before snapshot loading: a verified PONS launch does
+      // not depend on custom LP evidence or a stored security snapshot.
+      const {origin,security:gate}=await robinhoodAlertSafety(args.event.assetId);
+      launchType = origin?.launchType ?? 'UNKNOWN';
+      if (!gate.allowed) {
+        console.warn('[AlphaSemanticDelivery] WITHHELD custom positive exit unverified', {reason:gate.reason});
+        return {delivered:0,failed:0};
       }
-    }
-    if (!raw) {
-      console.warn('[AlphaSemanticDelivery] Ephemeral security evidence missing; positive alert suppressed fail-closed.', {
-        alertEventId: args.event.id, token: args.event.assetId,
-      });
-      return { delivered: 0, failed: 0 };
-    }
-    const security = args.event.chain.toLowerCase() === 'robinhood'
-      ? await evaluateRobinhoodPositiveAlertSecurity({ tokenAddress: args.event.assetId, raw })
-      : evaluatePositiveAlertSecurity({ launchType: 'CUSTOM', raw });
-    launchType = security.launchType;
-    if(security.allowed && args.event.chain.toLowerCase()==='robinhood' && !['PONS','FLAP'].includes(security.launchType)){const exit=await routeBoostSecurity({tokenAddress:args.event.assetId,verifiedTrustedLaunchpad:false});if(!exit.allowed){console.warn('[AlphaSemanticDelivery] WITHHELD custom positive exit unverified');return {delivered:0,failed:0};}exitPairId=exit.exitPairId;}
-    if (!security.allowed) {
-      console.warn('[AlphaSemanticDelivery] Positive alert suppressed by fail-closed liquidity security.', {
-        alertEventId: args.event.id, semanticEventType: args.event.type, token: args.event.assetId,
-        launchType: security.launchType, liquidityState: security.liquidityState,
-        liquidityVerified: security.liquidityVerified, reason: security.reason,
-      });
-      return { delivered: 0, failed: 0 };
+      exitPairId=gate.exitPairId;
+      if (!origin) positiveSecurityNote=gate.reason;
+    } else if (args.event.chain.toLowerCase() === 'solana') {
+      const raw = args.event.rawSnapshot ?? (ephemeralMode ? getEphemeralSemanticEventEvidence(args.event.eventIdentity) : await loadSemanticRawSnapshot(args.event.id).catch(()=>null));
+      const security=evaluatePositiveAlertSecurity({launchType:'CUSTOM',raw});
+      if (!security.allowed) return {delivered:0,failed:0};
+      launchType=security.launchType;
     }
   }
 
@@ -223,6 +209,7 @@ export async function deliverAlphaSemanticEvent(args: {
     }
   }
   if (launchType) deliveryMessage = labelLaunchType(deliveryMessage, launchType);
+  if (positiveSecurityNote) deliveryMessage += '\n\n' + positiveSecurityNote;
 
   if(dependencies===productionDependencies && ['DEX_PAID','BOOST'].includes(args.event.type) && args.event.chain==='robinhood') {
     deliveryMessage=await discloseRobinhoodKeyStats(deliveryMessage,args.event.assetId,false,
