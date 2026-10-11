@@ -251,7 +251,7 @@ async function broadcastArcAlert(text: string, buttons: any[][], outcomeToken?: 
   if (!sellSafety.allowed) throw new Error(`ARC sellability blocked: ${sellSafety.reason}`);
   const stats = await arcAlertStats(outcomeToken,expectedPool);
   if (feed==='ARC_DEX_PAID') text = text.replace('Promotion payment confirmed',`${String(stats.name??'Token name unavailable').replace(/[<>&]/g,'')} (${String(stats.symbol??'Symbol unavailable').replace(/[<>&]/g,'')})\nPromotion payment confirmed`);
-  if(isArcPromotionFeed(feed)) text += `\n⚠️ <b>${sellSafety.reason}</b>`;
+  if(sellSafety.sellabilityVerified) text += `\n⚠️ <b>${sellSafety.reason}</b>`;
   text = withAlertKeyStats(text,{...stats,sellability:isArcPromotionFeed(feed)?(sellSafety.sellabilityVerified?'Same-wallet exit simulated · execution can change':'Unverified · manual validation required'):'Provider flags passed · execution unverified',lp:isArcPromotionFeed(feed)?(sellSafety.lpStatus??'Unverified'):'Unverified',dexPaid:feed==='ARC_DEX_PAID'?'Yes · payment confirmed':undefined});
   text = withOwnershipDisclosure(text, {creator:sellSafety.creator,creatorExplorer:"https://explorer.arc.io/address/",devPercent: sellSafety.devHoldingPercent ?? null, devObservedAt:sellSafety.observedAt,top10ObservedAt:sellSafety.observedAt,
     top10Percent: sellSafety.top10Percent ?? null, top10Coverage: sellSafety.top10Percent == null ? 'UNAVAILABLE' : 'PROVIDER_REPORTED'});
