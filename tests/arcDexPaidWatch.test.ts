@@ -25,3 +25,13 @@ test('ARC DEX warns for unavailable security but cannot override confirmed exit 
  for(const evidence of [{is_honeypot:'1'},{cannot_sell_all:'1'}])assert.equal(arcDexPaidSafety(arcBoostSafetyFromEvidence(evidence)).allowed,false);
  assert.equal(arcDexPaidSafety(arcBoostSafetyFromEvidence({is_honeypot:'0',cannot_sell_all:'0'})).sellabilityVerified,true);
 });
+
+test('rotated promotion discovery finds ARC ads without increasing check budget or duplicating delivery',async()=>{
+ let now=2000000000000; const urls:string[]=[],sent:string[]=[];const claims=new Set<string>();
+ const watch=createArcDexPaidWatch({now:()=>now,read:async url=>{urls.push(url);return url.includes('/orders/')?[{paymentTimestamp:now,status:'approved'}]:url.includes('/ads/')?[{chainId:'arc',tokenAddress:token}]:[];},security:async()=>({allowed:true,reason:'unknown warning'}),claim:async key=>{if(claims.has(key))return 'EXISTS';claims.add(key);return 'CLAIMED';},send:async t=>{sent.push(t);}});
+ for(let i=0;i<3;i++){await watch.tick();now+=60000;}
+ assert.deepEqual(sent,[token]);assert.equal(urls.filter(u=>!u.includes('/orders/')).length,3);
+ assert.ok(urls.some(u=>u.includes('recent-updates')));assert.ok(urls.some(u=>u.includes('/ads/')));
+ for(let i=0;i<30;i++)watch.seed('0x'+(i+10).toString(16).padStart(40,'0'));
+ assert.equal(watch.size(),24);
+});

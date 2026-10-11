@@ -2,6 +2,7 @@ import { recordFeedDelivery } from '../src/services/feedDeliveryHealth.js';
 import { recordRejectedCandidate, runRejectedCandidateReview } from '../src/services/rejectedCandidateReview.js';
 import { withAlertKeyStats, type AlertKeyStats } from '../src/ui/alertKeyStats.js';
 import { readResearchTokenSupply, formatResearchSupply } from '../src/services/researchTokenSupply.js';
+import {readArcBoostCheckpoint,saveArcBoostCheckpoint} from '../src/chains/arc/boostCheckpoint.js';
 import { createArcDexPaidWatch } from '../src/chains/arc/dexPaidWatch.js';
 import { consistentArcVolume5m, fetchArcBoostFeed } from '../src/chains/arc/boostFeed.js';
 import { governedDexScreenerJson } from '../src/services/dexscreenerRequestGovernor.js';
@@ -50,6 +51,7 @@ let arcBoostBaselineReady = false;
 const ARC_BOOST_RECOVERY_MAX = Math.max(1, Math.min(20, Number(process.env.ARC_BOOST_RECOVERY_MAX ?? 12)));
 const ARC_BOOST_POLL_MS = Math.max(10_000, Number(process.env.ARC_BOOST_POLL_MS ?? 15_000));
 let lastArcBoostPollAt = 0;
+let lastArcTopPollAt=0,lastArcBoostCheckpointAt=0;
 
 const ARC_BURN_MIN_PERCENT = Math.max(0.01, Number(process.env.ARC_BURN_MIN_PERCENT ?? 0.5));
 const ERC20_TRANSFER_EVENT = parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 value)');
@@ -507,7 +509,7 @@ async function getStoredArcBoostTotal(tokenAddress: string): Promise<number | nu
       .select('boost_total').eq('chain', 'arc').eq('asset_id', tokenAddress)
       .not('boost_total', 'is', null).order('alerted_at', { ascending: false }).limit(1).maybeSingle();
     if (error) throw error;
-    const total = Number(data?.boost_total);
+    const total = data?.boost_total == null ? NaN : Number(data.boost_total);
     return Number.isFinite(total) ? total : null;
   } catch (error) {
     console.warn('[ArcBoost] persistent baseline unavailable; using live baseline', {
@@ -591,23 +593,31 @@ async function processArcBoosts(): Promise<void> {
   lastArcBoostPollAt = Date.now();
   const boosts = await fetchArcBoosts();
   if (boosts === null) return;
-  for (const boost of boosts) arcDexPaid.seed(boost.tokenAddress);
+  for (const boost of boosts) arcDexPaid.seed(boost.tokenAddress,true);
   if (!arcBoostBaselineReady) {
-    let persisted = 0;
-    for (const boost of boosts) {
-      const storedTotal = await getStoredArcBoostTotal(boost.tokenAddress);
-      arcBoostTotals.set(boost.tokenAddress.toLowerCase(), Math.max(storedTotal ?? boost.totalAmount, boost.totalAmount));
-      if (storedTotal != null) persisted += 1;
-    }
-    arcBoostBaselineReady = true;
-    console.log('[ArcBoost] BASELINE_READY', { tokens: boosts.length, persisted, recoveryReplay: false });
-    // Current feed entries are baseline on startup. Never replay historical BOOSTs after a restart.
-    // Genuine later increases still produce a new token+total identity and alert normally.
-    return;
+    const restored=await readArcBoostCheckpoint();
+    for(const [token,total] of restored)arcBoostTotals.set(token,total);
+    for(const boost of boosts)if(!arcBoostTotals.has(boost.tokenAddress.toLowerCase()))arcBoostTotals.set(boost.tokenAddress.toLowerCase(),boost.totalAmount);
+    arcBoostBaselineReady=true;
+    console.log('[ArcBoost] BASELINE_READY',{tokens:boosts.length,restored:restored.size,recoveryReplay:false});
+    // Unknown startup totals remain baseline. A recent saved lower observation
+    // can establish a genuine increase during a short deployment gap.
   }
   for (const boost of boosts) {
     await processArcBoostObservation(arcBoostTotals, boost, eventType => deliverArcBoost(boost, eventType));
   }
+  if(Date.now()-lastArcTopPollAt>=60000){
+    lastArcTopPollAt=Date.now();
+    try{const top=await fetchArcBoostFeed('TOP');
+      for(const boost of top){arcDexPaid.seed(boost.tokenAddress,true);
+        if(!arcBoostTotals.has(boost.tokenAddress.toLowerCase()))arcBoostTotals.set(boost.tokenAddress.toLowerCase(),boost.totalAmount);
+        else await processArcBoostObservation(arcBoostTotals,boost,eventType=>deliverArcBoost(boost,eventType));}
+      console.log('[ArcBoost] FEED',{latest:boosts.length,top:top.length,observed:arcBoostTotals.size});
+    }catch{console.warn('[ArcBoost] top discovery unavailable; latest scanning retained');}
+  }
+  while(arcBoostTotals.size>100)arcBoostTotals.delete(arcBoostTotals.keys().next().value!);
+  if(Date.now()-lastArcBoostCheckpointAt>=30000){lastArcBoostCheckpointAt=Date.now();await saveArcBoostCheckpoint(arcBoostTotals);}
+
 }
 
 async function main() {
