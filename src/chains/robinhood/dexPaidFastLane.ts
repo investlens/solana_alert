@@ -170,9 +170,9 @@ export function startDexPaidFastLane() {
     else for(const row of rows){
       if(snapshot)seedRobinhoodStreamBoost({tokenAddress:row.tokenAddress,amount:row.amount!,totalAmount:row.totalAmount!});
       if(streamBoostSeen.get(row.tokenAddress)===row.totalAmount)continue;
+      if(boostPending.size>=64&&!boostPending.has(row.tokenAddress)){console.warn('[PromotionStreams] boost capacity deferred');continue;}
       if(streamBoostSeen.size>=500)streamBoostSeen.delete(streamBoostSeen.keys().next().value!);
       streamBoostSeen.set(row.tokenAddress,row.totalAmount!);
-      if(boostPending.size>=64&&!boostPending.has(row.tokenAddress)){console.warn('[PromotionStreams] boost capacity deferred');continue;}
       const previous=boostPending.get(row.tokenAddress);
       if(!previous||row.totalAmount!>previous.totalAmount)boostPending.set(row.tokenAddress,{tokenAddress:row.tokenAddress,amount:row.amount!,totalAmount:row.totalAmount!,snapshot:previous?previous.snapshot&&snapshot:snapshot});
     }
