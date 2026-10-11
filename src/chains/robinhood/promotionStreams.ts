@@ -6,9 +6,9 @@ export const PROMOTION_STREAM_PATHS=[
 ] as const;
 // Accept the observed handshake and incremental array formats, not arbitrary objects.
 // Strip images, links, descriptions and other provider payload before routing.
-export function parsePromotionUpdate(raw:string,kind:PromotionKind):PromotionUpdate[] {
+export function parsePromotionUpdate(raw:string,kind:PromotionKind):PromotionUpdate[]|null {
  if(raw.length>1_000_000)throw Error('Promotion payload too large');
- const payload=JSON.parse(raw);const rows=Array.isArray(payload)?payload:payload&&Array.isArray(payload.data)?payload.data:null;
+ const payload=JSON.parse(raw);if(payload?.type==='heartbeat'&&Object.keys(payload).length===1)return null;const rows=Array.isArray(payload)?payload:payload&&Array.isArray(payload.data)?payload.data:null;
  if(!rows)throw Error('Unknown promotion message format');
  const result=new Map<string,PromotionUpdate>();
  for(const row of rows.slice(0,200)) {
@@ -36,7 +36,7 @@ export function startPromotionStreams(route:(kind:PromotionKind,rows:PromotionUp
    const deadline=setTimeout(()=>{if(socket.readyState!==WebSocket.OPEN)socket.close();},10000);deadline.unref();
    socket.onopen=()=>{clearTimeout(deadline);console.log('[PromotionStreams] CONNECTED',{path});};
    socket.onmessage=event=>{
-    try{const rows=parsePromotionUpdate(String(event.data),kind);route(kind,rows,first);first=false;failures=0;
+    try{const rows=parsePromotionUpdate(String(event.data),kind);if(rows===null)return;route(kind,rows,first);first=false;failures=0;
      console.log('[PromotionStreams] UPDATE',{path,robinhood:rows.length});}
     catch{console.warn('[PromotionStreams] malformed update withheld',{path});socket.close();}
    };

@@ -18,3 +18,5 @@ test('paid priority is bounded, fair, retried on missing payment and deduplicate
  q.admit([{tokenAddress:token}],122000);assert.equal(q.next(122000),token);
 });
 test('expired queue cannot replay stale candidates',()=>{const q=createPromotionPriorityQueue();q.admit([{tokenAddress:token}],1000);assert.equal(q.next(481000),null);assert.equal(q.size,0);});
+
+test("provider heartbeat is a control message, not a promotion or snapshot",()=>{assert.equal(parsePromotionUpdate(JSON.stringify({type:"heartbeat"}),"boost"),null);assert.throws(()=>parsePromotionUpdate(JSON.stringify({type:"heartbeat",data:"invalid"}),"paid"));});
