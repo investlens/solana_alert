@@ -240,7 +240,7 @@ async function getArcRecipients(): Promise<string[]> {
 async function broadcastArcAlert(text: string, buttons: any[][], outcomeToken?: string, feed:LiveFeedKey = 'ARC_OPPORTUNITY', expectedPool?:string): Promise<{delivered:number;failed:number;adminMessageId:number|null}> {
   // Boost/payment are event-only; normal opportunity and burn retain their gate.
   if (!outcomeToken) throw new Error('ARC alert lacks token identity for sellability check');
-  const sellSafety = await arcDeliverySafety(feed,outcomeToken,checkArcBoostSecurity);
+  const sellSafety = await arcDeliverySafety(feed,outcomeToken,checkArcBoostSecurity,undefined,undefined,expectedPool);
   const cachedOwnership = isArcPromotionFeed(feed) ? arcSellSafetyCache.get(outcomeToken.toLowerCase()) : null;
   if(cachedOwnership && Date.now()-cachedOwnership.at < 90_000) {
     sellSafety.creator=cachedOwnership.result.creator;
@@ -249,10 +249,12 @@ async function broadcastArcAlert(text: string, buttons: any[][], outcomeToken?: 
     sellSafety.observedAt=cachedOwnership.result.observedAt;
   }
   if (!sellSafety.allowed) throw new Error(`ARC sellability blocked: ${sellSafety.reason}`);
-  const stats = await arcAlertStats(outcomeToken,expectedPool);
+  if(expectedPool && sellSafety.observedSelling?.poolId && expectedPool.toLowerCase()!==sellSafety.observedSelling.poolId.toLowerCase())throw new Error('ARC checked pool does not match alert pool');
+  const stats = await arcAlertStats(outcomeToken,sellSafety.observedSelling?.poolId??expectedPool);
   if (feed==='ARC_DEX_PAID') text = text.replace('Promotion payment confirmed',`${String(stats.name??'Token name unavailable').replace(/[<>&]/g,'')} (${String(stats.symbol??'Symbol unavailable').replace(/[<>&]/g,'')})\nPromotion payment confirmed`);
-  if(sellSafety.sellabilityVerified) text += `\n⚠️ <b>${sellSafety.reason}</b>`;
-  text = withAlertKeyStats(text,{...stats,sellability:isArcPromotionFeed(feed)?(sellSafety.sellabilityVerified?'Same-wallet exit simulated · execution can change':'Unverified · manual validation required'):'Provider flags passed · execution unverified',lp:isArcPromotionFeed(feed)?(sellSafety.lpStatus??'Unverified'):'Unverified',dexPaid:feed==='ARC_DEX_PAID'?'Yes · payment confirmed':undefined});
+  if(sellSafety.allowed) text += `\n⚠️ <b>${sellSafety.reason.replace(/[<>&]/g,'')}</b>`;
+  if(sellSafety.observedSelling){const e=sellSafety.observedSelling;text+=`\nObserved sells (last 5m): ${e.sells} transactions · ${e.sellers} distinct wallets · $${e.totalUsdc?.toFixed(2)} USDC received · largest seller ${e.largestSellerPercent}%\nCreator excluded when known; linked-wallet funding not verified.`;}
+  text = withAlertKeyStats(text,{...stats,sellability:sellSafety.sellabilityMethod==='OBSERVED_SELLS'?'Recent receipt-backed sells · simulation unavailable · future execution unverified':'Same-wallet exit simulated · execution can change',lp:sellSafety.lpStatus??'UNKNOWN',dexPaid:feed==='ARC_DEX_PAID'?'Yes · payment confirmed':undefined});
   text = withOwnershipDisclosure(text, {creator:sellSafety.creator,creatorExplorer:"https://explorer.arc.io/address/",devPercent: sellSafety.devHoldingPercent ?? null, devObservedAt:sellSafety.observedAt,top10ObservedAt:sellSafety.observedAt,
     top10Percent: sellSafety.top10Percent ?? null, top10Coverage: sellSafety.top10Percent == null ? 'UNAVAILABLE' : 'PROVIDER_REPORTED'});
   if (outcomeToken && /^0x[a-fA-F0-9]{40}$/.test(outcomeToken)) buttons = [...buttons, [{text:'⭐ Track',callback_data:`OUT_ARC_${outcomeToken}`}]];
@@ -493,8 +495,8 @@ async function checkArcBoostSecurity(tokenAddress: string): Promise<ArcBoostSecu
 async function assessArcWithSellSafety(market: Parameters<typeof assessArcForAlert>[0]) {
   const preliminary = assessArcForAlert(market);
   // Spend no security request on candidates already blocked by market or contract gates.
-  const marketBlocked = preliminary.security.reasons.some(reason => reason !== 'SELLABILITY_UNVERIFIED' && reason !== 'UNVERIFIED_V4_HOOK');
-  const final = marketBlocked ? preliminary : assessArcForAlert(market, await checkArcBoostSecurity(market.assetId));
+  const marketBlocked = preliminary.security.reasons.some(reason => reason !== 'SELLABILITY_UNVERIFIED');
+  const final = marketBlocked ? preliminary : assessArcForAlert(market, await arcDeliverySafety('ARC_OPPORTUNITY',market.assetId,checkArcBoostSecurity,undefined,undefined,market.poolId));
   if (!final.alertable) recordRejectedCandidate({chain:'arc',token:market.assetId,pair:market.poolId ?? '',price:market.priceUsd ?? 0,reason:final.security.reasons.join(' | ')});
   return final;
 }

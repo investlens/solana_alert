@@ -2,7 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {arcDeliverySafety,ARC_PROMOTION_WARNING} from '../src/chains/arc/promotionPolicy.js';
 import {readFileSync} from 'node:fs';
 import {polishArcTelegramPresentation} from '../src/chains/arc/telegramPresentation.js';
-test('ARC boost and DEX paid require a full exit simulation and block confirmed honeypots',async()=>{
+test('ARC boost and DEX paid require exit evidence and block confirmed honeypots',async()=>{
  for(const feed of ['ARC_BOOST','ARC_DEX_PAID']){
   let calls=0;
   for(const reason of ['honeypot','cannot-sell flag']){
@@ -27,7 +27,7 @@ test('ARC boost and DEX paid require a full exit simulation and block confirmed 
 test('premium ARC boost formatter preserves unchecked warning and removes safety approval',()=>{
  const text=`🚀 <b>BOOST DETECTED · ARC</b>\n<b>ABC</b>\n🔥 Boost <b>10 total (+10)</b>\n<code>0x${'1'.repeat(40)}</code>\n⚠️ <b>${ARC_PROMOTION_WARNING}</b>`;
  const rendered=polishArcTelegramPresentation(text).text;
- assert.match(rendered,/verified simulated exit/);assert.doesNotMatch(rendered,/No honeypot|flag detected/);
+ assert.match(rendered,/verified exit evidence/);assert.doesNotMatch(rendered,/No honeypot|flag detected/);
 });
 test('every ARC positive feed requires an exit; unlocked and unknown LP produce risky alerts',async()=>{
  for(const feed of ['ARC_BOOST','ARC_DEX_PAID','ARC_OPPORTUNITY','ARC_SUPPLY_BURN']){

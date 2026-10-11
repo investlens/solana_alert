@@ -136,3 +136,6 @@ export async function verifyArcMainnet(): Promise<{ chainId: number; blockNumber
     return { chainId, blockNumber };
   });
 }
+
+export const getArcTransaction = (hash: `0x${string}`) => failover('getTransaction', client => client.getTransaction({hash}));
+export const getArcTransactionReceipt = (hash: `0x${string}`) => failover('getTransactionReceipt', client => client.getTransactionReceipt({hash}));
