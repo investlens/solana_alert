@@ -36,7 +36,7 @@ export function deliveryAcceptanceEvidence(user: Recipient | string, startedAt: 
   const delayMs = safetyCritical ? 0 : recipientDelayMs(resolveRecipient(user, now), now);
   return { source: source.slice(0, 160), tier: delayMs === 5_000 ? 'pro' : delayMs === 30_000 ? 'free' : 'undelayed',
     releaseDelayMs: delayMs, startedAt: new Date(startedAt).toISOString(), acceptedAt: new Date(now).toISOString(),
-    elapsedMs: now - startedAt, releaseDeadlineMet: now >= startedAt + delayMs };
+    elapsedMs: now - startedAt, releaseLatenessMs: Math.max(0, now - startedAt - delayMs), releaseDeadlineMet: now >= startedAt + delayMs };
 }
 // Runtime logs only: no recipient IDs, no additional database rows, no replay.
 export function recordDeliveryAccepted(user: Recipient | string, startedAt: number, source: string, safetyCritical = false): void {
@@ -44,4 +44,17 @@ export function recordDeliveryAccepted(user: Recipient | string, startedAt: numb
 }
 export function isUndelayedRiskEvent(type: string): boolean {
   return new Set(['EXIT', 'COOLING', 'WEAKENING', 'DANGER', 'DEV_TRANSFER', 'DEV_SELL', 'LIQUIDITY_RISK', 'WALLET_CLUSTER']).has(type.toUpperCase());
+}
+
+// Separate tier lanes prevent a sleeping free recipient from occupying a Pro/admin slot.
+// Four workers per lane bound network concurrency without changing release times.
+export async function forEachDeliveryRecipient<T extends Recipient | string>(users:T[], task:(user:T,index:number)=>Promise<void>):Promise<void> {
+ const lanes=new Map<number,Array<{user:T,index:number}>>();
+ users.forEach((user,index)=>{const delay=recipientDelayMs(resolveRecipient(user,Date.now()));const lane=lanes.get(delay)??[];lane.push({user,index});lanes.set(delay,lane);});
+ await Promise.all([...lanes.values()].map(async lane=>{
+  let next=0;
+  await Promise.all(Array.from({length:Math.min(4,lane.length)},async()=>{
+   while(next<lane.length){const item=lane[next++];await task(item.user,item.index);}
+  }));
+ }));
 }
