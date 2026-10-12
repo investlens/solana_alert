@@ -27,7 +27,7 @@ import { assessArcForAlert } from '../src/chains/arc/alertGate.js';
 import { sendTelegramWithMessageId } from '../src/services/telegram.js';
 import { getDeliverableUsers } from '../src/core/delivery.js';
 import { supabase } from '../src/services/supabase.js';
-import { decodeEventLog, formatUnits, parseAbiItem } from 'viem';
+import { decodeEventLog, formatUnits, parseAbiItem, parseAbi } from 'viem';
 
 const POLL_MS = Math.max(2_000, Number(process.env.ARC_LIVE_POLL_INTERVAL_MS ?? 5_000));
 const ENABLED = String(process.env.ARC_LIVE_ENABLED ?? 'false').toLowerCase() === 'true';
@@ -646,9 +646,24 @@ async function main() {
   console.log('[ArcLive] starting', { enabled: ENABLED, pollIntervalMs: POLL_MS, mode: 'LIVE_ALERTS', hasAlertRecipient: Boolean(ALERT_CHAT_ID) });
   const verified = await verifyArcMainnet();
   console.log('[ArcLive] mainnet verified', { chainId: verified.chainId, blockNumber: verified.blockNumber.toString() });
-  if(process.env.ARC_EXIT_VALIDATE_ON_START==='true' && process.env.ARC_EXIT_VALIDATION_TOKEN && process.env.ARC_EXIT_VALIDATION_POOL){
-   const validation=await verifyArcNativeExit(process.env.ARC_EXIT_VALIDATION_TOKEN,process.env.ARC_EXIT_VALIDATION_POOL);
-   console.log('[ArcLive] EXIT_PROVIDER_VALIDATION',{allowed:validation.allowed,reason:validation.reason,maxLossPercent:validation.maxLossPercent});
+  if(process.env.ARC_EXIT_VALIDATE_ON_START==='true'){
+   // Read-only validation chooses a currently liquid pool inside a bounded recent
+   // window. Fixed launch tokens can lose liquidity before a deployment starts.
+   try{
+    const head=await getArcBlockNumber();
+    const candidates=(await discoverArcV4Pools(head>500n?head-500n:0n,head-2n))
+     .filter(p=>p.currency0.toLowerCase()==='0x0000000000000000000000000000000000000000'&&p.hooks.toLowerCase()==='0x0000000000000000000000000000000000000000').slice(-2).reverse();
+    let attempted=0;
+    for(const pool of candidates){
+     const liquidity=await readArcContract({address:'0xF3334192D15450CdD385c8B70e03f9A6bD9E673b',abi:parseAbi(['function getLiquidity(bytes32) view returns(uint128)']),functionName:'getLiquidity',args:[pool.poolId]});
+     if(BigInt(liquidity as bigint)===0n)continue;
+     attempted++;
+     const validation=await verifyArcNativeExit(pool.currency1,pool.poolId,{fee:pool.fee,tickSpacing:pool.tickSpacing,hooks:pool.hooks,quoteAsset:pool.currency0});
+     console.log('[ArcLive] EXIT_PROVIDER_VALIDATION',{allowed:validation.allowed,reason:validation.reason,maxLossPercent:validation.maxLossPercent});
+     if(validation.allowed)break;
+    }
+    if(!attempted)console.log('[ArcLive] EXIT_PROVIDER_VALIDATION',{allowed:false,reason:'No currently active plain native pool in bounded validation window'});
+   }catch{console.warn('[ArcLive] EXIT_PROVIDER_VALIDATION',{allowed:false,reason:'Bounded validation provider read unavailable; no safety bypass'});}
   }
 
   if (!ENABLED) {
