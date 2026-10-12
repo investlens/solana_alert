@@ -49,10 +49,10 @@ void startTelegramPollingEarly().catch((error) => {
   });
 });
 
-if (enabled('PUMPFUN_MOMENTUM_ENABLED', false)) {
+if (!enabled('SOLANA_ALERTS_PAUSED', false) && enabled('PUMPFUN_MOMENTUM_ENABLED', false)) {
   // Single free creation/migration connection; no per-launch database writes.
   startPumpfunMomentumWorker();
-} else if (enabled('PUMPPORTAL_CREATOR_FEED_ENABLED', false)) {
+} else if (!enabled('SOLANA_ALERTS_PAUSED', false) && enabled('PUMPPORTAL_CREATOR_FEED_ENABLED', false)) {
   void startPumpPortalCreatorFeed().catch((error) => {
     console.log('[PumpPortalCreatorFeed] startup error', {
       error: error instanceof Error ? error.message : String(error),
@@ -139,7 +139,7 @@ if (!enabled('ADMIN_TRADING_ENABLED', false)) {
   if (process.env.RUN_SCANNER === 'true') { tasks.push(startScanner()); tasks.push(startTierDispatchLoop()); }
   else console.log('[Recovery] Main scanner disabled.');
   if (process.env.WALLET_WATCH_ENABLED === 'true') tasks.push(startWalletWatch());
-  if (process.env.PUMPFUN_WATCH_ENABLED === 'true') tasks.push(startPumpfunWatch());
+  if (process.env.SOLANA_ALERTS_PAUSED !== 'true' && process.env.PUMPFUN_WATCH_ENABLED === 'true') tasks.push(startPumpfunWatch());
   if (process.env.ROBINHOOD_ONCHAIN_DISCOVERY_ENABLED === 'true') tasks.push(startRobinhoodObserver());
   if (process.env.ROBINHOOD_OUTCOME_TRACKER_ENABLED === 'true' && process.env.ALPHA_COMPACT_OUTCOMES_ENABLED === 'false') tasks.push(startRobinhoodOutcomeTracker());
   if (process.env.EXISTING_TOKEN_SCANNER_ENABLED === 'true') tasks.push(startExistingTokenOpportunityScanner());
