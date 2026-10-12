@@ -15,6 +15,7 @@ const TOKEN_PROFILES_URL =
 
 const TOKEN_BOOSTS_URL =
   'https://api.dexscreener.com/token-boosts/latest/v1';
+const TOKEN_BOOSTS_TOP_URL='https://api.dexscreener.com/token-boosts/top/v1';
 
 type DexTokenProfile = {
   chainId?: string;
@@ -61,7 +62,7 @@ async function fetchJson<T>(
   url: string,
 ): Promise<T> {
   return (await governedDexScreenerJson<T>({ url, caller: 'robinhood_discovery', priority: url === TOKEN_BOOSTS_URL ? 'HIGH' : 'BACKGROUND',
-    endpoint: url === TOKEN_PROFILES_URL ? 'PROFILES' : 'BOOSTS', cacheTtlMs: url === TOKEN_PROFILES_URL ? 60_000 : 15_000 })).value;
+    endpoint: url === TOKEN_PROFILES_URL ? 'PROFILES' : 'BOOSTS', cacheTtlMs: url === TOKEN_PROFILES_URL || url === TOKEN_BOOSTS_TOP_URL ? 60_000 : 15_000 })).value;
 }
 
 function calculateBuyRatio(
@@ -176,6 +177,7 @@ export type RobinhoodBoostEntry = {
   tokenAddress: string;
   amount: number;
   totalAmount: number;
+  source?:'LATEST'|'TOP';
 };
 
 export async function fetchRobinhoodBoosts():
@@ -190,7 +192,7 @@ Promise<RobinhoodBoostEntry[]> {
       throw new Error('Malformed DexScreener boost feed');
     }
 
-    return boosts
+    const latest=boosts
       .filter(
         (boost) =>
           boost.chainId ===
@@ -217,6 +219,21 @@ Promise<RobinhoodBoostEntry[]> {
             ),
         }),
       );
+    // One cached TOP read/minute catches increments after tokens leave LATEST.
+    // First appearances in TOP are baselines, not proof of a new purchase.
+    const merged=new Map<string,RobinhoodBoostEntry>(latest.filter(row=>/^0x[a-f0-9]{40}$/i.test(row.tokenAddress)&&Number.isFinite(row.totalAmount)&&row.totalAmount>0&&Number.isFinite(row.amount)&&row.amount>=0&&row.amount<=row.totalAmount).map(row=>[row.tokenAddress.toLowerCase(),{...row,source:'LATEST' as const}] as const));
+    try{
+      const top=await fetchJson<DexBoostToken[]>(TOKEN_BOOSTS_TOP_URL);
+      if(!Array.isArray(top))throw Error('Malformed TOP boost feed');
+      for(const item of top.slice(0,200)){
+        if(item.chainId!==ROBINHOOD_CHAIN_ID||!/^0x[a-f0-9]{40}$/i.test(item.tokenAddress??''))continue;
+        const row:RobinhoodBoostEntry={tokenAddress:item.tokenAddress!,amount:Number(item.amount),totalAmount:Number(item.totalAmount),source:'TOP'};
+        if(!Number.isFinite(row.amount)||row.amount<0||!Number.isFinite(row.totalAmount)||row.totalAmount<=0||row.amount>row.totalAmount)continue;
+        const prior=merged.get(row.tokenAddress.toLowerCase());
+        if(!prior||row.totalAmount>prior.totalAmount)merged.set(row.tokenAddress.toLowerCase(),row);
+      }
+    }catch{console.warn('[RobinhoodDiscovery] TOP boost coverage unavailable; LATEST remains active');}
+    return [...merged.values()];
   } catch (error) {
     console.error(
       '[RobinhoodDiscovery] Boost feed failed:',

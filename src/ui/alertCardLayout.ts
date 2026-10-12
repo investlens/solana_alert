@@ -1,4 +1,4 @@
-import { RESEARCH_DISCLOSURE, withResearchDisclosure } from './researchDisclosure.js';
+import { RESEARCH_DISCLOSURE, TRADE_SETUP_DISCLOSURE, withResearchDisclosure } from './researchDisclosure.js';
 import { lpLockNote } from './lpLockNote.js';
 export type CardButton = { text: string; url?: string; callback_data?: string };
 
@@ -18,7 +18,7 @@ export function cleanAlertCard(text: string): string {
     if (!/^(?:LOCKED|BURNED|UNLOCKED|UNKNOWN|Unverified|Unavailable|Not independently checked|Bonding curve)$/i.test(status)) return line;
     return lpLockNote(status, /^Bonding curve$/i.test(status));
   }).join('\n');
-  clean = clean.replace(RESEARCH_DISCLOSURE, '').trim();
+  clean = clean.replace(RESEARCH_DISCLOSURE, '').replace(TRADE_SETUP_DISCLOSURE,'').trim();
   // An empty STATS heading must not capture the following RISK section.
   clean = clean.replace(/<b>STATS<\/b>\s*(?=<b>(?:RISK(?: COVERAGE)?|SAFETY|SECURITY|SOCIALS|SOCIAL LINKS|OWNERSHIP|CONTRACT)<\/b>)/g, '');
   // Merge the supplemental stats into one readable section; never truncate for a banner.

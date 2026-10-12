@@ -51,13 +51,15 @@ export function roundTripLoss(input:bigint,output:bigint):number {
  // Basis points calculated with integers; avoid overflowing token quantities.
  return Math.max(0,Number((input-output)*10000n/input)/100);
 }
-export function customPoolRisk(security:Record<string,unknown>|undefined):string|null {
+export function customPoolRisk(security:Record<string,unknown>|undefined,pairId?:string):string|null {
  if(String(security?.is_honeypot)==='1'||String(security?.cannot_sell_all)==='1')return 'Confirmed honeypot or sell restriction';
  for(const field of ['buy_tax','sell_tax','transfer_tax']){
   const v=security?.[field];if(v!=null&&v!==''&&Number.isFinite(Number(v))&&Number(v)>0.10)return 'Excessive reported token fee';
  }
  const pools=Array.isArray(security?.dex)?security!.dex as Record<string,unknown>[]:[];
- if(pools.some(p=>Number(p.liquidity)>=1&&p.pool_fee!=null&&p.pool_fee!==''&&Number(p.pool_fee)>0.10))return 'Conflicting pool routes with excessive fees';
+ // Pool fees belong to a venue. A dust pool cannot condemn an independently
+ // checked main pool; token-level restrictions above still block every route.
+ if(pairId && pools.some(p=>String(p.pair).toLowerCase()===pairId.toLowerCase()&&p.pool_fee!=null&&p.pool_fee!==''&&Number(p.pool_fee)>0.10))return 'Selected pool has excessive fees';
  return null;
 }
 export function observedLpStatus(security:Record<string,unknown>|undefined):'LOCKED'|'BURNED'|'UNLOCKED'|'UNKNOWN'{
@@ -74,7 +76,7 @@ export function createCustomExitVerifier(deps:Dependencies){
  return async(request:ExitRequest):Promise<ExitVerification>=>{
   const key=`${request.chain}:${request.token.toLowerCase()}:${request.pairId?.toLowerCase()??''}`;
   const blocked=(reason:string):ExitVerification=>({allowed:false,reason,observedAt:deps.now()});
-  const risk=customPoolRisk(request.security);if(risk)return blocked(risk);
+  const risk=customPoolRisk(request.security,request.pairId);if(risk)return blocked(risk);
   if(!/^0x[a-f0-9]{40}$/i.test(request.token))return blocked('Invalid token identity');
   const prior=cache.get(key);if(prior&&prior.until>deps.now())return prior.value;
   const pending=inflight.get(key);if(pending)return pending;
@@ -84,7 +86,7 @@ export function createCustomExitVerifier(deps:Dependencies){
    const signal=AbortSignal.timeout(8_000),config=EXIT_CHAIN_CONFIG[request.chain];
    try{
     const security=request.security??await deps.security?.(request,signal);
-    const evidenceRisk=customPoolRisk(security);if(evidenceRisk)return blocked(evidenceRisk);
+    const evidenceRisk=customPoolRisk(security,request.pairId);if(evidenceRisk)return blocked(evidenceRisk);
     if(Number(BigInt(await deps.rpc(request.chain,'eth_chainId',[],signal)))!==config.id)throw Error('RPC chain identity mismatch');
     // ARC's public RPC currently lacks eth_simulateV1. Probe before enrichment,
     // and fail closed rather than presenting provider flags as execution proof.
@@ -96,6 +98,7 @@ export function createCustomExitVerifier(deps:Dependencies){
     const pool=request.pairId?pairs.find(p=>String(p.pairAddress).toLowerCase()===request.pairId!.toLowerCase()):pairs.sort((a,b)=>Number(b.liquidity?.usd??0)-Number(a.liquidity?.usd??0))[0];
     if(!pool||pool.dexId!=='uniswap'||String(pool.quoteToken?.address??'').toLowerCase()!==config.quote.toLowerCase())throw Error('Exact supported DEX pool unavailable');
     const pairId=String(pool.pairAddress);
+    const selectedRisk=customPoolRisk(security,pairId);if(selectedRisk)return blocked(selectedRisk);
     const known=Array.isArray(security?.dex)?(security!.dex as any[]).find(d=>String(d.pair).toLowerCase()===pairId.toLowerCase()):null;
     const fee=known?.pool_fee!=null&&known.pool_fee!==''?Math.round(Number(known.pool_fee)*1e6):null;
     const fees=fee==null?[100,500,3000,10000]:[fee];

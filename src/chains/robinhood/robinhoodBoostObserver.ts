@@ -404,10 +404,10 @@ async function initialBoostEnrichment(tokenAddress: string): Promise<{ market: B
   ]);
 }
 
-async function processBoost(boost: { tokenAddress: string; amount: number; totalAmount: number }): Promise<boolean> {
+async function processBoost(boost: { tokenAddress: string; amount: number; totalAmount: number; source?:'LATEST'|'TOP' }): Promise<boolean> {
   const tokenKey = normalize(boost.tokenAddress);
   if (!boostVerificationDue(verificationRetries, tokenKey, boost.totalAmount, Date.now())) return false;
-  const canonical = observeBoostCanonicalEvent(boostTotals, tokenKey, boost.totalAmount, boost.amount);
+  const canonical = observeBoostCanonicalEvent(boostTotals, tokenKey, boost.totalAmount, boost.amount,boost.source);
   if (!canonical) return false;
 
   const origin = await getVerifiedRobinhoodLaunchpad(boost.tokenAddress);

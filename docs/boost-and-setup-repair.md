@@ -1,0 +1,11 @@
+# Boost gate and concise setup cards
+
+On 12 October 2026, the main worker was receiving two boost entries but issued no boost alerts. Security logs showed repeated `Conflicting pool routes with excessive fees` blocks. A bounded GoPlus read for `0xe5cd5c76680bad7599873cb3047815cd4ed0fa8d` reported a primary pool with roughly $11.3k liquidity and zero pool fee, plus dust pools with $1–4 liquidity and 50–82% fees. The old token-wide pool-fee check blocked the primary route before selecting it. Another observed token genuinely had only high-fee pools; this change does not approve it.
+
+Pool fees now block only the exact selected venue. Honeypot flags, cannot-sell flags and reported excessive token taxes remain token-wide hard blocks. The selected pool still requires the existing three-size same-wallet round-trip simulation, exact V4 key, and loss ceiling. Removing the dust-pool false positive is not proof that a token will pass those checks. Unlocked LP can already pass only with independently verified exit evidence and a prominent withdrawal-risk warning; unknown protection remains explicitly unknown.
+
+Robinhood boost discovery adds a TOP-feed read cached for 60 seconds to the existing LATEST feed. Unknown first appearances from TOP are silently baselined to avoid historical promotion spam; genuine cumulative increases remain alertable. LATEST failures propagate rather than establish a false empty baseline; TOP failure does not stop LATEST. This improves coverage but public latest/top feeds do not prove exhaustive capture of all purchases. Normal/reversal dedupe and recipient timing are unchanged.
+
+Trade Setup cards now consolidate price/valuation, age/recovery, 5-minute activity and ownership, retain the exact invalidation reference and explicit entry/exit/linked-wallet/social unknowns, keep material LP warnings and action buttons, and use one evidence timestamp and one short research footer. Other alert families retain their existing disclosure. The screenshot-style regression fixture is below 1,200 displayed characters without truncating a risk warning or changing the trigger.
+
+No AI worker is deployed as part of this repair. No database schema change, new polling service, trade execution or synthetic public alert is introduced.
