@@ -1,3 +1,4 @@
+import {cacheArcPoolMetadata} from './observedPoolCache.js';
 import {decodeEventLog,parseAbiItem,encodeAbiParameters,parseAbiParameters,keccak256,type Address,type Hex} from 'viem';
 import {resolvePlainV4Key} from '../../services/customTokenExitVerification.js';
 import {governedDexScreenerJson} from '../../services/dexscreenerRequestGovernor.js';
@@ -21,6 +22,8 @@ export function resolveArcObservedPoolKey(token:string,quote:string,poolId:strin
   const hash=keccak256(encodeAbiParameters(parseAbiParameters('address,address,uint24,int24,address'),[currency0,currency1,key.fee,key.tickSpacing,key.hooks]));
   return same(hash,poolId)?key:null;
  }
+ const standardArc=resolveArcObservedPoolKey(token,quote,poolId,{fee:2500,tickSpacing:50,hooks:ARC_NATIVE_USDC,quoteAsset:quote});
+ if(standardArc)return standardArc;
  return [0,100,500,3000,10000].map(fee=>resolvePlainV4Key(token,quote,poolId,fee)).find(Boolean)??null;
 }
 export function assessObservedSales(sales:ObservedSale[],now:number,creator?:string|null):ArcObservedSelling {
@@ -83,6 +86,7 @@ export function createArcObservedVerifier(deps:Dependencies){
     const pool=pairs[0];if(!pool||Number(pool.txns?.m5?.sells??0)<4||Number(pool.liquidity?.usd??0)<2500)return blocked('No eligible liquid ARC pool with recent sells');
     const poolId=String(pool.pairAddress);const poolKey=resolveArcObservedPoolKey(token,pool.quoteToken.address,poolId,metadata);
     if(!poolKey)return blocked('Unknown hook or unsupported ARC pool identity');
+    if(metadata)await cacheArcPoolMetadata(poolId,token,metadata).catch(()=>undefined);
     const head=await deps.head();if(head<2n)return blocked('ARC head unavailable');
     const toBlock=head-2n,fromBlock=toBlock>600n?toBlock-600n:0n;
     const logs=await deps.logs({address:MANAGER,event:ARC_SWAP,args:{id:poolId},fromBlock,toBlock});
@@ -112,4 +116,4 @@ export function createArcObservedVerifier(deps:Dependencies){
   }).finally(()=>{active--;pending.delete(key);});pending.set(key,work);return work;
  };
 }
-export const verifyArcObservedSelling=createArcObservedVerifier({now:Date.now,pairs:async token=>(await governedDexScreenerJson<any[]>({url:`https://api.dexscreener.com/token-pairs/v1/arc/${token}`,caller:'arc_observed_selling',endpoint:'ARC_TOKEN_PAIRS',priority:'NORMAL',cacheKey:`arc-alert-pairs:${token.toLowerCase()}`,cacheTtlMs:30_000,queueWaitTimeoutMs:750,httpTimeoutMs:2000})).value,head:getArcBlockNumber,logs:getArcLogs,transaction:getArcTransaction,receipt:getArcTransactionReceipt,block:number=>getArcBlock({blockNumber:number}),code:async address=>(await getArcBytecode(address))??'0x'});
+export const verifyArcObservedSelling=createArcObservedVerifier({now:Date.now,pairs:async token=>(await governedDexScreenerJson<any[]>({url:`https://api.dexscreener.com/token-pairs/v1/arc/${token}`,caller:'arc_observed_selling',endpoint:'ARC_TOKEN_PAIRS',priority:'NORMAL',cacheKey:`arc-alert-pairs:${token.toLowerCase()}`,cacheTtlMs:30_000,queueWaitTimeoutMs:750,httpTimeoutMs:2000})).value,head:getArcBlockNumber,logs:getArcLogs,transaction:getArcTransaction,receipt:getArcTransactionReceipt,block:number=>getArcBlock({blockNumber:number}),code:async address=>await getArcBytecode(address)});
