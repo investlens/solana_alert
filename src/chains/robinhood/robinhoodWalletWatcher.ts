@@ -718,6 +718,7 @@ export async function pollRobinhoodTrackedWalletsExplorer(
   const events: WalletWatchEvent[] = [];
   const checkpointBlocks = new Map<string, bigint>();
   const scannedWallets: Address[] = [];
+  let failedWalletPolls = 0;
 
   for (const wallet of wallets) {
     const key = wallet.toLowerCase();
@@ -749,6 +750,7 @@ export async function pollRobinhoodTrackedWalletsExplorer(
         });
       }
     } catch (error) {
+      failedWalletPolls++;
       console.warn('[RobinhoodWalletExplorer] wallet poll failed', {
         wallet,
         reason: error instanceof Error ? error.message : String(error),
@@ -756,6 +758,8 @@ export async function pollRobinhoodTrackedWalletsExplorer(
     }
   }
 
+  if (failedWalletPolls === wallets.length) throw new Error('Wallet explorer unavailable for every active wallet');
+  console.log('[RobinhoodWalletExplorer] CYCLE', {wallets:wallets.length, scanned:scannedWallets.length, failed:failedWalletPolls, events:events.length});
   return { events, checkpointBlocks, wallets: scannedWallets };
 }
 
@@ -849,6 +853,7 @@ async function pollRobinhoodTrackedWalletsLiveBlocks(
 
   const delivery = await processChunk(events);
   if (delivery.failedWallets.size === 0) {
+    await commitRobinhoodWalletCheckpoints(wallets, toBlock);
     liveBlockCursor = toBlock;
   } else {
     console.warn('[RobinhoodWalletLiveBlocks] delivery failed; holding live cursor', {
@@ -862,6 +867,7 @@ async function pollRobinhoodTrackedWalletsLiveBlocks(
     for (const wallet of wallets) checkpointBlocks.set(wallet.toLowerCase(), toBlock);
   }
 
+  console.log('[RobinhoodWalletLiveBlocks] CYCLE', {wallets:wallets.length, events:events.length, lagBlocks:Number(head-toBlock), degraded:true});
   if (events.length > 0) {
     console.log('[RobinhoodWalletLiveBlocks] activity processed', {
       events: events.length,
@@ -873,16 +879,59 @@ async function pollRobinhoodTrackedWalletsLiveBlocks(
 }
 
 
+let explorerWalletCooldownUntil=0;
 export async function pollRobinhoodTrackedWalletsLean(
   processChunk: RobinhoodWalletChunkProcessor,
 ) {
   try {
+    if(Date.now()<explorerWalletCooldownUntil)return await pollRobinhoodTrackedWalletsIndexedRpc(processChunk);
     explorerJson.assertAvailable();
     return await pollRobinhoodTrackedWalletsExplorer(processChunk);
   } catch (error) {
-    console.warn('[RobinhoodWalletWatcher] explorer unavailable; using live block fallback', {
+    explorerWalletCooldownUntil=Date.now()+60000;
+    console.warn('[RobinhoodWalletWatcher] explorer unavailable; using indexed RPC fallback', {
       reason: error instanceof Error ? error.message : String(error),
     });
-    return pollRobinhoodTrackedWalletsLiveBlocks(processChunk);
+    try { return await pollRobinhoodTrackedWalletsIndexedRpc(processChunk); }
+    catch (rpcError) {
+      console.warn('[RobinhoodWalletWatcher] indexed RPC unavailable; degraded block fallback', {reason:rpcError instanceof Error?rpcError.message:String(rpcError)});
+      return pollRobinhoodTrackedWalletsLiveBlocks(processChunk);
+    }
   }
+}
+
+// One shared address-filtered range, not one block request per chain block.
+// Retain per-wallet checkpoints on send failures; never rebase a failed delivery.
+const indexedRpcCursors=new Map<string,bigint>();
+export function walletIndexedRange(cursor:bigint,head:bigint){
+ return {fromBlock:cursor+1n,toBlock:cursor+1000n<head?cursor+1000n:head};
+}
+async function pollRobinhoodTrackedWalletsIndexedRpc(processChunk:RobinhoodWalletChunkProcessor){
+ const wallets=[...new Map((await getActiveTrackedWalletAddresses('robinhood')).map(value=>getAddress(value)).map(w=>[w.toLowerCase(),w])).values()];
+ const head=await getRobinhoodBlockNumberResilient();
+ const missing=wallets.filter(wallet=>!indexedRpcCursors.has(wallet.toLowerCase()));
+ if(missing.length){
+  const stored=await initializeMissingCursors(missing,head);
+  for(const wallet of missing){
+   const entry=stored.get(wallet.toLowerCase());
+   const recent=entry&&Date.now()-entry.updatedAt.getTime()>=0&&Date.now()-entry.updatedAt.getTime()<5*60000&&entry.block<=head&&head-entry.block<=10000n;
+   const block=recent?entry.block:head;
+   await commitRobinhoodWalletCheckpoints([wallet],block);
+   indexedRpcCursors.set(wallet.toLowerCase(),block);
+  }
+ }
+ const active=new Set(wallets.map(w=>w.toLowerCase()));
+ for(const key of indexedRpcCursors.keys())if(!active.has(key))indexedRpcCursors.delete(key);
+ const pending=wallets.filter(w=>indexedRpcCursors.get(w.toLowerCase())!<head);
+ const checkpointBlocks=new Map<string,bigint>();
+ if(!pending.length){console.log('[RobinhoodWalletIndexedRpc] CYCLE',{wallets:wallets.length,events:0,lagBlocks:0});return {events:[],wallets,checkpointBlocks};}
+ const cursor=pending.reduce((min,w)=>indexedRpcCursors.get(w.toLowerCase())!<min?indexedRpcCursors.get(w.toLowerCase())!:min,head);
+ const range=walletIndexedRange(cursor,head);
+ const events=(await scanRobinhoodWalletActivity({wallets:pending,...range})).filter(e=>eventIsAfterWalletCursor(e,indexedRpcCursors));
+ const delivery=await processChunk(events);
+ const advanced=pending.filter(w=>!delivery.failedWallets.has(w.toLowerCase())&&indexedRpcCursors.get(w.toLowerCase())!<range.toBlock);
+ await commitRobinhoodWalletCheckpoints(advanced,range.toBlock);
+ for(const wallet of advanced){indexedRpcCursors.set(wallet.toLowerCase(),range.toBlock);checkpointBlocks.set(wallet.toLowerCase(),range.toBlock);}
+ console.log('[RobinhoodWalletIndexedRpc] CYCLE',{wallets:wallets.length,events:events.length,failedWallets:delivery.failedWallets.size,lagBlocks:Number(head-range.toBlock),throughBlock:range.toBlock.toString()});
+ return {events,wallets,checkpointBlocks};
 }
