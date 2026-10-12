@@ -66,7 +66,7 @@ test('missing full-sell flag may use receipt evidence only after affirmative hon
  }
  const weak=async()=>({...assessObservedSales(sales().slice(0,3),now),poolId:pool});
  assert.equal((await arcDeliverySafety('ARC_OPPORTUNITY',token,check,undefined,weak,pool)).allowed,false);
- for(const evidence of [{is_honeypot:'1',buy_tax:'0',sell_tax:'0'},{is_honeypot:'0',cannot_sell_all:'1',buy_tax:'0',sell_tax:'0'},{is_honeypot:'0',buy_tax:'',sell_tax:'0'},{is_honeypot:'0',buy_tax:'0',sell_tax:'0.5'},{}]){
+ for(const evidence of [{is_honeypot:'1',buy_tax:'0',sell_tax:'0'},{is_honeypot:'0',cannot_sell_all:'1',buy_tax:'0',sell_tax:'0'},{is_honeypot:'0',buy_tax:'0',sell_tax:'0.5'},{}]){
   let calls=0;const result=await arcDeliverySafety('ARC_OPPORTUNITY',token,async()=>arcBoostSafetyFromEvidence(evidence),undefined,async()=>{calls++;return observed();},pool);
   assert.equal(result.allowed,false);assert.equal(calls,0);
  }
@@ -108,4 +108,13 @@ test('observed route cannot waive unknown hooks and formatting preserves evidenc
  const decision=assessArcForAlert(market,{allowed:true,reason:'observed',sellabilityMethod:'OBSERVED_SELLS'});assert.equal(decision.alertable,false);assert.ok(decision.security.reasons.includes('UNVERIFIED_V4_HOOK'));
  const text=`🚀 <b>BOOST DETECTED · ARC</b>\n<b>ABC</b>\n<code>${token}</code>\n⚠️ <b>RISKY ALERT — LIQUIDITY PROTECTION UNVERIFIED</b>\nObserved sells (last 5m): 4 transactions · 4 distinct wallets · $80.00 USDC received\nCreator excluded when known; linked-wallet funding not verified.`;
  const rendered=polishArcTelegramPresentation(text).text;assert.match(rendered,/RISKY ALERT/);assert.match(rendered,/4 distinct wallets/);assert.match(rendered,/linked-wallet funding not verified/);assert.doesNotMatch(rendered,/No honeypot/);
+});
+
+test('blank taxes reach exact receipt screening with explicit uncertainty, never automatic approval',async()=>{
+ const {arcBoostSafetyFromEvidence}=await import('../src/chains/arc/boostSafety.js');
+ const check=async()=>arcBoostSafetyFromEvidence({is_honeypot:'0',buy_tax:'',sell_tax:''});
+ assert.equal((await check()).allowed,false);
+ const result=await arcDeliverySafety('ARC_BOOST',token,check,undefined,async()=>({...assessObservedSales(sales(),now),poolId:pool}),pool);
+ assert.equal(result.allowed,true);assert.match(result.reason,/taxes unverified/);assert.match(result.reason,/do not prove a full exit/);
+ assert.equal((await arcDeliverySafety('ARC_BOOST',token,check,undefined,async()=>assessObservedSales(sales(3),now),pool)).allowed,false);
 });

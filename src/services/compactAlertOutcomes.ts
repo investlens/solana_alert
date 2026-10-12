@@ -19,6 +19,7 @@ const seen = new Map<string, number>();
 const excluded = new Map<string, { chain: string; feed: string; count: number }>();
 let registrations = 0; let minute = 0; let registering = false; let pausedUntil = 0;
 let running = false; let maintainedAt = 0;
+const runnerPeekAt=new Map<string,number>();
 function exclude(args: CompactAlertBaseline) {
   const key = `${args.chain}:${args.feed}`;
   const old = excluded.get(key);
@@ -117,6 +118,20 @@ export async function runCompactOutcomeCycle(): Promise<void> {
       if(['CHECKPOINT','WINNER','FAILED','NEUTRAL','INCOMPLETE'].includes(result.data))void processCompactRunner(row,sample).catch(()=>console.warn('[RunnerCard] milestone delivery unavailable'));
       console.log('[CompactOutcomes] CHECKPOINT',{chain:row.chain,token:row.token,slot:row.checkpoint,result:result.data});
     }
+    // One rotating active-token peek per existing minute timer. No new worker,
+    // raw history or outcome-row writes; fixed checkpoint accounting stays intact.
+    const active = await supabase.from('alpha_compact_tracking')
+      .select('chain,token,feed,pair_id,price_unit,baseline_price,baseline_liquidity,started_at,checkpoint,retried,lease')
+      .is('finalized_at',null).eq('price_unit','USD').gte('started_at',new Date(Date.now()-365*60000).toISOString())
+      .order('started_at',{ascending:true}).limit(20).abortSignal(AbortSignal.timeout(2000));
+    if(active.error)throw active.error;
+    const measured=new Set(((data??[]) as CompactTrackingRow[]).map(r=>`${r.chain}:${r.token}:${r.started_at}`));
+    const eligible=((active.data??[]) as CompactTrackingRow[]).filter(r=>!measured.has(`${r.chain}:${r.token}:${r.started_at}`));
+    eligible.sort((a,b)=>(runnerPeekAt.get(`${a.chain}:${a.token}:${a.started_at}`)??0)-(runnerPeekAt.get(`${b.chain}:${b.token}:${b.started_at}`)??0));
+    const peek=eligible[0];
+    if(peek){const key=`${peek.chain}:${peek.token}:${peek.started_at}`;runnerPeekAt.delete(key);runnerPeekAt.set(key,Date.now());while(runnerPeekAt.size>100)runnerPeekAt.delete(runnerPeekAt.keys().next().value!);
+      const sample=await measure(peek);void processCompactRunner(peek,sample).catch(()=>console.warn('[RunnerCard] active peek delivery unavailable'));
+      console.log('[RunnerCard] ACTIVE_PEEK',{chain:peek.chain,status:sample.status,active:active.data?.length??0,maxPerMinute:1});}
     console.log('[CompactOutcomes] CYCLE',{claimed:data?.length??0,maxActive:20,maxPerMinute:2});
   } catch { pausedUntil=Date.now()+60000; console.warn('[CompactOutcomes] cycle unavailable; paused for 60s'); }
   finally { running=false; }
