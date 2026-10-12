@@ -1,3 +1,6 @@
+import {verifyArcNativeExit} from '../src/chains/arc/nativeExitSimulation.js';
+import {acquireRecipientClaim,telegramExplicitRejection,retryTelegramRejection} from '../src/services/recipientDeliveryClaim.js';
+import {loadPendingArcBoosts,savePendingArcBoosts,restorePendingArcBoosts,type PendingArcBoost} from '../src/chains/arc/pendingBoosts.js';
 import {loadArcSecurity} from '../src/chains/arc/securityProvider.js';
 import { recordFeedDelivery } from '../src/services/feedDeliveryHealth.js';
 import { recordRejectedCandidate, runRejectedCandidateReview } from '../src/services/rejectedCandidateReview.js';
@@ -10,7 +13,7 @@ import { governedDexScreenerJson } from '../src/services/dexscreenerRequestGover
 import { withOwnershipDisclosure } from '../src/ui/ownershipDisclosure.js';
 import { enabledLiveRecipients, type LiveFeedKey } from '../src/services/liveAlertPreferences.js';
 import { arcMarketNumber, arcMarketRetryAt } from '../src/chains/arc/market.js';
-import { waitForRecipientDelivery, recordDeliveryAccepted } from '../src/services/recipientDeliveryTiming.js';
+import { waitForRecipientDelivery, recordDeliveryAccepted, forEachDeliveryRecipient } from '../src/services/recipientDeliveryTiming.js';
 import { recordCompactAlert } from '../src/services/compactAlertOutcomes.js';
 import { arcBoostSafetyFromEvidence, processArcBoostObservation } from '../src/chains/arc/boostSafety.js';
 import {arcDeliverySafety,isArcPromotionFeed,ARC_PROMOTION_WARNING} from '../src/chains/arc/promotionPolicy.js';
@@ -238,7 +241,7 @@ async function getArcRecipients(): Promise<string[]> {
   return [...recipientCache];
 }
 
-async function broadcastArcAlert(text: string, buttons: any[][], outcomeToken?: string, feed:LiveFeedKey = 'ARC_OPPORTUNITY', expectedPool?:string, poolMetadata?:Parameters<typeof arcDeliverySafety>[6]): Promise<{delivered:number;failed:number;adminMessageId:number|null}> {
+async function broadcastArcAlert(text: string, buttons: any[][], outcomeToken?: string, feed:LiveFeedKey = 'ARC_OPPORTUNITY', expectedPool?:string, poolMetadata?:Parameters<typeof arcDeliverySafety>[6], deliveryIdentity?:string): Promise<{delivered:number;failed:number;adminMessageId:number|null}> {
   // Boost/payment are event-only; normal opportunity and burn retain their gate.
   if (!outcomeToken) throw new Error('ARC alert lacks token identity for sellability check');
   const sellSafety = await arcDeliverySafety(feed,outcomeToken,checkArcBoostSecurity,undefined,undefined,expectedPool,poolMetadata);
@@ -262,12 +265,19 @@ async function broadcastArcAlert(text: string, buttons: any[][], outcomeToken?: 
   const recipients = await enabledLiveRecipients(await getArcRecipients(), feed);
   if (!recipients.length) return {delivered:0,failed:0,adminMessageId:null};
   const deliveryStartedAt = Date.now();
-  const results = await Promise.allSettled(recipients.map(async chatId => {
-    await waitForRecipientDelivery(chatId, deliveryStartedAt);
-    const accepted = await sendTelegramWithMessageId(chatId, text, buttons);
-    recordDeliveryAccepted(chatId, deliveryStartedAt, `arc:${outcomeToken ?? 'discovery'}`);
-    return accepted;
-  }));
+  const results:PromiseSettledResult<number|null>[] = new Array(recipients.length);
+  await forEachDeliveryRecipient(recipients,async(chatId,index)=>{
+    let held:Awaited<ReturnType<typeof acquireRecipientClaim>>|undefined;let started=false;
+    try{
+      await waitForRecipientDelivery(chatId, deliveryStartedAt);
+      if(deliveryIdentity){held=await acquireRecipientClaim(deliveryIdentity,chatId);if(held.state==='DELIVERED'){results[index]={status:'fulfilled',value:null};return;}if(held.state!=='CLAIMED')throw Error('Recipient send unconfirmed; duplicate withheld');}
+      started=true;
+      const accepted=await retryTelegramRejection(()=>sendTelegramWithMessageId(chatId,text,buttons));
+      if(held?.state==='CLAIMED')await held.finish(accepted);
+      recordDeliveryAccepted(chatId,deliveryStartedAt,`arc:${outcomeToken??'discovery'}`);
+      results[index]={status:'fulfilled',value:accepted};
+    }catch(error){if(held?.state==='CLAIMED'&&(!started||telegramExplicitRejection(error)))await held.release().catch(()=>undefined);results[index]={status:'rejected',reason:error};}
+  });
   let deliveredCount = 0;
   let failed = 0;
   let adminMessageId: number | null = null;
@@ -569,17 +579,29 @@ async function deliverArcBoost(boost: {tokenAddress:string;amount:number;totalAm
     [ ...(website ? [{text:'🌐 Project',url:website}] : []), ...(twitter ? [{text:'𝕏 X',url:twitter}] : []), ...(telegram ? [{text:'✈️ TG',url:telegram}] : []) ],
   ].filter(row => row.length > 0);
   try {
-    const delivery = await broadcastArcAlert(text, buttons, boost.tokenAddress, 'ARC_BOOST');
-    arcBoostDelivered.add(identity);
+    const delivery = await broadcastArcAlert(text, buttons, boost.tokenAddress, 'ARC_BOOST',undefined,undefined,`arc:boost:${identity}`);
+    if(delivery.failed===0)arcBoostDelivered.add(identity);
     await persistArcBoostDelivery(boost).catch(error => console.warn('[ArcBoost] PERSIST_FAILED', { token:key, totalBoost:boost.totalAmount, reason:error instanceof Error ? error.message : String(error) }));
     console.log('[ArcBoost] ALERT_SENT', { token:key, totalBoost:boost.totalAmount, eventType, messageId:delivery.adminMessageId, delivered:delivery.delivered, failed:delivery.failed });
-    return true;
+    return delivery.failed===0;
   } catch (error) {
     console.error('[ArcBoost] ALERT_PROCESSING_FAILED', { token:key, totalBoost:boost.totalAmount, eventType, error });
     return false;
   }
 }
 
+const pendingArcBoosts=new Map<string,PendingArcBoost>();
+async function processRecoverableArcBoost(boost:{tokenAddress:string;amount:number;totalAmount:number}){
+ const key=boost.tokenAddress.toLowerCase(),previous=arcBoostTotals.get(key)??0;
+ if(boost.totalAmount<=previous)return;
+ const saved=pendingArcBoosts.get(key);
+ if(!saved||boost.totalAmount>saved.totalAmount){
+  pendingArcBoosts.set(key,{...boost,previous,at:Date.now()});
+  await savePendingArcBoosts([...pendingArcBoosts.values()]);
+ }
+ await processArcBoostObservation(arcBoostTotals,boost,type=>deliverArcBoost(boost,type));
+ if((arcBoostTotals.get(key)??0)>=boost.totalAmount){pendingArcBoosts.delete(key);await savePendingArcBoosts([...pendingArcBoosts.values()]);}
+}
 async function processArcBoosts(): Promise<void> {
   if (Date.now() - lastArcBoostPollAt < ARC_BOOST_POLL_MS) return;
   lastArcBoostPollAt = Date.now();
@@ -590,23 +612,31 @@ async function processArcBoosts(): Promise<void> {
     const restored=await readArcBoostCheckpoint();
     for(const [token,total] of restored)arcBoostTotals.set(token,total);
     for(const boost of boosts)if(!arcBoostTotals.has(boost.tokenAddress.toLowerCase()))arcBoostTotals.set(boost.tokenAddress.toLowerCase(),boost.totalAmount);
+    for(const pending of await loadPendingArcBoosts()){
+      const key=pending.tokenAddress.toLowerCase();pendingArcBoosts.set(key,pending);
+      if((arcBoostTotals.get(key)??0)>=pending.totalAmount)arcBoostTotals.set(key,pending.previous);
+    }
     arcBoostBaselineReady=true;
     console.log('[ArcBoost] BASELINE_READY',{tokens:boosts.length,restored:restored.size,recoveryReplay:false});
     // Unknown startup totals remain baseline. A recent saved lower observation
     // can establish a genuine increase during a short deployment gap.
   }
   for (const boost of boosts) {
-    await processArcBoostObservation(arcBoostTotals, boost, eventType => deliverArcBoost(boost, eventType));
+    await processRecoverableArcBoost(boost);
   }
   if(Date.now()-lastArcTopPollAt>=60000){
     lastArcTopPollAt=Date.now();
     try{const top=await fetchArcBoostFeed('TOP');
       for(const boost of top){arcDexPaid.seed(boost.tokenAddress,true);
         if(!arcBoostTotals.has(boost.tokenAddress.toLowerCase()))arcBoostTotals.set(boost.tokenAddress.toLowerCase(),boost.totalAmount);
-        else await processArcBoostObservation(arcBoostTotals,boost,eventType=>deliverArcBoost(boost,eventType));}
+        else await processRecoverableArcBoost(boost);}
       console.log('[ArcBoost] FEED',{latest:boosts.length,top:top.length,observed:arcBoostTotals.size});
     }catch{console.warn('[ArcBoost] top discovery unavailable; latest scanning retained');}
   }
+  const pending=restorePendingArcBoosts([...pendingArcBoosts.values()]);
+  const present=new Set(boosts.map(b=>b.tokenAddress.toLowerCase()));
+  for(const item of pending)if(!present.has(item.tokenAddress.toLowerCase()))await processRecoverableArcBoost(item);
+  for(const key of pendingArcBoosts.keys())if(!pending.some(p=>p.tokenAddress.toLowerCase()===key))pendingArcBoosts.delete(key);
   while(arcBoostTotals.size>100)arcBoostTotals.delete(arcBoostTotals.keys().next().value!);
   if(Date.now()-lastArcBoostCheckpointAt>=30000){lastArcBoostCheckpointAt=Date.now();await saveArcBoostCheckpoint(arcBoostTotals);}
 
@@ -616,6 +646,10 @@ async function main() {
   console.log('[ArcLive] starting', { enabled: ENABLED, pollIntervalMs: POLL_MS, mode: 'LIVE_ALERTS', hasAlertRecipient: Boolean(ALERT_CHAT_ID) });
   const verified = await verifyArcMainnet();
   console.log('[ArcLive] mainnet verified', { chainId: verified.chainId, blockNumber: verified.blockNumber.toString() });
+  if(process.env.ARC_EXIT_VALIDATE_ON_START==='true' && process.env.ARC_EXIT_VALIDATION_TOKEN && process.env.ARC_EXIT_VALIDATION_POOL){
+   const validation=await verifyArcNativeExit(process.env.ARC_EXIT_VALIDATION_TOKEN,process.env.ARC_EXIT_VALIDATION_POOL);
+   console.log('[ArcLive] EXIT_PROVIDER_VALIDATION',{allowed:validation.allowed,reason:validation.reason,maxLossPercent:validation.maxLossPercent});
+  }
 
   if (!ENABLED) {
     console.log('[ArcLive] observer disabled; set ARC_LIVE_ENABLED=true on an isolated service after validation.');
