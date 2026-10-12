@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {encodeAbiParameters,encodeEventTopics,keccak256,parseAbiParameters,parseAbiItem} from 'viem';
-import {assessObservedSales,saleFromReceipt,createArcObservedVerifier,ARC_SWAP,ARC_USDC} from '../src/chains/arc/observedSelling.js';
+import {assessObservedSales,saleFromReceipt,createArcObservedVerifier,resolveArcObservedPoolKey,ARC_SWAP,ARC_USDC} from '../src/chains/arc/observedSelling.js';
 import {arcDeliverySafety,arcLiquidityDisclosure} from '../src/chains/arc/promotionPolicy.js';
 import {ARC_UNISWAP_V4_POOL_MANAGER as manager} from '../src/chains/arc/uniswap.js';
 const address=(n:number)=>`0x${n.toString(16).padStart(40,'0')}` as `0x${string}`;
@@ -53,6 +53,31 @@ test('collector bounds starts, receipts, plain pool identity and cache',async()=
  assert.equal((await verify(token)).allowed,false);assert.equal(calls,12);await verify(token);assert.equal(calls,12);
  await verify(address(7));assert.equal(calls,12);assert.match((await verify(address(8))).reason,/budget busy/);
  clock+=60001;assert.equal((await verify(token)).allowed,false);assert.equal(calls,24);
+});
+test('missing full-sell flag may use receipt evidence only after affirmative honeypot/tax screening',async()=>{
+ const {arcBoostSafetyFromEvidence}=await import('../src/chains/arc/boostSafety.js');
+ const check=async()=>arcBoostSafetyFromEvidence({is_honeypot:'0',buy_tax:'0',sell_tax:'0'});
+ assert.equal((await check()).allowed,false);assert.equal((await check()).receiptFallbackEligible,true);
+ const observed=async()=>({...assessObservedSales(sales(),now),poolId:pool});
+ for(const feed of ['ARC_OPPORTUNITY','ARC_BOOST','ARC_DEX_PAID']){
+  const result=await arcDeliverySafety(feed,token,check,undefined,observed,pool);
+  assert.equal(result.allowed,true);assert.equal(result.sellabilityVerified,false);assert.equal(result.lpStatus,'UNKNOWN');
+  assert.match(result.reason,/do not prove a full exit/);assert.match(result.reason,/LIQUIDITY PROTECTION UNVERIFIED/);
+ }
+ const weak=async()=>({...assessObservedSales(sales().slice(0,3),now),poolId:pool});
+ assert.equal((await arcDeliverySafety('ARC_OPPORTUNITY',token,check,undefined,weak,pool)).allowed,false);
+ for(const evidence of [{is_honeypot:'1',buy_tax:'0',sell_tax:'0'},{is_honeypot:'0',cannot_sell_all:'1',buy_tax:'0',sell_tax:'0'},{is_honeypot:'0',buy_tax:'',sell_tax:'0'},{is_honeypot:'0',buy_tax:'0',sell_tax:'0.5'},{}]){
+  let calls=0;const result=await arcDeliverySafety('ARC_OPPORTUNITY',token,async()=>arcBoostSafetyFromEvidence(evidence),undefined,async()=>{calls++;return observed();},pool);
+  assert.equal(result.allowed,false);assert.equal(calls,0);
+ }
+});
+test('exact on-chain plain pool metadata supports zero fees and nonstandard ticks without guessing or waiving hooks',()=>{
+ const metadata={fee:0,tickSpacing:20,hooks:address(0),quoteAsset:address(0)};
+ const poolId=keccak256(encodeAbiParameters(parseAbiParameters('address,address,uint24,int24,address'),[address(0),token,0,20,address(0)]));
+ assert.ok(resolveArcObservedPoolKey(token,address(0),poolId,metadata));
+ assert.equal(resolveArcObservedPoolKey(token,address(0),poolId,{...metadata,tickSpacing:60}),null);
+ assert.equal(resolveArcObservedPoolKey(token,address(0),poolId,{...metadata,hooks:address(7)}),null);
+ assert.equal(resolveArcObservedPoolKey(token,address(0),poolId,{...metadata,quoteAsset:ARC_USDC}),null);
 });
 test('native USDC uses only the 18-decimal system emitter, never the mirrored ERC20 credit',()=>{
  const f:any=fixture();f.nativeQuote=true;

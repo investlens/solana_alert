@@ -238,10 +238,10 @@ async function getArcRecipients(): Promise<string[]> {
   return [...recipientCache];
 }
 
-async function broadcastArcAlert(text: string, buttons: any[][], outcomeToken?: string, feed:LiveFeedKey = 'ARC_OPPORTUNITY', expectedPool?:string): Promise<{delivered:number;failed:number;adminMessageId:number|null}> {
+async function broadcastArcAlert(text: string, buttons: any[][], outcomeToken?: string, feed:LiveFeedKey = 'ARC_OPPORTUNITY', expectedPool?:string, poolMetadata?:Parameters<typeof arcDeliverySafety>[6]): Promise<{delivered:number;failed:number;adminMessageId:number|null}> {
   // Boost/payment are event-only; normal opportunity and burn retain their gate.
   if (!outcomeToken) throw new Error('ARC alert lacks token identity for sellability check');
-  const sellSafety = await arcDeliverySafety(feed,outcomeToken,checkArcBoostSecurity,undefined,undefined,expectedPool);
+  const sellSafety = await arcDeliverySafety(feed,outcomeToken,checkArcBoostSecurity,undefined,undefined,expectedPool,poolMetadata);
   const cachedOwnership = isArcPromotionFeed(feed) ? arcSellSafetyCache.get(outcomeToken.toLowerCase()) : null;
   if(cachedOwnership && Date.now()-cachedOwnership.at < 90_000) {
     sellSafety.creator=cachedOwnership.result.creator;
@@ -353,7 +353,7 @@ async function deliverArcAlert(market: Awaited<ReturnType<typeof enrichArcMarket
     ],
   ].filter(row => row.length > 0);
 
-  const delivery = await broadcastArcAlert(text, buttons, market.assetId, 'ARC_OPPORTUNITY', market.poolId);
+  const delivery = await broadcastArcAlert(text, buttons, market.assetId, 'ARC_OPPORTUNITY', market.poolId,market);
   delivered.add(key);
   console.log('[ArcLive] ALERT_SENT', { assetId: market.assetId, symbol: market.symbol, messageId: delivery.adminMessageId, delivered: delivery.delivered, failed: delivery.failed });
 }
@@ -486,7 +486,7 @@ async function assessArcWithSellSafety(market: Parameters<typeof assessArcForAle
   const preliminary = assessArcForAlert(market);
   // Spend no security request on candidates already blocked by market or contract gates.
   const marketBlocked = preliminary.security.reasons.some(reason => reason !== 'SELLABILITY_UNVERIFIED');
-  const final = marketBlocked ? preliminary : assessArcForAlert(market, await arcDeliverySafety('ARC_OPPORTUNITY',market.assetId,checkArcBoostSecurity,undefined,undefined,market.poolId));
+  const final = marketBlocked ? preliminary : assessArcForAlert(market, await arcDeliverySafety('ARC_OPPORTUNITY',market.assetId,checkArcBoostSecurity,undefined,undefined,market.poolId,market));
   if (!final.alertable) recordRejectedCandidate({chain:'arc',token:market.assetId,pair:market.poolId ?? '',price:market.priceUsd ?? 0,reason:final.security.reasons.join(' | ')});
   return final;
 }

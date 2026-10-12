@@ -1,5 +1,5 @@
 import type {ArcObservedSelling} from './observedSelling.js';
-export type ArcBoostSafety = { sellabilityMethod?:'SIMULATED_EXIT'|'OBSERVED_SELLS'; observedSelling?:ArcObservedSelling; lpStatus?:'LOCKED'|'BURNED'|'UNLOCKED'|'UNKNOWN';allowed: boolean; reason: string; sellabilityBlocked?: boolean; sellabilityVerified?: boolean; creator?: string | null; devHoldingPercent?: number | null; top10Percent?: number | null };
+export type ArcBoostSafety = { receiptFallbackEligible?:boolean;sellabilityMethod?:'SIMULATED_EXIT'|'OBSERVED_SELLS'; observedSelling?:ArcObservedSelling; lpStatus?:'LOCKED'|'BURNED'|'UNLOCKED'|'UNKNOWN';allowed: boolean; reason: string; sellabilityBlocked?: boolean; sellabilityVerified?: boolean; creator?: string | null; devHoldingPercent?: number | null; top10Percent?: number | null };
 export function arcBoostSafetyFromEvidence(evidence: Record<string, unknown> | null | undefined): ArcBoostSafety {
   if (!evidence) return { allowed: false, reason: 'honeypot evidence unavailable' };
   for (const field of ['buy_tax','sell_tax','transfer_tax']) {
@@ -24,7 +24,8 @@ export function arcBoostSafetyFromEvidence(evidence: Record<string, unknown> | n
   if (String(evidence.is_honeypot) === '1') return { ...ownership, allowed: false, sellabilityBlocked:true, reason: 'honeypot flag' };
   if (String(evidence.cannot_sell_all) === '1') return { ...ownership, allowed: false, sellabilityBlocked:true, reason: 'cannot-sell flag' };
   if (String(evidence.is_honeypot) !== '0' || String(evidence.cannot_sell_all) !== '0')
-    return { ...ownership, allowed: false, reason: 'honeypot/sell evidence incomplete' };
+    return { ...ownership, allowed: false, receiptFallbackEligible:String(evidence.is_honeypot)==='0' && evidence.cannot_sell_all==null &&
+      ['buy_tax','sell_tax'].every(field=>evidence[field]!=null&&evidence[field]!==''&&Number.isFinite(Number(evidence[field]))&&Number(evidence[field])>=0&&Number(evidence[field])<=0.10), reason: 'honeypot/sell evidence incomplete' };
   return { allowed: true, sellabilityVerified:true, reason: 'no honeypot/cannot-sell flag detected; LP check intentionally skipped for BOOST',
     ...ownership };
 }

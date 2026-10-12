@@ -1,4 +1,4 @@
-import {decodeEventLog,parseAbiItem,type Address,type Hex} from 'viem';
+import {decodeEventLog,parseAbiItem,encodeAbiParameters,parseAbiParameters,keccak256,type Address,type Hex} from 'viem';
 import {resolvePlainV4Key} from '../../services/customTokenExitVerification.js';
 import {governedDexScreenerJson} from '../../services/dexscreenerRequestGovernor.js';
 import {getArcBlock,getArcBlockNumber,getArcLogs,getArcBytecode,getArcTransaction,getArcTransactionReceipt} from './rpc.js';
@@ -12,6 +12,17 @@ const WINDOW_MS=300_000;
 export type ObservedSale={wallet:string;tx:string;at:number;usdc:bigint};
 export type ArcObservedSelling={allowed:boolean;reason:string;poolId?:string;sellers?:number;sells?:number;totalUsdc?:number;largestSellerPercent?:number;oldestAt?:number;observedAt:number};
 const same=(a:unknown,b:unknown)=>typeof a==='string'&&typeof b==='string'&&a.toLowerCase()===b.toLowerCase();
+export type ArcObservedPoolMetadata={fee:number;tickSpacing:number;hooks:string;quoteAsset:string};
+export function resolveArcObservedPoolKey(token:string,quote:string,poolId:string,metadata?:ArcObservedPoolMetadata){
+ if(metadata){
+  if(!same(metadata.quoteAsset,quote)||!same(metadata.hooks,ARC_NATIVE_USDC)||!Number.isInteger(metadata.fee)||metadata.fee<0||metadata.fee>100000||!Number.isInteger(metadata.tickSpacing)||metadata.tickSpacing<=0||metadata.tickSpacing>32767)return null;
+  const [currency0,currency1]=[token.toLowerCase(),quote.toLowerCase()].sort() as Address[];
+  const key={currency0,currency1,fee:metadata.fee,tickSpacing:metadata.tickSpacing,hooks:ARC_NATIVE_USDC as Address};
+  const hash=keccak256(encodeAbiParameters(parseAbiParameters('address,address,uint24,int24,address'),[currency0,currency1,key.fee,key.tickSpacing,key.hooks]));
+  return same(hash,poolId)?key:null;
+ }
+ return [0,100,500,3000,10000].map(fee=>resolvePlainV4Key(token,quote,poolId,fee)).find(Boolean)??null;
+}
 export function assessObservedSales(sales:ObservedSale[],now:number,creator?:string|null):ArcObservedSelling {
  const unique=new Map<string,ObservedSale>();
  for(const sale of sales){
@@ -56,8 +67,8 @@ export function saleFromReceipt(input:{token:string;poolId:string;tokenIs0:boole
 type Dependencies={now:()=>number;pairs:(token:string)=>Promise<any[]>;head:()=>Promise<bigint>;logs:(args:any)=>Promise<any[]>;transaction:(hash:Hex)=>Promise<any>;receipt:(hash:Hex)=>Promise<any>;block:(number:bigint)=>Promise<any>;code:(address:Address)=>Promise<Hex|undefined>};
 export function createArcObservedVerifier(deps:Dependencies){
  const cache=new Map<string,{until:number;result:ArcObservedSelling}>(),pending=new Map<string,Promise<ArcObservedSelling>>();let active=0;const starts:number[]=[];
- return async(token:string,creator?:string|null,expectedPool?:string):Promise<ArcObservedSelling>=>{
-  const now=deps.now(),key=[token,creator??'',expectedPool??''].join(':').toLowerCase();
+ return async(token:string,creator?:string|null,expectedPool?:string,metadata?:ArcObservedPoolMetadata):Promise<ArcObservedSelling>=>{
+  const now=deps.now(),key=[token,creator??'',expectedPool??'',metadata?`${metadata.quoteAsset}:${metadata.fee}:${metadata.tickSpacing}:${metadata.hooks}`:''].join(':').toLowerCase();
   const blocked=(reason:string):ArcObservedSelling=>({allowed:false,reason,observedAt:deps.now()});
   if(!/^0x[a-f0-9]{40}$/i.test(token))return blocked('Invalid ARC token');
   const cached=cache.get(key);if(cached&&cached.until>now)return cached.result;
@@ -70,7 +81,7 @@ export function createArcObservedVerifier(deps:Dependencies){
     const deadline=now+25_000;
     const pairs=(await deps.pairs(token)).filter(p=>p.chainId==='arc'&&p.dexId==='uniswap'&&same(p.baseToken?.address,token)&&(same(p.quoteToken?.address,ARC_USDC)||same(p.quoteToken?.address,ARC_NATIVE_USDC))&&(!expectedPool||same(p.pairAddress,expectedPool))).sort((a,b)=>Number(b.liquidity?.usd??0)-Number(a.liquidity?.usd??0));
     const pool=pairs[0];if(!pool||Number(pool.txns?.m5?.sells??0)<4||Number(pool.liquidity?.usd??0)<2500)return blocked('No eligible liquid ARC pool with recent sells');
-    const poolId=String(pool.pairAddress);const poolKey=[100,500,3000,10000].map(fee=>resolvePlainV4Key(token,pool.quoteToken.address,poolId,fee)).find(Boolean);
+    const poolId=String(pool.pairAddress);const poolKey=resolveArcObservedPoolKey(token,pool.quoteToken.address,poolId,metadata);
     if(!poolKey)return blocked('Unknown hook or unsupported ARC pool identity');
     const head=await deps.head();if(head<2n)return blocked('ARC head unavailable');
     const toBlock=head-2n,fromBlock=toBlock>600n?toBlock-600n:0n;
