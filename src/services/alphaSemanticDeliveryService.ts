@@ -1,3 +1,4 @@
+import {forEachDeliveryRecipient} from './recipientDeliveryTiming.js';
 import { telegramRecipientUnavailable } from '../ui/alphaosPhotoDelivery.js';
 import { getDeliverableUsers, markTelegramUserBlocked, type DeliverableUser } from '../core/delivery.js';
 import { accessProfileForUser, hasCapability } from '../product/capabilities.js';
@@ -187,14 +188,14 @@ export async function deliverAlphaSemanticEvent(args: {
   const renderedCharacters = deliveryMessage.length;
   const renderedBytes = Buffer.byteLength(deliveryMessage, 'utf8');
   let delivered = 0; let failed = 0;
-  for (const user of users) {
-    if (!hasCapability(accessProfileForUser(user), 'opportunities.realtime')) continue;
+  await forEachDeliveryRecipient(users, async user => {
+    if (!hasCapability(accessProfileForUser(user), 'opportunities.realtime')) return;
     try {
       const preferenceKey = preferenceKeyForSemanticEvent(args.event);
-      if (preferenceKey && !await dependencies.strategyEnabled(user.telegram_id, preferenceKey)) continue;
+      if (preferenceKey && !await dependencies.strategyEnabled(user.telegram_id, preferenceKey)) return;
 
       if (ephemeralMode) {
-        if (!claimEphemeralDelivery(args.event, user)) continue;
+        if (!claimEphemeralDelivery(args.event, user)) return;
         try {
           const sendResult = await dependencies.send(user.telegram_id, deliveryMessage, args.buttons);
           delivered += 1;
@@ -219,11 +220,11 @@ export async function deliverAlphaSemanticEvent(args: {
             reason,
           });
         }
-        continue;
+        return;
       }
 
       const leaseToken = createLeaseToken();
-      if (!await dependencies.reserve(args.event, user, leaseToken)) continue;
+      if (!await dependencies.reserve(args.event, user, leaseToken)) return;
       const result = await deliverReservedTelegram({
         send: () => dependencies.send(user.telegram_id, deliveryMessage, args.buttons),
         complete: sendResult => dependencies.complete(args.event, user, leaseToken,
@@ -231,7 +232,7 @@ export async function deliverAlphaSemanticEvent(args: {
         release: () => dependencies.release(args.event, user, leaseToken),
       });
       if (result.sent) args.onTelegramAccepted?.(user);
-      if (result.recorded) { delivered += 1; continue; }
+      if (result.recorded) { delivered += 1; return; }
       failed += 1;
       args.onRecipientFailure?.(user, result.error, result.sent ? 'delivery_completion' : 'telegram_send');
       if (result.sent) await dependencies.sentUnconfirmed(args.event, user, leaseToken).catch(error =>
@@ -251,6 +252,6 @@ export async function deliverAlphaSemanticEvent(args: {
         semanticEventType: args.event.type, telegramId: user.telegram_id,
         reason: error instanceof Error ? error.message : String(error) });
     }
-  }
+  });
   return { delivered, failed };
 }
