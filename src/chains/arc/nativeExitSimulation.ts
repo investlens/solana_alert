@@ -40,7 +40,10 @@ export function createArcNativeExitSimulator(deps:Dependencies){
     const simulate=(calls:Call[])=>deps.rpc('eth_simulateV1',[{blockStateCalls:[{stateOverrides:{[wallet]:{balance:toHex(amount)}},calls}],validation:false},block],signal);
     const buy=[read(token as Address),read(ARC_USDC),call(ROUTER,arcNativeRoute(key,ARC_NATIVE_USDC,token as Address,amount,deadline),amount),read(token as Address),read(ARC_USDC)];
     stage=`BUY_${dollars}`;const bought=result(await simulate(buy),5);const tokens=value(bought[3]);
-    if(value(bought[0])!==0n||value(bought[1])!==quote||value(bought[4])!==0n||tokens<=0n)throw Error('Native funding or buy debit unverified');
+    if(value(bought[0])!==0n||value(bought[1])!==quote||value(bought[4])!==0n||tokens<=0n){
+     console.warn('[ArcNativeExitSimulation] BUY_PROOF_FAILED',{block,beforeTokenZero:value(bought[0])===0n,fundedQuoteMatches:value(bought[1])===quote,quoteRemaining:value(bought[4]).toString(),tokensReceived:tokens.toString()});
+     throw Error('Native funding or buy debit unverified');
+    }
     const full=[...buy,call(token as Address,encodeFunctionData({abi:TOKEN,functionName:'approve',args:[PERMIT2,2n**256n-1n]})),call(PERMIT2,encodeFunctionData({abi:PERMIT,functionName:'approve',args:[token as Address,ROUTER,2n**160n-1n,Number(deadline)]})),call(ROUTER,arcNativeRoute(key,token as Address,ARC_NATIVE_USDC,tokens,deadline)),read(ARC_USDC),read(token as Address)];
     stage=`FULL_SELL_${dollars}`;const sold=result(await simulate(full),10),returned=value(sold[8]);
     if(value(sold[0])!==0n||value(sold[1])!==quote||value(sold[3])!==tokens||value(sold[4])!==0n||value(sold[9])!==0n||returned<=0n)throw Error('Full exit unverified');
