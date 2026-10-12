@@ -1,3 +1,5 @@
+import {hasConfirmedNormalOpportunityDelivery} from './confirmedOpportunityDelivery.js';
+import {forEachDeliveryRecipient} from './recipientDeliveryTiming.js';
 import {robinhoodAlertSafety} from './robinhoodAlertSafety.js';
 import { waitForRecipientDelivery, recipientDelayMs, recordDeliveryAccepted } from './recipientDeliveryTiming.js';
 import {
@@ -1133,15 +1135,14 @@ async function deliverOpportunity(
   let delivered =
     0;
 
-  for (
-    const user of users
-  ) {
+  await forEachDeliveryRecipient(users,async user => {
+   try {
     if (
       !userCanReceiveOpportunity(
         user,
       )
     ) {
-      continue;
+      return;
     }
 
     if (action === 'EXIT') {
@@ -1149,7 +1150,7 @@ async function deliverOpportunity(
         telegramId: user.telegram_id, assetId: opportunity.asset_id,
         chain: opportunity.chain, opportunityId: opportunity.id,
       });
-      if (!shouldDeliverExit({ action, relevant, criticalReason })) continue;
+      if (!shouldDeliverExit({ action, relevant, criticalReason })) return;
     }
 
     await waitForRecipientDelivery(user, deliveryStartedAt, action === 'EXIT');
@@ -1182,13 +1183,13 @@ async function deliverOpportunity(
         },
       );
 
-      continue;
+      return;
     }
 
     if (
       !strategyEnabled
     ) {
-      continue;
+      return;
     }
 
     const leaseToken =
@@ -1199,7 +1200,7 @@ async function deliverOpportunity(
       });
 
     if (!leaseToken) {
-      continue;
+      return;
     }
 
     const delivery = await deliverReservedTelegram({
@@ -1266,7 +1267,9 @@ async function deliverOpportunity(
         },
       );
     }
-  }
+   }catch(error){console.warn('[OpportunityDelivery] Recipient processing failed',{opportunityId:opportunity.id,reason:error instanceof Error?error.message:String(error)});}
+  });
+  if(delivered>0 && action!=='EXIT' && opportunity.chain==='robinhood' && opportunity.strategy_key?.startsWith('EXISTING_TOKEN_'))hasConfirmedNormalOpportunityDelivery.confirm(opportunity.asset_id);
 
   console.log(
     '[OpportunityDelivery] Complete:',

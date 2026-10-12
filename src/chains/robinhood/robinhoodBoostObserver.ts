@@ -1,3 +1,4 @@
+import {loadPendingBoosts,savePendingBoosts,restorePendingBoosts,type PendingBoost} from './pendingBoostRecovery.js';
 import { discloseRobinhoodKeyStats } from '../../services/alertKeyStatsService.js';
 import { discloseRobinhoodOwnership } from '../../services/alertOwnershipService.js';
 import { enabledLiveRecipients } from '../../services/liveAlertPreferences.js';
@@ -57,6 +58,7 @@ let boostRecipientCache = new Set<string>();
 const BOOST_RECIPIENT_CACHE_MS = 5 * 60_000;
 let boostObserverStarted = false;
 let boostObserverRunning = false;
+const pendingBoostRecoveries=new Map<string,PendingBoost>();
 let boostBaselineReady = false;
 let boostBaselinePromise: Promise<boolean> | null = null;
 let boostObserverInterval: ReturnType<typeof setInterval> | null = null;
@@ -156,7 +158,12 @@ async function ensureBoostBaseline() {
     try {
       const boosts = await fetchRobinhoodBoosts();
       for (const boost of boosts) if (!boostTotals.has(normalize(boost.tokenAddress))) boostTotals.set(normalize(boost.tokenAddress), boost.totalAmount);
+      const pending=await loadPendingBoosts();
+      for(const row of pending){const key=normalize(row.tokenAddress);pendingBoostRecoveries.set(key,row);
+        if(row.previousTotal===null)boostTotals.delete(key);else boostTotals.set(key,row.previousTotal);
+        verificationRetries.set(key,{total:row.totalAmount,firstAt:row.firstAt,nextAt:Date.now(),attempts:0});}
       boostBaselineReady = true;
+      console.log('[RobinhoodBoostObserver] PENDING_RECOVERY_RESTORED',{count:pending.length,maxEntries:100});
       console.log('[RobinhoodBoostObserver] LIVE_ONLY_BASELINE_READY', { tokens: boosts.length, supabase: 'bypassed' });
       console.log('[RobinhoodBoostObserver] BASELINE_ABSORBED_SILENTLY', { tokens: boosts.length, recoveryAlertsSuppressed: true });
       return true;
@@ -409,6 +416,12 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
   if (!boostVerificationDue(verificationRetries, tokenKey, boost.totalAmount, Date.now())) return false;
   const canonical = observeBoostCanonicalEvent(boostTotals, tokenKey, boost.totalAmount, boost.amount,boost.source);
   if (!canonical) return false;
+  const pending=pendingBoostRecoveries.get(tokenKey);
+  if(!pending||boost.totalAmount>pending.totalAmount){
+    pendingBoostRecoveries.set(tokenKey,{tokenAddress:boost.tokenAddress,amount:canonical.boostAdded,totalAmount:boost.totalAmount,previousTotal:canonical.previousTotal,firstAt:Date.now()});
+    while(pendingBoostRecoveries.size>100)pendingBoostRecoveries.delete(pendingBoostRecoveries.keys().next().value!);
+    await savePendingBoosts([...pendingBoostRecoveries.values()]);
+  }
 
   const origin = await getVerifiedRobinhoodLaunchpad(boost.tokenAddress);
   const trustedLaunchType = origin?.launchType;
@@ -420,6 +433,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
   });
   if (!security.allowed) {
     const disposition = recordBoostSecurityBlock(boostTotals, verificationRetries, tokenKey, boost.totalAmount, security.exitUnverified === true || security.liquidity?.status === 'UNKNOWN', Date.now());
+    if(disposition!=='RETRY_PENDING'){pendingBoostRecoveries.delete(tokenKey);await savePendingBoosts([...pendingBoostRecoveries.values()]);}
     console.log('[RobinhoodBoostObserver] BOOST_VERIFICATION_DISPOSITION', { token: tokenKey, disposition });
     console.warn('[RobinhoodBoostObserver] BOOST_BLOCKED_SECURITY', {
       token: tokenKey, eventType: canonical.type, totalBoost: boost.totalAmount, reason: security.reason,
@@ -574,6 +588,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
     await markBoostDeliveryAccepted(semanticEvent.eventIdentity, rawSnapshot);
     boostTotals.set(tokenKey, boost.totalAmount);
     verificationRetries.delete(tokenKey);
+    pendingBoostRecoveries.delete(tokenKey);await savePendingBoosts([...pendingBoostRecoveries.values()]);
     console.log('[RobinhoodBoostObserver] BOOST_ALERT_VERIFIED', {
       token: tokenKey, eventType: canonical.type, boostAdded: canonical.boostAdded,
       totalBoost: canonical.currentTotal, verifiedPons, securityRoute: security.route,
@@ -616,7 +631,10 @@ export async function runRobinhoodBoostObserverCycle() {
   try {
     if (!await ensureBoostBaseline()) return;
     const boosts = await fetchRobinhoodBoosts();
-    console.log('[RobinhoodBoostObserver] Feed:', { boosts: boosts.length, mode: 'LIVE_ONLY' });
+    const pending=restorePendingBoosts([...pendingBoostRecoveries.values()]);
+    for(const key of pendingBoostRecoveries.keys())if(!pending.some(p=>normalize(p.tokenAddress)===key))pendingBoostRecoveries.delete(key);
+    for(const row of pending)if(!boosts.some(b=>normalize(b.tokenAddress)===normalize(row.tokenAddress)))boosts.push(row);
+    console.log('[RobinhoodBoostObserver] Feed:', { boosts: boosts.length, mode: 'LIVE_ONLY',pendingRecovery:pending.length });
     let alertsSent = 0;
     const unchangedTotals = boosts.filter(boost => {
       const prior = boostTotals.get(normalize(boost.tokenAddress));

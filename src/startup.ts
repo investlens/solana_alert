@@ -127,6 +127,7 @@ if (!enabled('ADMIN_TRADING_ENABLED', false)) {
     startNotificationService();
     startOpportunityDeliveryService();
   } else console.log('[Recovery] DB background services disabled.');
+  if(process.env.OPPORTUNITY_DELIVERY_ENABLED === 'true') startOpportunityDeliveryService();
 
   if (process.env.OPPORTUNITY_FRESHNESS_ENABLED === 'true') startOpportunityFreshnessService();
   if (process.env.ALPHA_OUTCOME_CHECKPOINT_ENABLED === 'true' && process.env.ALPHA_COMPACT_OUTCOMES_ENABLED === 'false') startAlphaOutcomeCheckpointService();

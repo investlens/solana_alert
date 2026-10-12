@@ -1,3 +1,4 @@
+import {hasConfirmedNormalOpportunityDelivery} from '../../services/confirmedOpportunityDelivery.js';
 import { considerRobinhoodVolumeBreakout } from './volumeBreakoutSetup.js';
 import { config } from '../../config.js';
 import { recordOpportunity } from '../../core/opportunityRegistry.js';
@@ -221,13 +222,13 @@ async function scanToken(entry: ExistingTokenUniverseEntry) {
     pairAddress: market.pairAddress, chartUrl: market.chartUrl, symbol: market.symbol, name: market.name,
     lastAlertState: prior.lastAlertState ?? null, lastAlertAt: prior.lastAlertAt ?? null };
   let qualified = false, emitted = false;
-  if (result.alertable && result.transition) {
+  if (result.alertable && (result.transition || prior.lastAlertAt)) {
     const qualification = qualifyPremiumOpportunity(rawData, 'CHECK_ENTRY', entry.token);
     // Normal/reversal opportunities are one-shot per token. BOOST events are handled
     // by the separate boost observer and intentionally remain repeatable on genuine
     // additional boost purchases.
-    const priorNormalAlert = Boolean(prior.lastAlertAt);
     qualified = qualification.eligible;
+    const priorNormalAlert = qualified && prior.lastAlertAt ? await hasConfirmedNormalOpportunityDelivery(entry.token) : false;
     if (qualified && priorNormalAlert) {
       console.log('[ExistingTokenScanner] DUPLICATE_REVERSAL_SUPPRESSED', {
         token: entry.token,
@@ -237,12 +238,13 @@ async function scanToken(entry: ExistingTokenUniverseEntry) {
       });
     }
     if (qualified && !priorNormalAlert) {
-      const kind = result.reentry ? 'REIGNITION' : result.assessment.state === 'RUNNER' ? 'RUNNER' : 'BREAKOUT';
-      const title = result.reentry ? `${market.symbol} 🔄 TREND REVERSAL` : `${market.symbol} Existing Token ${kind}`;
+      const deliveryRetry=!result.transition&&!!prior.lastAlertAt;
+      const kind = result.reentry || deliveryRetry ? 'REIGNITION' : result.assessment.state === 'RUNNER' ? 'RUNNER' : 'BREAKOUT';
+      const title = deliveryRetry?`${market.symbol} Recovery setup`:result.reentry ? `${market.symbol} 🔄 TREND REVERSAL` : `${market.symbol} Existing Token ${kind}`;
       const actionRaw = { ...rawData, lastAlertState: result.assessment.state, lastAlertAt: observedAt };
       requirePersistedScannerOpportunity(await recordOpportunityAndEmit({ opportunityType: 'DEX_CONFIRMATION', assetId: entry.token, chain: 'robinhood', sourceAgent: 'ExistingTokenOpportunityScanner',
         title, strategyKey: `EXISTING_TOKEN_${kind}`, recommendedAction: 'CHECK_ENTRY', status: 'NEW', why: result.assessment.reasons.join(' '),
-        whatHappened: result.reentry ? `Trend reversed from ${result.previousState} to ${result.assessment.state}.` : `Existing-token structure advanced from ${result.previousState} to ${result.assessment.state}.`,
+        whatHappened: deliveryRetry?'Current opportunity conditions remain qualified; prior Telegram delivery is unconfirmed.':result.reentry ? `Trend reversed from ${result.previousState} to ${result.assessment.state}.` : `Existing-token structure advanced from ${result.previousState} to ${result.assessment.state}.`,
         invalidation: 'Invalidate if sustained participation, price retention, liquidity, or buy pressure breaks down.',
         riskReason: 'Manual entry review required; fresh-wallet and security gates remain enforced at delivery.', confidence: result.assessment.state === 'RUNNER' ? 78 : 72,
         riskScore: 42, expiresAt: new Date(Date.now() + config.existingTokenAlertCooldownMinutes * 60_000).toISOString(), rawData: actionRaw }), `EXISTING_TOKEN_${kind}`);

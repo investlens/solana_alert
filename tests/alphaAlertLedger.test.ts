@@ -41,7 +41,7 @@ test('migrations enforce append-only semantic events and unique checkpoints', as
 
 test('delivery integration persists before per-user fanout and keeps watchlist user-scoped', async () => {
   const delivery = await readFile(new URL('../src/services/opportunityDeliveryService.ts', import.meta.url), 'utf8');
-  assert.ok(delivery.indexOf('await persistAlphaAlertEvent(opportunity)') < delivery.indexOf('for (\n    const user of users'));
+  assert.ok(delivery.indexOf('await persistAlphaAlertEvent(opportunity)') < delivery.indexOf('forEachDeliveryRecipient(users'));
   const relevance = await readFile(new URL('../src/services/alphaExitRelevance.ts', import.meta.url), 'utf8');
   assert.match(relevance, /\.eq\('telegram_id', args\.telegramId\)/); assert.match(relevance, /user_opportunity_watchlist/);
   assert.match(relevance, /wallet_activity_deliveries/);
