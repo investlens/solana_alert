@@ -9,7 +9,7 @@ import {getDeliverableUsers} from '../core/delivery.js';
 import {enabledLiveRecipients, type LiveFeedKey} from './liveAlertPreferences.js';
 import {buildAlphaosAlertCard} from '../ui/alphaosAlertCard.js';
 import {sendAlphaosPhotoAlert} from '../ui/alphaosPhotoDelivery.js';
-import {waitForRecipientDelivery,recordDeliveryAccepted} from './recipientDeliveryTiming.js';
+import {waitForRecipientDelivery,recordDeliveryAccepted,forEachDeliveryRecipient} from './recipientDeliveryTiming.js';
 import {withResearchDisclosure} from '../ui/researchDisclosure.js';
 export const RUNNER_MULTIPLES=[2,5,10,50,100] as const;
 export type RunnerSample=CompactSample & {name?:string;symbol?:string;exitNote?:string;lpStatus?:string};
@@ -68,15 +68,15 @@ async function deliver(row:CompactTrackingRow,sample:RunnerSample,multiple:numbe
  if(!recipients.length)return;
  const image=await buildAlphaosAlertCard({symbol:sample.symbol,name:sample.name,category:`${multiple}X RUNNER`,chainLabel:row.chain==='arc'?'ARC':'ROBINCHAIN',badge:`${multiple}X MILESTONE REACHED`,footer:'Sampled price move. Not trade profit or a buy signal.'}).catch(()=>null);
  const text=renderCompactRunner(row,sample,multiple),started=Date.now();
- // Sequential fan-out keeps Telegram concurrency bounded. No ambiguous-send retries.
+ // Independent bounded tier lanes. No ambiguous-send retries.
  let accepted=0;
- for(const chatId of recipients){try{
+ await forEachDeliveryRecipient(recipients,async chatId=>{try{
   await waitForRecipientDelivery(chatId,started);
   const identity=`runner:${row.chain}:${row.token.toLowerCase()}:${row.started_at}`;
   const sent=await deliverRunnerRecipient(identity,chatId,runnerCrossings(row,sample),async()=>
     (await sendAlphaosPhotoAlert({botToken,chatId,text,keyboard:compactRunnerButtons(row),image})).messageId);
   if(sent){recordDeliveryAccepted(chatId,started,`${identity}:${multiple}`);accepted++;}
- }catch{console.warn('[RunnerCard] recipient delivery unconfirmed');}}
+ }catch{console.warn('[RunnerCard] recipient delivery unconfirmed');}});
  console.log('[RunnerCard] DELIVERY',{chain:row.chain,multiple,accepted,failed:recipients.length-accepted});
 }
 const production:Dependencies={verifyExit:automaticRunnerExitGate,claim:async(key)=>{
@@ -90,7 +90,7 @@ export async function processCompactRunner(row:CompactTrackingRow,sample:RunnerS
  const crossings=runnerCrossings(row,sample);if(!crossings.length)return;
  if(deps===production)activeDeliveries++;
  try{
- if(deps.verifyExit){const exit=await deps.verifyExit(row);if(!exit.allowed){console.warn('[RunnerCard] WITHHELD custom exit unverified');return;}if(exit.pairId)sample={...sample,exitNote:exit.reason,lpStatus:exit.lpStatus};}
+ if(deps.verifyExit){const exit=await deps.verifyExit(row);if(!exit.allowed){console.warn('[RunnerCard] WITHHELD custom exit unverified');return;}if(exit.pairId || row.chain==='arc')sample={...sample,exitNote:exit.reason,lpStatus:exit.lpStatus};}
  const highest=crossings[crossings.length-1];const prefix=`alphaos:runner:${row.chain}:${row.token.toLowerCase()}:${row.started_at}`;
  // Claim the highest observed milestone first; a gap directly to 10x emits one
  // card and silently consumes lower milestones. Claims survive worker restarts.
