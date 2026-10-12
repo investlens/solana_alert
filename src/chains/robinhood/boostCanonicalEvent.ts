@@ -68,8 +68,12 @@ export function boostCanonicalTitle(event: BoostCanonicalEvent): string {
 
 /** Remember silently absorbed history so a later real increase can be classified. */
 export function observeBoostCanonicalEvent(totals: Map<string, number>, tokenAddress: string,
-  currentTotal: number, feedAmount: number): BoostCanonicalEvent | null {
+  currentTotal: number, feedAmount: number, source?:'LATEST'|'TOP'): BoostCanonicalEvent | null {
   const key = tokenAddress.trim().toLowerCase();
+  if(source==='TOP'&&!totals.has(key)){
+    if(Number.isFinite(currentTotal)&&currentTotal>0)totals.set(key,currentTotal);
+    return null;
+  }
   const previousTotal = totals.get(key);
   const event = classifyBoostCanonicalEvent({ previousTotal, currentTotal, feedAmount });
   if (!event && previousTotal == null && Number.isFinite(currentTotal) && currentTotal > 0

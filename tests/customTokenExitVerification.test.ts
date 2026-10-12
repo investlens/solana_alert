@@ -41,12 +41,23 @@ test('exact pool hash, token, fee and quote identity required',async()=>{
  assert.equal(resolvePlainV4Key(quote,quote,pair,3000),null);
  assert.equal((await fixture().verify({chain:'robinhood',token,pairId:'0x'+'f'.repeat(64)})).allowed,false);
 });
-test('BSKCAT-style ambiguous high-fee routes block before simulation; LP status does not prove an exit',()=>{
- assert.match(customPoolRisk({dex:[{liquidity:'7.5',pool_fee:'0.85'}]})!,/Conflicting/);
+test('fees are scoped to the checked pool; LP status does not prove an exit',()=>{
+ const dangerous='0x'+'f'.repeat(64);
+ const evidence={dex:[{pair:dangerous,liquidity:'7.5',pool_fee:'0.85'},{pair,liquidity:'100000',pool_fee:'0.003'}]};
+ assert.equal(customPoolRisk(evidence),null);
+ assert.match(customPoolRisk(evidence,dangerous)!,/Selected pool/);
+ assert.equal(customPoolRisk(evidence,pair),null);
+ assert.match(customPoolRisk({...evidence,is_honeypot:'1'},pair)!,/honeypot/);
  assert.equal(customPoolRisk({dex:[{liquidity:'100000',pool_fee:'0.003'}]}),null);
  assert.equal(observedLpStatus(undefined),'UNKNOWN');
  assert.equal(observedLpStatus({lp_holders:[{address:token,percent:'1',is_locked:'0'}]}),'UNLOCKED');
  assert.equal(roundTripLoss(10000n,90n),99.1);
+});
+test('a dust high-fee pool does not block a verified zero-fee route, but the selected high-fee route blocks',async()=>{
+ const security={dex:[{pair:'0x'+'f'.repeat(64),liquidity:'2',pool_fee:'0.85'},{pair,liquidity:'100000',pool_fee:'0.003'}]};
+ assert.equal((await fixture().verify({chain:'robinhood',token,security})).allowed,true);
+ const f=fixture();const result=await f.verify({chain:'robinhood',token,pairId:pair,security:{dex:[{pair,liquidity:'100000',pool_fee:'0.85'}]}});
+ assert.equal(result.allowed,false);assert.equal(f.requests.length,0);
 });
 test('ARC unsupported simulation is withheld, not turned into a warning-only alert',async()=>{
  const f=fixture('unsupported');assert.equal((await f.verify({chain:'arc',token})).allowed,false);
