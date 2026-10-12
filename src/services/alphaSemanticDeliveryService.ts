@@ -1,3 +1,4 @@
+import {forEachDeliveryRecipient} from './recipientDeliveryTiming.js';
 import { telegramRecipientUnavailable } from '../ui/alphaosPhotoDelivery.js';
 import { schedulePromotionCardEnrichment, type PromotionEditTarget } from './promotionCardEnrichment.js';
 import type { PromotionCardArgs } from '../ui/promotionEventCard.js';
@@ -256,16 +257,16 @@ export async function deliverAlphaSemanticEvent(args: {
   const renderedBytes = Buffer.byteLength(deliveryMessage, 'utf8');
   let delivered = 0; let failed = 0; let accepted = 0;
   const acceptedRecipients:AcceptedRecoveryRecipient[]=[];
-  for (const user of users) {
-    if (!hasCapability(accessProfileForUser(user), 'opportunities.realtime')) continue;
+  await forEachDeliveryRecipient(users, async user => {
+    if (!hasCapability(accessProfileForUser(user), 'opportunities.realtime')) return;
     let recipientClaim: Awaited<ReturnType<typeof acquireRecipientClaim>> | undefined;
     let sendStarted = false;
     let telegramAccepted = false;
     try {
       const liveFeed = semanticLiveFeed(args.event.type, args.event.chain);
-      if (dependencies === productionDependencies && liveFeed && !await liveFeedEnabled(user.telegram_id, liveFeed)) continue;
+      if (dependencies === productionDependencies && liveFeed && !await liveFeedEnabled(user.telegram_id, liveFeed)) return;
       const preferenceKey = preferenceKeyForSemanticEvent(args.event);
-      if (preferenceKey && !await dependencies.strategyEnabled(user.telegram_id, preferenceKey)) continue;
+      if (preferenceKey && !await dependencies.strategyEnabled(user.telegram_id, preferenceKey)) return;
 
       if (dependencies === productionDependencies) await waitForRecipientDelivery(user, deliveryStartedAt, isUndelayedRiskEvent(args.event.type));
 
@@ -277,7 +278,7 @@ export async function deliverAlphaSemanticEvent(args: {
           if (liveFeed) recordFeedDelivery(liveFeed, recipientClaim.state === 'DELIVERED' ? 'DEDUPLICATED' : 'UNCONFIRMED');
           console.warn('[AlphaSemanticDelivery] Recipient claim skipped', JSON.stringify({eventIdentity:args.event.eventIdentity,
             telegramId:user.telegram_id,state:recipientClaim.state}));
-          continue;
+          return;
         }
       }
       const send = async () => {
@@ -297,7 +298,7 @@ export async function deliverAlphaSemanticEvent(args: {
       if (ephemeralMode) {
         if (!claimEphemeralDelivery(args.event, user)) {
           if (recipientClaim?.state === 'CLAIMED') await recipientClaim.release();
-          continue;
+          return;
         }
         try {
           const sendResult = await send();
@@ -328,13 +329,13 @@ export async function deliverAlphaSemanticEvent(args: {
             reason,
           });
         }
-        continue;
+        return;
       }
 
       const leaseToken = createLeaseToken();
       if (!await dependencies.reserve(args.event, user, leaseToken)) {
         if (recipientClaim?.state === 'CLAIMED') await recipientClaim.release();
-        continue;
+        return;
       }
       const result = await deliverReservedTelegram({
         send: async () => { const result=await send();
@@ -344,7 +345,7 @@ export async function deliverAlphaSemanticEvent(args: {
         release: () => dependencies.release(args.event, user, leaseToken),
       });
       if (result.sent) { if (dependencies === productionDependencies) recordDeliveryAccepted(user, deliveryStartedAt, args.event.eventIdentity, isUndelayedRiskEvent(args.event.type)); accepted += 1; args.onTelegramAccepted?.(user); }
-      if (result.recorded) { delivered += 1; continue; }
+      if (result.recorded) { delivered += 1; return; }
       if (!result.sent && telegramExplicitRejection(result.error) && recipientClaim?.state === 'CLAIMED')
         await recipientClaim.release().catch(() => undefined);
       failed += 1;
@@ -368,7 +369,7 @@ export async function deliverAlphaSemanticEvent(args: {
         semanticEventType: args.event.type, telegramId: user.telegram_id,
         reason: error instanceof Error ? error.message : String(error) });
     }
-  }
+  });
   if(dependencies===productionDependencies && args.event.chain==='robinhood' && ['DEX_PAID','BOOST'].includes(args.event.type)) {
     const raw=args.event.rawSnapshot ?? getEphemeralSemanticEventEvidence(args.event.eventIdentity);
     const evidence:PromotionCardArgs={kind:args.event.type as 'DEX_PAID'|'BOOST',text:deliveryMessage,token:args.event.assetId,launchType,stats:cachedRobinhoodAlertStats(args.event.assetId),securityNote:paidSecurityNote??boostSecurityNote,lpStatus,buttons:deliveryButtons??[],paymentTimestamp:typeof raw?.paymentTimestamp==='number'?raw.paymentTimestamp:null};
