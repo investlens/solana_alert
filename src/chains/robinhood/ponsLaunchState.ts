@@ -69,12 +69,14 @@ export async function getIndexedVerifiedPonsLaunch(tokenAddress:string):Promise<
 
 async function readIndexedVerifiedPonsLaunch(tokenAddress:string):Promise<IndexedPonsLaunch|null> {
   const token = getAddress(tokenAddress);
+  let sharedOrigin: IndexedPonsLaunch | null = null;
   try {
     const shared=await getSharedJson<{token?:string;factory?:string;creator?:string}>(`alphaos:pons:verified:${token.toLowerCase()}`);
     const proof=shared?.value;
     if(proof&&isApprovedPonsOrigin(token,proof.token,proof.factory)){
       const generation=getPonsFactoryDeployments().find(f=>f.address.toLowerCase()===proof.factory!.toLowerCase())!.generation;
       const deployer=typeof proof.creator==='string'&&/^0x[a-f0-9]{40}$/i.test(proof.creator)&&!/^0x0{40}$/i.test(proof.creator)?proof.creator:null;
+      sharedOrigin = {exists:true,token,deployer,generation,factory:proof.factory!};
       // An origin proof without a creator must not hide an indexed creator.
       if(deployer)return {exists:true,token,deployer,generation,factory:proof.factory!};
     }
@@ -86,7 +88,7 @@ async function readIndexedVerifiedPonsLaunch(tokenAddress:string):Promise<Indexe
     if(!error&&!data)({data,error}=await query().ilike('token_address',token.toLowerCase())
       .order('block_number',{ascending:false}).limit(1).abortSignal(AbortSignal.timeout(1500)).maybeSingle());
     if (error) throw error;
-    if (!isApprovedPonsOrigin(token, data?.token_address, data?.factory_address)) return null;
+    if (!isApprovedPonsOrigin(token, data?.token_address, data?.factory_address)) return sharedOrigin;
     const deployer = typeof data?.deployer_address === 'string' && /^0x[a-f0-9]{40}$/i.test(data.deployer_address)
       && !/^0x0{40}$/i.test(data.deployer_address) ? data.deployer_address : null;
     const generation = getPonsFactoryDeployments().find(factory => factory.address.toLowerCase() === data!.factory_address.toLowerCase())!.generation;
@@ -96,7 +98,7 @@ async function readIndexedVerifiedPonsLaunch(tokenAddress:string):Promise<Indexe
       token,
       reason: error instanceof Error ? error.message : String(error),
     });
-    return null;
+    return sharedOrigin;
   }
 }
 

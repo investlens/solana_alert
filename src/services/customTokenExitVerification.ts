@@ -30,7 +30,7 @@ export function resolvePlainV4Key(token:string,quote:string,pairId:string,fee:nu
  return null;
 }
 function swapData(key:PoolKey,input:Address,output:Address,amount:bigint,deadline:bigint):Hex {
- const swap=encodeAbiParameters(parseAbiParameters('((address currency0,address currency1,uint24 fee,int24 tickSpacing,address hooks) poolKey,bool zeroForOne,uint128 amountIn,uint128 amountOutMinimum,bytes hookData)'),[{poolKey:key,zeroForOne:input.toLowerCase()===key.currency0,amountIn:amount,amountOutMinimum:0n,hookData:'0x'}]);
+ const swap=encodeAbiParameters(parseAbiParameters('((address currency0,address currency1,uint24 fee,int24 tickSpacing,address hooks) poolKey,bool zeroForOne,uint128 amountIn,uint128 amountOutMinimum,uint256 minHopPriceX36,bytes hookData)'),[{poolKey:key,zeroForOne:input.toLowerCase()===key.currency0,amountIn:amount,amountOutMinimum:0n,minHopPriceX36:0n,hookData:'0x'}]);
  const settle=encodeAbiParameters(parseAbiParameters('address,uint256'),[input,amount]);
  const take=encodeAbiParameters(parseAbiParameters('address,uint256'),[output,0n]);
  const inputData=encodeAbiParameters(parseAbiParameters('bytes,bytes[]'),['0x060c0f',[swap,settle,take]]);
@@ -109,7 +109,7 @@ export function createCustomExitVerifier(deps:Dependencies){
     let maxLoss=0;
     for(const amount of config.sizes){
      const wallet=deps.wallet();
-     const call=(to:Address,data:Hex,value:Hex='0x0'):Call=>({from:wallet,to,data,value,gas:'0x7a1200',gasPrice:'0x0'});
+     const call=(to:Address,data:Hex,value:Hex='0x0'):Call=>({from:wallet,to,data,value,gas:to.toLowerCase()===config.router.toLowerCase()?'0x124f80':'0x493e0',gasPrice:'0x0'});
      const read=(currency:Address)=>call(currency,encodeFunctionData({abi:ERC20,functionName:'balanceOf',args:[wallet]}));
      const approvals=(currency:Address)=>[
       call(currency,encodeFunctionData({abi:ERC20,functionName:'approve',args:[PERMIT2,2n**256n-1n]})),
