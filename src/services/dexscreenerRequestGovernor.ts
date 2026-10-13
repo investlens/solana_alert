@@ -1,4 +1,5 @@
 import { getSharedJson, setSharedJson } from './sharedJsonCache.js';
+import { currentRequestSignal, throwIfRequestAborted } from './requestDeadline.js';
 export type DexScreenerPriority = 'HIGH' | 'NORMAL' | 'BACKGROUND';
 
 export type GovernedDexScreenerValue<T> = {
@@ -291,6 +292,9 @@ export async function governedDexScreenerJson<T>(args: {
   url: string; caller: string; endpoint: string; priority?: DexScreenerPriority;
   cacheKey?: string; cacheTtlMs?: number; signal?: AbortSignal; queueWaitTimeoutMs?: number; httpTimeoutMs?: number;
 }): Promise<GovernedDexScreenerValue<T>> {
+  throwIfRequestAborted();
+  const parent = currentRequestSignal();
+  if (parent) args = { ...args, signal: args.signal ? AbortSignal.any([args.signal, parent]) : parent };
   const priority = args.priority ?? 'NORMAL';
   const key = (args.cacheKey ?? args.url).toLowerCase();
   const now = dependencies.now();
