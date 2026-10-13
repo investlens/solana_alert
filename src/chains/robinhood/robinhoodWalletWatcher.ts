@@ -14,7 +14,8 @@ import { recordWalletTrade } from '../../agents/smartWalletAgent.js';
 import { recordWalletBuy, recordWalletSell } from '../../agents/walletIntelligenceAgent.js';
 import { getRobinhoodMarketSnapshot } from './market.js';
 import { PONS_CONTRACTS } from './ponsContracts.js';
-import { getRobinhoodBlockNumberResilient, getRobinhoodLogsResilient, robinhoodPublicClient } from './rpc.js';
+import { getRobinhoodBlockNumberResilient, getRobinhoodLogsResilient, getRobinhoodBlockResilient, requestRobinhoodRpcResilient, robinhoodPublicClient } from './rpc.js';
+import { locateWalletNonceBlocks } from './walletNonceLocator.js';
 import { withRequestDeadline } from '../../services/requestDeadline.js';
 import { getRobinhoodTokenMetadata } from './tokenMetadata.js';
 
@@ -778,6 +779,78 @@ const LIVE_BLOCK_LOOKBACK = Math.max(
 );
 let liveBlockCursor: bigint | null = null;
 
+async function walletEventsFromBlocks(blockNumbers: bigint[], wallets: Address[]): Promise<WalletWatchEvent[]> {
+  const walletMap = new Map(wallets.map(wallet => [wallet.toLowerCase(), wallet]));
+  const events: WalletWatchEvent[] = [];
+
+  for (const blockNumber of blockNumbers) {
+    const block = await getRobinhoodBlockResilient({
+      blockNumber,
+      includeTransactions: true,
+    });
+    for (const tx of block.transactions as any[]) {
+      if (!tx || typeof tx !== 'object' || !tx.from || !tx.hash) continue;
+      const wallet = walletMap.get(String(tx.from).toLowerCase());
+      if (!wallet) continue;
+
+      const receipt = await robinhoodPublicClient.getTransactionReceipt({ hash: tx.hash as Hex });
+      const transfers = transferEvidenceFromReceipt(receipt);
+      const launchedTokens: Address[] = [];
+      for (const log of receipt.logs as any[]) {
+        if (![PONS_CONTRACTS.factory, PONS_V2_LIVE_EMITTER].some(factory => sameAddress(factory, log.address))) continue;
+        for (const event of [tokenLaunchedEvent, tokenLaunchedV2Event]) {
+          try {
+            const decoded = decodeEventLog({ abi: [event], data: log.data, topics: log.topics, strict: true });
+            const launched = decoded.args as { deployer?: Address; token?: Address };
+            if (launched.deployer && launched.token && sameAddress(launched.deployer, wallet)) launchedTokens.push(getAddress(launched.token));
+          } catch { /* Other factory events do not establish a launch. */ }
+        }
+      }
+      const classification = classifyRobinhoodWalletTransaction(wallet, {
+        hash: tx.hash as Hex,
+        from: getAddress(tx.from),
+        value: BigInt(tx.value ?? 0),
+        transfers,
+        launchedTokens,
+      });
+      if (!classification) continue;
+
+      const metadata = await tokenMetadata(classification.token).catch(() => null);
+      const quoteTransfer = transfers.find(transfer => isQuoteToken(transfer.token) && transfer.value > 0n);
+      const nativeRaw = BigInt(tx.value ?? 0);
+      const nativeAmount = classification.kind === 'buy' && nativeRaw > 0n
+        ? Number(nativeRaw) / 1e18
+        : quoteTransfer
+          ? Number(quoteTransfer.value) / 1e18
+          : null;
+
+      const event = {
+        kind: classification.kind,
+        chain: 'robinhood',
+        wallet,
+        signature: tx.hash as Hex,
+        timestamp: Number(block.timestamp),
+        blockNumber: Number(blockNumber),
+        tokenMint: classification.token,
+        tokenAmount: normalizedAmount(classification.amountRaw, metadata?.decimals ?? null),
+        tokenAmountRaw: classification.amountRaw?.toString() ?? null,
+        tokenDecimals: metadata?.decimals ?? null,
+        tokenSymbol: metadata?.symbol ?? null,
+        tokenName: metadata?.name ?? null,
+        nativeAmount,
+        quoteSymbol: nativeRaw > 0n ? 'ETH' : quoteTransfer ? 'WETH' : null,
+        counterparty: tx.to ? getAddress(tx.to) : null,
+        type: `Live block wallet activity: ${classification.evidence}`,
+        ...(classification.kind === 'buy' || classification.kind === 'sell' ? { amountSol: null } : {}),
+      } as WalletWatchEvent;
+      await persistRobinhoodWalletIntelligence(event).catch(() => console.warn('[RobinhoodWalletNonce] intelligence persistence unavailable'));
+      events.push(event);
+    }
+  }
+
+  return events;
+}
+
 async function pollRobinhoodTrackedWalletsLiveBlocks(
   processChunk: RobinhoodWalletChunkProcessor,
 ): Promise<{ events: WalletWatchEvent[]; checkpointBlocks: Map<string, bigint>; wallets: Address[] }> {
@@ -814,58 +887,9 @@ async function pollRobinhoodTrackedWalletsLiveBlocks(
 
   const maxPerPoll = BigInt(Math.max(5, Math.min(100, Number(process.env.ROBINHOOD_WALLET_MAX_BLOCKS_PER_POLL ?? 30))));
   const toBlock = liveBlockCursor + maxPerPoll < head ? liveBlockCursor + maxPerPoll : head;
-  const events: WalletWatchEvent[] = [];
-
-  for (let blockNumber = liveBlockCursor + 1n; blockNumber <= toBlock; blockNumber += 1n) {
-    const block = await robinhoodPublicClient.getBlock({
-      blockNumber,
-      includeTransactions: true,
-    });
-    for (const tx of block.transactions as any[]) {
-      if (!tx || typeof tx !== 'object' || !tx.from || !tx.hash) continue;
-      const wallet = walletMap.get(String(tx.from).toLowerCase());
-      if (!wallet) continue;
-
-      const receipt = await robinhoodPublicClient.getTransactionReceipt({ hash: tx.hash as Hex });
-      const transfers = transferEvidenceFromReceipt(receipt);
-      const classification = classifyRobinhoodWalletTransaction(wallet, {
-        hash: tx.hash as Hex,
-        from: getAddress(tx.from),
-        value: BigInt(tx.value ?? 0),
-        transfers,
-      });
-      if (!classification) continue;
-
-      const metadata = await tokenMetadata(classification.token).catch(() => null);
-      const quoteTransfer = transfers.find(transfer => isQuoteToken(transfer.token) && transfer.value > 0n);
-      const nativeRaw = BigInt(tx.value ?? 0);
-      const nativeAmount = classification.kind === 'buy' && nativeRaw > 0n
-        ? Number(nativeRaw) / 1e18
-        : quoteTransfer
-          ? Number(quoteTransfer.value) / 1e18
-          : null;
-
-      events.push({
-        kind: classification.kind,
-        chain: 'robinhood',
-        wallet,
-        signature: tx.hash as Hex,
-        timestamp: Number(block.timestamp),
-        blockNumber: Number(blockNumber),
-        tokenMint: classification.token,
-        tokenAmount: normalizedAmount(classification.amountRaw, metadata?.decimals ?? null),
-        tokenAmountRaw: classification.amountRaw?.toString() ?? null,
-        tokenDecimals: metadata?.decimals ?? null,
-        tokenSymbol: metadata?.symbol ?? null,
-        tokenName: metadata?.name ?? null,
-        nativeAmount,
-        quoteSymbol: nativeRaw > 0n ? 'ETH' : quoteTransfer ? 'WETH' : null,
-        counterparty: tx.to ? getAddress(tx.to) : null,
-        type: `Live block wallet activity: ${classification.evidence}`,
-        ...(classification.kind === 'buy' || classification.kind === 'sell' ? { amountSol: null } : {}),
-      } as WalletWatchEvent);
-    }
-  }
+  const blockNumbers: bigint[] = [];
+  for (let number = liveBlockCursor + 1n; number <= toBlock; number++) blockNumbers.push(number);
+  const events = await walletEventsFromBlocks(blockNumbers, wallets);
 
   const delivery = await processChunk(events);
   if (delivery.failedWallets.size === 0) {
@@ -896,6 +920,65 @@ async function pollRobinhoodTrackedWalletsLiveBlocks(
 
 
 let explorerWalletCooldownUntil=0;
+const nonceWalletCursors = new Map<string, { block: bigint; nonce: bigint }>();
+async function pollRobinhoodTrackedWalletsNonce(processChunk: RobinhoodWalletChunkProcessor) {
+  const wallets = [...new Map((await getActiveTrackedWalletAddresses('robinhood')).map(value => getAddress(value)).map(wallet => [wallet.toLowerCase(), wallet])).values()];
+  if (!wallets.length) return { events: [], checkpointBlocks: new Map<string, bigint>(), wallets };
+  const head = await getRobinhoodBlockNumberResilient();
+  const active = new Set(wallets.map(wallet => wallet.toLowerCase()));
+  for (const key of nonceWalletCursors.keys()) if (!active.has(key)) nonceWalletCursors.delete(key);
+  let nonceReads = 0, inspectedBlocks = 0;
+  const nonceAt = async (wallet: Address, block: bigint) => {
+    nonceReads++;
+    const value = await requestRobinhoodRpcResilient<string>({ method: 'eth_getTransactionCount', params: [wallet, `0x${block.toString(16)}`] });
+    if (!/^0x[0-9a-f]+$/i.test(value)) throw new Error('Invalid wallet nonce response');
+    return BigInt(value);
+  };
+  const missing = wallets.filter(wallet => !nonceWalletCursors.has(wallet.toLowerCase()));
+  const stored = missing.length ? await initializeMissingCursors(missing, head) : new Map();
+  const unresolved = missing.length ? await unresolvedWalletDeliveries(missing) : new Map<string, number>();
+  for (const wallet of missing) {
+    const previous = stored.get(wallet.toLowerCase())?.block ?? head;
+    let block = previous <= head && head - previous <= 1000n ? previous : head;
+    if ((unresolved.get(wallet.toLowerCase()) ?? 0) > 0) block = previous;
+    let nonce: bigint;
+    try { nonce = await nonceAt(wallet, block); }
+    catch (error) {
+      if (block === head || (unresolved.get(wallet.toLowerCase()) ?? 0) > 0) throw error;
+      block = head; nonce = await nonceAt(wallet, head);
+    }
+    if (block !== previous) console.warn('[RobinhoodWalletNonce] COVERAGE_GAP_RESUME', { skippedBlocks: Number(head - previous), mode: 'LIVE_ONLY' });
+    nonceWalletCursors.set(wallet.toLowerCase(), { block, nonce });
+  }
+  const events: WalletWatchEvent[] = [];
+  const completed = new Map<string, { block: bigint; nonce: bigint }>();
+  for (const wallet of wallets) {
+    const previous = nonceWalletCursors.get(wallet.toLowerCase())!;
+    if (previous.block >= head) continue;
+    const after = await nonceAt(wallet, head);
+    const found = await locateWalletNonceBlocks({ from: previous.block, to: head, before: previous.nonce, after,
+      nonceAt: block => nonceAt(wallet, block), maxReads: 24, maxBlocks: 4 });
+    inspectedBlocks += found.blocks.length;
+    events.push(...await walletEventsFromBlocks(found.blocks, [wallet]));
+    const nonce = found.complete ? after : await nonceAt(wallet, found.throughBlock);
+    completed.set(wallet.toLowerCase(), { block: found.throughBlock, nonce });
+  }
+  const delivery = await processChunk(events);
+  const checkpointBlocks = new Map<string, bigint>();
+  for (const wallet of wallets) {
+    const next = completed.get(wallet.toLowerCase());
+    if (!next || delivery.failedWallets.has(wallet.toLowerCase())) continue;
+    await commitRobinhoodWalletCheckpoints([wallet], next.block);
+    nonceWalletCursors.set(wallet.toLowerCase(), next); checkpointBlocks.set(wallet.toLowerCase(), next.block);
+  }
+  const oldest = wallets.reduce((value, wallet) => {
+    const block = nonceWalletCursors.get(wallet.toLowerCase())!.block; return block < value ? block : value;
+  }, head);
+  console.log('[RobinhoodWalletNonce] CYCLE', JSON.stringify({ wallets: wallets.length, nonceReads, inspectedBlocks,
+    events: events.length, failedWallets: delivery.failedWallets.size, lagBlocks: Number(head - oldest),
+    coverage: 'WALLET_INITIATED_TRANSACTIONS', incomingTransferCoverage: 'EXPLORER_WHEN_AVAILABLE' }));
+  return { events, checkpointBlocks, wallets };
+}
 export async function pollRobinhoodTrackedWalletsLean(
   processChunk: RobinhoodWalletChunkProcessor,
 ) {
@@ -903,15 +986,15 @@ export async function pollRobinhoodTrackedWalletsLean(
 }
 async function pollRobinhoodTrackedWalletsLeanBounded(processChunk: RobinhoodWalletChunkProcessor) {
   try {
-    if(Date.now()<explorerWalletCooldownUntil)return await pollRobinhoodTrackedWalletsIndexedRpc(processChunk);
+    if(Date.now()<explorerWalletCooldownUntil)return await pollRobinhoodTrackedWalletsNonce(processChunk);
     explorerJson.assertAvailable();
     return await pollRobinhoodTrackedWalletsExplorer(processChunk);
   } catch (error) {
     explorerWalletCooldownUntil=Date.now()+60000;
-    console.warn('[RobinhoodWalletWatcher] explorer unavailable; using indexed RPC fallback', {
+    console.warn('[RobinhoodWalletWatcher] explorer unavailable; using wallet transaction-count fallback', {
       reason: error instanceof Error ? error.message : String(error),
     });
-    try { return await pollRobinhoodTrackedWalletsIndexedRpc(processChunk); }
+    try { return await pollRobinhoodTrackedWalletsNonce(processChunk); }
     catch (rpcError) {
       console.warn('[RobinhoodWalletWatcher] indexed RPC unavailable; degraded block fallback', {reason:rpcError instanceof Error?rpcError.message:String(rpcError)});
       return pollRobinhoodTrackedWalletsLiveBlocks(processChunk);
