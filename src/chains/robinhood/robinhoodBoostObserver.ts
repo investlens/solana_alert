@@ -426,7 +426,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
   const origin = await getVerifiedRobinhoodLaunchpad(boost.tokenAddress);
   const trustedLaunchType = origin?.launchType;
   const verifiedPons = trustedLaunchType === 'PONS';
-  const security = await routeBoostSecurity({ tokenAddress: boost.tokenAddress, verifiedTrustedLaunchpad: origin !== null, requireExplicitSellability: true, allowUnknownSellability: true });
+  const security = await routeBoostSecurity({ tokenAddress: boost.tokenAddress, verifiedTrustedLaunchpad: verifiedPons, requireExplicitSellability: true, allowUnknownSellability: true, promotionEvent: true });
   console.log('[RobinhoodBoostObserver] BOOST_SECURITY_DECISION', {
     token: tokenKey, eventType: canonical.type, route: security.route,
     allowed: security.allowed, reason: security.reason, cached: security.cached,
