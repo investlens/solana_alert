@@ -120,9 +120,9 @@ test('first actionable CHECK_ENTRY is explicit entry intent and bounded to three
   await import('dotenv/config');
   const { buildOpportunityMessage } = await import('../src/services/opportunityDeliveryService.js');
   const message = buildOpportunityMessage(intentOpportunity({}));
-  assert.match(message, /^🔎 <b>SETUP OBSERVED — [^\n]+<\/b>/);
-  assert.match(message, /🎯 <b>RESEARCH STATUS: REVIEW EVIDENCE<\/b>/);
-  assert.match(message, /RESEARCH ASSESSMENT: SETUP FOR REVIEW/);
+  assert.match(message, /^📈 <b>ALPHAOS · OPPORTUNITY<\/b>/);
+  assert.match(message, /<b>DEV &amp; SAFETY<\/b>/);
+  assert.doesNotMatch(message, /Confidence|RESEARCH ASSESSMENT|72\/100/);
   assert.doesNotMatch(message, /Previously alerted opportunity has a new qualified momentum signal/);
   assert.equal((message.match(/^• /gm) ?? []).length, 3);
   assert.match(message, /• Breakout confirmed\n• Volume acceleration increased\n• Structure remains confirmed/);
@@ -137,10 +137,10 @@ test('prior successfully delivered actionable event produces momentum intent wit
     price: { previous: 0.00004, current: 0.00004952, changePct: 23.8 }, previousState: 'CONFIRMED', currentState: 'RUNNER' };
   const message = buildOpportunityMessage(base, comparison, { intent: 'MOMENTUM_UPDATE', notify: true,
     factors: ['PROGRESSION'], reasons: ['Price advanced 23.8% since previous alert'] });
-  assert.match(message, /^📈 <b>MOMENTUM UPDATE — [^\n]+<\/b>/);
-  assert.match(message, /🎯 <b>RESEARCH STATUS: MOMENTUM UPDATE<\/b>/);
+  assert.match(message, /^📈 <b>ALPHAOS · MOMENTUM UPDATE<\/b>/);
+  assert.match(message, /<b>MOMENTUM<\/b>/);
   assert.match(message, /Price advanced 23.8% since previous alert/);
-  assert.match(message, /Previously alerted[\s\S]*Now[\s\S]*Change[\s\S]*\+23\.8%/);
+  assert.match(message, /Since previous alert <b>\+23\.8%<\/b> · price/);
   assert.match(message, /MOMENTUM UPDATE/);
   const unavailable = buildOpportunityMessage(base, { hasPriorAlert: true });
   assert.doesNotMatch(unavailable, /Previously alerted\s+<b>\$0/);
