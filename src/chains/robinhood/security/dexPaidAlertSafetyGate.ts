@@ -33,7 +33,7 @@ export function createDexPaidEventGate(deps:Dependencies) {
       base.checks.push({key:'PAYMENT_FRESHNESS',passed:fresh,detail:'New payment event window; token age has no limit'});
       if(!fresh){base.reasons.push('PAYMENT_OUTSIDE_WINDOW');return base;}
       const launch=await deps.launch(token).catch(()=>null);
-      if(launch?.exists&&launch.token.toLowerCase()===token.toLowerCase()) {
+      if(launch?.exists&&launch.token.toLowerCase()===token.toLowerCase()&&(!launch.launchType||launch.launchType==='PONS')) {
         base.allowed=true;base.launchType=launch.launchType??'PONS';base.ponsDeployer=launch.deployer;
         base.securityNote=`Verified ${base.launchType} launchpad origin · payment is promotion, not a trade recommendation.`;
         base.checks.push({key:'TRUSTED_LAUNCHPAD',passed:true,detail:'Authoritative PONS factory verification'});
@@ -56,4 +56,4 @@ export const evaluateDexPaidAlertSafety=createDexPaidEventGate({paid:scanRobinho
   // V2 origin is independently verifiable without the V1-only launch-state view.
   // Creator enrichment is optional and must not turn an approved origin into CUSTOM.
   launch:async token=>{const origin=await getVerifiedRobinhoodLaunchpad(token);return origin?{...origin,exists:true}:null;},
-  custom:token=>routeBoostSecurity({tokenAddress:token,verifiedTrustedLaunchpad:false,requireExplicitSellability:true,allowUnknownSellability:true}),now:Date.now});
+  custom:token=>routeBoostSecurity({tokenAddress:token,verifiedTrustedLaunchpad:false,requireExplicitSellability:true,allowUnknownSellability:true,promotionEvent:true}),now:Date.now});
