@@ -1,3 +1,4 @@
+import {buildExistingTokenResearchCard} from '../ui/existingTokenResearchCard.js';
 import {hasConfirmedNormalOpportunityDelivery} from './confirmedOpportunityDelivery.js';
 import {forEachDeliveryRecipient} from './recipientDeliveryTiming.js';
 import {robinhoodAlertSafety} from './robinhoodAlertSafety.js';
@@ -479,6 +480,15 @@ export function buildOpportunityMessage(
     !hasPreIndexValuation &&
     opportunity.raw_data?.marketIndexState === 'NOT_INDEXED'
   );
+
+  // Existing-token cards disclose facts instead of scanner placeholder scores.
+  // EXIT and every other producer retain their existing rendering path.
+  if (opportunity.chain === 'robinhood' && String(opportunity.strategy_key ?? '').startsWith('EXISTING_TOKEN_') &&
+      (action === 'BUY' || action === 'CHECK_ENTRY')) {
+    return buildExistingTokenResearchCard({token:opportunity.asset_id,chain:opportunity.chain,
+      strategy:opportunity.strategy_key!,raw:opportunity.raw_data??{},market,evidence:decisionEvidence,
+      reason,comparison,decision:notificationDecision});
+  }
 
   const isPonsConfirmed = ['robinhood', 'pons'].includes(String(opportunity.chain ?? '').toLowerCase()) &&
     String(opportunity.strategy_key ?? '').toUpperCase().startsWith('PONS_') &&
@@ -1127,6 +1137,11 @@ async function deliverOpportunity(
   if (opportunity.chain==='robinhood' && ['BUY','CHECK_ENTRY'].includes(action)) {
     const {origin,security}=await robinhoodAlertSafety(opportunity.asset_id);
     if (!security.allowed) return;
+    // Reuse authoritative final-gate evidence only for presentation. No new reads.
+    if (String(opportunity.strategy_key??'').startsWith('EXISTING_TOKEN_')) opportunity.raw_data = {...opportunity.raw_data,alertSafetyDisplay:{
+      token:opportunity.asset_id,launchType:origin?.launchType??null,
+      sellabilityVerified:security.sellabilityVerified===true,lpStatus:security.liquidity?.status??null,
+    }};
     if (!origin) customSafetyNote='\n\n'+security.reason;
   }
   const deliveryStartedAt = Date.now();
