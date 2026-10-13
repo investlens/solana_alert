@@ -20,3 +20,5 @@ test('paid priority is bounded, fair, retried on missing payment and deduplicate
 test('expired queue cannot replay stale candidates',()=>{const q=createPromotionPriorityQueue();q.admit([{tokenAddress:token}],1000);assert.equal(q.next(481000),null);assert.equal(q.size,0);});
 
 test("provider heartbeat is a control message, not a promotion or snapshot",()=>{assert.equal(parsePromotionUpdate(JSON.stringify({type:"heartbeat"}),"boost"),null);assert.throws(()=>parsePromotionUpdate(JSON.stringify({type:"heartbeat",data:"invalid"}),"paid"));});
+
+test("promotion streams isolate ARC and Robinchain",()=>{const row={chainId:"arc",tokenAddress:token,amount:10,totalAmount:20};assert.deepEqual(parsePromotionUpdate(JSON.stringify([row]),"boost","arc"),[{tokenAddress:token,amount:10,totalAmount:20}]);assert.deepEqual(parsePromotionUpdate(JSON.stringify([row]),"boost"),[]);assert.deepEqual(parsePromotionUpdate(JSON.stringify([{...row,chainId:"robinhood"}]),"paid","arc"),[]);});
