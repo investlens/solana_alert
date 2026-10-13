@@ -29,16 +29,18 @@ test('verified Flap boost and positive alerts skip separate security providers a
     assert.match(labelLaunchType('Alert\nStats','FLAP'),/Launch: <b>FLAP<\/b>/);
   }finally{globalThis.fetch=prior;}
 });
-test('fresh verified Flap DEX payment skips custom checks but freshness and exact-token matching remain',async()=>{
+test('Flap DEX payment requires custom selling checks; only verified PONS is exempt',async()=>{
   const now=Date.now();let calls=0;
   const paid={tokenAddress:token,dexPaid:true,status:'PAID' as const,orderTypes:['tokenProfile'],orderStatuses:['approved'],latestPaymentTimestamp:now-1000,warnings:[],scannedAt:now};
   const deps={paid:async()=>paid,launch:async()=>({exists:true,token,deployer:null,launchType:'FLAP' as const}),
     custom:async()=>{calls++;return {allowed:false,route:'CUSTOM_SECURITY_REQUIRED' as const,liquidity:null,reason:'unknown',cached:false};},now:()=>now};
   const result=await createDexPaidEventGate(deps)(token);
-  assert.equal(result.allowed,true);assert.equal(result.launchType,'FLAP');assert.equal(calls,0);
+  assert.equal(result.allowed,false);assert.equal(calls,1);
+  const pons=await createDexPaidEventGate({...deps,launch:async()=>({exists:true,token,deployer:null,launchType:'PONS' as const})})(token);
+  assert.equal(pons.allowed,true);assert.equal(pons.launchType,'PONS');assert.equal(calls,1);
   assert.equal((await createDexPaidEventGate({...deps,paid:async()=>({...paid,latestPaymentTimestamp:now-601000})})(token)).allowed,false);
   assert.equal((await createDexPaidEventGate({...deps,launch:async()=>({...await deps.launch(),token:'0x2222222222222222222222222222222222222222'})})(token)).allowed,false);
-  assert.equal(calls,1);
+  assert.equal(calls,2);
 });
 test('observer, delivery and general positive gate share the approved-launchpad resolver',async()=>{
   for(const path of ['src/chains/robinhood/robinhoodBoostObserver.ts','src/services/alphaSemanticDeliveryService.ts','src/chains/robinhood/launchSecurity.ts','src/chains/robinhood/security/dexPaidAlertSafetyGate.ts'])
