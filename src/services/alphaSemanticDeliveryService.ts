@@ -159,8 +159,8 @@ export async function deliverAlphaSemanticEvent(args: {
   let lpStatus: string | null = null;
   if (dependencies === productionDependencies && args.event.type === 'BOOST' && args.event.chain.toLowerCase() === 'robinhood') {
     const origin = await getVerifiedRobinhoodLaunchpad(args.event.assetId).catch(() => null);
-    const trusted = origin !== null;
-    const safety = await routeBoostSecurity({tokenAddress:args.event.assetId, verifiedTrustedLaunchpad:trusted, requireExplicitSellability:true, allowUnknownSellability:true});
+    const trusted = origin?.launchType === 'PONS';
+    const safety = await routeBoostSecurity({tokenAddress:args.event.assetId, verifiedTrustedLaunchpad:trusted, requireExplicitSellability:true, allowUnknownSellability:true,promotionEvent:true});
     if (!safety.allowed) { console.warn('[AlphaSemanticDelivery] Boost sellability blocked', {reason:safety.reason}); return {delivered:0,failed:0}; }
     launchType = origin?.launchType ?? 'UNKNOWN';
     exitPairId=safety.exitPairId;
