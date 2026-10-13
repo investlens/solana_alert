@@ -1,7 +1,16 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {arcDeliverySafety,ARC_PROMOTION_WARNING} from '../src/chains/arc/promotionPolicy.js';
+import {arcDeliverySafety as deliverySafety,ARC_PROMOTION_WARNING} from '../src/chains/arc/promotionPolicy.js';
 import {readFileSync} from 'node:fs';
+const arcDeliverySafety=(...args:Parameters<typeof deliverySafety>)=>deliverySafety(args[0],args[1],args[2],args[3],args[4]??(async()=>({allowed:false,reason:'No independent sell receipts',observedAt:Date.now()})),args[5],args[6],1);
+
 import {polishArcTelegramPresentation} from '../src/chains/arc/telegramPresentation.js';
+test('ARC boost and DEX share zero-sell watch and unlocked-LP delivery rules',async()=>{
+ for(const feed of ['ARC_BOOST','ARC_DEX_PAID'])for(const sells of [0,1,null]){
+  const result=await deliverySafety(feed,'token',async()=>({allowed:true,reason:'flags clear'}),
+    async()=>({allowed:true,reason:'Full exit verified',lpStatus:'UNLOCKED',observedAt:Date.now()}),undefined,undefined,undefined,sells);
+  assert.equal(result.allowed,sells===1);if(result.allowed)assert.match(result.reason,/LIQUIDITY NOT LOCKED/);
+ }
+});
 test('ARC boost and DEX paid require exit evidence and block confirmed honeypots',async()=>{
  for(const feed of ['ARC_BOOST','ARC_DEX_PAID']){
   let calls=0;

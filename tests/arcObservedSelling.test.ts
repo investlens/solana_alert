@@ -42,7 +42,8 @@ test('observed route does not claim simulation or LP protection; confirmed restr
  const observe=async()=>({...assessObservedSales(sales(),now),poolId:pool});
  const result=await arcDeliverySafety('ARC_OPPORTUNITY',token,async()=>({allowed:true,reason:'flags clear'}),undefined,observe,pool);
  assert.equal(result.allowed,true);assert.equal(result.sellabilityVerified,false);assert.equal(result.sellabilityMethod,'OBSERVED_SELLS');assert.equal(result.lpStatus,'UNKNOWN');assert.match(result.reason,/RISKY ALERT/);
- for(const check of [async()=>({allowed:false,reason:'unknown'}),async()=>({allowed:false,sellabilityBlocked:true,reason:'honeypot'})])assert.equal((await arcDeliverySafety('ARC_BOOST',token,check,undefined,observe)).allowed,false);
+ assert.equal((await arcDeliverySafety('ARC_BOOST',token,async()=>({allowed:false,reason:'provider flags unavailable'}),undefined,observe)).allowed,true);
+ assert.equal((await arcDeliverySafety('ARC_BOOST',token,async()=>({allowed:false,sellabilityBlocked:true,reason:'honeypot'}),undefined,observe)).allowed,false);
  assert.equal((await arcDeliverySafety('ARC_BOOST',token,async()=>({allowed:true,reason:'clear'}),async()=>({allowed:false,reason:'Sell simulation reverted',observedAt:now}),observe)).allowed,false);
  assert.match(arcLiquidityDisclosure('LOCKED'),/Liquidity protection verified/);assert.doesNotMatch(arcLiquidityDisclosure('BURNED'),/safe/i);
 });

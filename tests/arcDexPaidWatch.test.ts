@@ -1,6 +1,21 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {createArcDexPaidWatch,freshArcPayment}from '../src/chains/arc/dexPaidWatch.js';
 const token='0x'+'1'.repeat(40);
+test('failed ARC payment delivery remains retryable and is not prematurely marked done',async()=>{
+ let now=2000000000000, attempts=0;
+ const watch=createArcDexPaidWatch({now:()=>now,read:async url=>url.includes('/orders/')?[{paymentTimestamp:2000000000,status:'approved'}]:[],
+  security:async()=>({allowed:true,reason:'exit passed'}),claim:async()=> 'CLAIMED',send:async()=>{attempts++;return {delivered:1,failed:attempts===1?1:0};}});
+ watch.seed(token,true);await watch.tick();now+=30000;await watch.tick();now+=30000;await watch.tick();assert.equal(attempts,2);
+});
+test('a genuinely observed payment survives a security wait without relabelling an old payment as new',async()=>{
+ let now=2000000000000, safe=false, sends=0;
+ const watch=createArcDexPaidWatch({now:()=>now,read:async url=>url.includes('/orders/')?[{paymentTimestamp:2000000000,status:'approved'}]:[],
+  security:async()=>({allowed:safe,reason:'WATCH: zero sells'}),claim:async()=> 'CLAIMED',send:async()=>{sends++;}});
+ watch.seed(token,true);await watch.tick();now+=700000;safe=true;await watch.tick();assert.equal(sends,1);
+ const old=createArcDexPaidWatch({now:()=>now,read:async url=>url.includes('/orders/')?[{paymentTimestamp:2000000000,status:'approved'}]:[],
+  security:async()=>({allowed:true,reason:'pass'}),claim:async()=> 'CLAIMED',send:async()=>{sends++;}});
+ old.seed(token,true);await old.tick();assert.equal(sends,1);
+});
 test('fresh payment parser excludes cancelled, stale, future and malformed orders',()=>{
  const now=2000000000000;
  assert.equal(freshArcPayment([{paymentTimestamp:now/1000,status:'approved'}],now),now);

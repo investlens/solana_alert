@@ -6,12 +6,12 @@ export async function setSharedJson(key:string,value:unknown,fetchedAt:string,tt
 
 // Critical delivery claims fail closed. A timeout may have written the key, so
 // callers must never interpret unavailable Redis as permission to send.
-export async function claimSharedDelivery(key: string, ttlMs: number): Promise<'CLAIMED' | 'EXISTS' | 'UNAVAILABLE'> {
+export async function claimSharedDelivery(key: string, ttlMs: number, owner = 'claimed'): Promise<'CLAIMED' | 'EXISTS' | 'UNAVAILABLE'> {
   try {
     const redis = await getClient();
     if (!redis || ttlMs <= 0) return 'UNAVAILABLE';
     const result = await Promise.race([
-      redis.set(key, 'claimed', { NX: true, PX: ttlMs }),
+      redis.set(key, owner, { NX: true, PX: ttlMs }),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Delivery claim timeout')), 500)),
     ]);
     return result === 'OK' ? 'CLAIMED' : 'EXISTS';
