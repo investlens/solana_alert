@@ -1,4 +1,5 @@
 import {verifyArcNativeExit} from '../src/chains/arc/nativeExitSimulation.js';
+import {startPromotionStreams} from '../src/chains/robinhood/promotionStreams.js';
 import {acquireRecipientClaim,telegramExplicitRejection,retryTelegramRejection} from '../src/services/recipientDeliveryClaim.js';
 import {loadPendingArcBoosts,savePendingArcBoosts,restorePendingArcBoosts,type PendingArcBoost} from '../src/chains/arc/pendingBoosts.js';
 import {loadArcSecurity} from '../src/chains/arc/securityProvider.js';
@@ -672,6 +673,25 @@ async function main() {
   }
 
   let last = verified.blockNumber;
+  await processArcBoosts();
+  const streamBoosts=new Map<string,{tokenAddress:string;amount:number;totalAmount:number}>();
+  let streamWorking=false;
+  const drainStreamBoosts=async()=>{
+    if(streamWorking)return;streamWorking=true;
+    try{while(streamBoosts.size){const [key,row]=streamBoosts.entries().next().value!;streamBoosts.delete(key);await processRecoverableArcBoost(row);}}
+    catch(error){console.warn('[ArcBoost] STREAM_PROCESSING_UNAVAILABLE',{reason:error instanceof Error?error.message:String(error)});}
+    finally{streamWorking=false;}
+  };
+  startPromotionStreams((kind,rows,snapshot)=>{
+    for(const row of rows){arcDexPaid.seed(row.tokenAddress,true);if(kind!=='boost')continue;
+      const key=row.tokenAddress.toLowerCase();
+      if(snapshot&&!arcBoostTotals.has(key)){arcBoostTotals.set(key,row.totalAmount!);continue;}
+      if(row.totalAmount!<=(arcBoostTotals.get(key)??0))continue;
+      streamBoosts.set(key,{tokenAddress:key,amount:row.amount!,totalAmount:row.totalAmount!});
+      while(streamBoosts.size>100)streamBoosts.delete(streamBoosts.keys().next().value!);
+    }
+    if(kind==='boost')void drainStreamBoosts();else void arcDexPaid.tick();
+  },'arc');
   while (true) {
     await new Promise(resolve => setTimeout(resolve, POLL_MS));
     try {
@@ -760,8 +780,9 @@ const arcDexPaid=createArcDexPaidWatch({
  security:async token=>arcDeliverySafety('ARC_DEX_PAID',token,checkArcBoostSecurity),
  send:async(token,paymentAt)=>{
   const text=['💎 <b>DEX PAID DETECTED · ARC</b>','Promotion payment confirmed · research event',`Payment age ${Math.max(0,Math.floor((Date.now()-paymentAt)/1000))}s`,'<b>RISK</b>','LP protection, creator history and linked-wallet risks remain unverified.','<b>CONTRACT</b>',`<code>${token}</code>`,'Paid promotion does not establish trading quality.'].join('\n');
-  const result=await broadcastArcAlert(text,[[{text:'💎 DexScreener',url:`https://dexscreener.com/arc/${token}`},{text:'🔎 Explorer',url:`https://explorer.arc.io/address/${token}`}]],token,'ARC_DEX_PAID');
+  const result=await broadcastArcAlert(text,[[{text:'💎 DexScreener',url:`https://dexscreener.com/arc/${token}`},{text:'🔎 Explorer',url:`https://explorer.arc.io/address/${token}`}]],token,'ARC_DEX_PAID',undefined,undefined,`arc:dex-paid:${token}:${paymentAt}`);
   console.log('[ArcDexPaid] SENT',{delivered:result.delivered,failed:result.failed});
+  return result;
  }
 });
 
