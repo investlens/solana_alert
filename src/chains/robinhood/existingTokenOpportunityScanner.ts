@@ -1,4 +1,5 @@
 import {hasConfirmedNormalOpportunityDelivery} from '../../services/confirmedOpportunityDelivery.js';
+import { withRequestDeadline, throwIfRequestAborted } from '../../services/requestDeadline.js';
 import { considerRobinhoodVolumeBreakout } from './volumeBreakoutSetup.js';
 import { config } from '../../config.js';
 import { recordOpportunity } from '../../core/opportunityRegistry.js';
@@ -290,6 +291,7 @@ export async function refreshExistingTokenOpportunityScanner() {
     queue_deferred: 0, quota_deferred: 0, cycle_deferred: 0, provider_backoff_deferred: 0, remaining_due: 0, candidates: 0, qualified: 0,
     actionable_emitted: 0, market_batch_candidates: 0, market_batch_ready: 0, failure_reasons: {} as Record<string, number>, provider_backoff: false, duration_ms: 0 };
   try {
+    return await withRequestDeadline(90_000, async () => {
     const universe = await loadUniverse(); metrics.universe = universe.length;
     const quota = Math.min(config.existingTokenMaxPerCycle, EXISTING_TOKEN_SCANNER_SUSTAINABLE_QUOTA);
     const due = selectDueExistingTokens(universe, { max: Math.min(quota*2,30) }); hotCursor = due.nextHotCursor; warmCursor = due.nextWarmCursor;
@@ -303,6 +305,7 @@ export async function refreshExistingTokenOpportunityScanner() {
     catch{console.warn('[ExistingTokenScanner] batch prefetch unavailable; individual scanning retained');}
     metrics.selected=selected.length;metrics.quota_deferred=Math.max(0,due.dueCount-selected.length);
     const batch = await runExistingTokenProviderBatch(selected, scanToken);
+    throwIfRequestAborted();
     recordCompletedExistingTokenScans(batch.completed.map(row => row.entry));
     for (const { result } of batch.completed) { metrics.scanned_success++; metrics.candidates += Number(result.candidate); metrics.qualified += Number(result.qualified); metrics.actionable_emitted += Number(result.emitted); }
     for (const { entry, error } of batch.failed) {
@@ -321,6 +324,7 @@ export async function refreshExistingTokenOpportunityScanner() {
     metrics.remaining_due = Math.max(0, due.dueCount - metrics.scanned_success - metrics.no_market);
     metrics.health = metrics.failed ? 'DEGRADED' : metrics.queue_deferred || metrics.cycle_deferred || metrics.quota_deferred ? 'CAPACITY_LIMITED' : 'HEALTHY';
     return metrics;
+    });
   } catch (error) {
     metrics.failed++; metrics.health = 'DEGRADED'; console.error('[ExistingTokenScanner] cycle failed', { reason: error instanceof Error ? error.message : String(error) }); return metrics;
   } finally {
