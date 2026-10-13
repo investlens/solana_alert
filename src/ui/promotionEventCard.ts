@@ -38,7 +38,7 @@ export function buildPromotionEventCard(args:PromotionCardArgs) {
    ? `Creator <a href="https://robinhoodchain.blockscout.com/address/${s.creator}">${s.creator.slice(0,8)}…${s.creator.slice(-4)}</a>`
    : lines.find(l=>/^Creator\s+0x/i.test(l.replace(/<[^>]+>/g,'').replace(/^[^A-Za-z]+/,'')));
  const age=args.paymentTimestamp&&Number.isFinite(args.paymentTimestamp)?Math.max(0,Math.floor((Date.now()-(args.paymentTimestamp<1e10?args.paymentTimestamp*1000:args.paymentTimestamp))/60000)):null;
- const trusted=args.launchType==='PONS'||args.launchType==='FLAP';
+ const trusted=args.launchType==='PONS'||(args.kind==='SOCIAL_MAFIA'&&args.launchType==='FLAP');
  const securityNote=(args.securityNote??'Sellability unverified · validate selling before investing.')
    .replace(/^⚠️\s*LP\s+UNLOCKED(?:\s*·\s*liquidity can be removed\.|:\s*liquidity can be pulled\.)\s*/i,'');
  const risk=trusted?`Verified ${args.launchType} origin · ownership and market risks remain`:esc(securityNote);
