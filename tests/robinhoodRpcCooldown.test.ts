@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { robinhoodRpcFailureCooldown, robinhoodRpcFailurePolicy, robinhoodRpcOperationMethod } from '../src/chains/robinhood/rpc.js';
+import { conciseRpcError } from '../src/chains/robinhood/rpc.js';
 test('blocked and rate-limited RPCs back off for five minutes; ordinary errors retain normal cooldown',()=>{
  for(const message of ['HTTP request failed. Status: 403 URL: private','HTTP 429','statusCode=403']) assert.equal(robinhoodRpcFailureCooldown(new Error(message),60000),300000);
  assert.equal(robinhoodRpcFailureCooldown(new Error('timeout'),60000),60000);
@@ -22,4 +23,8 @@ test('method and parameter errors do not classify a provider as unreachable; acc
 test('deterministic contract reverts are distinct from provider outages',()=>{
  assert.equal(robinhoodRpcFailurePolicy(new Error('execution reverted')), 'CONTRACT');
  assert.equal(robinhoodRpcFailurePolicy(new Error('HTTP 503')), 'PROVIDER');
+});
+test('RPC diagnostics retain the actionable detail and omit provider credentials and request bodies', () => {
+ const error={details:'maximum log range is 100 blocks',shortMessage:'Invalid parameters',message:'URL: https://example.invalid/secret Request body: private'};
+ const message=conciseRpcError(error); assert.match(message,/maximum log range is 100 blocks/); assert.doesNotMatch(message,/secret|private/);
 });
