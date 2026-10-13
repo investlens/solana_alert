@@ -16,7 +16,7 @@ test('BOOST withholds custom alerts without verified execution, including provid
   const result=await routeBoostSecurity({tokenAddress:token,verifiedTrustedLaunchpad:false,requireExplicitSellability:true,allowUnknownSellability:true});
   assert.equal(result.allowed,false);assert.equal(result.sellabilityVerified,false);assert.match(result.reason,/Exit unverified/);
   const source=readFileSync(new URL('../src/chains/robinhood/robinhoodBoostObserver.ts',import.meta.url),'utf8');
-  assert.match(source,/verifiedTrustedLaunchpad: origin !== null, requireExplicitSellability: true, allowUnknownSellability: true/);
+  assert.match(source,/verifiedTrustedLaunchpad: verifiedPons, requireExplicitSellability: true, allowUnknownSellability: true, promotionEvent: true/);
   const deliverySource=readFileSync(new URL('../src/services/alphaSemanticDeliveryService.ts',import.meta.url),'utf8');
   assert.match(deliverySource,/verifiedTrustedLaunchpad:trusted, requireExplicitSellability:true, allowUnknownSellability:true/,
     'The delivery gate must preserve the observer warning policy; confirmed honeypots still block');
