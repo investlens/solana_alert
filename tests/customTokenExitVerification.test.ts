@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {decodeFunctionData,encodeAbiParameters,parseAbiParameters,parseAbi,keccak256,type Address} from 'viem';
+import {decodeAbiParameters,decodeFunctionData,encodeAbiParameters,parseAbiParameters,parseAbi,keccak256,type Address} from 'viem';
 import {createCustomExitVerifier,resolvePlainV4Key,customPoolRisk,roundTripLoss,observedLpStatus,EXIT_CHAIN_CONFIG} from '../src/services/customTokenExitVerification.js';
 const token=('0x'+'a'.repeat(40)) as Address,quote=EXIT_CHAIN_CONFIG.robinhood.quote;
 const currencies=[token.toLowerCase(),quote.toLowerCase()].sort() as Address[];
@@ -19,6 +19,13 @@ function fixture(mode='success'){
    assert.deepEqual(Object.keys(spec.stateOverrides),[wallet],'no token, pool or router state overrides');
    assert.deepEqual(Object.keys(spec.stateOverrides[wallet]),['balance']);
    assert.equal(decodeFunctionData({abi:erc20,data:calls[2].data}).functionName,'deposit');
+   const routed=decodeFunctionData({abi:parseAbi(['function execute(bytes commands,bytes[] inputs,uint256 deadline) payable']),data:calls[5].data});
+   const [actions,inputs]=decodeAbiParameters(parseAbiParameters('bytes,bytes[]'),routed.args![1][0]);
+   assert.equal(actions,'0x060c0f');
+   const [swap]=decodeAbiParameters(parseAbiParameters('((address currency0,address currency1,uint24 fee,int24 tickSpacing,address hooks) poolKey,bool zeroForOne,uint128 amountIn,uint128 amountOutMinimum,uint256 minHopPriceX36,bytes hookData)'),inputs[0]);
+   assert.equal(swap.minHopPriceX36,0n);assert.equal(swap.hookData,'0x');
+   assert.equal(keccak256(encodeAbiParameters(parseAbiParameters('address,address,uint24,int24,address'),[swap.poolKey.currency0,swap.poolKey.currency1,swap.poolKey.fee,swap.poolKey.tickSpacing,swap.poolKey.hooks])),pair);
+   assert.ok(calls.reduce((n:bigint,c:any)=>n+BigInt(c.gas),0n)<=6_000_000n,'simulation stays within bounded block gas');
    const input=BigInt(calls[2].value),output=mode==='99-loss'?input/100n:input*995n/1000n;
    return [{calls:calls.map((c:any,i:number)=>({status:mode==='revert'&&i===10?'0x0':'0x1',returnData:[0,1,6,7,11,12].includes(i)?encoded(i===6?1000n:i===11?(mode==='zero'?0n:output):i===12&&mode==='partial'?1n:0n):'0x'}))}];
   }});
