@@ -226,7 +226,7 @@ export async function deliverAlphaSemanticEvent(args: {
       : await discloseRobinhoodOwnership(deliveryMessage, args.event.assetId,
           paidCreator ?? (typeof args.event.rawSnapshot?.creator === 'string' ? args.event.rawSnapshot.creator : null),
           cachedRobinhoodAlertStats(args.event.assetId)?.chartUrl?.match(/\/robinhood\/(0x[a-fA-F0-9]{40,64})/)?.[1] ?? (cachedRobinhoodAlertStats(args.event.assetId)?.authoritativeVenue ? null : typeof args.event.rawSnapshot?.pairAddress === 'string' ? args.event.rawSnapshot.pairAddress : null),
-          isUndelayedRiskEvent(args.event.type));
+          isUndelayedRiskEvent(args.event.type) || ['DEX_PAID','BOOST'].includes(args.event.type));
     if(paidOwnership?.devPercent==null && paidOwnership?.top10Percent!=null)deliveryMessage=withOwnershipDisclosure(deliveryMessage,paidOwnership);
   }
   // Read the evidence already fetched for the card; no additional provider calls.

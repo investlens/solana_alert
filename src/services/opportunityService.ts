@@ -8,6 +8,7 @@ import {
 } from '../core/opportunityRegistry.js';
 
 import {robinhoodAlertSafety} from './robinhoodAlertSafety.js';
+import { throwIfRequestAborted } from './requestDeadline.js';
 
 export type RecordOpportunityAndEmitInput =
   OpportunityInput;
@@ -34,6 +35,7 @@ export async function recordOpportunityAndEmit(
   if (!opportunity) {
     return null;
   }
+  throwIfRequestAborted();
 
   try {
     await eventEngine.emit({

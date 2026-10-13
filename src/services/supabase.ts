@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { createRequestGate, currentRequestSignal, fetchBuffered } from './requestDeadline.js';
 import { runtimeDeliverableUsers, mergeRuntimeSubscribers } from './runtimeSubscriberRegistry.js';
 
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -15,12 +16,6 @@ type CachedResponse = {
 };
 
 type Lane = 'critical' | 'background';
-
-type LaneState = {
-  active: number;
-  limit: number;
-  queue: Array<() => void>;
-};
 
 let deliverableUsersCache: CachedResponse | null = null;
 const failOpenReservations = new Set<string>();
@@ -41,10 +36,7 @@ const BACKGROUND_CONCURRENCY = Math.max(
   Number(process.env.SUPABASE_BACKGROUND_CONCURRENCY ?? 2),
 );
 
-const lanes: Record<Lane, LaneState> = {
-  critical: { active: 0, limit: CRITICAL_CONCURRENCY, queue: [] },
-  background: { active: 0, limit: BACKGROUND_CONCURRENCY, queue: [] },
-};
+const requestGates = { critical: createRequestGate(CRITICAL_CONCURRENCY), background: createRequestGate(BACKGROUND_CONCURRENCY) };
 
 function requestUrl(input: RequestInfo | URL): string {
   if (typeof input === 'string') return input;
@@ -133,28 +125,6 @@ function cacheableCriticalGet(url: string, init?: RequestInit): boolean {
     url.includes('/rest/v1/pons_launches') ||
     isDeliverableUsersRead(url, init)
   );
-}
-
-async function acquireLane(lane: Lane): Promise<void> {
-  const state = lanes[lane];
-  if (state.active < state.limit) {
-    state.active += 1;
-    return;
-  }
-
-  await new Promise<void>((resolve) => {
-    state.queue.push(() => {
-      state.active += 1;
-      resolve();
-    });
-  });
-}
-
-function releaseLane(lane: Lane): void {
-  const state = lanes[lane];
-  state.active = Math.max(0, state.active - 1);
-  const next = state.queue.shift();
-  if (next) next();
 }
 
 function reservationKey(body: string | null): string | null {
@@ -252,15 +222,18 @@ async function resilientFetch(input: RequestInfo | URL, init?: RequestInit): Pro
   const critical = isCriticalRequest(url, init);
   const lane: Lane = critical ? 'critical' : 'background';
 
-  await acquireLane(lane);
-
+  const inherited = currentRequestSignal();
+  const signals = [AbortSignal.timeout(SUPABASE_REQUEST_TIMEOUT_MS), init?.signal, inherited].filter((signal): signal is AbortSignal => !!signal);
+  const signal = AbortSignal.any(signals);
+  let release: (() => void) | undefined;
   const boundedInit: RequestInit = {
     ...init,
-    signal: init?.signal ?? AbortSignal.timeout(SUPABASE_REQUEST_TIMEOUT_MS),
+    signal,
   };
 
   try {
-    const response = await fetch(input, boundedInit);
+    release = await requestGates[lane](signal);
+    const response = await fetchBuffered(input, boundedInit, signal);
 
     if (usersRead && response.ok) {
       const clone = response.clone();
@@ -316,6 +289,8 @@ async function resilientFetch(input: RequestInfo | URL, init?: RequestInit): Pro
 
     return response;
   } catch (error) {
+    // An expired scanner operation must not receive a cached response or a write permit.
+    inherited?.throwIfAborted();
     if (reservation) {
       if (key && failOpenReservations.has(key)) {
         console.warn('[SupabaseResilience] Reservation request failed; duplicate suppressed in memory.', { key });
@@ -351,7 +326,7 @@ async function resilientFetch(input: RequestInfo | URL, init?: RequestInit): Pro
     });
     throw error;
   } finally {
-    releaseLane(lane);
+    release?.();
   }
 }
 

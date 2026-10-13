@@ -3,6 +3,12 @@ import { withResearchDisclosure } from '../ui/researchDisclosure.js';
 import { buildAlphaosAlertCard } from '../ui/alphaosAlertCard.js';
 import { sendAlphaosPhotoAlert, telegramCaptionLength } from '../ui/alphaosPhotoDelivery.js';
 import { config } from '../config.js';
+import { currentRequestSignal, fetchBuffered, throwIfRequestAborted } from './requestDeadline.js';
+
+const boundedTelegramFetch: typeof fetch = (input, init: RequestInit = {}) => {
+  const signals = [init.signal, currentRequestSignal(), AbortSignal.timeout(8_000)].filter((value): value is AbortSignal => !!value);
+  return fetchBuffered(input, init, AbortSignal.any(signals));
+};
 
 export type InlineButton = {
   text: string;
@@ -52,6 +58,7 @@ export function buildAlphaReportUrl(tokenMint: string, context?: { engine?: stri
 }
 
 async function sendTelegramRequest(chatId: string, text: string, buttons?: InlineButton[][]): Promise<number | null> {
+  throwIfRequestAborted();
   if (!chatId) return null;
   text = cleanAlertCard(text);
   if (/PUMPFUN MOMENTUM WATCH|DEX PAID DETECTED|BOOST DETECTED|BOOST INCREASED|MAX BOOST 500\+|ARC OPPORTUNITY|TRADE SETUP WATCH|SUPPLY BURN|SOCIAL MAFIA ALERT/.test(text.split('\n')[0])) text = withResearchDisclosure(text);
@@ -82,10 +89,10 @@ async function sendTelegramRequest(chatId: string, text: string, buttons?: Inlin
       chainLabel: /PUMPFUN MOMENTUM/.test(category) ? 'SOLANA / PUMP.FUN' : /ARC OPPORTUNITY/.test(category) ? 'ARC' : 'ALPHAOS / TOKEN RESEARCH',
       badge: 'INFORMATION / DYOR', footer: 'Promotion and market activity do not establish token safety.' }).catch(() => null);
     return (await sendAlphaosPhotoAlert({ botToken: config.botToken, chatId, text,
-      keyboard: buttons ?? [], image })).messageId;
+      keyboard: buttons ?? [], image }, boundedTelegramFetch)).messageId;
   }
 
-  const res = await fetch(`https://api.telegram.org/bot${config.botToken}/sendMessage`, {
+  const res = await boundedTelegramFetch(`https://api.telegram.org/bot${config.botToken}/sendMessage`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
@@ -95,8 +102,9 @@ async function sendTelegramRequest(chatId: string, text: string, buttons?: Inlin
     const bodyText = await res.text().catch(() => '');
     throw new Error(`Telegram send failed: ${res.status} ${bodyText}`);
   }
-  const payload = await res.json() as { result?: { message_id?: number } };
-  return Number.isFinite(Number(payload.result?.message_id)) ? Number(payload.result?.message_id) : null;
+  const payload = await res.json() as { ok?: boolean; result?: { message_id?: number } };
+  if (!payload.ok || !Number.isInteger(payload.result?.message_id)) throw new Error('Telegram delivery not confirmed');
+  return payload.result!.message_id!;
 }
 
 export async function sendTelegram(chatId: string, text: string, buttons?: InlineButton[][]): Promise<void> {
