@@ -1,7 +1,7 @@
 import {finishProtectedBoost,classifyBoostAttempt,boostPurchaseKey} from './boostRecoveryState.js';
 import {claimBoostRecipientRecovery,releaseBoostRecipientRecovery,acquireBoostRecipientClaim} from '../../services/boostDeliveryGuard.js';
 import {telegramExplicitRejection} from '../../services/recipientDeliveryClaim.js';
-import {recordFeedPoll} from '../../services/feedDeliveryHealth.js';
+import {recordFeedPoll,recordPromotionAudit} from '../../services/feedDeliveryHealth.js';
 import {loadPendingBoosts,savePendingBoosts,restorePendingBoosts,type PendingBoost} from './pendingBoostRecovery.js';
 import { discloseRobinhoodKeyStats } from '../../services/alertKeyStatsService.js';
 import { discloseRobinhoodOwnership } from '../../services/alertOwnershipService.js';
@@ -422,10 +422,11 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
   if (!boostVerificationDue(verificationRetries, purchaseKey, boost.totalAmount, Date.now())) return false;
   const canonical = classifyBoostAttempt(boostTotals,pendingBoostRecoveries,tokenKey,boost);
   if (!canonical) return false;
+  recordPromotionAudit('RH_BOOST',purchaseKey,'OBSERVED');
   const pending=pendingBoostRecoveries.get(purchaseKey);
   if(!pending||boost.totalAmount>pending.totalAmount){
     pendingBoostRecoveries.set(purchaseKey,{tokenAddress:boost.tokenAddress,amount:canonical.boostAdded,totalAmount:boost.totalAmount,previousTotal:canonical.previousTotal,firstAt:Date.now()});
-    while(pendingBoostRecoveries.size>100){const key=pendingBoostRecoveries.keys().next().value!;const evicted=pendingBoostRecoveries.get(key)!;const token=normalize(evicted.tokenAddress);boostTotals.set(token,Math.max(boostTotals.get(token)??0,evicted.totalAmount));pendingBoostRecoveries.delete(key);verificationRetries.delete(key);console.warn('[RobinhoodBoostObserver] RECOVERY_CAPACITY_EXCEEDED_UNCONFIRMED');}
+    while(pendingBoostRecoveries.size>100){const key=pendingBoostRecoveries.keys().next().value!;const evicted=pendingBoostRecoveries.get(key)!;const token=normalize(evicted.tokenAddress);boostTotals.set(token,Math.max(boostTotals.get(token)??0,evicted.totalAmount));pendingBoostRecoveries.delete(key);verificationRetries.delete(key);recordPromotionAudit('RH_BOOST',key,'EXPIRED');console.warn('[RobinhoodBoostObserver] RECOVERY_CAPACITY_EXCEEDED_UNCONFIRMED');}
     await savePendingBoosts([...pendingBoostRecoveries.values()]);
   }
 
@@ -440,6 +441,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
   if (!security.allowed) {
     const disposition = recordBoostSecurityBlock(new Map(), verificationRetries, purchaseKey, boost.totalAmount, security.exitUnverified === true || security.liquidity?.status === 'UNKNOWN', Date.now());
     if(disposition!=='RETRY_PENDING'){boostTotals.set(tokenKey,Math.max(boostTotals.get(tokenKey)??0,boost.totalAmount));pendingBoostRecoveries.delete(purchaseKey);await savePendingBoosts([...pendingBoostRecoveries.values()]);}
+    recordPromotionAudit('RH_BOOST',purchaseKey,disposition==='RETRY_PENDING'?'WATCHED':'BLOCKED');
     console.log('[RobinhoodBoostObserver] BOOST_VERIFICATION_DISPOSITION', { token: tokenKey, disposition });
     console.warn('[RobinhoodBoostObserver] BOOST_BLOCKED_SECURITY', {
       token: tokenKey, eventType: canonical.type, totalBoost: boost.totalAmount, reason: security.reason,
@@ -447,6 +449,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
     return false;
   }
 
+  recordPromotionAudit('RH_BOOST',purchaseKey,'READY');
   const [metadata, initialEnrichment] = await Promise.all([
     resolveBoostMetadata(boost.tokenAddress, null, 500)
       .catch(() => boostMetadataFallback(boost.tokenAddress)),
@@ -555,6 +558,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
   const recovering=activePending.recipientClaims===true;
   const claim = recovering?await claimBoostRecipientRecovery(boost.tokenAddress,boost.totalAmount,claimOwner,true):await claimBoostDelivery(boost.tokenAddress, boost.totalAmount, undefined, claimOwner);
   if (claim !== 'CLAIMED') {
+    recordPromotionAudit('RH_BOOST',purchaseKey,'DELIVERY_PENDING');
     console.log('[RobinhoodBoostObserver] BOOST_DELIVERY_GUARD', { token: tokenKey, totalBoost: boost.totalAmount, state: claim });
     // EXISTS may be a concurrent/ambiguous attempt, not complete fan-out.
     {
@@ -570,7 +574,13 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
   }
   const protectedPending=activePending;
   protectedPending.recipientClaims=true;
-  await savePendingBoosts([...pendingBoostRecoveries.values()]);
+  try{await savePendingBoosts([...pendingBoostRecoveries.values()]);}
+  catch(error){
+    if(!recovering)delete protectedPending.recipientClaims;
+    if(recovering)await releaseBoostRecipientRecovery(boost.tokenAddress,boost.totalAmount,claimOwner);
+    else await releaseUnsentBoostClaim(boost.tokenAddress,boost.totalAmount,claimOwner,false);
+    throw error;
+  }
   try {
   let failed=0,alreadyConfirmed=0,fallbackUsed=false;
   let delivered = 0;
@@ -606,6 +616,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
   }
 
   if (!fallbackUsed && failed===0 && (delivered>0||accepted>0||alreadyConfirmed>0)) {
+    recordPromotionAudit('RH_BOOST',purchaseKey,'DELIVERED');
     await markBoostDeliveryAccepted(semanticEvent.eventIdentity, rawSnapshot);
     finishProtectedBoost(boostTotals,pendingBoostRecoveries,verificationRetries,tokenKey,boost.totalAmount,protectedPending);
     await savePendingBoosts([...pendingBoostRecoveries.values()]);
@@ -639,6 +650,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
     })();
     return true;
   }
+  recordPromotionAudit('RH_BOOST',purchaseKey,'DELIVERY_PENDING');
   verificationRetries.set(purchaseKey,{total:boost.totalAmount,firstAt:protectedPending.firstAt,nextAt:Date.now()+60000,attempts:1});
   console.warn('[RobinhoodBoostObserver] RECIPIENT_RECOVERY_PENDING',{delivered,failed,alreadyConfirmed,fallbackUsed});
   if (await releaseUnsentBoostClaim(boost.tokenAddress, boost.totalAmount, claimOwner, sendStarted)) {
@@ -656,7 +668,7 @@ export async function runRobinhoodBoostObserverCycle() {
     const boosts = await fetchRobinhoodBoosts();
     recordFeedPoll('RH_BOOST_SCAN','OK',boosts.length);
     const pending=restorePendingBoosts([...pendingBoostRecoveries.values()]);
-    for(const [key,row] of pendingBoostRecoveries)if(!pending.some(p=>boostPurchaseKey(p.tokenAddress,p.totalAmount)===key)){boostTotals.set(normalize(row.tokenAddress),Math.max(boostTotals.get(normalize(row.tokenAddress))??0,row.totalAmount));pendingBoostRecoveries.delete(key);verificationRetries.delete(key);console.warn('[RobinhoodBoostObserver] RECOVERY_EXPIRED_UNCONFIRMED');}
+    for(const [key,row] of pendingBoostRecoveries)if(!pending.some(p=>boostPurchaseKey(p.tokenAddress,p.totalAmount)===key)){boostTotals.set(normalize(row.tokenAddress),Math.max(boostTotals.get(normalize(row.tokenAddress))??0,row.totalAmount));pendingBoostRecoveries.delete(key);verificationRetries.delete(key);recordPromotionAudit('RH_BOOST',key,'EXPIRED');console.warn('[RobinhoodBoostObserver] RECOVERY_EXPIRED_UNCONFIRMED');}
     for(const row of pending)if(!boosts.some(b=>boostPurchaseKey(b.tokenAddress,b.totalAmount)===boostPurchaseKey(row.tokenAddress,row.totalAmount)))boosts.push(row);
     console.log('[RobinhoodBoostObserver] Feed:', { boosts: boosts.length, mode: 'LIVE_ONLY',pendingRecovery:pending.length });
     let alertsSent = 0;
@@ -667,6 +679,7 @@ export async function runRobinhoodBoostObserverCycle() {
     for (const boost of boosts) {
       try { if (await processBoost(boost)) alertsSent += 1; }
       catch (error) {
+        recordPromotionAudit('RH_BOOST',boostPurchaseKey(boost.tokenAddress,boost.totalAmount),'DELIVERY_PENDING');
         console.error('[RobinhoodBoostObserver] Token processing failed:', {
           token: boost.tokenAddress, error: error instanceof Error ? error.message : String(error),
         });
