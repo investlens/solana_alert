@@ -1,3 +1,4 @@
+import {acquireRecipientClaim} from './recipientDeliveryClaim.js';
 import { supabase } from './supabase.js';
 import { claimSharedDelivery, runSharedAtomic } from './sharedJsonCache.js';
 
@@ -55,4 +56,20 @@ export async function markBoostDeliveryAccepted(eventIdentity: string, rawSnapsh
     // The pre-send Redis claim still prevents ambiguous or partial replay.
     console.warn('[BoostDeliveryGuard] Acceptance audit unavailable; shared claim retained');
   }
+}
+
+// Only an explicitly checkpointed recipient-protected attempt may enter this
+// short recovery lease. Historical/global claims are never deleted or weakened.
+export async function claimBoostRecipientRecovery(token:string,total:number,owner:string,protectedAttempt:boolean,claim=claimSharedDelivery){
+ if(!protectedAttempt||!owner||owner==='claimed'||!/^0x[a-f0-9]{40}$/i.test(token)||!Number.isSafeInteger(total)||total<=0)return 'UNAVAILABLE' as const;
+ return claim(`alphaos:boost-recipient-recovery:${token.toLowerCase()}:${total}`,90000,owner);
+}
+export async function releaseBoostRecipientRecovery(token:string,total:number,owner:string,atomic=runSharedAtomic){
+ try{await atomic("if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) end return 0",[`alphaos:boost-recipient-recovery:${token.toLowerCase()}:${total}`],[owner]);}catch{}
+}
+
+// Boost fan-out must not inherit a thirty-second claim retry pause per recipient.
+// Preserve the same owner and fail-closed semantics, with two bounded 1s pauses.
+export function acquireBoostRecipientClaim(event:string,recipient:string,atomic=runSharedAtomic,wait=(ms:number)=>new Promise<void>(resolve=>setTimeout(resolve,ms))){
+ return acquireRecipientClaim(event,recipient,atomic,ms=>wait(Math.min(ms,1000)));
 }
