@@ -612,6 +612,7 @@ async function processRecoverableArcBoost(boost:{tokenAddress:string;amount:numb
 async function processArcBoosts(): Promise<void> {
   if (Date.now() - lastArcBoostPollAt < ARC_BOOST_POLL_MS) return;
   lastArcBoostPollAt = Date.now();
+  try {
   const boosts = await fetchArcBoosts();
   recordFeedPoll('ARC_BOOST_SCAN',boosts===null?'UNAVAILABLE':'OK',boosts?.length??0);
   if (boosts === null) return;
@@ -646,7 +647,8 @@ async function processArcBoosts(): Promise<void> {
   for(const key of pendingArcBoosts.keys())if(!pending.some(p=>arcBoostIdentity(p.tokenAddress,p.totalAmount)===key)){const row=pendingArcBoosts.get(key)!;const token=row.tokenAddress.toLowerCase();arcBoostTotals.set(token,Math.max(arcBoostTotals.get(token)??0,row.totalAmount));pendingArcBoosts.delete(key);recordPromotionAudit('ARC_BOOST',key,'EXPIRED');}
   while(arcBoostTotals.size>100)arcBoostTotals.delete(arcBoostTotals.keys().next().value!);
   if(Date.now()-lastArcBoostCheckpointAt>=30000){lastArcBoostCheckpointAt=Date.now();await saveArcBoostCheckpoint(arcBoostTotals);}
-
+  recordFeedPoll('ARC_BOOST_RECOVERY','OK');
+  }catch{recordFeedPoll('ARC_BOOST_RECOVERY','UNAVAILABLE');console.warn('[ArcBoost] RECOVERY_UNAVAILABLE; pending checkpoints retained; next existing cycle retries');}
 }
 
 async function main() {
@@ -683,7 +685,7 @@ async function main() {
   const streamBoosts=new Map<string,{tokenAddress:string;amount:number;totalAmount:number}>();
   let streamWorking=false;
   const drainStreamBoosts=async()=>{
-    if(streamWorking)return;streamWorking=true;
+    if(streamWorking||!arcBoostBaselineReady)return;streamWorking=true;
     try{while(streamBoosts.size){const [key,row]=streamBoosts.entries().next().value!;streamBoosts.delete(key);await processRecoverableArcBoost(row);}}
     catch(error){console.warn('[ArcBoost] STREAM_PROCESSING_UNAVAILABLE',{reason:error instanceof Error?error.message:String(error)});}
     finally{streamWorking=false;}
@@ -693,7 +695,7 @@ async function main() {
       const key=row.tokenAddress.toLowerCase();
       if(snapshot&&!arcBoostTotals.has(key)){arcBoostTotals.set(key,row.totalAmount!);continue;}
       if(row.totalAmount!<=(arcBoostTotals.get(key)??0))continue;
-      streamBoosts.set(key,{tokenAddress:key,amount:row.amount!,totalAmount:row.totalAmount!});
+      streamBoosts.set(arcBoostIdentity(key,row.totalAmount!),{tokenAddress:key,amount:row.amount!,totalAmount:row.totalAmount!});
       while(streamBoosts.size>100)streamBoosts.delete(streamBoosts.keys().next().value!);
     }
     if(kind==='boost')void drainStreamBoosts();else void arcDexPaid.tick();
@@ -704,6 +706,7 @@ async function main() {
     void runRejectedCandidateReview();
     // Promotion events get the request budget before speculative unindexed pools.
     await processArcBoosts();
+    await drainStreamBoosts();
     await arcDexPaid.tick();
     await processMarketRetries();
     const current = await getArcBlockNumber();
