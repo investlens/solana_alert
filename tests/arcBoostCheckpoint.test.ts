@@ -17,3 +17,12 @@ test('restored lower total recovers an increase once without replaying equal or 
  for(const total of [20,30,30,20])await processArcBoostObservation(totals,{tokenAddress:token,totalAmount:total},deliver);
  assert.deepEqual(events,['INCREASE']);assert.equal(totals.get(token),30);
 });
+
+
+test('captured older ARC boost survives newer completion without lowering observed totals',async()=>{
+ const totals=new Map([[token,60]]),events:string[]=[];
+ const completed=await processArcBoostObservation(totals,{tokenAddress:token,totalAmount:30,previousTotal:20},async event=>{events.push(event);return true;});
+ assert.equal(completed,true);assert.equal(totals.get(token),60);assert.deepEqual(events,['INCREASE']);
+ const failed=await processArcBoostObservation(totals,{tokenAddress:token,totalAmount:40,previousTotal:30},async()=>false);
+ assert.equal(failed,false);assert.equal(totals.get(token),60);
+});
