@@ -19,11 +19,29 @@ This confirms delivery of recorded events. It does not prove complete global dis
 ## Remaining coverage limitations to resolve in subsequent batches
 
 - Current health screening counters count checks, not unique promotion events; exact event-stage reconciliation still needs a bounded identity-aware audit.
-- A payment first observed while fresh can age out of Robinchain's ten-minute safety window while sell evidence is pending. ARC already has a separate thirty-minute fresh-observation watch. Any Robinchain alignment must preserve first-observed freshness and must not replay older first-seen payments.
-- Robinchain BOOST acknowledges global completion after any acceptance; review per-recipient partial-failure recovery before modifying this critical lease path.
+- The first review batch identified payment aging during evidence checks. The second batch now prepares a bounded fresh-observation watch; see the detailed safeguards below.
+- The first review batch identified BOOST acknowledgement after any acceptance. The second batch now prepares recipient-protected recovery; concurrent/superseded attempts and recovery expiry require release review.
 - Process restart loses volatile counters. A rolling historical report needs bounded aggregate retention rather than storing all tokens/provider payloads.
 - Upstream bounded feeds cannot establish exhaustive worldwide promotion coverage.
 
 ## Release sequence
 
 Run typecheck and the full regression suite, publish a draft review PR, review the identified retry behavior, then agree a deployment window with the user. Do not merge or deploy automatically: this phase is explicitly isolated from current alerts.
+
+## Second review batch — recipient recovery and fresh-payment watch
+
+Prepared in the same unmerged main draft:
+
+- New boost attempts checkpoint recipient protection before sending. A partial attempt retains its pending event rather than acknowledging global completion. A short owner-scoped recovery lease coordinates retries; stable per-recipient claims skip accepted recipients and hold ambiguous sends. Historical/global boost claims are not deleted. Legacy pending attempts lacking the protection checkpoint do not gain permission to bypass historical claims.
+- Failed reservation/recipient setup and unconfirmed claims prevent global acknowledgement. Complete fan-out can include previously confirmed recipients without resending them. The initial admin fallback also uses the recipient guard and remains pending for the other eligible users. Recovery does not invoke an admin fallback when shared delivery is unavailable.
+- Pending recovery expires after the existing thirty-minute bound, reports expiry without claiming Telegram delivery, and absorbs the expired observed total so it cannot resurrect as a new purchase. A newer boost total retains its own event identity. The existing one-pending-total-per-token design can supersede an older attempt when a higher total arrives; exact historical purchase reconciliation remains a separate work item.
+- Robinchain DEX payments actually observed while fresh are retained for at most thirty minutes from payment time. The checkpoint holds at most twenty-four token/payment/observation triples. Late first-seen payments, mismatched payments, future observations and expired checkpoints cannot grant eligibility. Restored watches seed the existing bounded queues; no new poller. Every attempt still requires current confirmed paid-order evidence and the existing custom selling/security gate or verified PONS exemption.
+- Added Redis recipient claims/checkpoint writes are bounded. Existing provider-request budgets, safety decisions, mute preferences and release delays are preserved. Unknown Telegram acceptance remains unconfirmed, never a fabricated success.
+
+Remaining before release: independent review of concurrent/superseded boost handling and first-seen payment checkpoints, plus unique-event reconciliation diagnostics. Production remains untouched.
+
+Second-batch local validation: TypeScript typecheck and all 917 tests passed, including nine recovery regressions. Completed DEX watches are removed; their last confirmed receipt is distinguished from a new Telegram acceptance. Draft only, not deployed.
+
+Boost-specific recipient claims retain the same owner across retries while capping each retry pause at one second, avoiding a new thirty-second pause in the boost fan-out path. DEX claim timings are unchanged.
+
+Recovery classification is pinned to the pending attempt’s original prior total and increment. A newer purchase can use the already-observed pending total as evidence even before delivery finishes, so an in-flight attempt does not cause the next genuine increase to be silently absorbed as historical state.
