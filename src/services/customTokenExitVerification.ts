@@ -1,11 +1,12 @@
 import {encodeAbiParameters,encodeFunctionData,decodeFunctionResult,keccak256,parseAbi,parseAbiParameters,toHex,type Address,type Hex} from 'viem';
 import {governedDexScreenerJson} from './dexscreenerRequestGovernor.js';
+import {createExitRpcTransport} from './exitRpcTransport.js';
 
 export type ExitRequest={chain:'robinhood'|'arc';token:string;pairId?:string;security?:Record<string,unknown>};
 export type ExitVerification={allowed:boolean;reason:string;pairId?:string;maxLossPercent?:number;observedAt:number;lpStatus?:'LOCKED'|'BURNED'|'UNLOCKED'|'UNKNOWN'};
 type PoolKey={currency0:Address;currency1:Address;fee:number;tickSpacing:number;hooks:Address};
 type Call={from:Address;to:Address;data:Hex;value?:Hex;gas:Hex;gasPrice:Hex};
-type SimCall={status?:string;returnData?:Hex;error?:unknown};
+type SimCall={status?:string;returnData?:Hex;error?:unknown;logs?:{address:string;topics:string[];data:string;removed?:boolean}[]};
 type SimBlock={calls?:SimCall[]};
 type Dependencies={rpc:(chain:ExitRequest['chain'],method:string,params:unknown[],signal:AbortSignal)=>Promise<any>;pairs:(request:ExitRequest,signal:AbortSignal)=>Promise<any[]>;now:()=>number;wallet:()=>Address;security?:(request:ExitRequest,signal:AbortSignal)=>Promise<Record<string,unknown>|undefined>};
 const ZERO='0x0000000000000000000000000000000000000000' as Address;
@@ -17,6 +18,22 @@ export const EXIT_CHAIN_CONFIG={
 const ERC20=parseAbi(['function balanceOf(address) view returns (uint256)','function approve(address,uint256) returns (bool)','function deposit() payable']);
 const PERMIT_ABI=parseAbi(['function approve(address token,address spender,uint160 amount,uint48 expiration)']);
 const ROUTER=parseAbi(['function execute(bytes commands,bytes[] inputs,uint256 deadline) payable']);
+const NATIVE_TRACE='0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+const TRANSFER_TOPIC=keccak256(toHex('Transfer(address,address,uint256)'));
+// eth_simulateV1 traceTransfers emits native transfers at this reserved address.
+// Never accept ERC20 Transfer logs or a missing trace as native exit proceeds.
+export function nativeWalletDelta(call:SimCall,wallet:Address):bigint {
+ if(!Array.isArray(call.logs))throw Error('Native transfer trace unavailable');
+ let delta=0n;const topic='0x'+wallet.slice(2).toLowerCase().padStart(64,'0');
+ for(const log of call.logs){
+  if(log.address.toLowerCase()!==NATIVE_TRACE)continue;
+  if(log.removed||log.topics.length!==3||log.topics[0].toLowerCase()!==TRANSFER_TOPIC||!log.topics.slice(1).every(t=>/^0x0{24}[a-f0-9]{40}$/i.test(t))||!/^0x[a-f0-9]{64}$/i.test(log.data))throw Error('Native transfer trace malformed');
+  const amount=BigInt(log.data);
+  if(log.topics[1].toLowerCase()===topic)delta-=amount;
+  if(log.topics[2].toLowerCase()===topic)delta+=amount;
+ }
+ return delta;
+}
 const poolParameters=parseAbiParameters('address currency0,address currency1,uint24 fee,int24 tickSpacing,address hooks');
 // Candidate keys are accepted ONLY if their full ABI encoding hashes to the
 // exact observed pool ID. A known fee or a token symbol is never pool proof.
@@ -96,13 +113,15 @@ export function createCustomExitVerifier(deps:Dependencies){
     }
     const pairs=(await deps.pairs(request,signal)).filter(p=>p?.chainId===request.chain&&String(p.baseToken?.address??'').toLowerCase()===request.token.toLowerCase());
     const pool=request.pairId?pairs.find(p=>String(p.pairAddress).toLowerCase()===request.pairId!.toLowerCase()):pairs.sort((a,b)=>Number(b.liquidity?.usd??0)-Number(a.liquidity?.usd??0))[0];
-    if(!pool||pool.dexId!=='uniswap'||String(pool.quoteToken?.address??'').toLowerCase()!==config.quote.toLowerCase())throw Error('Exact supported DEX pool unavailable');
+    const poolQuote=String(pool?.quoteToken?.address??'').toLowerCase();
+    const nativeQuote=request.chain==='robinhood'&&poolQuote===ZERO;
+    if(!pool||pool.dexId!=='uniswap'||(!nativeQuote&&poolQuote!==config.quote.toLowerCase()))throw Error('Exact supported DEX pool unavailable');
     const pairId=String(pool.pairAddress);
     const selectedRisk=customPoolRisk(security,pairId);if(selectedRisk)return blocked(selectedRisk);
     const known=Array.isArray(security?.dex)?(security!.dex as any[]).find(d=>String(d.pair).toLowerCase()===pairId.toLowerCase()):null;
     const fee=known?.pool_fee!=null&&known.pool_fee!==''?Math.round(Number(known.pool_fee)*1e6):null;
-    const fees=fee==null?[100,500,3000,10000]:[fee];
-    const key=fees.map(f=>resolvePlainV4Key(request.token,config.quote,pairId,f)).find(Boolean);
+    const fees=fee==null?[0,100,500,3000,10000]:[fee];
+    const key=fees.map(f=>resolvePlainV4Key(request.token,poolQuote,pairId,f)).find(Boolean);
     if(!key)throw Error('Exact V4 pool key unsupported; hooks/route unverified');
     const block=await deps.rpc(request.chain,'eth_blockNumber',[],signal);
     const token=request.token.toLowerCase() as Address,deadline=BigInt(Math.floor(deps.now()/1000)+300);
@@ -117,7 +136,21 @@ export function createCustomExitVerifier(deps:Dependencies){
      ];
      // ONLY the test EOA's native balance is overridden. Token code, token
      // balances, router and pool state are never fabricated or overwritten.
-     const simulate=(calls:Call[])=>deps.rpc(request.chain,'eth_simulateV1',[{blockStateCalls:[{stateOverrides:{[wallet]:{balance:toHex(amount)}},calls}],validation:false},block],signal);
+     const simulate=(calls:Call[])=>deps.rpc(request.chain,'eth_simulateV1',[{blockStateCalls:[{stateOverrides:{[wallet]:{balance:toHex(amount)}},calls}],validation:false,...(nativeQuote?{traceTransfers:true}:{})},block],signal);
+     if(nativeQuote){
+      const buy=[read(token),call(config.router,swapData(key,ZERO,token,amount,deadline),toHex(amount)),read(token)];
+      const bought=complete(await simulate(buy),buy.length);
+      const tokens=balance(bought[2]);
+      if(balance(bought[0])!==0n||tokens<=0n||nativeWalletDelta(bought[1],wallet)!==-amount)throw Error('Native buy debit or received tokens unverified');
+      const roundtrip=[...buy,...approvals(token),call(config.router,swapData(key,token,ZERO,tokens,deadline)),read(token)];
+      const exited=complete(await simulate(roundtrip),roundtrip.length);
+      if(balance(exited[0])!==0n||balance(exited[2])!==tokens||balance(exited[6])!==0n||nativeWalletDelta(exited[1],wallet)!==-amount)throw Error('Full same-wallet native sell unverified');
+      const output=nativeWalletDelta(exited[5],wallet);
+      if(exited.reduce((sum,c)=>sum+nativeWalletDelta(c,wallet),0n)!==output-amount)throw Error('Native wallet cash flow unverified');
+      const loss=roundTripLoss(amount,output);maxLoss=Math.max(maxLoss,loss);
+      if(loss>10)throw Error('Exit loss exceeds 10% at a tested size');
+      continue;
+     }
      const buy=[read(token),read(config.quote),call(config.quote,encodeFunctionData({abi:ERC20,functionName:'deposit'}),toHex(amount)),...approvals(config.quote),call(config.router,swapData(key,config.quote,token,amount,deadline)),read(token),read(config.quote)];
      const bought=complete(await simulate(buy),buy.length);
      if(balance(bought[0])!==0n||balance(bought[1])!==0n||balance(bought[7])!==0n)throw Error('Test wallet balance or buy debit unverified');
@@ -129,22 +162,28 @@ export function createCustomExitVerifier(deps:Dependencies){
      if(loss>10)throw Error('Exit loss exceeds 10% at a tested size');
     }
     return {allowed:true,reason:`Same-wallet buy/sell simulated at three sizes · max round-trip loss ${maxLoss.toFixed(2)}% (excludes gas). Use the exact checked pool; execution can change.`,pairId,maxLossPercent:maxLoss,observedAt:deps.now(),lpStatus:observedLpStatus(security)};
-   }catch{return blocked('Exit unverified or excessive loss; automatic alert withheld. Available for manual research.');}
+   }catch(error){
+    // Only locally defined reasons are exposed; provider errors may include secrets.
+    const message=error instanceof Error?error.message:'';
+    const known=/^(?:Exact supported DEX pool unavailable|Exact V4 pool key unsupported; hooks\/route unverified|ARC native quote funding not independently supported|RPC chain identity mismatch|Native transfer trace unavailable|Native transfer trace malformed|Native buy debit or received tokens unverified|Full same-wallet native sell unverified|Native wallet cash flow unverified|Buy\/sell simulation reverted or incomplete|Exit loss exceeds 10% at a tested size|Exit returned no quote currency)$/;
+    const reason=known.test(message)?message:'Exit verification data unavailable or incomplete';
+    return blocked(`Exit unverified: ${reason}; automatic alert withheld. Available for manual research.`);
+   }
   })();
   inflight.set(key,promise);
   try{const value=await promise;if(cache.size>=100)cache.delete(cache.keys().next().value!);cache.set(key,{until:deps.now()+(value.allowed?20_000:60_000),value});return value;}
   finally{active--;inflight.delete(key);}
  };
 }
+const exitRpc=createExitRpcTransport({
+ chainId:chain=>EXIT_CHAIN_CONFIG[chain].id,
+ urls:chain=>chain==='robinhood'
+  ?[process.env.ROBINHOOD_RPC_URL,process.env.ROBINHOOD_RPC_FALLBACK_URL,EXIT_CHAIN_CONFIG.robinhood.rpc,'https://rpc.mainnet.chain.robinhood.com']
+  :[process.env.ARC_RPC_URL,EXIT_CHAIN_CONFIG.arc.rpc],
+});
 export const verifyCustomTokenExit=createCustomExitVerifier({
  now:Date.now,wallet:()=>('0x'+keccak256(toHex(crypto.randomUUID())).slice(-40)) as Address,
- rpc:async(chain,method,params,signal)=>{
-  const config=EXIT_CHAIN_CONFIG[chain];
-  const configured=chain==='robinhood'?process.env.ROBINHOOD_RPC_URL:process.env.ARC_RPC_URL;
-  const response=await fetch(configured?.trim()||config.rpc,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal});
-  if(!response.ok)throw Error('Simulation provider unavailable');
-  const json=await response.json() as any;if(json.error||json.result==null)throw Error('Simulation unsupported or failed');return json.result;
- },
+ rpc:exitRpc,
  security:async(request,signal)=>{
   const response=await fetch(`https://api.gopluslabs.io/api/v1/token_security/${EXIT_CHAIN_CONFIG[request.chain].id}?contract_addresses=${request.token}`,{signal});
   if(!response.ok)return undefined;

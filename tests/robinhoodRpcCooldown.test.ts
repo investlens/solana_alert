@@ -28,3 +28,8 @@ test('RPC diagnostics retain the actionable detail and omit provider credentials
  const error={details:'maximum log range is 100 blocks',shortMessage:'Invalid parameters',message:'URL: https://example.invalid/secret Request body: private'};
  const message=conciseRpcError(error); assert.match(message,/maximum log range is 100 blocks/); assert.doesNotMatch(message,/secret|private/);
 });
+
+test('archive credential restrictions do not masquerade as range errors or poison live RPC health',()=>{
+ assert.equal(robinhoodRpcFailurePolicy({details:'Archive requests require a personal token.',message:'Invalid parameters were provided to the RPC method.'}),'HISTORY');
+ assert.equal(robinhoodRpcFailurePolicy(new Error('Invalid parameters: maximum log range is 100 blocks')),'PARAMETERS');
+});

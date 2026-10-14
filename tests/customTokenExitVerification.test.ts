@@ -73,3 +73,29 @@ test('concurrent checks for a token coalesce without duplicate simulation',async
  const f=fixture();const results=await Promise.all([f.verify({chain:'robinhood',token}),f.verify({chain:'robinhood',token})]);
  assert.ok(results.every(r=>r.allowed));assert.equal(f.wallets,3);
 });
+
+test('native ETH route requires traced buy debit, complete full-sell proceeds and three wallets',async()=>{
+ const zero='0x0000000000000000000000000000000000000000';
+ const nativePair=keccak256(encodeAbiParameters(parseAbiParameters('address,address,uint24,int24,address'),[zero,token,0,60,zero]));
+ for(const mode of ['success','no-trace','fake-erc20','partial','loss','wrong-recipient','wrong-debit','extra-transfer','malformed']){
+  let wallets=0,simulations=0;
+  const verify=createCustomExitVerifier({now:()=>2_000_000_000_000,wallet:()=>('0x'+(++wallets).toString(16).padStart(40,'0')) as Address,
+   pairs:async()=>[{chainId:'robinhood',baseToken:{address:token},quoteToken:{address:zero},pairAddress:nativePair,dexId:'uniswap'}],
+   rpc:async(_chain,method,params)=>{
+    if(method==='eth_chainId')return '0x1237';if(method==='eth_blockNumber')return '0x123456';
+    simulations++;const spec=params[0] as any,calls=spec.blockStateCalls[0].calls,wallet=calls[0].from;
+    assert.equal(spec.traceTransfers,true);assert.equal(params[1],'0x123456');
+    assert.deepEqual(Object.keys(spec.blockStateCalls[0].stateOverrides),[wallet]);
+    assert.deepEqual(Object.keys(spec.blockStateCalls[0].stateOverrides[wallet]),['balance']);
+    assert.ok(calls.every((c:any)=>c.from===wallet));
+    const input=BigInt(calls[1].value),output=mode==='loss'?input/2n:input*995n/1000n;
+    const topic=(a:string)=>'0x'+a.slice(2).padStart(64,'0');
+    const trace=(from:string,to:string,value:bigint)=>({address:mode==='fake-erc20'?token:'0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',topics:[keccak256(new TextEncoder().encode('Transfer(address,address,uint256)')),topic(from),topic(to)],data:mode==='malformed'?'0x1':encoded(value)});
+    return [{calls:calls.map((_c:any,i:number)=>({status:'0x1',returnData:encoded(i===2?1000n:i===6&&mode==='partial'?1n:0n),
+     logs:mode==='no-trace'?undefined:i===1?[trace(wallet,EXIT_CHAIN_CONFIG.robinhood.router,mode==='wrong-debit'?input/2n:input)]:i===5?[trace(EXIT_CHAIN_CONFIG.robinhood.router,mode==='wrong-recipient'?token:wallet,output)]:i===3&&mode==='extra-transfer'?[trace(wallet,token,1n)]:[]}))}];
+   }});
+  const result=await verify({chain:'robinhood',token});
+  assert.equal(result.allowed,mode==='success',mode);
+  if(mode==='success'){assert.equal(wallets,3);assert.equal(simulations,6);assert.equal(result.maxLossPercent,0.5);assert.equal(result.pairId,nativePair);}
+ }
+});
