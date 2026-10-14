@@ -174,7 +174,8 @@ export async function deliverAlphaSemanticEvent(args: {
   let paidCreator: string | null = null;
   let paidSecurityNote: string | null = null;
   if (dependencies === productionDependencies && args.event.type === 'DEX_PAID' && args.event.chain.toLowerCase() === 'robinhood') {
-    const safety = await evaluateDexPaidAlertSafety(args.event.assetId);
+    const expectedPayment=(args.event.rawSnapshot??(ephemeralMode?getEphemeralSemanticEventEvidence(args.event.eventIdentity):null))?.paymentTimestamp;
+    const safety = await evaluateDexPaidAlertSafety(args.event.assetId,typeof expectedPayment==='number'?expectedPayment:undefined);
     if (!safety.allowed) {
       console.warn('[AlphaSemanticDelivery] Robinhood DEX_PAID suppressed by event safety gate.', {
         alertEventId: args.event.id,
