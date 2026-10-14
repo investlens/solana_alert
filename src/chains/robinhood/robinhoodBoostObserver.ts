@@ -1,4 +1,4 @@
-import {finishProtectedBoost,classifyBoostAttempt} from './boostRecoveryState.js';
+import {finishProtectedBoost,classifyBoostAttempt,boostPurchaseKey} from './boostRecoveryState.js';
 import {claimBoostRecipientRecovery,releaseBoostRecipientRecovery,acquireBoostRecipientClaim} from '../../services/boostDeliveryGuard.js';
 import {telegramExplicitRejection} from '../../services/recipientDeliveryClaim.js';
 import {recordFeedPoll} from '../../services/feedDeliveryHealth.js';
@@ -163,9 +163,10 @@ async function ensureBoostBaseline() {
       const boosts = await fetchRobinhoodBoosts();
       for (const boost of boosts) if (!boostTotals.has(normalize(boost.tokenAddress))) boostTotals.set(normalize(boost.tokenAddress), boost.totalAmount);
       const pending=await loadPendingBoosts();
-      for(const row of pending){const key=normalize(row.tokenAddress);pendingBoostRecoveries.set(key,row);
-        if(row.previousTotal===null)boostTotals.delete(key);else boostTotals.set(key,row.previousTotal);
-        verificationRetries.set(key,{total:row.totalAmount,firstAt:row.firstAt,nextAt:Date.now(),attempts:0});}
+      for(const row of pending){const key=normalize(row.tokenAddress);pendingBoostRecoveries.set(boostPurchaseKey(key,row.totalAmount),row);
+        // Exact pending identities replay independently; retain the startup
+        // baseline so newer historical totals cannot become fresh purchases.
+        verificationRetries.set(boostPurchaseKey(key,row.totalAmount),{total:row.totalAmount,firstAt:row.firstAt,nextAt:Date.now(),attempts:0});}
       boostBaselineReady = true;
       console.log('[RobinhoodBoostObserver] PENDING_RECOVERY_RESTORED',{count:pending.length,maxEntries:100});
       console.log('[RobinhoodBoostObserver] LIVE_ONLY_BASELINE_READY', { tokens: boosts.length, supabase: 'bypassed' });
@@ -417,13 +418,14 @@ async function initialBoostEnrichment(tokenAddress: string): Promise<{ market: B
 
 async function processBoost(boost: { tokenAddress: string; amount: number; totalAmount: number; source?:'LATEST'|'TOP' }): Promise<boolean> {
   const tokenKey = normalize(boost.tokenAddress);
-  if (!boostVerificationDue(verificationRetries, tokenKey, boost.totalAmount, Date.now())) return false;
+  const purchaseKey=boostPurchaseKey(tokenKey,boost.totalAmount);
+  if (!boostVerificationDue(verificationRetries, purchaseKey, boost.totalAmount, Date.now())) return false;
   const canonical = classifyBoostAttempt(boostTotals,pendingBoostRecoveries,tokenKey,boost);
   if (!canonical) return false;
-  const pending=pendingBoostRecoveries.get(tokenKey);
+  const pending=pendingBoostRecoveries.get(purchaseKey);
   if(!pending||boost.totalAmount>pending.totalAmount){
-    pendingBoostRecoveries.set(tokenKey,{tokenAddress:boost.tokenAddress,amount:canonical.boostAdded,totalAmount:boost.totalAmount,previousTotal:canonical.previousTotal,firstAt:Date.now()});
-    while(pendingBoostRecoveries.size>100)pendingBoostRecoveries.delete(pendingBoostRecoveries.keys().next().value!);
+    pendingBoostRecoveries.set(purchaseKey,{tokenAddress:boost.tokenAddress,amount:canonical.boostAdded,totalAmount:boost.totalAmount,previousTotal:canonical.previousTotal,firstAt:Date.now()});
+    while(pendingBoostRecoveries.size>100){const key=pendingBoostRecoveries.keys().next().value!;const evicted=pendingBoostRecoveries.get(key)!;const token=normalize(evicted.tokenAddress);boostTotals.set(token,Math.max(boostTotals.get(token)??0,evicted.totalAmount));pendingBoostRecoveries.delete(key);verificationRetries.delete(key);console.warn('[RobinhoodBoostObserver] RECOVERY_CAPACITY_EXCEEDED_UNCONFIRMED');}
     await savePendingBoosts([...pendingBoostRecoveries.values()]);
   }
 
@@ -436,8 +438,8 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
     allowed: security.allowed, reason: security.reason, cached: security.cached,
   });
   if (!security.allowed) {
-    const disposition = recordBoostSecurityBlock(boostTotals, verificationRetries, tokenKey, boost.totalAmount, security.exitUnverified === true || security.liquidity?.status === 'UNKNOWN', Date.now());
-    if(disposition!=='RETRY_PENDING'){pendingBoostRecoveries.delete(tokenKey);await savePendingBoosts([...pendingBoostRecoveries.values()]);}
+    const disposition = recordBoostSecurityBlock(new Map(), verificationRetries, purchaseKey, boost.totalAmount, security.exitUnverified === true || security.liquidity?.status === 'UNKNOWN', Date.now());
+    if(disposition!=='RETRY_PENDING'){boostTotals.set(tokenKey,Math.max(boostTotals.get(tokenKey)??0,boost.totalAmount));pendingBoostRecoveries.delete(purchaseKey);await savePendingBoosts([...pendingBoostRecoveries.values()]);}
     console.log('[RobinhoodBoostObserver] BOOST_VERIFICATION_DISPOSITION', { token: tokenKey, disposition });
     console.warn('[RobinhoodBoostObserver] BOOST_BLOCKED_SECURITY', {
       token: tokenKey, eventType: canonical.type, totalBoost: boost.totalAmount, reason: security.reason,
@@ -548,7 +550,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
   });
 
   const claimOwner = randomUUID();
-  const activePending=pendingBoostRecoveries.get(tokenKey);
+  const activePending=pendingBoostRecoveries.get(purchaseKey);
   if(!activePending||activePending.totalAmount!==boost.totalAmount)return false;
   const recovering=activePending.recipientClaims===true;
   const claim = recovering?await claimBoostRecipientRecovery(boost.tokenAddress,boost.totalAmount,claimOwner,true):await claimBoostDelivery(boost.tokenAddress, boost.totalAmount, undefined, claimOwner);
@@ -556,12 +558,12 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
     console.log('[RobinhoodBoostObserver] BOOST_DELIVERY_GUARD', { token: tokenKey, totalBoost: boost.totalAmount, state: claim });
     // EXISTS may be a concurrent/ambiguous attempt, not complete fan-out.
     {
-      if (verificationRetries.size >= 100 && !verificationRetries.has(tokenKey)) verificationRetries.delete(verificationRetries.keys().next().value!);
-      verificationRetries.set(tokenKey, { total: boost.totalAmount, firstAt: Date.now(), nextAt: Date.now() + 60_000, attempts: 1 });
+      if (verificationRetries.size >= 100 && !verificationRetries.has(purchaseKey)) verificationRetries.delete(verificationRetries.keys().next().value!);
+      verificationRetries.set(purchaseKey, { total: boost.totalAmount, firstAt: Date.now(), nextAt: Date.now() + 60_000, attempts: 1 });
     }
     return false;
   }
-  if(pendingBoostRecoveries.get(tokenKey)!==activePending){
+  if(pendingBoostRecoveries.get(purchaseKey)!==activePending){
     if(recovering)await releaseBoostRecipientRecovery(boost.tokenAddress,boost.totalAmount,claimOwner);
     else await releaseUnsentBoostClaim(boost.tokenAddress,boost.totalAmount,claimOwner,false);
     return false;
@@ -637,7 +639,7 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
     })();
     return true;
   }
-  verificationRetries.set(tokenKey,{total:boost.totalAmount,firstAt:protectedPending.firstAt,nextAt:Date.now()+60000,attempts:1});
+  verificationRetries.set(purchaseKey,{total:boost.totalAmount,firstAt:protectedPending.firstAt,nextAt:Date.now()+60000,attempts:1});
   console.warn('[RobinhoodBoostObserver] RECIPIENT_RECOVERY_PENDING',{delivered,failed,alreadyConfirmed,fallbackUsed});
   if (await releaseUnsentBoostClaim(boost.tokenAddress, boost.totalAmount, claimOwner, sendStarted)) {
     console.log('[RobinhoodBoostObserver] Unsent boost claim released for retry', { token: tokenKey, totalBoost: boost.totalAmount });
@@ -654,8 +656,8 @@ export async function runRobinhoodBoostObserverCycle() {
     const boosts = await fetchRobinhoodBoosts();
     recordFeedPoll('RH_BOOST_SCAN','OK',boosts.length);
     const pending=restorePendingBoosts([...pendingBoostRecoveries.values()]);
-    for(const [key,row] of pendingBoostRecoveries)if(!pending.some(p=>normalize(p.tokenAddress)===key)){boostTotals.set(key,Math.max(boostTotals.get(key)??0,row.totalAmount));pendingBoostRecoveries.delete(key);verificationRetries.delete(key);console.warn('[RobinhoodBoostObserver] RECOVERY_EXPIRED_UNCONFIRMED');}
-    for(const row of pending)if(!boosts.some(b=>normalize(b.tokenAddress)===normalize(row.tokenAddress)))boosts.push(row);
+    for(const [key,row] of pendingBoostRecoveries)if(!pending.some(p=>boostPurchaseKey(p.tokenAddress,p.totalAmount)===key)){boostTotals.set(normalize(row.tokenAddress),Math.max(boostTotals.get(normalize(row.tokenAddress))??0,row.totalAmount));pendingBoostRecoveries.delete(key);verificationRetries.delete(key);console.warn('[RobinhoodBoostObserver] RECOVERY_EXPIRED_UNCONFIRMED');}
+    for(const row of pending)if(!boosts.some(b=>boostPurchaseKey(b.tokenAddress,b.totalAmount)===boostPurchaseKey(row.tokenAddress,row.totalAmount)))boosts.push(row);
     console.log('[RobinhoodBoostObserver] Feed:', { boosts: boosts.length, mode: 'LIVE_ONLY',pendingRecovery:pending.length });
     let alertsSent = 0;
     const unchangedTotals = boosts.filter(boost => {
