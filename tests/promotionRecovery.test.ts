@@ -1,5 +1,5 @@
 import {promotionDeliveryResult} from '../src/services/promotionDeliveryResult.js';
-import {finishProtectedBoost,classifyBoostAttempt} from '../src/chains/robinhood/boostRecoveryState.js';
+import {finishProtectedBoost,classifyBoostAttempt,boostPurchaseKey} from '../src/chains/robinhood/boostRecoveryState.js';
 import test from 'node:test';import assert from 'node:assert/strict';
 import {deliverAlphaSemanticEvent} from '../src/services/alphaSemanticDeliveryService.js';
 import {createFreshDexPaymentWatch} from '../src/chains/robinhood/freshDexPaymentWatch.js';
@@ -48,8 +48,8 @@ test('watched DEX payment still requires a current paid order and selling gate; 
 
 test('older boost completion preserves a newer pending total and recipient recovery',()=>{
  const old={tokenAddress:token,amount:10,totalAmount:30,previousTotal:20,firstAt:1000,recipientClaims:true as const};
- const newer={...old,totalAmount:60,previousTotal:30};const totals=new Map([[token,60]]),pending=new Map([[token,newer]]),retries=new Map([[token,{total:60,firstAt:1000,nextAt:61000,attempts:1}]]);
- finishProtectedBoost(totals,pending,retries,token,30,old);assert.equal(totals.get(token),60);assert.equal(pending.get(token),newer);assert.equal(retries.get(token)?.total,60);
+ const newer={...old,totalAmount:60,previousTotal:30};const totals=new Map([[token,60]]),pending=new Map([[boostPurchaseKey(token,30),old],[boostPurchaseKey(token,60),newer]]),retries=new Map([[boostPurchaseKey(token,60),{total:60,firstAt:1000,nextAt:61000,attempts:1}]]);
+ finishProtectedBoost(totals,pending,retries,token,30,old);assert.equal(totals.get(token),60);assert.equal(pending.get(boostPurchaseKey(token,60)),newer);assert.equal(retries.get(boostPurchaseKey(token,60))?.total,60);
  finishProtectedBoost(totals,pending,retries,token,60,newer);assert.equal(pending.size,0);assert.equal(retries.size,0);
 });
 
@@ -65,7 +65,7 @@ test('boost recipient claims retry with the same owner and bounded pauses during
 });
 
 test('boost retries retain immutable classification and a newer purchase uses the observed pending total',()=>{
- const pendingRow={tokenAddress:token,amount:30,totalAmount:30,previousTotal:null,firstAt:1000};const pending=new Map([[token,pendingRow]]),totals=new Map([[token,20]]);
+ const pendingRow={tokenAddress:token,amount:30,totalAmount:30,previousTotal:null,firstAt:1000};const pending=new Map([[boostPurchaseKey(token,30),pendingRow]]),totals=new Map([[token,20]]);
  const retry=classifyBoostAttempt(totals,pending,token,{totalAmount:30,amount:30});assert.equal(retry?.type,'BOOST_DETECTED');assert.equal(retry?.boostAdded,30);
  const next=classifyBoostAttempt(totals,pending,token,{totalAmount:40,amount:10});assert.equal(next?.type,'BOOST_INCREASED');assert.equal(next?.boostAdded,10);
  assert.equal(classifyBoostAttempt(new Map(),new Map(),token,{totalAmount:40,amount:10}),null,'unseen historical totals still do not become purchases');
@@ -76,4 +76,34 @@ test('DEX gate cannot authorize one payment using a different currently approved
  const gate=createDexPaidEventGate({now:()=>now,paid:async()=>({tokenAddress:token,dexPaid:true,status:'PAID',orderTypes:[],orderStatuses:[],latestPaymentTimestamp:payment,warnings:[],scannedAt:now}),launch:async()=>({exists:true,token,deployer:null,launchType:'PONS'}),custom:async()=>{checks++;throw Error('Custom gate should not run');}});
  assert.equal((await gate(token,payment)).allowed,true);const mismatch=await gate(token,payment-1000);assert.equal(mismatch.allowed,false);assert.deepEqual(mismatch.reasons,['PAYMENT_CHANGED']);assert.equal(checks,0);
  assert.equal((await gate(token,payment/1000)).allowed,true,'seconds and milliseconds identify the same payment');
+});
+
+
+test('two close DEX payments survive restore and exact completion independently',()=>{
+ const now=2_000_000_000_000,w=createFreshDexPaymentWatch();
+ w.observe(token,now-2000,now);w.observe(token,now-1000,now);
+ assert.equal(w.snapshot(now).length,2);
+ const restored=createFreshDexPaymentWatch();restored.restore(w.snapshot(now),now+12*60000);
+ assert.equal(restored.has(token,now-2000,now+12*60000),true);
+ assert.equal(restored.has(token,now-1000,now+12*60000),true);
+ restored.remove(token,(now-2000)/1000);
+ assert.equal(restored.has(token,now-1000,now+12*60000),true);
+ assert.equal(restored.snapshot(now+12*60000).length,1);
+});
+
+test('older DEX payment stays valid while still present and fails once withdrawn',async()=>{
+ const now=2_000_000_000_000,older=now-2000,newer=now-1000;let payments=[older,newer];
+ const gate=createDexPaidEventGate({now:()=>now,paid:async()=>({tokenAddress:token,dexPaid:true,status:'PAID',orderTypes:[],orderStatuses:[],latestPaymentTimestamp:newer,paymentTimestamps:payments,warnings:[],scannedAt:now}),launch:async()=>({exists:true,token,deployer:null,launchType:'PONS'}),custom:async()=>{throw Error('unexpected');}});
+ assert.equal((await gate(token,older)).allowed,true);payments=[newer];
+ assert.deepEqual((await gate(token,older)).reasons,['PAYMENT_CHANGED']);
+});
+
+test('both pending boost purchases retain original increments after newer acknowledgement',()=>{
+ const old={tokenAddress:token,amount:10,totalAmount:30,previousTotal:20,firstAt:1000};
+ const newer={...old,amount:30,totalAmount:60,previousTotal:30};
+ const pending=new Map([[boostPurchaseKey(token,30),old],[boostPurchaseKey(token,60),newer]]),totals=new Map([[token,20]]),retries=new Map();
+ finishProtectedBoost(totals,pending,retries,token,60,newer);
+ assert.equal(classifyBoostAttempt(totals,pending,token,{totalAmount:30,amount:10})?.boostAdded,10);
+ assert.equal(pending.size,1);finishProtectedBoost(totals,pending,retries,token,30,old);
+ assert.equal(totals.get(token),60);assert.equal(pending.size,0);
 });
