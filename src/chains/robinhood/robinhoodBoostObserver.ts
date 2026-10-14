@@ -1,3 +1,6 @@
+import {finishProtectedBoost,classifyBoostAttempt} from './boostRecoveryState.js';
+import {claimBoostRecipientRecovery,releaseBoostRecipientRecovery,acquireBoostRecipientClaim} from '../../services/boostDeliveryGuard.js';
+import {telegramExplicitRejection} from '../../services/recipientDeliveryClaim.js';
 import {recordFeedPoll} from '../../services/feedDeliveryHealth.js';
 import {loadPendingBoosts,savePendingBoosts,restorePendingBoosts,type PendingBoost} from './pendingBoostRecovery.js';
 import { discloseRobinhoodKeyStats } from '../../services/alertKeyStatsService.js';
@@ -415,7 +418,7 @@ async function initialBoostEnrichment(tokenAddress: string): Promise<{ market: B
 async function processBoost(boost: { tokenAddress: string; amount: number; totalAmount: number; source?:'LATEST'|'TOP' }): Promise<boolean> {
   const tokenKey = normalize(boost.tokenAddress);
   if (!boostVerificationDue(verificationRetries, tokenKey, boost.totalAmount, Date.now())) return false;
-  const canonical = observeBoostCanonicalEvent(boostTotals, tokenKey, boost.totalAmount, boost.amount,boost.source);
+  const canonical = classifyBoostAttempt(boostTotals,pendingBoostRecoveries,tokenKey,boost);
   if (!canonical) return false;
   const pending=pendingBoostRecoveries.get(tokenKey);
   if(!pending||boost.totalAmount>pending.totalAmount){
@@ -545,51 +548,65 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
   });
 
   const claimOwner = randomUUID();
-  const claim = await claimBoostDelivery(boost.tokenAddress, boost.totalAmount, undefined, claimOwner);
+  const activePending=pendingBoostRecoveries.get(tokenKey);
+  if(!activePending||activePending.totalAmount!==boost.totalAmount)return false;
+  const recovering=activePending.recipientClaims===true;
+  const claim = recovering?await claimBoostRecipientRecovery(boost.tokenAddress,boost.totalAmount,claimOwner,true):await claimBoostDelivery(boost.tokenAddress, boost.totalAmount, undefined, claimOwner);
   if (claim !== 'CLAIMED') {
     console.log('[RobinhoodBoostObserver] BOOST_DELIVERY_GUARD', { token: tokenKey, totalBoost: boost.totalAmount, state: claim });
-    if (claim === 'EXISTS') boostTotals.set(tokenKey, boost.totalAmount);
-    else {
+    // EXISTS may be a concurrent/ambiguous attempt, not complete fan-out.
+    {
       if (verificationRetries.size >= 100 && !verificationRetries.has(tokenKey)) verificationRetries.delete(verificationRetries.keys().next().value!);
       verificationRetries.set(tokenKey, { total: boost.totalAmount, firstAt: Date.now(), nextAt: Date.now() + 60_000, attempts: 1 });
     }
     return false;
   }
+  if(pendingBoostRecoveries.get(tokenKey)!==activePending){
+    if(recovering)await releaseBoostRecipientRecovery(boost.tokenAddress,boost.totalAmount,claimOwner);
+    else await releaseUnsentBoostClaim(boost.tokenAddress,boost.totalAmount,claimOwner,false);
+    return false;
+  }
+  const protectedPending=activePending;
+  protectedPending.recipientClaims=true;
+  await savePendingBoosts([...pendingBoostRecoveries.values()]);
+  try {
+  let failed=0,alreadyConfirmed=0,fallbackUsed=false;
   let delivered = 0;
   let accepted = 0;
   let sendStarted = false;
   let sharedDeliveryUnavailable = false;
   try {
-    const result = await deliverAlphaSemanticEvent({ event: semanticEvent, message: baseMessage, buttons: baseButtons, preserveMessage: true,
+    const result = await deliverAlphaSemanticEvent({ event: semanticEvent, message: baseMessage, buttons: baseButtons, preserveMessage: true,protectBoostRecipients:true,
       onSendStarted: () => { sendStarted = true; },
       onTelegramAccepted: () => { accepted += 1; recordAcceptedAdminBoostNotification(boost.tokenAddress, boost.totalAmount); },
     });
-    delivered = result.delivered;
+    delivered = result.delivered;failed=result.failed;alreadyConfirmed=result.alreadyConfirmed??0;
   } catch (error) {
-    sharedDeliveryUnavailable = true;
+    sharedDeliveryUnavailable = true;failed=Math.max(1,failed);
     console.warn('[RobinhoodBoostObserver] Shared delivery unavailable; using bounded runtime/admin fallback', {
       token: tokenKey, reason: error instanceof Error ? error.message : String(error),
     });
   }
 
-  if (sharedDeliveryUnavailable && accepted === 0 && !sendStarted) {
+  if (sharedDeliveryUnavailable && accepted === 0 && !sendStarted && !recovering) {
+    fallbackUsed=true;
     baseMessage = await discloseRobinhoodKeyStats(baseMessage,boost.tokenAddress,false,trustedLaunchType?`Trusted ${trustedLaunchType} route`:'Sellability/LP status: review security note; validate before buying',security.liquidity?.status);
     const fallbackCard = await discloseAlertDexPaid(baseMessage, baseButtons, boost.tokenAddress);
     sendStarted = true; // Conservative: retain claim even if fallback fails before acceptance.
-    const fallbackDelivered = await deliverAdminBoostFallback({
-      tokenAddress: boost.tokenAddress,
-      totalBoostAmount: boost.totalAmount,
-      message: fallbackCard.text,
-      buttons: fallbackCard.buttons,
-    });
+    const adminClaim=await acquireBoostRecipientClaim(semanticEvent.eventIdentity,String(config.adminTelegramId));
+    const fallbackDelivered = adminClaim.state==='CLAIMED' && await deliverAdminBoostFallback({
+      tokenAddress: boost.tokenAddress,totalBoostAmount:boost.totalAmount,message:fallbackCard.text,buttons:fallbackCard.buttons,
+    },{send:async(chat,message,buttons)=>{
+      try{const id=await sendTelegramWithMessageId(chat,message,buttons);await adminClaim.finish(id);return id;}
+      catch(error){if(telegramExplicitRejection(error))await adminClaim.release();throw error;}
+    }});
     if (fallbackDelivered) delivered = 1;
   }
 
-  if (delivered > 0 || accepted > 0 || acceptedAdminBoostNotifications.has(boostFallbackIdentity(boost.tokenAddress, boost.totalAmount))) {
+  if (!fallbackUsed && failed===0 && (delivered>0||accepted>0||alreadyConfirmed>0)) {
     await markBoostDeliveryAccepted(semanticEvent.eventIdentity, rawSnapshot);
-    boostTotals.set(tokenKey, boost.totalAmount);
-    verificationRetries.delete(tokenKey);
-    pendingBoostRecoveries.delete(tokenKey);await savePendingBoosts([...pendingBoostRecoveries.values()]);
+    finishProtectedBoost(boostTotals,pendingBoostRecoveries,verificationRetries,tokenKey,boost.totalAmount,protectedPending);
+    await savePendingBoosts([...pendingBoostRecoveries.values()]);
     console.log('[RobinhoodBoostObserver] BOOST_ALERT_VERIFIED', {
       token: tokenKey, eventType: canonical.type, boostAdded: canonical.boostAdded,
       totalBoost: canonical.currentTotal, verifiedPons, securityRoute: security.route,
@@ -620,10 +637,13 @@ async function processBoost(boost: { tokenAddress: string; amount: number; total
     })();
     return true;
   }
+  verificationRetries.set(tokenKey,{total:boost.totalAmount,firstAt:protectedPending.firstAt,nextAt:Date.now()+60000,attempts:1});
+  console.warn('[RobinhoodBoostObserver] RECIPIENT_RECOVERY_PENDING',{delivered,failed,alreadyConfirmed,fallbackUsed});
   if (await releaseUnsentBoostClaim(boost.tokenAddress, boost.totalAmount, claimOwner, sendStarted)) {
     console.log('[RobinhoodBoostObserver] Unsent boost claim released for retry', { token: tokenKey, totalBoost: boost.totalAmount });
   }
   return false;
+  } finally {if(recovering)await releaseBoostRecipientRecovery(boost.tokenAddress,boost.totalAmount,claimOwner);}
 }
 
 export async function runRobinhoodBoostObserverCycle() {
@@ -634,7 +654,7 @@ export async function runRobinhoodBoostObserverCycle() {
     const boosts = await fetchRobinhoodBoosts();
     recordFeedPoll('RH_BOOST_SCAN','OK',boosts.length);
     const pending=restorePendingBoosts([...pendingBoostRecoveries.values()]);
-    for(const key of pendingBoostRecoveries.keys())if(!pending.some(p=>normalize(p.tokenAddress)===key))pendingBoostRecoveries.delete(key);
+    for(const [key,row] of pendingBoostRecoveries)if(!pending.some(p=>normalize(p.tokenAddress)===key)){boostTotals.set(key,Math.max(boostTotals.get(key)??0,row.totalAmount));pendingBoostRecoveries.delete(key);verificationRetries.delete(key);console.warn('[RobinhoodBoostObserver] RECOVERY_EXPIRED_UNCONFIRMED');}
     for(const row of pending)if(!boosts.some(b=>normalize(b.tokenAddress)===normalize(row.tokenAddress)))boosts.push(row);
     console.log('[RobinhoodBoostObserver] Feed:', { boosts: boosts.length, mode: 'LIVE_ONLY',pendingRecovery:pending.length });
     let alertsSent = 0;
