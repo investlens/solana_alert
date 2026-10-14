@@ -1,3 +1,4 @@
+import {recordFeedPoll} from '../src/services/feedDeliveryHealth.js';
 import {verifyArcNativeExit} from '../src/chains/arc/nativeExitSimulation.js';
 import {startPromotionStreams} from '../src/chains/robinhood/promotionStreams.js';
 import {acquireRecipientClaim,telegramExplicitRejection,retryTelegramRejection} from '../src/services/recipientDeliveryClaim.js';
@@ -607,6 +608,7 @@ async function processArcBoosts(): Promise<void> {
   if (Date.now() - lastArcBoostPollAt < ARC_BOOST_POLL_MS) return;
   lastArcBoostPollAt = Date.now();
   const boosts = await fetchArcBoosts();
+  recordFeedPoll('ARC_BOOST_SCAN',boosts===null?'UNAVAILABLE':'OK',boosts?.length??0);
   if (boosts === null) return;
   for (const boost of boosts) arcDexPaid.seed(boost.tokenAddress,true);
   if (!arcBoostBaselineReady) {
