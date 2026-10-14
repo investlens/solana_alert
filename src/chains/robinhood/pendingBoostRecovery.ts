@@ -1,5 +1,5 @@
 import {getSharedJson,setSharedJson} from '../../services/sharedJsonCache.js';
-export type PendingBoost={tokenAddress:string;amount:number;totalAmount:number;previousTotal:number|null;firstAt:number};
+export type PendingBoost={tokenAddress:string;amount:number;totalAmount:number;previousTotal:number|null;firstAt:number;recipientClaims?:true};
 const KEY='alphaos:robinhood:pending-boosts:v1';
 export function restorePendingBoosts(raw:unknown,now=Date.now()):PendingBoost[]{
  if(!Array.isArray(raw))return [];
