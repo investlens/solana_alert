@@ -1,0 +1,23 @@
+name: Project Intelligence (isolated)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'features/project-intelligence/**'
+      - 'docs/project-intelligence/**'
+      - '.github/workflows/project-intelligence.yml'
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck isolated feature
+        run: node node_modules/typescript/bin/tsc -p features/project-intelligence/tsconfig.json
+      - name: Test evidence accuracy, access and isolation
+        run: node --import tsx --test features/project-intelligence/tests/*.test.ts
