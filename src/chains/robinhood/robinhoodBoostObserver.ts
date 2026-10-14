@@ -1,3 +1,4 @@
+import {recordFeedPoll} from '../../services/feedDeliveryHealth.js';
 import {loadPendingBoosts,savePendingBoosts,restorePendingBoosts,type PendingBoost} from './pendingBoostRecovery.js';
 import { discloseRobinhoodKeyStats } from '../../services/alertKeyStatsService.js';
 import { discloseRobinhoodOwnership } from '../../services/alertOwnershipService.js';
@@ -631,6 +632,7 @@ export async function runRobinhoodBoostObserverCycle() {
   try {
     if (!await ensureBoostBaseline()) return;
     const boosts = await fetchRobinhoodBoosts();
+    recordFeedPoll('RH_BOOST_SCAN','OK',boosts.length);
     const pending=restorePendingBoosts([...pendingBoostRecoveries.values()]);
     for(const key of pendingBoostRecoveries.keys())if(!pending.some(p=>normalize(p.tokenAddress)===key))pendingBoostRecoveries.delete(key);
     for(const row of pending)if(!boosts.some(b=>normalize(b.tokenAddress)===normalize(row.tokenAddress)))boosts.push(row);
@@ -650,6 +652,7 @@ export async function runRobinhoodBoostObserverCycle() {
     }
     console.log('[RobinhoodBoostObserver] Cycle complete:', { alertsSent, unchangedTotals, observed: boosts.length });
   } catch (error) {
+    recordFeedPoll('RH_BOOST_SCAN','UNAVAILABLE');
     console.error('[RobinhoodBoostObserver] Cycle failed:', error instanceof Error ? error.message : String(error));
   } finally {
     boostObserverRunning = false;
