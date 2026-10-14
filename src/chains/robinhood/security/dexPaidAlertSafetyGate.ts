@@ -21,7 +21,7 @@ type Dependencies = {
   observedFresh?:(token:string,payment:number,now:number)=>boolean;
 };
 export function createDexPaidEventGate(deps:Dependencies) {
-  return async(token:string):Promise<DexPaidAlertSafetyResult>=>{
+  return async(token:string,expectedPayment?:number):Promise<DexPaidAlertSafetyResult>=>{
     const base:DexPaidAlertSafetyResult={allowed:false,reasons:[],checks:[],marketCapUsd:null,liquidityUsd:null,
       pairAgeMinutes:null,paymentAgeSeconds:null,sellImpactPercent:null,ponsDeployer:null};
     try {
@@ -29,6 +29,8 @@ export function createDexPaidEventGate(deps:Dependencies) {
       const confirmed=paid.dexPaid===true&&paid.status==='PAID';
       base.checks.push({key:'DEX_PAID_CONFIRMED',passed:confirmed,detail:paid.status});
       if(!confirmed){base.reasons.push('DEX_PAID_UNCONFIRMED');return base;}
+      const ms=(at:number)=>at<10_000_000_000?at*1000:at;
+      if(expectedPayment!=null&&(paid.latestPaymentTimestamp==null||ms(expectedPayment)!==ms(paid.latestPaymentTimestamp))){base.reasons.push('PAYMENT_CHANGED');return base;}
       const fresh=recentDexPayment(paid.latestPaymentTimestamp,deps.now()) || (paid.latestPaymentTimestamp!=null && deps.observedFresh?.(token,paid.latestPaymentTimestamp,deps.now())===true);
       const at=paid.latestPaymentTimestamp;
       base.paymentAgeSeconds=at==null?null:Math.max(0,(deps.now()-(at<10_000_000_000?at*1000:at))/1000);
