@@ -4,6 +4,7 @@ import { claimSharedDelivery, runSharedAtomic, getWatchCheckpoint, setWatchCheck
 import {recordPromotionAudit} from '../../services/feedDeliveryHealth.js';
 export const ARC_PAID_DISCOVERY_FEEDS=['token-profiles/latest/v1','token-profiles/recent-updates/v1','ads/latest/v1','community-takeovers/latest/v1'] as const;
 type Dependencies={security:(token:string)=>Promise<{allowed:boolean;reason:string;sellabilityBlocked?:boolean}>;send:(token:string,paymentAt:number)=>Promise<void|{delivered:number;failed:number;alreadyConfirmed?:number}>;
+ checkpointRead?:(key:string)=>Promise<{value:unknown;fetchedAt:string}|null>;
  read?:(url:string)=>Promise<unknown>;claim?:(key:string,ttl:number)=>Promise<string>;now?:()=>number};
 export function eligibleArcPayments(payload:unknown):number[]{
  const parsed=parseDexScreenerPaidOrders(payload);if(parsed.malformed)throw Error('Malformed paid-order response');
@@ -26,7 +27,7 @@ export function createArcDexPaidWatch(deps:Dependencies){
   if(running||now()-lastTick<30000)return;running=true;lastTick=now();
   let checked=0,detected=0,blocked=0,failed=0;
   try{
-   if(!restored){if(!deps.read){const saved=await getWatchCheckpoint<unknown>(checkpointKey);if(Array.isArray(saved?.value))for(const row of saved.value.slice(-24)){
+   if(!restored){if(!deps.read||deps.checkpointRead){const saved=await (deps.checkpointRead??getWatchCheckpoint<unknown>)(checkpointKey);if(Array.isArray(saved?.value))for(const row of saved.value.slice(-24)){
     const [key,payment]=Array.isArray(row)?row:[];const token=payment?.token??key;
     if(typeof token==='string'&&/^0x[a-f0-9]{40}$/i.test(token)&&Number.isFinite(payment?.at)&&Number.isFinite(payment?.observedAt)&&payment.observedAt-payment.at>=-30000&&payment.observedAt-payment.at<=600000&&now()-payment.at>=-30000&&now()-payment.at<=1800000){const normalized=token.toLowerCase();pendingPayments.set(identity(normalized,payment.at),{token:normalized,at:payment.at,observedAt:payment.observedAt});seed(normalized,true);}
    }}restored=true;}
@@ -58,6 +59,6 @@ export function createArcDexPaidWatch(deps:Dependencies){
     }catch{failed++;}
    }
    console.log('[ArcDexPaid] CYCLE',{candidates:watch.size,checked,detected,blocked,failed,cap:24,dbWrites:0});
-  }finally{running=false;}
+  }catch{console.warn('[ArcDexPaid] RECOVERY_UNAVAILABLE; checkpoint retained; next existing tick retries');}finally{running=false;}
  },size:()=>watch.size};
 }

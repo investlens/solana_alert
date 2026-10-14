@@ -71,3 +71,11 @@ test('malformed ARC orders cannot authorize an aged captured payment',async()=>{
  const watch=createArcDexPaidWatch({now:()=>now,read:async url=>url.includes('/orders/')?(malformed?{}:[{paymentTimestamp:now,status:'approved'}]):[],security:async()=>({allowed:malformed,reason:'pending'}),claim:async()=> 'CLAIMED',send:async()=>{sends++;}});
  watch.seed(token,true);await watch.tick();now+=700000;malformed=true;await watch.tick();assert.equal(sends,0);
 });
+
+
+test('temporary ARC checkpoint outage preserves startup state and recovers on the next tick',async()=>{
+ let now=2000000000000,reads=0,sends=0;
+ const watch=createArcDexPaidWatch({now:()=>now,checkpointRead:async()=>{reads++;if(reads===1)throw Error('Redis not ready');return null;},read:async url=>url.includes('/orders/')?[{paymentTimestamp:now,status:'approved'}]:[],security:async()=>({allowed:true,reason:'exit'}),claim:async()=> 'CLAIMED',send:async()=>{sends++;}});
+ watch.seed(token,true);await assert.doesNotReject(watch.tick());assert.equal(sends,0);
+ now+=30000;await watch.tick();assert.equal(reads,2);assert.equal(sends,1);
+});
