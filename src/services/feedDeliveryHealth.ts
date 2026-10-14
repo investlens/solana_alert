@@ -1,11 +1,13 @@
+import {createPromotionEventAudit,type PromotionAuditSnapshot,type PromotionAuditStage} from './promotionEventAudit.js';
 import { getSharedJson, setSharedJson } from './sharedJsonCache.js';
 import { escapeTelegramHtml as esc } from '../ui/escapeHtml.js';
 
 export type DeliveryStage = 'ENABLED' | 'MUTED' | 'PREFERENCES_UNAVAILABLE' | 'ACCEPTED' | 'PROCESSING_FAILED'
   | 'DISCOVERED' | 'EVALUATED' | 'DATA_UNAVAILABLE' | 'CONDITION_WAIT' | 'RISK_REJECTED' | 'QUALIFIED' | 'DEDUPLICATED' | 'UNCONFIRMED';
 export type FeedPoll = {observedAt:number;status:'OK'|'UNAVAILABLE';items:number};
-export type FeedHealthSnapshot = { startedAt: number; observedAt: number; feeds: Record<string, Partial<Record<DeliveryStage, number>>>; polls?:Record<string,FeedPoll> };
+export type FeedHealthSnapshot = { startedAt: number; observedAt: number; feeds: Record<string, Partial<Record<DeliveryStage, number>>>; polls?:Record<string,FeedPoll>; promotions?:PromotionAuditSnapshot };
 const startedAt = Date.now();
+const promotionAudit=createPromotionEventAudit(128,3_600_000,startedAt);
 const feeds: FeedHealthSnapshot['feeds'] = {};
 const polls:Record<string,FeedPoll>={};
 let lastPublish = 0;
@@ -49,8 +51,11 @@ export function recordFeedPoll(source:string,status:FeedPoll['status'],items=0):
   if(!polls[source]&&Object.keys(polls).length>=32)return;
   polls[source]={observedAt:Date.now(),status,items};schedulePublish();
 }
+export function recordPromotionAudit(feed:string,identity:string,stage:PromotionAuditStage):void {
+ if(promotionAudit.record(feed,identity,stage))schedulePublish();
+}
 export function localFeedHealth(now = Date.now()): FeedHealthSnapshot {
-  return { startedAt, observedAt: lastObserved, feeds: structuredClone(feeds),polls:structuredClone(polls) };
+  return { startedAt, observedAt: lastObserved, feeds: structuredClone(feeds),polls:structuredClone(polls),promotions:promotionAudit.snapshot(now) };
 }
 export function renderFeedHealth(rows: Array<{ name: string; snapshot: FeedHealthSnapshot | null }>, now = Date.now()): string {
   const lines = ['📡 <b>ALERT DELIVERY HEALTH</b>', 'Screening and recipient counters since each worker restart · Cache snapshots', ''];
@@ -63,6 +68,15 @@ export function renderFeedHealth(rows: Array<{ name: string; snapshot: FeedHealt
       if(lines.join('\n').length>2600)break;
       const age=Math.max(0,Math.floor((now-poll.observedAt)/1000));
       lines.push(`${esc(source.replace(/_/g,' '))}: ${age>180?'STALE':poll.status} · ${poll.items} rows · ${age}s ago`);
+    }
+    if(snapshot.promotions){
+      const audit=snapshot.promotions;
+      for(const feed of [...new Set(audit.entries.map(row=>row.feed))].slice(0,4)){
+        const entries=audit.entries.filter(row=>row.feed===feed);
+        const count=(stage:PromotionAuditStage)=>entries.filter(row=>row.stage===stage).length;
+        lines.push(`${esc(feed.replace(/_/g,' '))} unique observed events: ${entries.length} · delivered ${count('DELIVERED')} · watched ${count('WATCHED')} · blocked ${count('BLOCKED')} · delivery pending ${count('DELIVERY_PENDING')} · ready ${count('READY')} · observed ${count('OBSERVED')} · expired ${count('EXPIRED')}`);
+      }
+      lines.push(`Event window: up to 1h since restart · cap ${audit.limit} · capacity evictions ${audit.capacityEvicted} · aged out ${audit.expired}`);
     }
     if (!Object.keys(snapshot.feeds).length) lines.push('No recipient attempts recorded by this worker yet.');
     lines.push(`Snapshot ${new Date(snapshot.observedAt).toISOString().slice(11, 19)} UTC`);
