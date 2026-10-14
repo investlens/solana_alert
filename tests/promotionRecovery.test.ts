@@ -107,3 +107,13 @@ test('both pending boost purchases retain original increments after newer acknow
  assert.equal(pending.size,1);finishProtectedBoost(totals,pending,retries,token,30,old);
  assert.equal(totals.get(token),60);assert.equal(pending.size,0);
 });
+
+
+test('critical boost checkpoints distinguish missing state from read/write failure',async()=>{
+ const {loadPendingBoosts,savePendingBoosts}=await import('../src/chains/robinhood/pendingBoostRecovery.js');
+ const now=Date.now(),row={tokenAddress:token,amount:10,totalAmount:30,previousTotal:20,firstAt:now,recipientClaims:true as const};
+ assert.deepEqual(await loadPendingBoosts(async()=>null,now),[]);
+ await assert.rejects(loadPendingBoosts(async()=>{throw Error('Redis timeout');},now),/timeout/);
+ await assert.rejects(savePendingBoosts([row],async()=>{throw Error('write unacknowledged');},now),/unacknowledged/);
+ let saved:unknown;await savePendingBoosts([row],async(_key,value)=>{saved=value;},now);assert.deepEqual(saved,[row]);
+});
