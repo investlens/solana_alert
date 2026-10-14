@@ -1,5 +1,5 @@
 import {recentDexPayment} from './dexPaidWatchState.js';
-import {getSharedJson,setSharedJson} from '../../services/sharedJsonCache.js';
+import {getWatchCheckpoint,setWatchCheckpoint} from '../../services/sharedJsonCache.js';
 export type FreshPayment={token:string;payment:number;observedAt:number};
 const KEY='alphaos:robinhood:fresh-dex-payments:v1';
 export const paymentMs=(v:number)=>v<10_000_000_000?v*1000:v;
@@ -18,15 +18,23 @@ export function createFreshDexPaymentWatch(limit=24){
   snapshot(now=Date.now()){prune(now);return [...rows.values()].map(row=>({...row}));},
  };
 }
-const watch=createFreshDexPaymentWatch();let loading:Promise<void>|undefined;
+const watch=createFreshDexPaymentWatch();let loading:Promise<void>|undefined;let checkpoint:Promise<void>|undefined;let checkpointDirty=false;
 export function observeFreshDexPayment(token:string,payment:number,now=Date.now()):boolean {
- if(watch.observe(token,payment,now))void setSharedJson(KEY,watch.snapshot(now),new Date(now).toISOString(),3600000);
+ if(watch.observe(token,payment,now))checkpointDirty=true;
  return watch.has(token,payment,now);
 }
 export const previouslyObservedFreshPayment=(token:string,payment:number,now=Date.now())=>watch.has(token,payment,now);
 export async function restoreFreshDexPayments(){
- loading??=(async()=>{watch.restore((await getSharedJson<unknown>(KEY,1000))?.value);})();await loading;return watch.snapshot();
+ loading??=(async()=>{watch.restore((await getWatchCheckpoint<unknown>(KEY))?.value);})();try{await loading;}catch(error){loading=undefined;throw error;}return watch.snapshot();
 }
 
 export const currentFreshDexPayments=()=>watch.snapshot();
-export function completeFreshDexPayment(token:string,payment:number){if(watch.remove(token,payment))void setSharedJson(KEY,watch.snapshot(),new Date().toISOString(),3600000);}
+export function completeFreshDexPayment(token:string,payment:number){if(watch.remove(token,payment)){checkpointDirty=true;void flushFreshDexPayments().catch(()=>console.warn('[FreshDexPaymentWatch] CHECKPOINT_UNAVAILABLE'));}}
+
+export async function flushFreshDexPayments(){
+ if(!checkpoint)checkpoint=(async()=>{
+  while(checkpointDirty){checkpointDirty=false;const now=Date.now();try{await setWatchCheckpoint(KEY,watch.snapshot(now),new Date(now).toISOString(),3600000);}catch(error){checkpointDirty=true;throw error;}}
+ })().finally(()=>{checkpoint=undefined;});
+ await checkpoint;
+ if(checkpointDirty)await flushFreshDexPayments();
+}
