@@ -3,7 +3,7 @@ import {forEachDeliveryRecipient} from './recipientDeliveryTiming.js';
 import { telegramRecipientUnavailable } from '../ui/alphaosPhotoDelivery.js';
 import { schedulePromotionCardEnrichment, type PromotionEditTarget } from './promotionCardEnrichment.js';
 import type { PromotionCardArgs } from '../ui/promotionEventCard.js';
-import { recordFeedDelivery } from './feedDeliveryHealth.js';
+import { recordFeedDelivery,recordPromotionAudit } from './feedDeliveryHealth.js';
 import { buildPromotionEventCard } from '../ui/promotionEventCard.js';
 import { discloseRobinhoodKeyStats, cachedRobinhoodAlertStats } from './alertKeyStatsService.js';
 import {robinhoodAlertSafety} from './robinhoodAlertSafety.js';
@@ -132,7 +132,7 @@ export async function deliverAlphaSemanticEvent(args: {
   onSendStarted?: () => void;
   onRecipientFailure?: (user: DeliverableUser, error: unknown,
     stage: 'recipient_setup' | 'telegram_send' | 'delivery_completion') => void;
-}, dependencies: SemanticDeliveryDependencies = productionDependencies): Promise<{ delivered: number; failed: number; alreadyConfirmed?:number }> {
+}, dependencies: SemanticDeliveryDependencies = productionDependencies): Promise<{ delivered: number; failed: number; alreadyConfirmed?:number;withheld?:true }> {
   const ephemeralMode = dependencies === productionDependencies && (args.event.ephemeral === true || args.event.id < 0);
   let launchType: LaunchClassification | null = null;
   let exitPairId:string|undefined;
@@ -185,8 +185,10 @@ export async function deliverAlphaSemanticEvent(args: {
         pairAgeMinutes: safety.pairAgeMinutes,
         reasons: safety.reasons,
       });
-      return { delivered: 0, failed: 0 };
+      if(typeof expectedPayment==='number')recordPromotionAudit('RH_DEX_PAID',`${args.event.assetId.toLowerCase()}:${expectedPayment<10_000_000_000?expectedPayment*1000:expectedPayment}`,safety.reasons.some(reason=>/HARD BLOCK|PAYMENT_CHANGED/i.test(reason))?'BLOCKED':'WATCHED');
+      return { delivered: 0, failed: 0,withheld:true };
     }
+    if(typeof expectedPayment==='number')recordPromotionAudit('RH_DEX_PAID',`${args.event.assetId.toLowerCase()}:${expectedPayment<10_000_000_000?expectedPayment*1000:expectedPayment}`,'READY');
     exitPairId=safety.exitPairId;
     lpStatus=safety.lpStatus ?? null;
     launchType=safety.launchType ?? 'UNKNOWN';paidCreator=safety.ponsDeployer;paidSecurityNote=safety.securityNote ?? null;
