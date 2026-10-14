@@ -1,3 +1,4 @@
+import {previouslyObservedFreshPayment} from '../freshDexPaymentWatch.js';
 import { recentDexPayment } from '../dexPaidWatchState.js';
 import { getVerifiedRobinhoodLaunchpad } from '../trustedLaunchpad.js';
 import { routeBoostSecurity, type BoostSecurityGateDecision } from '../boostSecurityRouter.js';
@@ -17,9 +18,10 @@ type Dependencies = {
   launch:(token:string)=>Promise<{exists:boolean;token:string;deployer:string|null;launchType?:'PONS'|'FLAP'}|null>;
   custom:(token:string)=>Promise<BoostSecurityGateDecision>;
   now:()=>number;
+  observedFresh?:(token:string,payment:number,now:number)=>boolean;
 };
 export function createDexPaidEventGate(deps:Dependencies) {
-  return async(token:string):Promise<DexPaidAlertSafetyResult>=>{
+  return async(token:string,expectedPayment?:number):Promise<DexPaidAlertSafetyResult>=>{
     const base:DexPaidAlertSafetyResult={allowed:false,reasons:[],checks:[],marketCapUsd:null,liquidityUsd:null,
       pairAgeMinutes:null,paymentAgeSeconds:null,sellImpactPercent:null,ponsDeployer:null};
     try {
@@ -27,10 +29,12 @@ export function createDexPaidEventGate(deps:Dependencies) {
       const confirmed=paid.dexPaid===true&&paid.status==='PAID';
       base.checks.push({key:'DEX_PAID_CONFIRMED',passed:confirmed,detail:paid.status});
       if(!confirmed){base.reasons.push('DEX_PAID_UNCONFIRMED');return base;}
-      const fresh=recentDexPayment(paid.latestPaymentTimestamp,deps.now());
-      const at=paid.latestPaymentTimestamp;
+      const ms=(at:number)=>at<10_000_000_000?at*1000:at;
+      const at=expectedPayment??paid.latestPaymentTimestamp;
+      if(expectedPayment!=null&&!(paid.paymentTimestamps??(paid.latestPaymentTimestamp==null?[]:[paid.latestPaymentTimestamp])).some(payment=>ms(payment)===ms(expectedPayment))){base.reasons.push('PAYMENT_CHANGED');return base;}
+      const fresh=recentDexPayment(at,deps.now()) || (at!=null && deps.observedFresh?.(token,at,deps.now())===true);
       base.paymentAgeSeconds=at==null?null:Math.max(0,(deps.now()-(at<10_000_000_000?at*1000:at))/1000);
-      base.checks.push({key:'PAYMENT_FRESHNESS',passed:fresh,detail:'New payment event window; token age has no limit'});
+      base.checks.push({key:'PAYMENT_FRESHNESS',passed:fresh,detail:'Fresh payment or bounded watch of a payment actually observed fresh; token age has no limit'});
       if(!fresh){base.reasons.push('PAYMENT_OUTSIDE_WINDOW');return base;}
       const launch=await deps.launch(token).catch(()=>null);
       if(launch?.exists&&launch.token.toLowerCase()===token.toLowerCase()&&(!launch.launchType||launch.launchType==='PONS')) {
@@ -56,4 +60,4 @@ export const evaluateDexPaidAlertSafety=createDexPaidEventGate({paid:scanRobinho
   // V2 origin is independently verifiable without the V1-only launch-state view.
   // Creator enrichment is optional and must not turn an approved origin into CUSTOM.
   launch:async token=>{const origin=await getVerifiedRobinhoodLaunchpad(token);return origin?{...origin,exists:true}:null;},
-  custom:token=>routeBoostSecurity({tokenAddress:token,verifiedTrustedLaunchpad:false,requireExplicitSellability:true,allowUnknownSellability:true,promotionEvent:true}),now:Date.now});
+  custom:token=>routeBoostSecurity({tokenAddress:token,verifiedTrustedLaunchpad:false,requireExplicitSellability:true,allowUnknownSellability:true,promotionEvent:true}),observedFresh:previouslyObservedFreshPayment,now:Date.now});

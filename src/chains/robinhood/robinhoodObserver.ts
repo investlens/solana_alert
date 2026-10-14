@@ -1,3 +1,6 @@
+import {recordPromotionAudit} from '../../services/feedDeliveryHealth.js';
+import {observeFreshDexPayment,completeFreshDexPayment,flushFreshDexPayments,dexPurchaseKey,paymentMs} from './freshDexPaymentWatch.js';
+import {promotionDeliveryResult} from '../../services/promotionDeliveryResult.js';
 import { runRejectedCandidateReview } from '../../services/rejectedCandidateReview.js';
 import { recentDexPayment } from './dexPaidWatchState.js';
 import { recordDexPaidCheck } from './dexPaidDiagnostics.js';
@@ -2133,14 +2136,24 @@ export async function processRobinhoodDexPaidSignal(token: RobinhoodDiscoveredTo
   if (dexPaid.dexPaid !== true) {
     recordDexPaidCheck(dexPaid.dexPaid === null ? 'PROVIDER_UNAVAILABLE' : 'NO_PAID_ORDER'); return false;
   }
-  if (!recentDexPayment(dexPaid.latestPaymentTimestamp)) { recordDexPaidCheck('PAYMENT_OUTSIDE_WINDOW'); return false; }
-  const attemptKey = normalize(token.tokenAddress);
-  const previousAttempt = dexPaymentAttempts.get(attemptKey);
-  if (previousAttempt?.payment === dexPaid.latestPaymentTimestamp && previousAttempt.nextAt > Date.now()) {
-    recordDexPaidCheck('RETRY_COOLDOWN'); return false;
-  }
+  // Capture every eligible timestamp in this same provider response; process only
+  // one due purchase per invocation to preserve the existing request budget.
+  const now=Date.now();
+  const payments=(dexPaid.paymentTimestamps??(dexPaid.latestPaymentTimestamp==null?[]:[dexPaid.latestPaymentTimestamp])).map(paymentMs).sort((a,b)=>a-b);
+  let coolingDown=false;
+  const eligible=payments.filter(payment=>{
+    const attempt=dexPaymentAttempts.get(dexPurchaseKey(token.tokenAddress,payment));
+    if(attempt&&attempt.nextAt>now){coolingDown=true;return false;}
+    const fresh=observeFreshDexPayment(token.tokenAddress,payment,now);
+    if(fresh)recordPromotionAudit('RH_DEX_PAID',dexPurchaseKey(token.tokenAddress,payment),'OBSERVED');
+    return fresh;
+  });
+  const payment=eligible[0];
+  if(payment==null){recordDexPaidCheck(coolingDown?'RETRY_COOLDOWN':'PAYMENT_OUTSIDE_WINDOW');return false;}
+  const attemptKey=dexPurchaseKey(token.tokenAddress,payment);
+  await flushFreshDexPayments();
   if (dexPaymentAttempts.size >= 100 && !dexPaymentAttempts.has(attemptKey)) dexPaymentAttempts.delete(dexPaymentAttempts.keys().next().value!);
-  dexPaymentAttempts.set(attemptKey, {payment:dexPaid.latestPaymentTimestamp!,nextAt:Date.now()+60_000});
+  dexPaymentAttempts.set(attemptKey, {payment:payment!,nextAt:Date.now()+60_000});
   const market = await getRobinhoodMarketSnapshot(token.tokenAddress, { priority: 'NORMAL',
     caller: 'robinhood_dex_paid_context', queueWaitTimeoutMs: 750 }).catch(() => null);
   const chartUrl = market?.chartUrl ?? (token.pairAddress
@@ -2153,9 +2166,9 @@ export async function processRobinhoodDexPaidSignal(token: RobinhoodDiscoveredTo
   const evidence = normalizeCoreDecisionMetrics(token.metadata);
   const age = verifiedPairAge(market?.pairCreatedAt);
   const semanticEvent = await persistOrLoadAlphaSemanticEventRecord({
-    identity: `${token.tokenAddress.toLowerCase()}:${dexPaid.latestPaymentTimestamp}`,
+    identity: `${token.tokenAddress.toLowerCase()}:${payment}`,
     type: 'DEX_PAID', assetId: token.tokenAddress, chain: 'robinhood', intelligenceState: 'FORMING',
-    symbol: marketContext.symbol ?? token.symbol ?? null, rawSnapshot: { symbol: marketContext.symbol, name: marketContext.name, paymentTimestamp: dexPaid.latestPaymentTimestamp,
+    symbol: marketContext.symbol ?? token.symbol ?? null, rawSnapshot: { symbol: marketContext.symbol, name: marketContext.name, paymentTimestamp: payment,
       orderTypes: dexPaid.orderTypes, orderStatuses: dexPaid.orderStatuses, chartUrl,
       price: marketContext.price, priceProvenance: market ? 'DEXSCREENER_VERIFIED_BASE_PAIR' : null,
       marketCap: marketContext.marketCap, fdv: marketContext.fdv, liquidity: marketContext.liquidity,
@@ -2166,15 +2179,19 @@ export async function processRobinhoodDexPaidSignal(token: RobinhoodDiscoveredTo
     eventIdentity: semanticEvent.event_identity, type: 'DEX_PAID', assetId: token.tokenAddress, chain: 'robinhood', rawSnapshot: semanticEvent.raw_snapshot },
     message: buildPremiumTokenNotification({ state: 'DEX_PAID', symbol: marketContext.symbol, name: marketContext.name,
       address: token.tokenAddress, market: marketContext, evidence, age,
-      insightTitle: 'VERIFIED EVENT', insight: ['A verified Dex visibility payment was detected.', `Payment age · ${Math.max(0, Math.floor((Date.now() - (dexPaid.latestPaymentTimestamp! < 10_000_000_000 ? dexPaid.latestPaymentTimestamp! * 1000 : dexPaid.latestPaymentTimestamp!)) / 60_000))}m · Checked now`],
+      insightTitle: 'VERIFIED EVENT', insight: ['A verified Dex visibility payment was detected.', `Payment age · ${Math.max(0, Math.floor((Date.now() - (payment! < 10_000_000_000 ? payment! * 1000 : payment!)) / 60_000))}m · Checked now`],
       statusTitle: '💎 STATUS', status: 'Promotion payment confirmed · research event, not a buy signal.' }),
     buttons: buildAlphaMarketActions({ chartUrl, tokenUrl: buildExplorerUrl(token.tokenAddress),
       fullIntelCallback: `FI_RH_${token.tokenAddress}`, copyContractCallback: `COPY_CA_${token.tokenAddress}` }), preserveMessage: true });
-  if (result.delivered > 0) dexPaymentAttempts.set(attemptKey,{payment:dexPaid.latestPaymentTimestamp!,nextAt:Date.now()+10*60_000});
-  recordDexPaidCheck(result.delivered > 0 ? 'TELEGRAM_ACCEPTED' : result.failed > 0 ? 'DELIVERY_FAILURE' : 'NO_DELIVERY');
+  const completion=promotionDeliveryResult(result);
+  // Final security-gate withholding is recorded in the shared delivery layer.
+  if(completion.complete)recordPromotionAudit('RH_DEX_PAID',attemptKey,'DELIVERED');
+  else if(!result.withheld)recordPromotionAudit('RH_DEX_PAID',attemptKey,'DELIVERY_PENDING');
+  if (completion.complete){completeFreshDexPayment(token.tokenAddress,payment!);dexPaymentAttempts.set(attemptKey,{payment:payment!,nextAt:Date.now()+10*60_000});}
+  recordDexPaidCheck(completion.outcome);
   console.log('[RobinhoodObserver] DEX PAID semantic delivery:', { token: token.tokenAddress,
-    paymentTimestamp: dexPaid.latestPaymentTimestamp, delivered: result.delivered, failed: result.failed });
-  return true;
+    paymentTimestamp: payment, delivered: result.delivered, failed: result.failed });
+  return completion.complete;
 }
 
 export async function processRobinhoodDexPaidDiscoverySlice(tokens: RobinhoodDiscoveredToken[]) {

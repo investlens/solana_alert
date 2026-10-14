@@ -44,7 +44,7 @@ test('DEX Paid and BOOST preserve identities, bounded optional enrichment, share
     readFile(new URL('../src/chains/robinhood/robinhoodObserver.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/chains/robinhood/robinhoodBoostObserver.ts', import.meta.url), 'utf8'),
   ]);
-  assert.match(observer, /identity: `\$\{token\.tokenAddress\.toLowerCase\(\)\}:\$\{dexPaid\.latestPaymentTimestamp\}`/);
+  assert.match(observer, /identity: `\$\{token\.tokenAddress\.toLowerCase\(\)\}:\$\{payment\}`/);
   assert.match(observer, /queueWaitTimeoutMs: 750/); assert.match(observer, /\.catch\(\(\) => null\)/);
   assert.match(observer, /fullIntelCallback: `FI_RH_\$\{token\.tokenAddress\}`/);
   assert.match(observer, /deliverAlphaSemanticEvent/);

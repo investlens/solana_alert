@@ -1,3 +1,4 @@
+import {restoreFreshDexPayments,currentFreshDexPayments} from './freshDexPaymentWatch.js';
 import { seedRobinhoodStreamBoost } from './robinhoodBoostObserver.js';
 import { startPromotionStreams } from './promotionStreams.js';
 import { createPromotionPriorityQueue } from './promotionPriorityQueue.js';
@@ -94,6 +95,10 @@ async function cycle() {
   const startedAt = Date.now();
   try {
     if (!restored) {
+      for(const payment of await restoreFreshDexPayments()){
+        const token:RobinhoodDiscoveredToken={chain:'robinhood',tokenAddress:payment.token,discoveredAt:payment.observedAt,source:'DEXSCREENER',sourceType:'INDEXER',sources:[]};
+        remember(token);priority.admit([{tokenAddress:payment.token}]);
+      }
       const saved = await getSharedJson<unknown>(CHECKPOINT_KEY, 1_000);
       for (const entry of restoreDexPaidWatch(saved?.value, Date.now(), WATCH_LIMIT)) candidates.set(key(entry.token.tokenAddress), entry);
       // One bounded read of the existing verified PONS launch queue also warms
@@ -112,6 +117,7 @@ async function cycle() {
     });
     firstCycle = false;
     for (const token of batch.tokens) remember(token);
+    for(const payment of currentFreshDexPayments()){remember({chain:'robinhood',tokenAddress:payment.token,discoveredAt:payment.observedAt,source:'DEXSCREENER',sourceType:'INDEXER',sources:[]});priority.admit([{tokenAddress:payment.token}]);}
     prune();
 
     await setSharedJson(CHECKPOINT_KEY, snapshotDexPaidWatch(candidates.values(), Date.now(), WATCH_LIMIT), new Date().toISOString(), DEX_PAID_WATCH_TTL_MS);

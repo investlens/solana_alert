@@ -1,8 +1,9 @@
+import {acquireBoostRecipientClaim} from './boostDeliveryGuard.js';
 import {forEachDeliveryRecipient} from './recipientDeliveryTiming.js';
 import { telegramRecipientUnavailable } from '../ui/alphaosPhotoDelivery.js';
 import { schedulePromotionCardEnrichment, type PromotionEditTarget } from './promotionCardEnrichment.js';
 import type { PromotionCardArgs } from '../ui/promotionEventCard.js';
-import { recordFeedDelivery } from './feedDeliveryHealth.js';
+import { recordFeedDelivery,recordPromotionAudit } from './feedDeliveryHealth.js';
 import { buildPromotionEventCard } from '../ui/promotionEventCard.js';
 import { discloseRobinhoodKeyStats, cachedRobinhoodAlertStats } from './alertKeyStatsService.js';
 import {robinhoodAlertSafety} from './robinhoodAlertSafety.js';
@@ -44,6 +45,7 @@ export async function claimDexRecipient(eventIdentity: string, recipient: string
 }
 
 type SemanticDeliveryDependencies = {
+  recipientClaim?:typeof acquireRecipientClaim;
   getUsers: () => Promise<DeliverableUser[]>;
   strategyEnabled: (telegramId: string, strategyKey: string) => Promise<boolean>;
   reserve: (event: UserFacingSemanticEvent, user: DeliverableUser, leaseToken: string) => Promise<boolean>;
@@ -124,12 +126,13 @@ async function loadSemanticRawSnapshot(eventId: number): Promise<Record<string, 
 
 export async function deliverAlphaSemanticEvent(args: {
   event: UserFacingSemanticEvent; message: string; buttons?: InlineButton[][]; preserveMessage?: boolean;
+  protectBoostRecipients?:boolean;
   onFailure?: (error: unknown) => void;
   onTelegramAccepted?: (user: DeliverableUser) => void;
   onSendStarted?: () => void;
   onRecipientFailure?: (user: DeliverableUser, error: unknown,
     stage: 'recipient_setup' | 'telegram_send' | 'delivery_completion') => void;
-}, dependencies: SemanticDeliveryDependencies = productionDependencies): Promise<{ delivered: number; failed: number }> {
+}, dependencies: SemanticDeliveryDependencies = productionDependencies): Promise<{ delivered: number; failed: number; alreadyConfirmed?:number;withheld?:true }> {
   const ephemeralMode = dependencies === productionDependencies && (args.event.ephemeral === true || args.event.id < 0);
   let launchType: LaunchClassification | null = null;
   let exitPairId:string|undefined;
@@ -171,7 +174,8 @@ export async function deliverAlphaSemanticEvent(args: {
   let paidCreator: string | null = null;
   let paidSecurityNote: string | null = null;
   if (dependencies === productionDependencies && args.event.type === 'DEX_PAID' && args.event.chain.toLowerCase() === 'robinhood') {
-    const safety = await evaluateDexPaidAlertSafety(args.event.assetId);
+    const expectedPayment=(args.event.rawSnapshot??(ephemeralMode?getEphemeralSemanticEventEvidence(args.event.eventIdentity):null))?.paymentTimestamp;
+    const safety = await evaluateDexPaidAlertSafety(args.event.assetId,typeof expectedPayment==='number'?expectedPayment:undefined);
     if (!safety.allowed) {
       console.warn('[AlphaSemanticDelivery] Robinhood DEX_PAID suppressed by event safety gate.', {
         alertEventId: args.event.id,
@@ -181,8 +185,10 @@ export async function deliverAlphaSemanticEvent(args: {
         pairAgeMinutes: safety.pairAgeMinutes,
         reasons: safety.reasons,
       });
-      return { delivered: 0, failed: 0 };
+      if(typeof expectedPayment==='number')recordPromotionAudit('RH_DEX_PAID',`${args.event.assetId.toLowerCase()}:${expectedPayment<10_000_000_000?expectedPayment*1000:expectedPayment}`,safety.reasons.some(reason=>/HARD BLOCK|PAYMENT_CHANGED/i.test(reason))?'BLOCKED':'WATCHED');
+      return { delivered: 0, failed: 0,withheld:true };
     }
+    if(typeof expectedPayment==='number')recordPromotionAudit('RH_DEX_PAID',`${args.event.assetId.toLowerCase()}:${expectedPayment<10_000_000_000?expectedPayment*1000:expectedPayment}`,'READY');
     exitPairId=safety.exitPairId;
     lpStatus=safety.lpStatus ?? null;
     launchType=safety.launchType ?? 'UNKNOWN';paidCreator=safety.ponsDeployer;paidSecurityNote=safety.securityNote ?? null;
@@ -255,7 +261,7 @@ export async function deliverAlphaSemanticEvent(args: {
   const enrichmentTargets: PromotionEditTarget[] = [];
   const renderedCharacters = deliveryMessage.length;
   const renderedBytes = Buffer.byteLength(deliveryMessage, 'utf8');
-  let delivered = 0; let failed = 0; let accepted = 0;
+  let delivered = 0; let failed = 0; let accepted = 0;let alreadyConfirmed=0;const countConfirmation=args.protectBoostRecipients===true||(dependencies===productionDependencies&&args.event.type==='DEX_PAID');
   const acceptedRecipients:AcceptedRecoveryRecipient[]=[];
   await forEachDeliveryRecipient(users, async user => {
     if (!hasCapability(accessProfileForUser(user), 'opportunities.realtime')) return;
@@ -272,9 +278,11 @@ export async function deliverAlphaSemanticEvent(args: {
 
       // DEX payment claims survive DB outages, restarts and concurrent workers.
       // Keep an ambiguous Telegram result claimed rather than risk a duplicate.
-      if (dependencies === productionDependencies && ['DEX_PAID','PUMPFUN_MOMENTUM'].includes(args.event.type)) {
-        recipientClaim = await acquireRecipientClaim(args.event.eventIdentity, user.telegram_id);
+      if ((dependencies === productionDependencies && ['DEX_PAID','PUMPFUN_MOMENTUM'].includes(args.event.type)) || (args.event.type==='BOOST'&&args.protectBoostRecipients===true)) {
+        recipientClaim = await (dependencies.recipientClaim??(args.protectBoostRecipients?acquireBoostRecipientClaim:acquireRecipientClaim))(args.event.eventIdentity, user.telegram_id);
         if (recipientClaim.state !== 'CLAIMED') {
+          if(countConfirmation){if(recipientClaim.state==='DELIVERED')alreadyConfirmed++;else failed++;}
+
           if (liveFeed) recordFeedDelivery(liveFeed, recipientClaim.state === 'DELIVERED' ? 'DEDUPLICATED' : 'UNCONFIRMED');
           console.warn('[AlphaSemanticDelivery] Recipient claim skipped', JSON.stringify({eventIdentity:args.event.eventIdentity,
             telegramId:user.telegram_id,state:recipientClaim.state}));
@@ -335,6 +343,7 @@ export async function deliverAlphaSemanticEvent(args: {
       const leaseToken = createLeaseToken();
       if (!await dependencies.reserve(args.event, user, leaseToken)) {
         if (recipientClaim?.state === 'CLAIMED') await recipientClaim.release();
+        if(countConfirmation)failed++;
         return;
       }
       const result = await deliverReservedTelegram({
@@ -388,5 +397,5 @@ export async function deliverAlphaSemanticEvent(args: {
       price:verifiedPair?stats!.price:raw.price as number | null, marketCap:verifiedPair?stats!.marketCap:raw.marketCap as number | null,
       liquidity:verifiedPair?stats!.liquidity:raw.liquidity as number | null, pair:verifiedPair??raw.pairAddress as string | null}, accepted);
   }
-  return { delivered, failed };
+  return countConfirmation?{delivered,failed,alreadyConfirmed}:{ delivered, failed };
 }
