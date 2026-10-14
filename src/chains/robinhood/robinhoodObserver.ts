@@ -1,3 +1,4 @@
+import {observeFreshDexPayment,completeFreshDexPayment} from './freshDexPaymentWatch.js';
 import {promotionDeliveryResult} from '../../services/promotionDeliveryResult.js';
 import { runRejectedCandidateReview } from '../../services/rejectedCandidateReview.js';
 import { recentDexPayment } from './dexPaidWatchState.js';
@@ -2134,12 +2135,12 @@ export async function processRobinhoodDexPaidSignal(token: RobinhoodDiscoveredTo
   if (dexPaid.dexPaid !== true) {
     recordDexPaidCheck(dexPaid.dexPaid === null ? 'PROVIDER_UNAVAILABLE' : 'NO_PAID_ORDER'); return false;
   }
-  if (!recentDexPayment(dexPaid.latestPaymentTimestamp)) { recordDexPaidCheck('PAYMENT_OUTSIDE_WINDOW'); return false; }
   const attemptKey = normalize(token.tokenAddress);
   const previousAttempt = dexPaymentAttempts.get(attemptKey);
   if (previousAttempt?.payment === dexPaid.latestPaymentTimestamp && previousAttempt.nextAt > Date.now()) {
     recordDexPaidCheck('RETRY_COOLDOWN'); return false;
   }
+  if (dexPaid.latestPaymentTimestamp==null || !observeFreshDexPayment(token.tokenAddress,dexPaid.latestPaymentTimestamp)) { recordDexPaidCheck('PAYMENT_OUTSIDE_WINDOW'); return false; }
   if (dexPaymentAttempts.size >= 100 && !dexPaymentAttempts.has(attemptKey)) dexPaymentAttempts.delete(dexPaymentAttempts.keys().next().value!);
   dexPaymentAttempts.set(attemptKey, {payment:dexPaid.latestPaymentTimestamp!,nextAt:Date.now()+60_000});
   const market = await getRobinhoodMarketSnapshot(token.tokenAddress, { priority: 'NORMAL',
@@ -2172,7 +2173,7 @@ export async function processRobinhoodDexPaidSignal(token: RobinhoodDiscoveredTo
     buttons: buildAlphaMarketActions({ chartUrl, tokenUrl: buildExplorerUrl(token.tokenAddress),
       fullIntelCallback: `FI_RH_${token.tokenAddress}`, copyContractCallback: `COPY_CA_${token.tokenAddress}` }), preserveMessage: true });
   const completion=promotionDeliveryResult(result);
-  if (completion.complete) dexPaymentAttempts.set(attemptKey,{payment:dexPaid.latestPaymentTimestamp!,nextAt:Date.now()+10*60_000});
+  if (completion.complete){completeFreshDexPayment(token.tokenAddress,dexPaid.latestPaymentTimestamp!);dexPaymentAttempts.set(attemptKey,{payment:dexPaid.latestPaymentTimestamp!,nextAt:Date.now()+10*60_000});}
   recordDexPaidCheck(completion.outcome);
   console.log('[RobinhoodObserver] DEX PAID semantic delivery:', { token: token.tokenAddress,
     paymentTimestamp: dexPaid.latestPaymentTimestamp, delivered: result.delivered, failed: result.failed });
