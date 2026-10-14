@@ -1,3 +1,4 @@
+import {promotionDeliveryResult} from '../../services/promotionDeliveryResult.js';
 import { runRejectedCandidateReview } from '../../services/rejectedCandidateReview.js';
 import { recentDexPayment } from './dexPaidWatchState.js';
 import { recordDexPaidCheck } from './dexPaidDiagnostics.js';
@@ -2170,11 +2171,12 @@ export async function processRobinhoodDexPaidSignal(token: RobinhoodDiscoveredTo
       statusTitle: '💎 STATUS', status: 'Promotion payment confirmed · research event, not a buy signal.' }),
     buttons: buildAlphaMarketActions({ chartUrl, tokenUrl: buildExplorerUrl(token.tokenAddress),
       fullIntelCallback: `FI_RH_${token.tokenAddress}`, copyContractCallback: `COPY_CA_${token.tokenAddress}` }), preserveMessage: true });
-  if (result.delivered > 0) dexPaymentAttempts.set(attemptKey,{payment:dexPaid.latestPaymentTimestamp!,nextAt:Date.now()+10*60_000});
-  recordDexPaidCheck(result.delivered > 0 ? 'TELEGRAM_ACCEPTED' : result.failed > 0 ? 'DELIVERY_FAILURE' : 'NO_DELIVERY');
+  const completion=promotionDeliveryResult(result);
+  if (completion.complete) dexPaymentAttempts.set(attemptKey,{payment:dexPaid.latestPaymentTimestamp!,nextAt:Date.now()+10*60_000});
+  recordDexPaidCheck(completion.outcome);
   console.log('[RobinhoodObserver] DEX PAID semantic delivery:', { token: token.tokenAddress,
     paymentTimestamp: dexPaid.latestPaymentTimestamp, delivered: result.delivered, failed: result.failed });
-  return true;
+  return completion.complete;
 }
 
 export async function processRobinhoodDexPaidDiscoverySlice(tokens: RobinhoodDiscoveredToken[]) {
