@@ -70,3 +70,10 @@ test('boost retries retain immutable classification and a newer purchase uses th
  const next=classifyBoostAttempt(totals,pending,token,{totalAmount:40,amount:10});assert.equal(next?.type,'BOOST_INCREASED');assert.equal(next?.boostAdded,10);
  assert.equal(classifyBoostAttempt(new Map(),new Map(),token,{totalAmount:40,amount:10}),null,'unseen historical totals still do not become purchases');
 });
+
+test('DEX gate cannot authorize one payment using a different currently approved order',async()=>{
+ const now=2_000_000_000_000,payment=now-1000;let checks=0;
+ const gate=createDexPaidEventGate({now:()=>now,paid:async()=>({tokenAddress:token,dexPaid:true,status:'PAID',orderTypes:[],orderStatuses:[],latestPaymentTimestamp:payment,warnings:[],scannedAt:now}),launch:async()=>({exists:true,token,deployer:null,launchType:'PONS'}),custom:async()=>{checks++;throw Error('Custom gate should not run');}});
+ assert.equal((await gate(token,payment)).allowed,true);const mismatch=await gate(token,payment-1000);assert.equal(mismatch.allowed,false);assert.deepEqual(mismatch.reasons,['PAYMENT_CHANGED']);assert.equal(checks,0);
+ assert.equal((await gate(token,payment/1000)).allowed,true,'seconds and milliseconds identify the same payment');
+});
