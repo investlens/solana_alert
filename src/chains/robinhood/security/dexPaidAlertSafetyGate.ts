@@ -30,9 +30,9 @@ export function createDexPaidEventGate(deps:Dependencies) {
       base.checks.push({key:'DEX_PAID_CONFIRMED',passed:confirmed,detail:paid.status});
       if(!confirmed){base.reasons.push('DEX_PAID_UNCONFIRMED');return base;}
       const ms=(at:number)=>at<10_000_000_000?at*1000:at;
-      if(expectedPayment!=null&&(paid.latestPaymentTimestamp==null||ms(expectedPayment)!==ms(paid.latestPaymentTimestamp))){base.reasons.push('PAYMENT_CHANGED');return base;}
-      const fresh=recentDexPayment(paid.latestPaymentTimestamp,deps.now()) || (paid.latestPaymentTimestamp!=null && deps.observedFresh?.(token,paid.latestPaymentTimestamp,deps.now())===true);
-      const at=paid.latestPaymentTimestamp;
+      const at=expectedPayment??paid.latestPaymentTimestamp;
+      if(expectedPayment!=null&&!(paid.paymentTimestamps??(paid.latestPaymentTimestamp==null?[]:[paid.latestPaymentTimestamp])).some(payment=>ms(payment)===ms(expectedPayment))){base.reasons.push('PAYMENT_CHANGED');return base;}
+      const fresh=recentDexPayment(at,deps.now()) || (at!=null && deps.observedFresh?.(token,at,deps.now())===true);
       base.paymentAgeSeconds=at==null?null:Math.max(0,(deps.now()-(at<10_000_000_000?at*1000:at))/1000);
       base.checks.push({key:'PAYMENT_FRESHNESS',passed:fresh,detail:'Fresh payment or bounded watch of a payment actually observed fresh; token age has no limit'});
       if(!fresh){base.reasons.push('PAYMENT_OUTSIDE_WINDOW');return base;}
