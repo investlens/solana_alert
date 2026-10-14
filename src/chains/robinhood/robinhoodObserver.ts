@@ -1,4 +1,5 @@
-import {observeFreshDexPayment,completeFreshDexPayment,dexPurchaseKey,paymentMs} from './freshDexPaymentWatch.js';
+import {recordPromotionAudit} from '../../services/feedDeliveryHealth.js';
+import {observeFreshDexPayment,completeFreshDexPayment,flushFreshDexPayments,dexPurchaseKey,paymentMs} from './freshDexPaymentWatch.js';
 import {promotionDeliveryResult} from '../../services/promotionDeliveryResult.js';
 import { runRejectedCandidateReview } from '../../services/rejectedCandidateReview.js';
 import { recentDexPayment } from './dexPaidWatchState.js';
@@ -2143,11 +2144,14 @@ export async function processRobinhoodDexPaidSignal(token: RobinhoodDiscoveredTo
   const eligible=payments.filter(payment=>{
     const attempt=dexPaymentAttempts.get(dexPurchaseKey(token.tokenAddress,payment));
     if(attempt&&attempt.nextAt>now){coolingDown=true;return false;}
-    return observeFreshDexPayment(token.tokenAddress,payment,now);
+    const fresh=observeFreshDexPayment(token.tokenAddress,payment,now);
+    if(fresh)recordPromotionAudit('RH_DEX_PAID',dexPurchaseKey(token.tokenAddress,payment),'OBSERVED');
+    return fresh;
   });
   const payment=eligible[0];
   if(payment==null){recordDexPaidCheck(coolingDown?'RETRY_COOLDOWN':'PAYMENT_OUTSIDE_WINDOW');return false;}
   const attemptKey=dexPurchaseKey(token.tokenAddress,payment);
+  await flushFreshDexPayments();
   if (dexPaymentAttempts.size >= 100 && !dexPaymentAttempts.has(attemptKey)) dexPaymentAttempts.delete(dexPaymentAttempts.keys().next().value!);
   dexPaymentAttempts.set(attemptKey, {payment:payment!,nextAt:Date.now()+60_000});
   const market = await getRobinhoodMarketSnapshot(token.tokenAddress, { priority: 'NORMAL',
@@ -2180,6 +2184,9 @@ export async function processRobinhoodDexPaidSignal(token: RobinhoodDiscoveredTo
     buttons: buildAlphaMarketActions({ chartUrl, tokenUrl: buildExplorerUrl(token.tokenAddress),
       fullIntelCallback: `FI_RH_${token.tokenAddress}`, copyContractCallback: `COPY_CA_${token.tokenAddress}` }), preserveMessage: true });
   const completion=promotionDeliveryResult(result);
+  // Final security-gate withholding is recorded in the shared delivery layer.
+  if(completion.complete)recordPromotionAudit('RH_DEX_PAID',attemptKey,'DELIVERED');
+  else if(!result.withheld)recordPromotionAudit('RH_DEX_PAID',attemptKey,'DELIVERY_PENDING');
   if (completion.complete){completeFreshDexPayment(token.tokenAddress,payment!);dexPaymentAttempts.set(attemptKey,{payment:payment!,nextAt:Date.now()+10*60_000});}
   recordDexPaidCheck(completion.outcome);
   console.log('[RobinhoodObserver] DEX PAID semantic delivery:', { token: token.tokenAddress,
