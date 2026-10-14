@@ -29,12 +29,13 @@ export function arcBoostSafetyFromEvidence(evidence: Record<string, unknown> | n
   return { allowed: true, sellabilityVerified:true, reason: 'no honeypot/cannot-sell flag detected; LP check intentionally skipped for BOOST',
     ...ownership };
 }
-export async function processArcBoostObservation(totals: Map<string, number>, boost: { tokenAddress: string; totalAmount: number },
-  deliver: (eventType: 'NEW' | 'INCREASE') => Promise<boolean>): Promise<void> {
-  if (!Number.isFinite(boost.totalAmount) || boost.totalAmount <= 0) return;
-  const key = boost.tokenAddress.toLowerCase(); const previous = totals.get(key);
-  if (previous != null && boost.totalAmount <= previous) return;
-  if (await deliver(previous == null ? 'NEW' : 'INCREASE')) totals.set(key, boost.totalAmount);
+export async function processArcBoostObservation(totals: Map<string, number>, boost: { tokenAddress: string; totalAmount: number; previousTotal?:number },
+  deliver: (eventType: 'NEW' | 'INCREASE') => Promise<boolean>): Promise<boolean> {
+  if (!Number.isFinite(boost.totalAmount) || boost.totalAmount <= 0) return false;
+  const key = boost.tokenAddress.toLowerCase(); const previous = boost.previousTotal??totals.get(key);
+  if (previous != null && boost.totalAmount <= previous) return false;
+  if (await deliver(previous == null ? 'NEW' : 'INCREASE')) {totals.set(key,Math.max(totals.get(key)??0,boost.totalAmount));return true;}
+  return false;
 }
 
 // DEX payments surface missing evidence as a warning; confirmed exit restrictions still block.
