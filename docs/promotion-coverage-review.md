@@ -40,8 +40,10 @@ Prepared in the same unmerged main draft:
 
 Remaining before release: independent review of concurrent/superseded boost handling and first-seen payment checkpoints, plus unique-event reconciliation diagnostics. Production remains untouched.
 
-Second-batch local validation: TypeScript typecheck and all 917 tests passed, including nine recovery regressions. Completed DEX watches are removed; their last confirmed receipt is distinguished from a new Telegram acceptance. Draft only, not deployed.
+Second-batch local validation: TypeScript typecheck and all 918 tests passed, including ten recovery regressions. Completed DEX watches are removed; their last confirmed receipt is distinguished from a new Telegram acceptance. Draft only, not deployed.
 
 Boost-specific recipient claims retain the same owner across retries while capping each retry pause at one second, avoiding a new thirty-second pause in the boost fan-out path. DEX claim timings are unchanged.
 
 Recovery classification is pinned to the pending attempt’s original prior total and increment. A newer purchase can use the already-observed pending total as evidence even before delivery finishes, so an in-flight attempt does not cause the next genuine increase to be silently absorbed as historical state.
+
+The final DEX gate also matches the current approved payment to the event’s expected payment timestamp, preventing a changed provider order from authorizing the wrong pending event.
