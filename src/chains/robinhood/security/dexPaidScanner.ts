@@ -28,6 +28,7 @@ export type RobinhoodDexPaidResult = {
   orderTypes: string[];
   orderStatuses: string[];
   latestPaymentTimestamp: number | null;
+  paymentTimestamps?: number[];
   warnings: string[];
   scannedAt: number;
 };
@@ -50,8 +51,8 @@ export async function scanRobinhoodDexPaid(tokenAddress: string): Promise<Robinh
     if (parsed.malformed) throw new Error('DexScreener orders response was malformed');
     const paidOrders = parsed.orders.filter(order =>
       typeof order.paymentTimestamp === 'number' && order.paymentTimestamp > 0 &&
-      order.status !== 'cancelled' && order.status !== 'rejected');
-    const timestamps = paidOrders.map(order => order.paymentTimestamp!).filter(Number.isFinite);
+      order.status?.toLowerCase() !== 'cancelled' && order.status?.toLowerCase() !== 'rejected');
+    const timestamps = [...new Set(paidOrders.map(order => order.paymentTimestamp! < 10_000_000_000 ? order.paymentTimestamp! * 1000 : order.paymentTimestamp!).filter(Number.isFinite))].sort((a,b)=>a-b);
     const latestPaymentTimestamp = timestamps.length ? Math.max(...timestamps) : null;
 
     return {
@@ -61,6 +62,7 @@ export async function scanRobinhoodDexPaid(tokenAddress: string): Promise<Robinh
       orderTypes: [...new Set(paidOrders.map(order => order.type).filter((v): v is string => Boolean(v)))],
       orderStatuses: [...new Set(paidOrders.map(order => order.status).filter((v): v is string => Boolean(v)))],
       latestPaymentTimestamp,
+      paymentTimestamps: timestamps,
       warnings,
       scannedAt: Date.now(),
     };
@@ -72,6 +74,7 @@ export async function scanRobinhoodDexPaid(tokenAddress: string): Promise<Robinh
       orderTypes: [],
       orderStatuses: [],
       latestPaymentTimestamp: null,
+      paymentTimestamps: [],
       warnings: [error instanceof Error ? error.message : String(error)],
       scannedAt: Date.now(),
     };
