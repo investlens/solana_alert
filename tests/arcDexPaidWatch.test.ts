@@ -50,3 +50,24 @@ test('rotated promotion discovery finds ARC ads without increasing check budget 
  for(let i=0;i<30;i++)watch.seed('0x'+(i+10).toString(16).padStart(40,'0'));
  assert.equal(watch.size(),24);
 });
+
+
+test('two ARC payments on one token keep independent retries within the same scan budget',async()=>{
+ let now=2000000000000,safe=false,orderReads=0;const first=now-2000,second=now-1000,sent:number[]=[];
+ const watch=createArcDexPaidWatch({now:()=>now,read:async url=>{if(!url.includes('/orders/'))return [];orderReads++;return [{paymentTimestamp:first,status:'approved'},{paymentTimestamp:second,status:'approved'}];},security:async()=>({allowed:safe,reason:'pending sell evidence'}),claim:async()=> 'CLAIMED',send:async(_t,p)=>{sent.push(p);return {delivered:1,failed:0};}});
+ watch.seed(token,true);await watch.tick();assert.deepEqual(sent,[]);
+ now+=700000;safe=true;await watch.tick();now+=30000;await watch.tick();now+=30000;await watch.tick();
+ assert.deepEqual(sent,[first,second]);assert.equal(orderReads,4);
+});
+
+test('cancelled or removed pending ARC order cannot borrow approval from a newer order',async()=>{
+ let now=2000000000000,safe=false,cancelled=false;const first=now-2000,second=now-1000,sent:number[]=[];
+ const watch=createArcDexPaidWatch({now:()=>now,read:async url=>url.includes('/orders/')?[{paymentTimestamp:first,status:cancelled?'cancelled':'approved'},{paymentTimestamp:second,status:'approved'}]:[],security:async()=>({allowed:safe,reason:'exit'}),claim:async()=> 'CLAIMED',send:async(_t,p)=>{sent.push(p);return {delivered:0,failed:0,alreadyConfirmed:1};}});
+ watch.seed(token,true);await watch.tick();now+=700000;safe=true;cancelled=true;await watch.tick();now+=30000;await watch.tick();assert.deepEqual(sent,[second]);
+});
+
+test('malformed ARC orders cannot authorize an aged captured payment',async()=>{
+ let now=2000000000000,malformed=false,sends=0;
+ const watch=createArcDexPaidWatch({now:()=>now,read:async url=>url.includes('/orders/')?(malformed?{}:[{paymentTimestamp:now,status:'approved'}]):[],security:async()=>({allowed:malformed,reason:'pending'}),claim:async()=> 'CLAIMED',send:async()=>{sends++;}});
+ watch.seed(token,true);await watch.tick();now+=700000;malformed=true;await watch.tick();assert.equal(sends,0);
+});
