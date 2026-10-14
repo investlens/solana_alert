@@ -18,7 +18,7 @@ This confirms delivery of recorded events. It does not prove complete global dis
 
 ## Remaining coverage limitations to resolve in subsequent batches
 
-- Current health screening counters count checks, not unique promotion events; exact event-stage reconciliation still needs a bounded identity-aware audit.
+- Screening counters count checks. The fourth batch adds a distinct bounded event audit; this is a recent diagnostic window, not a complete historical census.
 - The first review batch identified payment aging during evidence checks. The second batch now prepares a bounded fresh-observation watch; see the detailed safeguards below.
 - The first review batch identified BOOST acknowledgement after any acceptance. The second batch now prepares recipient-protected recovery; concurrent/superseded attempts and recovery expiry require release review.
 - Process restart loses volatile counters. A rolling historical report needs bounded aggregate retention rather than storing all tokens/provider payloads.
@@ -56,6 +56,25 @@ The final DEX gate also matches the currently confirmed paid order to the eventâ
 - The existing orders response exposes all eligible payment timestamps without another provider request. Each invocation captures due fresh payments and processes at most one due purchase, preserving the existing scanner request budget. Per-purchase cooldowns prevent a newer order from overwriting an older retry. The final gate verifies the exact expected timestamp is still in the current eligible paid-order set; an unrelated newer payment cannot authorize a withdrawn older order.
 - No new chain, poller, worker, migration or delivery timing change. The identities reflect observed cumulative boost totals and provider payment timestamps; simultaneous orders with identical timestamps cannot be distinguished without upstream order IDs. Unseen intermediate boost purchases cannot be reconstructed from aggregates.
 
-Unique event-stage reporting across all rejection/watch outcomes remains pending. These fixes preserve retry identities and exact confirmed-event matching; they do not constitute an exhaustive discovery census. Production remains unchanged and release is held pending review and CI.
+The fourth batch adds bounded unique-event reporting. These fixes do not constitute an exhaustive discovery census. Production remains unchanged; release readiness requires final CI on both review branches.
 
 Third-batch local validation: typecheck and all 921 tests passed, including separate close-payment restore/completion, withdrawn older-order rejection, and newer-before-older boost completion. No production mutation or test Telegram messages.
+
+
+## Fourth review batch â€” event audit and release review
+
+- Existing per-worker health snapshots now include up to 128 opaque purchase identities for a one-hour diagnostic window. Repeated checks do not increase the unique-event count; a confirmed delivery cannot be downgraded by rediscovery. Current stages distinguish observed, ready, watched, blocked, delivery pending, delivered and expired. Capacity evictions and aged-out entries are explicit. No recipient identifiers, token payloads, SQL writes or new polling loops. The existing at-most-once-per-minute publication carries this audit.
+- Critical recovery checkpoint reads distinguish a genuinely missing key from unavailable Redis. Failed reads prevent destructive empty-state startup; retries can recover on a subsequent cycle. Critical writes require acknowledgement before sending a new protected boost or processing a captured DEX payment. Failed unsent boost protection writes revert the protection flag and release only the owned unsent claim. DEX checkpoint updates coalesce, preventing earlier best-effort snapshots from overwriting newer observations.
+- Independent release review found equivalent ARC overwrite and stale-payment authorization risks. Companion PR #222 now prepares per-purchase boost recovery and exact currently eligible DEX timestamps, with the same existing scan budgets. ARC records the audit through its direct path. Prior-confirmed recipient claims are distinguished from new acceptances; an empty recipient cohort cannot acknowledge a boost as delivered.
+
+Validation: main typecheck and all 924 tests passed; ARC typecheck and all 598 tests passed. Includes close purchases, out-of-order completion, aging, restore, cancelled/removed/malformed orders, partial/ambiguous recipient sends, checkpoint read/write failure, audit deduplication and explicit capacity limits. Existing timing/security/wallet/winner regressions also pass. A final targeted ARC run passed after bounding the delivered-identity cache.
+
+## Controlled release checklist
+
+1. Final GitHub CI must pass for PR #221 (main) and PR #222 (arc-integration). Keep both unmerged until the requested deployment action.
+2. Confirm source revisions and preserve rollback points: main/PONS production 53fb9ad; ARC production 5c3d5ae. Runtime checks on 14 October found all three online, one running replica each, zero crashes and no pending deployments.
+3. Release only the relevant source branch/services. Do not enable Solana, AI watchdog, auto trading or X automation. No database migration, secret request or new service is required.
+4. Following deployment, verify terminal SUCCESS, replica health, nonzero-or-empty feed activity, checkpoint readiness, and actual confirmed deliveries with recipient timing. CI does not substitute for observing the new runtime.
+5. If runtime regression occurs, use the recorded prior revisions. Preserve recovery checkpoints and recipient claims for review; do not delete claims or force replay ambiguous Telegram sends. The previous runtime does not understand multiple overlapping pending events, so a rollback needs follow-up reconciliation of unfinished deliveries.
+
+Release scope: ready for controlled deployment when final CI is green. This certifies the coverage/recovery package, not worldwide upstream completeness, read receipts, all future trades, or a premium launch across new chains. The diagnostic event window resets with the worker; published snapshots expire after one hour. Unknown or absent snapshots remain unknown rather than zero activity.
