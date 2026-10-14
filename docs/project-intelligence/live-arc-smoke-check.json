@@ -1,0 +1,112 @@
+{
+  "checkedAt": "2026-10-14T20:40:50.887Z",
+  "live": true,
+  "requests": 6,
+  "checks": {
+    "contract": false,
+    "developer": false,
+    "walletEvidence": false,
+    "launchEvidence": false,
+    "socialPosts": false,
+    "sellability": false
+  },
+  "readyForFullFeature": false,
+  "reason": "Live source validation and manual cross-checks on both chains are required; this one-token probe cannot approve a deployment.",
+  "report": {
+    "version": 1,
+    "chain": "arc",
+    "token": "0x3600000000000000000000000000000000000000",
+    "generatedAt": "2026-10-14T20:40:36.322Z",
+    "findings": [
+      {
+        "id": "missing:identity",
+        "section": "identity",
+        "quality": "UNVERIFIED",
+        "severity": "UNKNOWN",
+        "summary": "identity: evidence unavailable or not independently established.",
+        "evidence": []
+      },
+      {
+        "id": "missing:developer",
+        "section": "developer",
+        "quality": "UNVERIFIED",
+        "severity": "UNKNOWN",
+        "summary": "developer: evidence unavailable or not independently established.",
+        "evidence": []
+      },
+      {
+        "id": "missing:connections",
+        "section": "connections",
+        "quality": "UNVERIFIED",
+        "severity": "UNKNOWN",
+        "summary": "connections: evidence unavailable or not independently established.",
+        "evidence": []
+      },
+      {
+        "id": "missing:launches",
+        "section": "launches",
+        "quality": "UNVERIFIED",
+        "severity": "UNKNOWN",
+        "summary": "launches: evidence unavailable or not independently established.",
+        "evidence": []
+      },
+      {
+        "id": "missing:holders",
+        "section": "holders",
+        "quality": "UNVERIFIED",
+        "severity": "UNKNOWN",
+        "summary": "holders: evidence unavailable or not independently established.",
+        "evidence": []
+      },
+      {
+        "id": "missing:controls",
+        "section": "controls",
+        "quality": "UNVERIFIED",
+        "severity": "UNKNOWN",
+        "summary": "controls: evidence unavailable or not independently established.",
+        "evidence": []
+      },
+      {
+        "id": "missing:market",
+        "section": "market",
+        "quality": "UNVERIFIED",
+        "severity": "UNKNOWN",
+        "summary": "market: evidence unavailable or not independently established.",
+        "evidence": []
+      },
+      {
+        "id": "missing:social",
+        "section": "social",
+        "quality": "UNVERIFIED",
+        "severity": "UNKNOWN",
+        "summary": "social: evidence unavailable or not independently established.",
+        "evidence": []
+      },
+      {
+        "id": "missing:selling",
+        "section": "selling",
+        "quality": "UNVERIFIED",
+        "severity": "UNKNOWN",
+        "summary": "selling: evidence unavailable or not independently established.",
+        "evidence": []
+      }
+    ],
+    "coverage": {
+      "identity": "UNAVAILABLE",
+      "developer": "UNAVAILABLE",
+      "connections": "UNAVAILABLE",
+      "launches": "UNAVAILABLE",
+      "holders": "UNAVAILABLE",
+      "controls": "UNAVAILABLE",
+      "market": "UNAVAILABLE",
+      "social": "UNAVAILABLE",
+      "selling": "UNAVAILABLE"
+    },
+    "limits": [
+      "Connections do not establish common ownership.",
+      "History and wallet tracing are bounded; absent evidence is not a clean history.",
+      "No overall safety score or investment recommendation.",
+      "On-chain research was incomplete or its pinned block could not be revalidated. No complete on-chain assessment is claimed."
+    ]
+  }
+}
