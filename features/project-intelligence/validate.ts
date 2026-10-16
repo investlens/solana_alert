@@ -1,0 +1,13 @@
+import {writeFile} from 'node:fs/promises';
+import {chainName,tokenAddress} from './model.js';
+import {createReader,chainConfig,type ProviderConfig} from './providers.js';
+import {buildReport} from './build.js';
+const args=process.argv.slice(2),arg=(name:string)=>args[args.indexOf(name)+1];
+if(!args.includes('--live')||!args.includes('--chain')||!args.includes('--token'))throw Error('Usage: node --import tsx features/project-intelligence/validate.ts --live --chain robinhood --token 0x... [--out report.json]');
+const chain=chainName(arg('--chain')),token=tokenAddress(arg('--token'));
+const config:ProviderConfig={rpc:{robinhood:process.env.PI_ROBINHOOD_RPC_URL??chainConfig.robinhood.rpc,arc:process.env.PI_ARC_RPC_URL??chainConfig.arc.rpc},explorer:{robinhood:process.env.PI_ROBINHOOD_EXPLORER_URL??chainConfig.robinhood.explorer+'/api/v2',arc:process.env.PI_ARC_EXPLORER_URL??chainConfig.arc.explorer+'/api/v2'},explorerKey:process.env.PI_BLOCKSCOUT_KEY,securityKey:process.env.PI_GOPLUS_KEY,socialUrl:process.env.PI_SOCIAL_PROVIDER_URL,socialKey:process.env.PI_SOCIAL_PROVIDER_KEY};
+const reader=createReader(config,{signal:AbortSignal.timeout(30000)}),report=await buildReport(chain,token,reader);
+const checks={contract:report.findings.some(f=>f.id==='contract'&&f.quality==='VERIFIED'),developer:report.findings.some(f=>f.id==='developer-holding'&&f.quality==='VERIFIED'),walletEvidence:report.coverage.connections!=='UNAVAILABLE',launchEvidence:report.coverage.launches!=='UNAVAILABLE',socialPosts:report.findings.some(f=>f.id==='social-sample'),sellability:report.coverage.selling==='AVAILABLE'};
+const result={checkedAt:new Date().toISOString(),live:true,requests:reader.requests(),checks,readyForFullFeature:false,reason:'Live source validation and manual cross-checks on both chains are required; this one-token probe cannot approve a deployment.',report};
+if(args.includes('--out'))await writeFile(arg('--out'),JSON.stringify(result,null,2)+'\n');
+console.log(JSON.stringify({checkedAt:result.checkedAt,requests:result.requests,checks,coverage:report.coverage,readyForFullFeature:false},null,2));
