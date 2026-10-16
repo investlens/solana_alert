@@ -1,3 +1,4 @@
+import {queueDexCoverageCreator,runPonsDexCoverage} from '../../services/ponsDexCoverageWorker.js';
 import {flushVerifiedPonsDex} from '../../services/ponsDexReachedEvidence.js';
 import type {PonsLaunch} from './ponsHistoricalLaunchScanner.js';
 import {createReturningWinnerQueue,returningWinnerCard,parseWinnerSnapshot,returningWinnerHistory,type WinnerHistory} from './ponsReturningWinner.js';
@@ -85,10 +86,13 @@ const worker=createReturningWinnerQueue({
 const enabled=()=>String(process.env.PONS_RETURNING_WINNER_ENABLED??'true').toLowerCase()==='true';
 export function queuePonsReturningWinner(launch:PonsLaunch):void {
  if(!enabled())return;recordFeedDelivery(FEED,'DISCOVERED');worker.enqueue(launch);
+ queueDexCoverageCreator(launch.deployer_address,launch.token_address);
 }
 export async function processPonsReturningWinners():Promise<void>{
  if(!enabled())return;
  await flushVerifiedPonsDex();
  await worker.tick();
+ // Separate bounded research; live launch routing never awaits it.
+ void runPonsDexCoverage();
  const stats=worker.stats();if(stats.pending||stats.active)console.log('[ReturningWinnerDev] QUEUE',stats);
 }
