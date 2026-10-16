@@ -7,7 +7,7 @@ import { assessTokenIntelligence, type IntelligenceObservation, type TokenIntell
 import { classifyLifecycleObservation } from '../../intelligence/lifecycleIntelligence.js';
 import { recordOpportunityAndEmit } from '../../services/opportunityService.js';
 import { qualifyPremiumOpportunity } from '../../services/opportunityDeliveryService.js';
-import { runDatabaseWork, isTransientDatabaseError } from '../../services/databaseLoadGovernor.js';
+import { withDatabaseRequestPriority, isTransientDatabaseError } from '../../services/databaseLoadGovernor.js';
 import { supabase } from '../../services/supabase.js';
 import { getRobinhoodMarketSnapshot, prefetchRobinhoodScannerPairs } from './market.js';
 import { DexScreenerHttpTimeoutError, DexScreenerMalformedResponseError, DexScreenerProviderHttpError,
@@ -140,7 +140,7 @@ async function loadUniverse() {
   if (cachedUniverse.length && now - lastUniverseRefreshAt < UNIVERSE_REFRESH_MS) return cachedUniverse;
   const cutoff = new Date(now - config.existingTokenRetentionHours * 3_600_000).toISOString();
   try {
-    const loaded = await runDatabaseWork('BACKGROUND', async () => {
+    const loaded = await withDatabaseRequestPriority('BACKGROUND', async () => {
       const [opportunities, events, watched] = await Promise.all([
         supabase.from('opportunities').select('asset_id,status,strategy_key,last_observed_at,updated_at')
           .eq('chain', 'robinhood').in('status', ['NEW', 'WATCHING', 'APPROVED']).order('updated_at', { ascending: false }).limit(MAX_UNIVERSE_ROWS_PER_SOURCE),

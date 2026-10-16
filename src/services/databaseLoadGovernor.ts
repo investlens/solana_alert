@@ -4,6 +4,11 @@ export type DatabaseWorkClass = 'CRITICAL' | 'BACKGROUND';
 
 const workContext = new AsyncLocalStorage<DatabaseWorkClass>();
 export const currentDatabaseWorkClass = () => workContext.getStore();
+// Transport priority alone: critical scheduled refreshes must not be skipped
+// by the optional analytics admission circuit.
+export function withDatabaseRequestPriority<T>(workClass: DatabaseWorkClass, fn: () => Promise<T>): Promise<T> {
+  return workContext.run(workClass, fn);
+}
 
 type GovernorState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
 
