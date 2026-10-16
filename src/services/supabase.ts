@@ -1,3 +1,4 @@
+import { currentDatabaseWorkClass } from './databaseLoadGovernor.js';
 import { createClient } from '@supabase/supabase-js';
 import { createRequestGate, currentRequestSignal, fetchBuffered } from './requestDeadline.js';
 import { runtimeDeliverableUsers, mergeRuntimeSubscribers } from './runtimeSubscriberRegistry.js';
@@ -81,6 +82,8 @@ function isCriticalRequest(url: string, init?: RequestInit): boolean {
     url.includes('/rest/v1/user_tracked_wallets') ||
     url.includes('/rest/v1/wallet_activity_deliveries') ||
     url.includes('/rest/v1/wallet_monitor_cursors') ||
+    url.includes('/rest/v1/strategy_registry') ||
+    url.includes('/rest/v1/user_strategy_preferences') ||
     url.includes('/rest/v1/strategy_settings') ||
     url.includes('/rest/v1/alerts') ||
     url.includes('/rest/v1/alert_deliveries') ||
@@ -141,25 +144,6 @@ function reservationKey(body: string | null): string | null {
   }
 }
 
-function testingRealtimeEnabled(): boolean {
-  return process.env.TESTING_REALTIME_ALERTS === 'true';
-}
-
-function normalizeTestingRecipients(rows: any[]): any[] {
-  if (!testingRealtimeEnabled()) return rows;
-  const adminId = String(process.env.ADMIN_TELEGRAM_ID ?? process.env.OWNER_CHAT_ID ?? '');
-  return rows.map((row) => {
-    const telegramId = String(row?.telegram_id ?? '');
-    if (!telegramId || telegramId === adminId) return row;
-    return {
-      ...row,
-      tier: 'paid',
-      subscription_status: 'active',
-      free_trial_used: 0,
-    };
-  });
-}
-
 function resilientUsersBody(cachedBody?: string | null): string {
   const merged = new Map<string, any>();
 
@@ -177,14 +161,14 @@ function resilientUsersBody(cachedBody?: string | null): string {
     }
   }
 
-  return JSON.stringify(normalizeTestingRecipients(mergeRuntimeSubscribers([...merged.values()])));
+  return JSON.stringify(mergeRuntimeSubscribers([...merged.values()]));
 }
 
 function runtimeUsersResponse(reason: string): Response {
   const body = resilientUsersBody(deliverableUsersCache?.body ?? null);
   console.warn('[SupabaseResilience] Subscriber database unavailable; using resilient recipient set.', {
     reason,
-    runtimeRecipients: runtimeDeliverableUsers({ allRealtime: testingRealtimeEnabled() }).length,
+    runtimeRecipients: runtimeDeliverableUsers().length,
     hasLastGoodCache: Boolean(deliverableUsersCache),
   });
   return new Response(body, {
@@ -220,7 +204,9 @@ async function resilientFetch(input: RequestInfo | URL, init?: RequestInit): Pro
   const body = requestBody(input, init);
   const key = reservation ? reservationKey(body) : null;
   const critical = isCriticalRequest(url, init);
-  const lane: Lane = critical ? 'critical' : 'background';
+  // Honor the governor's analytics scope even for tables also used by delivery.
+  // Keep the same gate sizes and deadlines; this changes priority, not load.
+  const lane: Lane = currentDatabaseWorkClass() === 'BACKGROUND' ? 'background' : critical ? 'critical' : 'background';
 
   const inherited = currentRequestSignal();
   const signals = [AbortSignal.timeout(SUPABASE_REQUEST_TIMEOUT_MS), init?.signal, inherited].filter((signal): signal is AbortSignal => !!signal);
@@ -238,23 +224,14 @@ async function resilientFetch(input: RequestInfo | URL, init?: RequestInit): Pro
     if (usersRead && response.ok) {
       const clone = response.clone();
       const rawBody = await clone.text();
-      let normalizedBody = rawBody;
-      try {
-        const rows = JSON.parse(rawBody);
-        if (Array.isArray(rows)) normalizedBody = JSON.stringify(normalizeTestingRecipients(rows));
-      } catch {
-        // Preserve original body if parsing fails.
-      }
-
       deliverableUsersCache = {
-        body: normalizedBody,
+        body: rawBody,
         status: clone.status,
         statusText: clone.statusText,
         contentType: clone.headers.get('content-type'),
       };
 
       lastGoodCriticalGets.set(url, deliverableUsersCache);
-      if (testingRealtimeEnabled()) return cachedResponse(deliverableUsersCache);
     } else if (critical && cacheableCriticalGet(url, init) && response.ok) {
       await rememberCriticalGet(url, response);
     }

@@ -44,3 +44,16 @@ test('a delayed card retains its captured market snapshot and creator observatio
   assert.equal(card.buttons[0][0].text,'🚀 PONS');
   assert.equal((card.text.match(/Creator balance change/g)??[]).length,1);
 });
+
+test('realtime fallback preserves free billing tier and the thirty-second schedule', async()=>{
+  const {runtimeDeliverableUsers}=await import('../src/services/runtimeSubscriberRegistry.js');
+  const {recipientDelayMs}=await import('../src/services/recipientDeliveryTiming.js');
+  const {accessProfileForUser,hasCapability}=await import('../src/product/capabilities.js');
+  const id='free-realtime-audit';rememberRuntimeSubscriber({telegramId:id});
+  try {
+    const user=runtimeDeliverableUsers({allRealtime:true}).find(row=>row.telegram_id===id)!;
+    assert.equal(user.tier,'free');assert.equal(user.subscription_status,'none');
+    assert.equal(recipientDelayMs(user),30000);
+    assert.equal(hasCapability(accessProfileForUser(user),'opportunities.realtime'),true);
+  } finally {forgetRuntimeSubscriber(id);}
+});
