@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {runDatabaseWork,currentDatabaseWorkClass,resetDatabaseGovernorForTests} from '../src/services/databaseLoadGovernor.js';
+import {runDatabaseWork,withDatabaseRequestPriority,currentDatabaseWorkClass,resetDatabaseGovernorForTests} from '../src/services/databaseLoadGovernor.js';
 
 process.env.SUPABASE_URL='https://priority-test.supabase.co';
 process.env.SUPABASE_SERVICE_ROLE_KEY='test';
@@ -40,4 +40,17 @@ test('analytics requests cannot occupy the subscriber preference lane; paid labe
     assert.equal(currentDatabaseWorkClass(),undefined);
     assert.equal(calls.includes('/rest/v1/alpha_alert_events'),true);
   } finally {release();globalThis.fetch=original;}
+});
+
+
+test('scheduled scanner refresh retains transport priority even while optional analytics owns admission',async()=>{
+  resetDatabaseGovernorForTests();let release!:()=>void;
+  const held=runDatabaseWork('BACKGROUND',()=>new Promise<void>(resolve=>{release=resolve;}));
+  try {
+    assert.equal(await runDatabaseWork('BACKGROUND',async()=>true),null);
+    assert.equal(await withDatabaseRequestPriority('BACKGROUND',async()=>{
+      assert.equal(currentDatabaseWorkClass(),'BACKGROUND');return 'refreshed';
+    }),'refreshed');
+    assert.equal(currentDatabaseWorkClass(),undefined);
+  } finally {release();await held;}
 });
