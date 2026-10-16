@@ -29,6 +29,7 @@
     "viem": "^2.55.11"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.10",
     "@types/node": "^24.13.2",
     "tsx": "4.23.15",
     "typescript": "^5.8.3"

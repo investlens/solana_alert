@@ -1,6 +1,7 @@
 import { removeAlertedCandidate } from './rejectedCandidateReview.js';
 import { governedDexScreenerJson } from './dexscreenerRequestGovernor.js';
 import {processCompactRunner,type RunnerSample} from './compactRunnerMilestones.js';
+import { reconcileDeveloperOutcomeLinks } from './developerOutcomeLinkage.js';
 
 export const compactOutcomesEnabled = () => String(process.env.ALPHA_COMPACT_OUTCOMES_ENABLED ?? 'true').toLowerCase() === 'true';
 export type CompactAlertBaseline = {
@@ -113,6 +114,7 @@ async function measure(row: CompactTrackingRow): Promise<RunnerSample> {
 export async function runCompactOutcomeCycle(): Promise<void> {
   if (!compactOutcomesEnabled() || running || Date.now() < pausedUntil) return;
   running = true;
+  void reconcileDeveloperOutcomeLinks();
   try {
     const { supabase } = await import('./supabase.js');
     if (Date.now()-maintainedAt>=5*60000) {
