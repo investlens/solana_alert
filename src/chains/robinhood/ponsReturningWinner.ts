@@ -6,7 +6,8 @@ const address=(v:unknown):v is string=>typeof v==='string'&&/^0x[a-f0-9]{40}$/i.
 const hash=(v:unknown)=>typeof v==='string'&&/^0x[a-f0-9]{64}$/i.test(v);
 const count=(v:unknown):number|null=>{const n=typeof v==='number'||(typeof v==='string'&&/^\d+$/.test(v))?Number(v):NaN;return Number.isSafeInteger(n)&&n>=0?n:null;};
 export type PriorWinner={chain:string;token:string;creator:string;creator_source:string;price_unit:'USD'|'ETH_RESERVE_RATIO';baseline_price:number;final_roi:number;sampled_low_roi:number;samples:{status:string;price:number;at:string}[];assessed_at:string};
-export type WinnerHistory={creator:string;assessed_sessions:number;winners:number;failed:number;neutral:number;incomplete:number;prior_winners:PriorWinner[];checked_at?:string;known_launches:number;launches_24h:number;verified_winning_tokens:number};
+export type DexReference={token:string;pool:string;source:'PONS_V2_GRADUATED_MAPPED_POOL'|'PONS_V1_MAPPED_POOL';observed_at:string};
+export type WinnerHistory={creator:string;known_launches:number;dex_projects:number;dex_references:DexReference[];history_scope:'SHORTLIST'|'PRIOR_LAUNCHES';checked_at?:string};
 export type WinnerSnapshot={asOf:number;capped:boolean;developers:Map<string,WinnerHistory>};
 export function freshVerifiedPonsLaunch(launch:PonsLaunch,now:number):boolean {
  if(!launch||launch.chain!=='robinhood'||launch.protocol!=='pons'||![launch.token_address,launch.deployer_address,launch.factory_address].every(address)||!hash(launch.transaction_hash)||!Number.isSafeInteger(launch.log_index)||launch.log_index<0||!/^\d+$/.test(launch.block_number))return false;
@@ -28,45 +29,41 @@ export function validPriorWinner(row:any,creator:string):row is PriorWinner {
 }
 export function parseWinnerSnapshot(payload:any,now:number):WinnerSnapshot|null {
  const asOf=Date.parse(payload?.as_of);
- if(payload?.policy_version!==2||!Number.isFinite(asOf)||asOf>now+30000||now-asOf>5*60000||!Array.isArray(payload?.developers)||payload.developers.length>1000)return null;
+ if(payload?.policy_version!==4||!Number.isFinite(asOf)||asOf>now+30000||now-asOf>5*60000||!Array.isArray(payload.developers)||payload.developers.length>1000)return null;
  const developers=new Map<string,WinnerHistory>();
  for(const row of payload.developers){
-  if(!address(row?.creator)||!Array.isArray(row.prior_winners)||row.prior_winners.length>3)continue;
-  const values=['assessed_sessions','winners','failed','neutral','incomplete'].map(k=>count(row[k]));
-  if(values.some(v=>v===null))continue;
-  const [sessions,winners,failed,neutral,incomplete]=values as number[];
-  const known=count(row.known_launches),recent=count(row.launches_24h),winning=count(row.verified_winning_tokens);
-  if(known===null||recent===null||winning===null||known<3||known>=50||recent>5||recent>known||winning<3||winning>known||winning*5<known*3)continue;
-  if(winners<winning||sessions!==winners+failed+neutral+incomplete)continue;
-  const prior=row.prior_winners.filter((w:any)=>validPriorWinner(w,row.creator)&&Date.parse(w.assessed_at)<=asOf);
-  if(prior.length!==3||new Set(prior.map((w:any)=>w.token.toLowerCase())).size!==3||prior.length>winners)continue;
-  const creator=row.creator.toLowerCase();
-  if(developers.has(creator))return null;
-  developers.set(creator,{creator,assessed_sessions:sessions,winners,failed,neutral,incomplete,known_launches:known,launches_24h:recent,verified_winning_tokens:winning,prior_winners:prior,checked_at:new Date(asOf).toISOString()});
+  const total=count(row?.known_launches),dex=count(row?.dex_projects);
+  if(!address(row?.creator)||total===null||dex===null||total<1||dex<1||dex>total||!['SHORTLIST','PRIOR_LAUNCHES'].includes(row.history_scope)||!Array.isArray(row.dex_references)||row.dex_references.length<1||row.dex_references.length>3)continue;
+  const denominator=row.history_scope==='SHORTLIST'?Math.max(total-1,1):total;
+  if(dex*10<denominator*3)continue;
+  const refs=row.dex_references.filter((r:any)=>address(r?.token)&&typeof r.pool==='string'&&/^0x(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(r.pool)&&!/^0x0+$/i.test(r.pool)&&r.pool.toLowerCase()!==r.token.toLowerCase()
+   &&['PONS_V2_GRADUATED_MAPPED_POOL','PONS_V1_MAPPED_POOL'].includes(r.source)&&Number.isFinite(Date.parse(r.observed_at))&&Date.parse(r.observed_at)<=asOf);
+  if(refs.length!==row.dex_references.length||refs.length>dex||new Set(refs.map((r:any)=>r.token.toLowerCase())).size!==refs.length)continue;
+  const creator=row.creator.toLowerCase();if(developers.has(creator))return null;
+  developers.set(creator,{creator,known_launches:total,dex_projects:dex,dex_references:refs,history_scope:row.history_scope,checked_at:new Date(asOf).toISOString()});
  }
  return {asOf,capped:payload.capped===true,developers};
 }
 export function returningWinnerHistory(launch:PonsLaunch,snapshot:WinnerSnapshot,now:number):WinnerHistory|null {
  if(!freshVerifiedPonsLaunch(launch,now)||now-snapshot.asOf>5*60000)return null;
- const history=snapshot.developers.get(launch.deployer_address.toLowerCase());
- if(!history)return null;
- const prior=history.prior_winners.filter(w=>w.token.toLowerCase()!==launch.token_address.toLowerCase()&&Date.parse(w.assessed_at)<Date.parse(launch.block_timestamp));
- return prior.length===3?{...history,prior_winners:prior}:null;
+ const history=snapshot.developers.get(launch.deployer_address.toLowerCase());if(!history)return null;
+ const refs=history.dex_references.filter(r=>r.token.toLowerCase()!==launch.token_address.toLowerCase()&&Date.parse(r.observed_at)<Date.parse(launch.block_timestamp));
+ return refs.length?{...history,dex_references:refs}:null;
 }
 export function returningWinnerCard(launch:PonsLaunch,history:WinnerHistory,metadata?:{name?:string|null;symbol?:string|null}):string {
- const complete=history.assessed_sessions-history.incomplete;
+ if(history.history_scope!=='PRIOR_LAUNCHES'||history.dex_projects*10<history.known_launches*3)throw Error('Prior DEX history required');
  const names=[metadata?.name?.slice(0,48),metadata?.symbol?.slice(0,16)].filter(Boolean).map(esc).join(' · ')||'New PONS token · name pending';
- return ['🏆 <b>ALPHAOS · RETURNING WINNER DEVELOPER</b>',names,'Robinchain · Verified PONS factory launch','',
+ return ['📊 <b>ALPHAOS · DEVELOPER DEX TRACK RECORD</b>',names,'Robinchain · Verified PONS factory launch','',
   `<code>${esc(launch.token_address)}</code>`,`Developer <code>${esc(history.creator)}</code>`,'',
-  `<b>${history.verified_winning_tokens} recorded winning tokens / ${history.known_launches} indexed PONS launches</b>`,
-  `Assessed sessions ${complete} · Failed ${history.failed} · Other ${history.neutral} · Incomplete ${history.incomplete}`,
-  `Launches in 24h: ${history.launches_24h}`,
-  ...(complete<5?['⚠️ Limited history sample']:[]),
-  ...history.prior_winners.slice(0,3).map(w=>`Prior: <a href="https://robinhoodchain.blockscout.com/token/${w.token}">${w.token.slice(0,8)}…${w.token.slice(-6)}</a> · +${w.final_roi.toFixed(1)}% (${w.price_unit==='USD'?'USD price':'curve reserve ratio'}, 6h sample)`),
-  'Tracked sample; coverage is partial, not all developer launches.',
+  `<b>DEX reached: ${history.dex_projects} / ${history.known_launches} prior projects · ${(100*history.dex_projects/history.known_launches).toFixed(1)}%</b>`,
+  'Qualifies at 30% verified DEX reach.',
+  ...(history.known_launches<10?['⚠️ Limited launch history sample']:[]),
+  ...history.dex_references.map(r=>`DEX project: <a href="https://robinhoodchain.blockscout.com/token/${r.token}">${r.token.slice(0,8)}…${r.token.slice(-6)}</a>`),
+  'Distinct indexed prior projects; the new launch is excluded.',
+  'Unverified DEX status does not count as success. Indexed history may be incomplete.',
+  'DEX reach is not a profitable-trade or safety guarantee.',
   ...(history.checked_at?[`History checked ${history.checked_at.slice(0,16).replace('T',' ')} UTC`]:[]),
-  'LP status Unverified',
-  'Previous performance does not establish this token’s safety or future return.'].join('\n');
+  'LP status Unverified'].join('\n');
 }
 
 export function createReturningWinnerQueue(deps:{now:()=>number;load:()=>Promise<unknown>;send:(launch:PonsLaunch,history:WinnerHistory)=>Promise<void>}) {

@@ -7,7 +7,7 @@ export const LIVE_ALERT_FEEDS = [
   {key:'DEX_PAID', chain:'Robinchain / PONS', name:'DEX Paid', description:'New DexScreener payment event; no market-cap/token-age limit.'},
   {key:'RH_SOCIAL_MAFIA', chain:'Robinchain / PONS', name:'Social Mafia', description:'Verified launchpad, exact contract on X, recent buying and current creator evidence.'},
   {key:'RH_PROTOCOL_DISCOVERY', chain:'Robinchain / PONS', name:'Protocol Discovery', description:'Protocol-named PONS projects with X + Telegram links.'},
-  {key:'RH_RETURNING_WINNER_DEV', chain:'Robinchain / PONS', name:'Returning Winner Developer', description:'New verified PONS launch from a developer with a measured previous winner.'},
+  {key:'RH_RETURNING_WINNER_DEV', chain:'Robinchain / PONS', name:'Developer DEX Track Record', description:'New verified PONS launch from a developer with a measured previous winner.'},
   {key:'RH_TRADE_SETUP', chain:'Robinchain / PONS', name:'Trade Setup', description:'Recovery setups with creator evidence, plus volume breakouts with complete seven-day pool history.'},
   {key:'RH_MOMENTUM', chain:'Robinchain / PONS', name:'PONS Momentum', description:'Qualified curve or indexed-market momentum and follow-ups.'},
   {key:'RH_SUPPLY_BURN', chain:'Robinchain / PONS', name:'Supply Burn', description:'Verified burn meeting the feed checks.'},
