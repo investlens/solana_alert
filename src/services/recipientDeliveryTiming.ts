@@ -40,7 +40,7 @@ export function deliveryAcceptanceEvidence(user: Recipient | string, startedAt: 
 }
 // Runtime logs only: no recipient IDs, no additional database rows, no replay.
 export function recordDeliveryAccepted(user: Recipient | string, startedAt: number, source: string, safetyCritical = false): void {
-  console.log('[AlertDeliveryTiming] TELEGRAM_ACCEPTED', deliveryAcceptanceEvidence(user, startedAt, source, safetyCritical));
+  console.log('[AlertDeliveryTiming] TELEGRAM_ACCEPTED', JSON.stringify(deliveryAcceptanceEvidence(user, startedAt, source, safetyCritical)));
 }
 export function isUndelayedRiskEvent(type: string): boolean {
   return new Set(['EXIT', 'COOLING', 'WEAKENING', 'DANGER', 'DEV_TRANSFER', 'DEV_SELL', 'LIQUIDITY_RISK', 'WALLET_CLUSTER']).has(type.toUpperCase());

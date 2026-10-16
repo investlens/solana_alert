@@ -1,3 +1,4 @@
+import {semanticRecipientPreferences} from './semanticRecipientPreferences.js';
 import {acquireBoostRecipientClaim} from './boostDeliveryGuard.js';
 import {forEachDeliveryRecipient} from './recipientDeliveryTiming.js';
 import { telegramRecipientUnavailable } from '../ui/alphaosPhotoDelivery.js';
@@ -133,6 +134,7 @@ export async function deliverAlphaSemanticEvent(args: {
   onRecipientFailure?: (user: DeliverableUser, error: unknown,
     stage: 'recipient_setup' | 'telegram_send' | 'delivery_completion') => void;
 }, dependencies: SemanticDeliveryDependencies = productionDependencies): Promise<{ delivered: number; failed: number; alreadyConfirmed?:number;withheld?:true }> {
+  const processingStartedAt=Date.now();
   const ephemeralMode = dependencies === productionDependencies && (args.event.ephemeral === true || args.event.id < 0);
   let launchType: LaunchClassification | null = null;
   let exitPairId:string|undefined;
@@ -205,6 +207,7 @@ export async function deliverAlphaSemanticEvent(args: {
     });
   }
 
+  const safetyFinishedAt=Date.now();
   let deliveryMessage = args.message;
   if (dependencies === productionDependencies && !args.preserveMessage && !ephemeralMode) {
     try {
@@ -227,6 +230,12 @@ export async function deliverAlphaSemanticEvent(args: {
   const outcomeStats = args.event.chain === 'robinhood' && ['DEX_PAID','BOOST'].includes(args.event.type) ? cachedRobinhoodAlertStats(args.event.assetId) : null;
   const deliveryStartedAt = Date.now();
   const users = (await dependencies.getUsers()).sort((a, b) => recipientDelayMs(a, deliveryStartedAt) - recipientDelayMs(b, deliveryStartedAt));
+  const recipientLoadMs=Date.now()-deliveryStartedAt;
+  const liveFeed = semanticLiveFeed(args.event.type, args.event.chain);
+  const preferenceKey = preferenceKeyForSemanticEvent(args.event);
+  const eligibility = dependencies === productionDependencies
+    ? semanticRecipientPreferences(users.map(user=>user.telegram_id),liveFeed,preferenceKey).catch(()=>null)
+    : Promise.resolve(null);
   if (dependencies === productionDependencies && (!deliveryMessage.includes('<b>OWNERSHIP</b>') || ['DEX_PAID','BOOST'].includes(args.event.type)) && /^(robinhood|robinchain)$/i.test(args.event.chain ?? '')) {
     deliveryMessage = paidOwnership?.devPercent != null ? withOwnershipDisclosure(deliveryMessage, paidOwnership)
       : await discloseRobinhoodOwnership(deliveryMessage, args.event.assetId,
@@ -269,16 +278,26 @@ export async function deliverAlphaSemanticEvent(args: {
   const renderedBytes = Buffer.byteLength(deliveryMessage, 'utf8');
   let delivered = 0; let failed = 0; let accepted = 0;let alreadyConfirmed=0;const countConfirmation=args.protectBoostRecipients===true||(dependencies===productionDependencies&&args.event.type==='DEX_PAID');
   const acceptedRecipients:AcceptedRecoveryRecipient[]=[];
+  const recipientPreferences = await eligibility;
+  if(dependencies===productionDependencies)console.log('[AlphaSemanticDelivery] PREPARED',JSON.stringify({
+    eventIdentity:args.event.eventIdentity,recipients:users.length,securityMs:safetyFinishedAt-processingStartedAt,
+    preparationMs:Date.now()-safetyFinishedAt,recipientLoadMs,deliveryClockElapsedMs:Date.now()-deliveryStartedAt,
+    preferenceMode:recipientPreferences?'BATCH':'FALLBACK',
+  }));
   await forEachDeliveryRecipient(users, async user => {
     if (!hasCapability(accessProfileForUser(user), 'opportunities.realtime')) return;
     let recipientClaim: Awaited<ReturnType<typeof acquireRecipientClaim>> | undefined;
     let sendStarted = false;
     let telegramAccepted = false;
     try {
-      const liveFeed = semanticLiveFeed(args.event.type, args.event.chain);
-      if (dependencies === productionDependencies && liveFeed && !await liveFeedEnabled(user.telegram_id, liveFeed)) return;
-      const preferenceKey = preferenceKeyForSemanticEvent(args.event);
-      if (preferenceKey && !await dependencies.strategyEnabled(user.telegram_id, preferenceKey)) return;
+      if (recipientPreferences) {
+        const enabled=recipientPreferences.get(user.telegram_id)===true;
+        if(liveFeed)recordFeedDelivery(liveFeed,enabled?'ENABLED':'MUTED');
+        if (!enabled) return;
+      } else {
+        if (dependencies === productionDependencies && liveFeed && !await liveFeedEnabled(user.telegram_id, liveFeed)) return;
+        if (preferenceKey && !await dependencies.strategyEnabled(user.telegram_id, preferenceKey)) return;
+      }
 
       if (dependencies === productionDependencies) await waitForRecipientDelivery(user, deliveryStartedAt, isUndelayedRiskEvent(args.event.type));
 
@@ -300,6 +319,7 @@ export async function deliverAlphaSemanticEvent(args: {
         args.onSendStarted?.();
         const result = await retryTelegramRejection(() => dependencies.send(user.telegram_id, deliveryMessage, deliveryButtons));
         telegramAccepted = true;
+        if (dependencies === productionDependencies) recordDeliveryAccepted(user, deliveryStartedAt, args.event.eventIdentity, isUndelayedRiskEvent(args.event.type));
         if(ephemeralMode)acceptedRecipients.push({telegramId:String(user.telegram_id),tier:user.tier,messageId:typeof result==='number'?result:null,acceptedAt:new Date().toISOString()});
         if (recipientClaim?.state === 'CLAIMED') {
           try { await recipientClaim.finish(typeof result === 'number' ? result : null); }
@@ -317,7 +337,6 @@ export async function deliverAlphaSemanticEvent(args: {
         try {
           const sendResult = await send();
           if(dependencies===productionDependencies && typeof sendResult==='number' && enrichmentTargets.length<50)enrichmentTargets.push({chatId:user.telegram_id,messageId:sendResult});
-          if (dependencies === productionDependencies) recordDeliveryAccepted(user, deliveryStartedAt, args.event.eventIdentity, isUndelayedRiskEvent(args.event.type));
           delivered += 1; accepted += 1;
           args.onTelegramAccepted?.(user);
           console.log('[AlphaSemanticDelivery] Telegram accepted via bounded persistence fallback.', {
@@ -359,7 +378,7 @@ export async function deliverAlphaSemanticEvent(args: {
           Number.isFinite(Number(sendResult)) ? Number(sendResult) : null),
         release: () => dependencies.release(args.event, user, leaseToken),
       });
-      if (result.sent) { if (dependencies === productionDependencies) recordDeliveryAccepted(user, deliveryStartedAt, args.event.eventIdentity, isUndelayedRiskEvent(args.event.type)); accepted += 1; args.onTelegramAccepted?.(user); }
+      if (result.sent) { accepted += 1; args.onTelegramAccepted?.(user); }
       if (result.recorded) { delivered += 1; return; }
       if (!result.sent && telegramExplicitRejection(result.error) && recipientClaim?.state === 'CLAIMED')
         await recipientClaim.release().catch(() => undefined);
