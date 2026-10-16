@@ -1,6 +1,7 @@
 import { saveSocialWatchCheckpoint, restoreSocialWatchCheckpoint } from '../src/chains/robinhood/ponsSocialMafiaAlert.js';
 import { saveSetupWatchCheckpoint, restoreSetupWatchCheckpoint } from '../src/chains/robinhood/ponsTradeSetupFeed.js';
 import { compactOutcomesEnabled, runCompactOutcomeCycle } from '../src/services/compactAlertOutcomes.js';
+import {queuePonsReturningWinner,processPonsReturningWinners} from '../src/chains/robinhood/ponsReturningWinnerDelivery.js';
 import 'dotenv/config';
 import { robinhoodResilientScannerRpc } from '../src/chains/robinhood/rpc.js';
 import { getPonsLiveConfig } from '../src/chains/robinhood/ponsLiveConfig.js';
@@ -23,6 +24,7 @@ if (!config.liveIntelligenceEnabled) {
   process.exit(0);
 }
 const route = createPonsLiveLaunchRouter({ config,
+  queueReturningWinner:mode.kind==='CONTINUOUS'?queuePonsReturningWinner:()=>{},
   ...(mode.kind !== 'CONTINUOUS' && !sendTelegramTest
     ? { emitAlert: async (alert: { text: string }) => { console.log(alert.text); } }
     : {}),
@@ -69,7 +71,7 @@ function startPonsOutcomeCollectionLoop(): void {
   if (compactOutcomesEnabled()) {
     console.log('[CompactOutcomes] START maxActive=20 checkpoints=15m,1h,6h retentionDays=7 observationsPerMinute=2 legacyPonsCollector=replaced');
     void runCompactOutcomeCycle();
-    setInterval(() => { void runCompactOutcomeCycle(); }, 60_000);
+    setInterval(() => { void runCompactOutcomeCycle().finally(()=>{void processPonsReturningWinners();}); }, 60_000);
     return;
   }
   const enabled = String(process.env.PONS_OUTCOME_COLLECTION_ENABLED ?? 'true').toLowerCase() === 'true';
