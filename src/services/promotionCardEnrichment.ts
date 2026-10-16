@@ -1,3 +1,4 @@
+import {readPromotionDeveloperHistory,developerHistoryNote} from './promotionDeveloperHistory.js';
 import { discloseRobinhoodKeyStats, cachedRobinhoodAlertStats } from './alertKeyStatsService.js';
 import { discloseRobinhoodOwnership } from './alertOwnershipService.js';
 import { editTelegramMessage } from './telegram.js';
@@ -19,7 +20,8 @@ const production:Dependencies={now:Date.now,schedule:(run,ms)=>{const t=setTimeo
   if(stats)stats={...stats,name:stats.name??args.stats?.name,symbol:stats.symbol??args.stats?.symbol,creator:stats.creator??args.stats?.creator};
   const pool=stats?.chartUrl?.match(/\/robinhood\/(0x[a-fA-F0-9]{40,64})/)?.[1];
   text=await discloseRobinhoodOwnership(text,args.token,stats?.creator,pool,false,true);
-  return buildPromotionEventCard({...args,text,stats});
+  const history=args.kind==='BOOST'||args.kind==='DEX_PAID'?await readPromotionDeveloperHistory(args.token):null;
+  return buildPromotionEventCard({...args,text,stats,...(history?{developerHistoryNote:developerHistoryNote(history)}:{})});
  }};
 // At most three refreshes per accepted promotion. IDs live in RAM for <=180 seconds.
 // Never resend, never write retries to DB, never change eligibility or reservations.
