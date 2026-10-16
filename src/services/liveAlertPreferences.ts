@@ -7,6 +7,7 @@ export const LIVE_ALERT_FEEDS = [
   {key:'DEX_PAID', chain:'Robinchain / PONS', name:'DEX Paid', description:'New DexScreener payment event; no market-cap/token-age limit.'},
   {key:'RH_SOCIAL_MAFIA', chain:'Robinchain / PONS', name:'Social Mafia', description:'Verified launchpad, exact contract on X, recent buying and current creator evidence.'},
   {key:'RH_PROTOCOL_DISCOVERY', chain:'Robinchain / PONS', name:'Protocol Discovery', description:'Protocol-named PONS projects with X + Telegram links.'},
+  {key:'RH_RETURNING_WINNER_DEV', chain:'Robinchain / PONS', name:'Returning Winner Developer', description:'New verified PONS launch from a developer with a measured previous winner.'},
   {key:'RH_TRADE_SETUP', chain:'Robinchain / PONS', name:'Trade Setup', description:'Recovery setups with creator evidence, plus volume breakouts with complete seven-day pool history.'},
   {key:'RH_MOMENTUM', chain:'Robinchain / PONS', name:'PONS Momentum', description:'Qualified curve or indexed-market momentum and follow-ups.'},
   {key:'RH_SUPPLY_BURN', chain:'Robinchain / PONS', name:'Supply Burn', description:'Verified burn meeting the feed checks.'},
@@ -29,12 +30,19 @@ function remember(user:string,value:Preferences) {
   local.delete(user);local.set(user,{value,at:Date.now()});
   while(local.size>5000) local.delete(local.keys().next().value!);
 }
+export function compatibleLivePreferences(saved:Partial<Preferences>|null|undefined):Preferences|null {
+ if(!saved||!LIVE_ALERT_FEEDS.every(feed=>typeof saved[feed.key]==='boolean'||(feed.key==='RH_RETURNING_WINNER_DEV'&&saved[feed.key]===undefined)))return null;
+ return {...saved,RH_RETURNING_WINNER_DEV:saved.RH_RETURNING_WINNER_DEV??true} as Preferences;
+}
 export async function liveAlertPreferences(user:string):Promise<Preferences> {
   const cached=local.get(user);if(cached && Date.now()-cached.at<15_000)return cached.value;
   if(pending.has(user))return pending.get(user)!;
   const work=(async()=>{
     const saved=await getSharedJson<Preferences>(`alphaos:feed-preferences:${user}`);
-    if(saved && LIVE_ALERT_FEEDS.every(feed=>typeof saved.value?.[feed.key]==='boolean')) {remember(user,saved.value);return saved.value;}
+    // A new feed must not invalidate every existing user's cached preferences
+    // or trigger a database refresh storm. Preserve all previously stored mutes.
+    const compatible=compatibleLivePreferences(saved?.value);
+    if(compatible){remember(user,compatible);return compatible;}
     if((failedUntil.get(user)??0)>Date.now())throw new Error('Preferences temporarily unavailable');
     try {
       const value=resolveLivePreferences(await getUserStrategyPreferences(user));
@@ -44,14 +52,15 @@ export async function liveAlertPreferences(user:string):Promise<Preferences> {
   })();pending.set(user,work);try{return await work;}finally{pending.delete(user);}
 }
 export async function liveFeedEnabled(user:string,key:LiveFeedKey):Promise<boolean> {
-  try { const enabled=(await liveAlertPreferences(user))[key]; recordFeedDelivery(key,enabled?'ENABLED':'MUTED'); return enabled; }
+  try { const enabled=key==='RH_RETURNING_WINNER_DEV'?(await returningWinnerRecipients([user])).includes(user):(await liveAlertPreferences(user))[key]; recordFeedDelivery(key,enabled?'ENABLED':'MUTED'); return enabled; }
   catch { recordFeedDelivery(key,'PREFERENCES_UNAVAILABLE'); return false; }
 }
 const changing = new Set<string>();
 export async function toggleLiveFeed(user:string,key:LiveFeedKey):Promise<boolean> {
   if(changing.has(user))throw new Error('Preference update in progress');
   changing.add(user);try {
-  const current=await liveAlertPreferences(user);const enabled=!current[key];
+  const current=await liveAlertPreferences(user);
+  const wasEnabled=key==='RH_RETURNING_WINNER_DEV'?(await returningWinnerRecipients([user])).includes(user):current[key];const enabled=!wasEnabled;
   await setUserStrategyEnabled({telegramId:user,strategyKey:key,enabled});
   const next={...current,[key]:enabled};
   await setSharedJson(`alphaos:feed-preferences:${user}`,next,new Date().toISOString(),60_000);
@@ -59,8 +68,19 @@ export async function toggleLiveFeed(user:string,key:LiveFeedKey):Promise<boolea
   } finally {changing.delete(user);}
 }
 export async function enabledLiveRecipients(users:string[],key:LiveFeedKey, check=liveFeedEnabled):Promise<string[]> {
+  if(key==='RH_RETURNING_WINNER_DEV'&&check===liveFeedEnabled)return returningWinnerRecipients(users);
   const flags=await Promise.all(users.map(user=>check(user,key)));
   return users.filter((_,index)=>flags[index]);
+}
+export async function returningWinnerRecipients(users:string[]):Promise<string[]> {
+ if(!users.length)return [];if(users.length>5000)throw new Error('Returning-winner recipient budget exceeded');
+ const {supabase}=await import('./supabase.js');
+ const {data,error}=await supabase.rpc('alpha_returning_winner_recipients',{p_users:users}).abortSignal(AbortSignal.timeout(4000));
+ if(error||!Array.isArray(data))throw error??new Error('Returning-winner preferences unavailable');
+ const allowed=new Set(data);return users.filter(user=>allowed.has(user));
+}
+export async function liveAlertMenuPreferences(user:string):Promise<Preferences> {
+ return {...await liveAlertPreferences(user),RH_RETURNING_WINNER_DEV:(await returningWinnerRecipients([user])).includes(user)};
 }
 export function semanticLiveFeed(type:string,chain:string):LiveFeedKey|null {
   if(chain==='solana' && type==='PUMPFUN_MOMENTUM')return 'SOLANA_PUMPFUN_MOMENTUM';
