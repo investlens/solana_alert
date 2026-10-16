@@ -15,7 +15,7 @@ export function createCustomDeveloperWorker(deps:{now:()=>number;claim:()=>Promi
    try{proof=await deps.verify(claim);}catch{nextAt=deps.now()+60*60000;}
    const result=await deps.finish(claim,proof);
    console.log('[CustomDeveloper] CHECK',{chain:claim.chain,result});
-  } catch {nextAt=deps.now()+60*60000;console.warn('[CustomDeveloper] unavailable; background checks paused for one hour');}
+  } catch {console.warn('[CustomDeveloper] database unavailable; retry at next ten-minute slot');}
   finally{running=false;}
  };
 }
@@ -53,7 +53,7 @@ export async function verifyCustomDeveloper(claim:Claim):Promise<DeploymentProof
 async function rpc(name:string,args:Record<string,unknown>={}):Promise<any>{
  return runDatabaseWork('BACKGROUND',async()=>{
   const {supabase}=await import('./supabase.js');
-  const {data,error}=await supabase.rpc(name,args).abortSignal(AbortSignal.timeout(2000));
+  const {data,error}=await supabase.rpc(name,args).abortSignal(AbortSignal.timeout(4000));
   if(error)throw error;return data;
  });
 }
