@@ -24,6 +24,7 @@ export type PonsLiveRouterDependencies = {
   sleep(ms: number): Promise<void>;
   config: PonsLiveConfig;
   log(line: string): void;
+  queueReturningWinner(launch:PonsLaunch):void;
 };
 
 export function createPonsLiveLaunchRouter(overrides: Partial<PonsLiveRouterDependencies> = {}) {
@@ -40,7 +41,7 @@ export function createPonsLiveLaunchRouter(overrides: Partial<PonsLiveRouterDepe
     },
     emitDecision: async decision => { console.log(`[PonsLive] SHADOW ${decision.action} reason=${decision.reason}`); },
     sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
-    config: getPonsLiveConfig(), log: console.log, ...overrides,
+    config: getPonsLiveConfig(), log: console.log, queueReturningWinner:()=>{}, ...overrides,
   };
   const processed = new Set<string>();
 
@@ -87,7 +88,10 @@ export function createPonsLiveLaunchRouter(overrides: Partial<PonsLiveRouterDepe
       dependencies.log(`[PonsLive] ignored deployer=${launch.deployer_address} tier=${ignore.tier} reason=${ignore.reason ?? 'blocked'}`);
       return { status: 'IGNORED', reason: ignore.reason ?? 'blocked developer', provenDeveloper: false, alert: null, decision: null, developerTier: ignore.tier, validation: 'NOT_RUN', alertDelivery: 'NOT_APPLICABLE' };
     }
-    if (!developer?.isBlocked && !developer?.riskTier) queuePonsTradeSetup(launch);
+    if (!developer?.isBlocked && !developer?.riskTier) {
+      try{dependencies.queueReturningWinner(launch);}catch{dependencies.log('[ReturningWinnerDev] queue unavailable; normal launch processing continues');}
+      queuePonsTradeSetup(launch);
+    }
     const verifiedPeak = developer?.bestVerifiedPeakMarketCap;
     if (!developer || developer.isBlocked || developer.riskTier || verifiedPeak == null
       || !Number.isFinite(verifiedPeak) || verifiedPeak < dependencies.config.successfulDeveloperMinPeakMarketCap) {
