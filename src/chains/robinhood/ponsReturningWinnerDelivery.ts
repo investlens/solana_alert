@@ -1,5 +1,5 @@
 import type {PonsLaunch} from './ponsHistoricalLaunchScanner.js';
-import {createReturningWinnerQueue,returningWinnerCard,type WinnerHistory} from './ponsReturningWinner.js';
+import {createReturningWinnerQueue,returningWinnerCard,parseWinnerSnapshot,returningWinnerHistory,type WinnerHistory} from './ponsReturningWinner.js';
 import {runDatabaseWork} from '../../services/databaseLoadGovernor.js';
 import {claimSharedDelivery} from '../../services/sharedJsonCache.js';
 import {getDeliverableUsers} from '../../core/delivery.js';
@@ -40,6 +40,11 @@ export async function deliverReturningWinner(launch:PonsLaunch,history:WinnerHis
  if(unavailable>0)throw new Error('Returning-winner delivery store unavailable');
  return {delivered,failed,deduplicated};
 }
+export async function recheckReturningWinner(launch:PonsLaunch,load:()=>Promise<unknown>,now:()=>number):Promise<WinnerHistory|null>{
+ const payload=await load(),snapshot=parseWinnerSnapshot(payload,now());
+ if(!snapshot)throw new Error('Returning-winner qualification unavailable');
+ return returningWinnerHistory(launch,snapshot,now());
+}
 const worker=createReturningWinnerQueue({
  now:Date.now,
  load:async()=>{
@@ -52,7 +57,15 @@ const worker=createReturningWinnerQueue({
   if(result===null)recordFeedDelivery(FEED,'DATA_UNAVAILABLE');
   return result;
  },
- send:async(launch,history)=>{
+ send:async(launch,_cachedHistory)=>{
+  // One exact-wallet recheck per cached positive, never per recipient. Fresh
+  // launches can change coverage/cadence during the five-minute shared cache.
+  const history=await recheckReturningWinner(launch,()=>runDatabaseWork('BACKGROUND',async()=>{
+   const {supabase}=await import('../../services/supabase.js');
+   const {data,error}=await supabase.rpc('alpha_returning_winner_launch_history',{p_creator:launch.deployer_address.toLowerCase(),p_token:launch.token_address.toLowerCase()}).abortSignal(AbortSignal.timeout(4000));
+   if(error)throw error;return data;
+  }),Date.now);
+  if(!history)return;
   recordFeedDelivery(FEED,'QUALIFIED');
   await deliverReturningWinner(launch,history,{
    now:Date.now,
