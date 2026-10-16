@@ -1,8 +1,9 @@
+import {cachedPromotionDeveloperHistory,developerHistoryNote} from '../services/promotionDeveloperHistory.js';
 import { escapeAlphaHtml as esc } from './alphaNotification.js';
 import { cleanAlertButtons, type CardButton } from './alertCardLayout.js';
 import { withAlertKeyStats, type AlertKeyStats } from './alertKeyStats.js';
 import { lpLockNote } from './lpLockNote.js';
-export type PromotionCardArgs = {text:string;token:string;launchType:string|null;stats:AlertKeyStats|null;securityNote:string|null;lpStatus?:string|null;buttons:CardButton[][];paymentTimestamp?:number|null;kind:'BOOST'|'DEX_PAID'|'SOCIAL_MAFIA'};
+export type PromotionCardArgs = {text:string;developerHistoryNote?:string;token:string;launchType:string|null;stats:AlertKeyStats|null;securityNote:string|null;lpStatus?:string|null;buttons:CardButton[][];paymentTimestamp?:number|null;kind:'BOOST'|'DEX_PAID'|'SOCIAL_MAFIA'};
 export function buildPromotionEventCard(args:PromotionCardArgs) {
  const s=args.stats, lines=args.text.split('\n');
  const plain=args.text.replace(/<[^>]+>/g,'').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"');
@@ -53,7 +54,7 @@ export function buildPromotionEventCard(args:PromotionCardArgs) {
  '<b>MARKET</b>',...new Set(metrics),...(unavailable.length?['Market data incomplete · use Full Intel to recheck']:[]),
  ...(s?.preBond?['Bonding curve · no DEX market yet']:!s?.chartUrl?['Trading venue unconfirmed']:[]),
  ...(!metrics.length?['Market snapshot pending']:[]),'',
- '<b>OWNERSHIP</b>',...(creator?[creator]:[]),dev,top,
+ '<b>OWNERSHIP</b>',...(creator?[creator]:[]),dev,top,...(args.kind==='BOOST'||args.kind==='DEX_PAID'?[args.developerHistoryNote??developerHistoryNote(cachedPromotionDeveloperHistory(args.token))]:[]),
  ...(lines.some(l=>/Creator wallet balance only/.test(l))?['Zero creator balance does not prove a sale or burn.']:[]),
  ...lines.filter(l=>/Concentrated dev holding|^Creator balance change|^Dev observed|^Holder sample observed|^Creator sold|^Creator burned|^Creator outflows|^Activity coverage/.test(l)),
  ...lines.filter(l=>/^(?:Burned|Verified dev burn)\s/i.test(l.replace(/<[^>]+>/g,'').replace(/^[^A-Za-z]+/,''))&&!/Unavailable|Unverified/i.test(l)),'',
