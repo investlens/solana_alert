@@ -189,6 +189,12 @@ export async function getPonsPublicContext(token: string, factory: string, creat
   return html ? parsePonsPublicContext(html, token, factory, creator) : null;
 }
 
+// Presentation-only reuse; never starts a network request for an early alert.
+export function getCachedPonsPublicContext(token:string,factory:string,creator:string):PonsPublicContext|null {
+ const page=pageCache.get(`https://www.ponsfamily.com/launchpad/${token}`);
+ return page?.html&&page.expires>Date.now()?parsePonsPublicContext(page.html,token,factory,creator):null;
+}
+
 export function classifyTelegramPreview(html: string): TelegramPreviewType {
   const extra = html.match(/class="tgme_page_extra"[^>]*>([\s\S]*?)<\/div>/)?.[1]?.replace(/<[^>]*>/g, '').trim() ?? '';
   if (/\b[\d, ]+ members\b/i.test(extra)) return 'Group';

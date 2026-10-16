@@ -15,7 +15,7 @@ All implementation lives under `features/project-intelligence`, with separate te
   and exact chain/token/pool matching. Provider URLs and credentials are never logged.
 - Pinned-block token supply, owner and balances. End-of-report block-hash check
   removes chain-derived assertions if the snapshot cannot be revalidated.
-- Developer attribution requires successful direct-deployment receipt proof.
+- Developer attribution requires a canonical direct-deployment sender/nonce proof or an exact approved PONS factory event, with at least 12 confirmations.
   A factory address or a provider's `creator_address` is not presented as a verified
   human/project developer.
 - Bounded direct token recipients and confirmed native-funding connections;
@@ -81,9 +81,8 @@ check, not a reference project/developer validation. See `live-arc-smoke-check.j
    dedicated quota so research cannot exhaust the alert services' provider quota.
 2. Add and validate a social-post provider. Public listing links alone do not
    establish account age, substantive activity, authenticity or project claims.
-3. Factory/PONS creator attribution and factory-based prior launches need exact
-   factory-event/receipt adapters. Current version fails closed on these cases.
-4. Prior-launch market outcomes, lock contract/expiry verification, comprehensive
+3. PONS factory-event attribution is implemented with receipt/block matching and conflicting-creator rejection. Validate real factory reference cases using the dedicated provider. Comprehensive factory launch history is still incomplete.
+4. Retained developer outcomes and up to three recent measured Robinhood winners are now readable with exact indexed wallet queries. Broad prior-launch outcomes, lock contract/expiry verification, comprehensive
    wallet tracing, developer swap attribution, connected-wallet coordination and
    website/claim corroboration are not yet implemented or validated.
 5. Build a manually reviewed reference set across both chains: direct and factory
@@ -136,3 +135,16 @@ for the pilot. A distributed quota/queue would be required before scaling replic
 Documentation consulted: Blockscout address API, official Blockscout PRO API guide,
 DexScreener reference and Telegram Mini App validation specification. Authenticated
 explorer access must be validated with the supplied provider plan, not assumed.
+
+## 16 October 2026 update
+
+Rebased onto the production release containing returning-winner alerts. Changes remain exclusively in the feature, its documentation and isolated CI workflow. No production configuration or schema was changed.
+
+- Direct-deployer attribution now reuses the established pure sender/nonce/canonical-block verifier.
+- PONS attribution decodes the approved factory version event with exact token, transaction, block and deployment-range checks. Transaction callers are not substituted for the developer. Twelve confirmations required.
+- Developer holding and connected-wallet reads use this strengthened attribution. A failed final snapshot validation also removes the report block to prevent incomplete reports from qualifying for tracking comparisons.
+- Existing retained developer counters and latest three winner references are read using two bounded, exact-chain/exact-wallet REST queries after creator verification. Summary counters are historical sessions, not lifetime launches. Winner ROI is recalculated from retained samples and labelled USD versus reserve ratio; ARC winner-reference coverage remains unavailable. Reads are read-only and benefit from the existing five-minute same-token report cache.
+- Strict feature typecheck and all 22 feature tests passed; all 989 existing tests passed.
+- Live database field queries succeeded. The public Robinhood probe remained incomplete; it is not release validation. No dedicated research service or PI configuration was found in the current Railway project. No existing service was changed, no new resource provisioned, and no test Telegram message was sent.
+
+Remaining release work: dedicated research RPC/explorer quota for both chains; social provider validation; independent LP lock evidence; reviewed live reference cases; separate Redis and full authenticated Mini App/track/restart validation. These gates remain unresolved, so this draft is not publicly deployable.

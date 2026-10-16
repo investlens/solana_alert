@@ -1,17 +1,18 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {encodeAbiParameters,decodeFunctionData,parseAbiParameters} from 'viem';
+import {encodeAbiParameters,decodeFunctionData,parseAbiParameters,getContractAddress} from 'viem';
 import {research} from '../report.js';import {abi,socialFindings,safeSocialUrl,type Reader} from '../providers.js';
-const token='0x'+'a'.repeat(40),creator='0x'+'b'.repeat(40),wallet='0x'+'c'.repeat(40),tx='0x'+'d'.repeat(64),blockHash='0x'+'e'.repeat(64);
+const creator='0x'+'b'.repeat(40),token=getContractAddress({from:creator as `0x${string}`,nonce:0n}).toLowerCase(),wallet='0x'+'c'.repeat(40),tx='0x'+'d'.repeat(64),blockHash='0x'+'e'.repeat(64);
 function fixture(mode='ok'):Reader{
  let blockReads=0;return {requests:()=>0,
   security:async()=>({creator_address:creator,is_honeypot:'0',is_mintable:'1'}),
   pairs:async()=>[{chainId:'arc',baseToken:{address:token},pairAddress:wallet,liquidity:{usd:999}},{chainId:'robinhood',baseToken:{address:token},pairAddress:'0x'+'1'.repeat(64),liquidity:{usd:1000},info:{socials:[{url:'https://x.com/example'}]}}],
-  explorer:async(_chain,path)=>path.startsWith('addresses/'+token)?{creator_address_hash:creator,creation_transaction_hash:tx}:path.includes('/holders')?{items:[{address:{hash:creator}},{address:{hash:wallet}}]}:{items:[],next_page_params:{block_number:1}},
+  explorer:async(_chain,path)=>path.startsWith('addresses/'+token)?{hash:token,is_contract:true,creator_address_hash:creator,creation_transaction_hash:tx}:path.includes('/holders')?{items:[{address:{hash:creator}},{address:{hash:wallet}}]}:{items:[],next_page_params:{block_number:1}},
   rpc:async(_chain,method,params)=>{
    if(method==='eth_chainId')return mode==='wrong-chain'?'0x1':'0x1237';if(method==='eth_blockNumber')return '0x10';
-   if(method==='eth_getBlockByNumber')return {number:'0x10',hash:mode==='reorg'&&++blockReads>1?'0x'+'f'.repeat(64):blockHash};
+   if(method==='eth_getBlockByNumber')return {number:params[0],transactions:[tx],hash:mode==='reorg'&&++blockReads>2?'0x'+'f'.repeat(64):blockHash};
    if(method==='eth_getCode')return '0x6001';
-   if(method==='eth_getTransactionReceipt')return {status:'0x1',to:mode==='factory'?wallet:null,contractAddress:token,from:creator,transactionHash:tx};
+   if(method==='eth_getTransactionByHash')return {hash:tx,from:creator,to:null,nonce:'0x0',chainId:'0x1237',blockNumber:'0x1',blockHash};
+   if(method==='eth_getTransactionReceipt')return {status:'0x1',to:mode==='factory'?wallet:null,contractAddress:token,from:creator,transactionHash:tx,blockNumber:'0x1',blockHash};
    if(method==='eth_getLogs')return [];
    const call=params[0] as any;assert.equal(params[1],'0x10');const decoded=decodeFunctionData({abi,data:call.data});
    if(decoded.functionName==='owner')return encodeAbiParameters(parseAbiParameters('address'),[creator as `0x${string}`]);

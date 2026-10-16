@@ -1,3 +1,4 @@
+import {createHistoryReader} from './history.js';
 import {createServer,type IncomingMessage} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {pathToFileURL} from 'node:url';
@@ -22,7 +23,8 @@ export async function start(){
   const response=await fetch(url,{headers:{apikey:process.env.PI_SUPABASE_SERVICE_KEY!,Authorization:`Bearer ${process.env.PI_SUPABASE_SERVICE_KEY!}`},signal:AbortSignal.timeout(2500)});
   if(!response.ok)throw Error('Membership verification unavailable');const rows=await response.json() as Member[];return rows.length===1&&String(rows[0].telegram_id)===id?rows[0]:null;
  };
- const service=new ResearchService({member,build:(chain,token)=>buildReport(chain,token,createReader(config,{signal:AbortSignal.timeout(30000),admit}))});
+ const history=createHistoryReader(process.env.PI_SUPABASE_URL!,process.env.PI_SUPABASE_SERVICE_KEY!);
+ const service=new ResearchService({member,build:(chain,token)=>buildReport(chain,token,createReader(config,{signal:AbortSignal.timeout(30000),admit}),history)});
  const {store,close}=await connectStore(process.env.PI_REDIS_URL!);
  const tracking=createTracking({store,service,send:async(id,text)=>{
   const response=await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({chat_id:id,text,link_preview_options:{is_disabled:true}}),signal:AbortSignal.timeout(5000)});

@@ -1,10 +1,10 @@
 import { Markup, type Telegraf } from 'telegraf';
 import { requireCapability } from './accessControl.js';
-import { LIVE_ALERT_FEEDS, liveAlertPreferences, toggleLiveFeed, isLiveFeedKey } from '../services/liveAlertPreferences.js';
+import { LIVE_ALERT_FEEDS, liveAlertMenuPreferences, toggleLiveFeed, isLiveFeedKey } from '../services/liveAlertPreferences.js';
 
 async function renderPreferences(ctx:any):Promise<void> {
   const user=String(ctx.from?.id??'');if(!user)return;
-  const prefs=await liveAlertPreferences(user);
+  const prefs=await liveAlertMenuPreferences(user);
   const lines=['⚙️ <b>ALERT SETTINGS</b>','','Choose the feeds you want to receive.','✅ ON · ⭕ OFF. Changes apply to upcoming alerts.','Free: 30-second release delay · Pro: priority delivery.','Risk warnings remain separate from discovery preferences.',''];
   const rows:any[][]=[];
   for(const chain of ['Robinchain / PONS','ARC','Solana / Pump.fun']) {

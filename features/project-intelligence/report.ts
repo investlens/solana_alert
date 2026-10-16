@@ -1,7 +1,9 @@
+import {historyFindings,type HistoryReader} from './history.js';
+import {verifiedCreator} from './creator.js';
 import {address,hash,tokenAddress,chainName,sections,percentage,type Report,type Finding,type Evidence,type Snapshot,type Chain} from './model.js';
 import {contractRead,pinnedBlock,safeSocialUrl,socialFindings,chainConfig,type Reader} from './providers.js';
-import {directCreator,outgoingConnections,linkedHoldings,holderFindings,transferTopic,confirmedFunding} from './evidence.js';
-export type ResearchDependencies={reader:Reader;now?:()=>number;verifyExit?:(chain:Chain,token:string,pair:string,security:any,pairs:any[])=>Promise<{allowed:boolean;reason:string;observedAt:number;pairId?:string}>};
+import {outgoingConnections,linkedHoldings,holderFindings,transferTopic,confirmedFunding} from './evidence.js';
+export type ResearchDependencies={reader:Reader;history?:HistoryReader;now?:()=>number;verifyExit?:(chain:Chain,token:string,pair:string,security:any,pairs:any[])=>Promise<{allowed:boolean;reason:string;observedAt:number;pairId?:string}>};
 export async function research(chainInput:unknown,tokenInput:unknown,deps:ResearchDependencies):Promise<Report>{
  const chain=chainName(chainInput),token=tokenAddress(tokenInput),at=new Date((deps.now??Date.now)()).toISOString(),r=deps.reader;
  const report:Report={version:1,chain,token,generatedAt:at,findings:[],coverage:Object.fromEntries(sections.map(s=>[s,'UNAVAILABLE'])) as Report['coverage'],limits:['Connections do not establish common ownership.','History and wallet tracing are bounded; absent evidence is not a clean history.','No overall safety score or investment recommendation.']};
@@ -38,10 +40,10 @@ export async function research(chainInput:unknown,tokenInput:unknown,deps:Resear
   add({id:'contract',section:'identity',quality:'VERIFIED',severity:'INFO',summary:`Token contract and supply verified${typeof name==='string'?' · '+name.slice(0,100):''}${typeof symbol==='string'?' ('+symbol.slice(0,24)+')':''}.`,value:supply.toString(),evidence:[source('On-chain RPC',`/address/${token}`,pinned.block)]});report.coverage.identity='AVAILABLE';
   if(address(owner)){snapshot.owner=owner.toLowerCase();add({id:'owner',section:'controls',quality:'VERIFIED',severity:'INFO',subject:snapshot.owner,summary:'owner() returned this address.',evidence:[source('On-chain RPC',`/address/${owner}`,pinned.block)],limits:'A zero owner does not prove that all privileged roles or proxy controls are absent.'});}
   if(hash(info?.creation_transaction_hash)){
-   const receipt=await safe(()=>r.rpc(chain,'eth_getTransactionReceipt',[info.creation_transaction_hash]));
-   creator=directCreator(token,info,receipt)??undefined;
+   const proof=await safe(()=>verifiedCreator(r,chain,token,info,pinned!.block));
+   creator=proof?.creator;
    if(creator){const balance=await contractRead(r,chain,token,pinned.block,'balanceOf',creator);snapshot.balances[creator]=balance;const pct=percentage(balance,supply);if(pct===null)throw Error('Creator balance invalid');
-    add({id:'developer-holding',section:'developer',quality:'VERIFIED',severity:'INFO',subject:creator,value:balance.toString(),summary:`Receipt-verified deployer holds ${pct} of total supply.`,evidence:[{...source('On-chain receipt and balance',`/tx/${info.creation_transaction_hash}`,pinned.block),transaction:info.creation_transaction_hash}],limits:'A deployer wallet is not an identity verification.'});
+    add({id:'developer-holding',section:'developer',quality:'VERIFIED',severity:'INFO',subject:creator,value:balance.toString(),summary:`${proof!.source==='PONS_FACTORY_EVENT'?'Verified PONS launch developer':'Verified direct deployer'} holds ${pct} of total supply.`,evidence:[{...source('On-chain canonical deployment proof and balance',`/tx/${info.creation_transaction_hash}`,pinned.block),transaction:info.creation_transaction_hash}],limits:'A deployer wallet is not an identity verification.'});
    }
   }
   const wallets=new Set<string>();
@@ -76,16 +78,17 @@ export async function research(chainInput:unknown,tokenInput:unknown,deps:Resear
    if(Array.isArray(history?.items))for(const tx of history.items.slice(0,50)){
     const ca=tx?.created_contract?.hash;
     if(!address(ca)||!hash(tx.hash)||ca.toLowerCase()===token||tx.from?.hash?.toLowerCase()!==creator||examined++>=3)continue;
-    const receipt=await safe(()=>r.rpc(chain,'eth_getTransactionReceipt',[tx.hash]));if(!directCreator(ca,{creator_address_hash:creator,creation_transaction_hash:tx.hash},receipt))continue;
+    const proof=await safe(()=>verifiedCreator(r,chain,ca.toLowerCase(),{hash:ca,is_contract:true,creator_address_hash:creator,creation_transaction_hash:tx.hash},pinned!.block));if(proof?.creator!==creator)continue;
     const priorSupply=await safe(()=>contractRead(r,chain,ca,pinned!.block,'totalSupply'));if(typeof priorSupply!=='bigint'||priorSupply<=0n)continue;
     confirmed++;add({id:`launch:${ca.toLowerCase()}`,section:'launches',quality:'VERIFIED',severity:'INFO',subject:ca.toLowerCase(),summary:'Prior direct token deployment by the same deployer wallet.',evidence:[{...source('On-chain deployment receipt',`/tx/${tx.hash}`),transaction:tx.hash}],limits:'Prior market performance, factory launches and deployments from other wallets are not established.'});
    }
    if(history){report.coverage.launches='PARTIAL';add({id:'history-scope',section:'launches',quality:'SOURCE_REPORTED',severity:'INFO',value:confirmed,summary:`${confirmed} prior token deployments confirmed within the sampled transaction page.`,evidence:[source('Blockscout address transactions')],limits:'At most 50 transactions sampled and 3 deployment candidates checked; this is not lifetime launch history.'});}
   }
+  if(creator&&deps.history){const history=await safe(()=>deps.history!(chain,creator!));if(history)for(const finding of historyFindings(chain,creator,token,history,at))add(finding);}
   const end=await r.rpc(chain,'eth_getBlockByNumber',[pinned.block,false]);if(end?.hash!==pinned.hash)throw Error('Pinned block changed');
  }catch{
   // A failed canonicality check invalidates every chain-derived finding.
-  if(pinned){report.findings=report.findings.filter(f=>f.section!=='launches'&&!f.evidence.some(e=>e.source.includes('On-chain')||e.block));for(const s of ['identity','connections','holders','launches'] as const)report.coverage[s]='UNAVAILABLE';}
+  if(pinned){report.findings=report.findings.filter(f=>f.section!=='launches'&&!f.evidence.some(e=>e.source.includes('On-chain')||e.block));for(const s of ['identity','connections','holders','launches'] as const)report.coverage[s]='UNAVAILABLE';delete report.block;}
   report.limits.push('On-chain research was incomplete or its pinned block could not be revalidated. No complete on-chain assessment is claimed.');
  }
  if(pair&&deps.verifyExit){const exit=await safe(()=>deps.verifyExit!(chain,token,pair.pairAddress,security,pairRaw));if(exit&&exit.pairId?.toLowerCase()===pair.pairAddress.toLowerCase()&&Date.parse(at)-exit.observedAt<=30000&&exit.observedAt<=Date.parse(at)+30000){add({id:'exit-simulation',section:'selling',quality:exit.allowed?'VERIFIED':'UNVERIFIED',severity:exit.allowed?'INFO':'UNKNOWN',summary:exit.reason,evidence:[{source:'Read-only exact-pool simulation',observedAt:new Date(exit.observedAt).toISOString()}],limits:'Simulation describes tested conditions only; future selling is not guaranteed.'});if(exit.allowed)report.coverage.selling='AVAILABLE';}}
