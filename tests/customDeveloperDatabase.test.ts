@@ -8,7 +8,7 @@ test('deployment evidence is leased, bounded, chain-specific and counted once in
  const scalar=async(sql:string,params:any[]=[])=>Object.values((await db.query(sql,params)).rows[0] as any)[0];
  const token='0x'+'1'.repeat(40),creator='0x'+'2'.repeat(40);
  await db.exec('create role anon;create role authenticated;create role service_role;');
- for(const name of ['20260903170000_pons_developer_launch_census.sql','20261002185816_alphaos_compact_alert_outcomes.sql','20261002190839_compact_outcome_sample_validation.sql','20261016070914_repair_developer_outcome_linkage.sql','20261016081140_bounded_custom_developer_verification.sql'])await db.exec(readFileSync(new URL('../supabase/migrations/'+name,import.meta.url),'utf8'));
+ for(const name of ['20260903170000_pons_developer_launch_census.sql','20261002185816_alphaos_compact_alert_outcomes.sql','20261002190839_compact_outcome_sample_validation.sql','20261016070914_repair_developer_outcome_linkage.sql','20261016081140_bounded_custom_developer_verification.sql','20261016082306_recover_custom_developer_claims.sql'])await db.exec(readFileSync(new URL('../supabase/migrations/'+name,import.meta.url),'utf8'));
  const register=async(chain='arc')=>scalar("select public.alpha_register_compact_alert($1,$2,'BOOST',1,100,100,$2,'USD')",[chain,token]);
  const claim=async()=>scalar('select public.alpha_claim_creator_verification()') as Promise<any>;
  const proof=(chain='arc')=>({chain,token,creator,source:'CHAIN_DEPLOYMENT_RECEIPT',transactionHash:'0x'+'a'.repeat(64),blockHash:'0x'+'b'.repeat(64),blockNumber:'16'});
@@ -19,6 +19,13 @@ test('deployment evidence is leased, bounded, chain-specific and counted once in
    await register();const c=await claim();assert.equal(c.chain,'arc');assert.equal(await claim(),null);
    assert.deepEqual(await finish(c,null),{status:'UNVERIFIED'});assert.equal(await claim(),null);
    await db.exec("update public.alpha_deployment_creator_evidence set checked_at=now()-interval '11 minutes'");assert.equal(await claim(),null);
+  });
+  await scenario('a committed claim with lost response recovers after ten minutes and fences its old lease',async()=>{
+   await register();const old=await claim();assert.equal(await claim(),null);
+   await db.exec("update public.alpha_deployment_creator_evidence set checked_at=now()-interval '11 minutes'");
+   const recovered=await claim();assert.equal(recovered.token,old.token);assert.notEqual(recovered.lease,old.lease);
+   assert.deepEqual(await finish(old,proof()),{status:'STALE'});
+   assert.deepEqual(await finish(recovered,proof()),{status:'VERIFIED',link:'LINKED_ACTIVE'});
   });
   await scenario('successful ARC proof attaches active identity without counting an unassessed session',async()=>{
    await register();await register('robinhood');const c=await claim();
