@@ -27,6 +27,8 @@ test('PONS creator is decoded from approved exact-token event, never the factory
  f.receipt.to=f.factory.address as any;f.receipt.logs=[log] as any;f.tx.to=f.factory.address as any;
  assert.equal((await verifiedCreator(f.reader,'robinhood',token,f.info,f.head))?.source,'PONS_FACTORY_EVENT');
  assert.equal(await verifiedCreator(f.reader,'arc',token,f.info,f.head),null);
+ const conflict={...log,topics:encodeEventTopics({abi,eventName:'TokenLaunched',args:{token,curve:'0x'+'c'.repeat(40),deployer:'0x'+'a'.repeat(40)}} as any)};
+ f.receipt.logs=[log,conflict] as any;assert.equal(await verifiedCreator(f.reader,'robinhood',token,f.info,f.head),null);
  for(const patch of [{address:creator},{removed:true},{blockHash:'0x'+'f'.repeat(64)},{transactionHash:'0x'+'a'.repeat(64)}]){
   f.receipt.logs=[{...log,...patch}] as any;assert.equal(await verifiedCreator(f.reader,'robinhood',token,f.info,f.head),null);
  }

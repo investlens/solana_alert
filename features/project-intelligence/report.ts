@@ -30,6 +30,7 @@ export async function research(chainInput:unknown,tokenInput:unknown,deps:Resear
   const lp=security.lp_holders;if(Array.isArray(lp)&&lp.length)add({id:'reported-lp',section:'market',quality:'SOURCE_REPORTED',severity:'CAUTION',summary:'LP-holder evidence is available from the security provider; lock contracts, expiry and coverage are not independently validated.',evidence:[source('GoPlus')],limits:'No safe or locked badge is issued from an unvalidated provider flag.'});
  }
  // Only receipt-verified direct deployments establish the developer in v1.
+ let creatorLaunchBlock:bigint|undefined;
  let pinned:Awaited<ReturnType<typeof pinnedBlock>>|undefined,snapshot:Snapshot|undefined,creator:string|undefined;
  try{
   pinned=await pinnedBlock(r,chain);report.block=pinned.block;
@@ -41,7 +42,7 @@ export async function research(chainInput:unknown,tokenInput:unknown,deps:Resear
   if(address(owner)){snapshot.owner=owner.toLowerCase();add({id:'owner',section:'controls',quality:'VERIFIED',severity:'INFO',subject:snapshot.owner,summary:'owner() returned this address.',evidence:[source('On-chain RPC',`/address/${owner}`,pinned.block)],limits:'A zero owner does not prove that all privileged roles or proxy controls are absent.'});}
   if(hash(info?.creation_transaction_hash)){
    const proof=await safe(()=>verifiedCreator(r,chain,token,info,pinned!.block));
-   creator=proof?.creator;
+   creator=proof?.creator;if(proof)creatorLaunchBlock=BigInt(proof.block);
    if(creator){const balance=await contractRead(r,chain,token,pinned.block,'balanceOf',creator);snapshot.balances[creator]=balance;const pct=percentage(balance,supply);if(pct===null)throw Error('Creator balance invalid');
     add({id:'developer-holding',section:'developer',quality:'VERIFIED',severity:'INFO',subject:creator,value:balance.toString(),summary:`${proof!.source==='PONS_FACTORY_EVENT'?'Verified PONS launch developer':'Verified direct deployer'} holds ${pct} of total supply.`,evidence:[{...source('On-chain canonical deployment proof and balance',`/tx/${info.creation_transaction_hash}`,pinned.block),transaction:info.creation_transaction_hash}],limits:'A deployer wallet is not an identity verification.'});
    }
@@ -78,7 +79,7 @@ export async function research(chainInput:unknown,tokenInput:unknown,deps:Resear
    if(Array.isArray(history?.items))for(const tx of history.items.slice(0,50)){
     const ca=tx?.created_contract?.hash;
     if(!address(ca)||!hash(tx.hash)||ca.toLowerCase()===token||tx.from?.hash?.toLowerCase()!==creator||examined++>=3)continue;
-    const proof=await safe(()=>verifiedCreator(r,chain,ca.toLowerCase(),{hash:ca,is_contract:true,creator_address_hash:creator,creation_transaction_hash:tx.hash},pinned!.block));if(proof?.creator!==creator)continue;
+    const proof=await safe(()=>verifiedCreator(r,chain,ca.toLowerCase(),{hash:ca,is_contract:true,creator_address_hash:creator,creation_transaction_hash:tx.hash},pinned!.block));if(proof?.creator!==creator||creatorLaunchBlock===undefined||BigInt(proof.block)>=creatorLaunchBlock)continue;
     const priorSupply=await safe(()=>contractRead(r,chain,ca,pinned!.block,'totalSupply'));if(typeof priorSupply!=='bigint'||priorSupply<=0n)continue;
     confirmed++;add({id:`launch:${ca.toLowerCase()}`,section:'launches',quality:'VERIFIED',severity:'INFO',subject:ca.toLowerCase(),summary:'Prior direct token deployment by the same deployer wallet.',evidence:[{...source('On-chain deployment receipt',`/tx/${tx.hash}`),transaction:tx.hash}],limits:'Prior market performance, factory launches and deployments from other wallets are not established.'});
    }
