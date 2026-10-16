@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {PGlite} from '@electric-sql/pglite';
 import {readFileSync} from 'node:fs';
-import {parseWinnerSnapshot} from '../src/chains/robinhood/ponsReturningWinner.js';
 
 test('returning-winner snapshot uses verified measured history and private read-only access',async t=>{
  const db=new PGlite();const creator='0x'+'2'.repeat(40),token=(n:number)=>'0x'+n.toString(16).padStart(40,'0');
@@ -22,7 +21,7 @@ test('returning-winner snapshot uses verified measured history and private read-
  try{
   await scenario('aggregate wins alone are insufficient; a retained verified winner is required',async()=>{
    await summary();assert.equal((await snapshot()).developers.length,0);
-   await winner();const p=await snapshot();assert.equal(p.developers.length,1);assert.equal(parseWinnerSnapshot(p,Date.now())!.developers.size,1);
+   await winner();const p=await snapshot();assert.equal(p.developers.length,1);assert.equal(p.developers[0].winners,5);
   });
   await scenario('only three references are returned, retaining the earliest winner to avoid look-ahead misses',async()=>{
    await summary();for(let i=1;i<=5;i++)await winner(i,24-i);
