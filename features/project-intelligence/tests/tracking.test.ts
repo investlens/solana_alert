@@ -19,3 +19,12 @@ test('tracking is opt-in, scoped per member and protects ambiguous sends against
  now+=300001;await tracking.tick();assert.equal(sends,1);
  pro=false;await assert.rejects(tracking.start('1','robinhood',token),/Pro/);await tracking.tick();assert.equal(sends,1);
 });
+test('failed research tracks back off without starving other due tracks or creating notifications',async()=>{
+ let now=1000000;const attempted:string[]=[];
+ const tracks=['1','2','3'].map(user=>({id:user,user,chain:'robinhood' as const,token,expires:now+86400000,next:now,baseline:report(now-1000),last:report(now-1000)}));
+ const state:TrackState={tracks,notices:[]},store:StateStore={read:async()=>structuredClone(state),mutate:async fn=>fn(state)};
+ const service=new ResearchService({now:()=>now,member:async id=>{attempted.push(id);throw Error('Membership temporarily unavailable');},build:async()=>report(now)});
+ const tracking=createTracking({store,service,now:()=>now,send:async()=>{throw Error('Must not send');}});
+ await tracking.tick();assert.deepEqual(attempted,['1','2']);assert.equal(state.tracks[0].next,now+300000);assert.equal(state.tracks[0].last.generatedAt,report(now-1000).generatedAt);
+ await tracking.tick();assert.deepEqual(attempted,['1','2','3']);assert.equal(state.notices.length,0);
+});

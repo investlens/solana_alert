@@ -3,7 +3,7 @@ import {address,hash,type Chain} from './model.js';
 export const chainConfig={robinhood:{id:4663,explorer:'https://robinhoodchain.blockscout.com',rpc:'https://robinhood-rpc.publicnode.com'},arc:{id:5042,explorer:'https://explorer.arc.io',rpc:'https://rpc.mainnet.arc.io'}};
 export type ProviderConfig={rpc:Record<Chain,string>;explorer:Record<Chain,string>;explorerKey?:string;securityKey?:string;socialUrl?:string;socialKey?:string};
 export const abi=parseAbi(['function totalSupply() view returns (uint256)','function balanceOf(address) view returns (uint256)','function owner() view returns (address)','function name() view returns (string)','function symbol() view returns (string)']);
-export type Reader={rpc:(chain:Chain,method:string,params:unknown[],signal?:AbortSignal)=>Promise<any>;explorer:(chain:Chain,path:string)=>Promise<any>;security:(chain:Chain,token:string)=>Promise<any>;pairs:(chain:Chain,token:string)=>Promise<any>;social?:(url:string)=>Promise<any>;requests:()=>number};
+export type Reader={rpc:(chain:Chain,method:string,params:unknown[],signal?:AbortSignal)=>Promise<any>;explorer:(chain:Chain,path:string)=>Promise<any>;security:(chain:Chain,token:string)=>Promise<any>;pairs:(chain:Chain,token:string)=>Promise<any>;social?:(url:string)=>Promise<any>;requests:()=>number;remaining?:()=>number};
 export function createReader(config:ProviderConfig,options:{signal?:AbortSignal;fetch?:typeof fetch;budget?:number;admit?:()=>boolean}={}):Reader{
  let count=0;const fetcher=options.fetch??fetch;
  async function json(url:string,init:RequestInit={}){
@@ -33,6 +33,7 @@ export function createReader(config:ProviderConfig,options:{signal?:AbortSignal;
   pairs:(chain,token)=>json(`https://api.dexscreener.com/token-pairs/v1/${chain}/${token}`),
   social:config.socialUrl?url=>json(config.socialUrl!,{method:'POST',headers:{'content-type':'application/json',...(config.socialKey?{Authorization:`Bearer ${config.socialKey}`}:{})},body:JSON.stringify({url,limit:30})}):undefined,
   requests:()=>count,
+  remaining:()=>Math.max(0,(options.budget??40)-count),
  };
 }
 export async function contractRead(reader:Reader,chain:Chain,token:string,block:string,name:'totalSupply'|'balanceOf'|'owner'|'name'|'symbol',wallet?:string):Promise<any>{

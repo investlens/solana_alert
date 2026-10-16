@@ -40,3 +40,12 @@ test('social samples reject account mismatches and future/duplicate posts; frequ
  assert.equal(socialFindings(raw,raw.profileUrl,at).count,1);assert.match(socialFindings(raw,raw.profileUrl,at).limits,/not proof of legitimacy/);
  assert.throws(()=>socialFindings({...raw,profileUrl:'https://x.com/other'},raw.profileUrl,at));
 });
+test('optional holder sampling preserves the final canonicality read under a tight source budget',async()=>{
+ const r=fixture();let remaining=30,calls=0;const rpc=r.rpc,explorer=r.explorer,security=r.security,pairs=r.pairs;
+ const consume=()=>{calls++;if(--remaining<0)throw Error('Budget exhausted');};
+ r.remaining=()=>remaining;
+ r.rpc=async(...args)=>{consume();return rpc(...args);};r.security=async(...args)=>{consume();return security(...args);};r.pairs=async(...args)=>{consume();return pairs(...args);};
+ r.explorer=async(...args)=>{consume();if(args[1].includes('/holders'))return {items:Array.from({length:8},(_,i)=>({address:{hash:'0x'+(i+1).toString(16).padStart(40,'0')}}))};return explorer(...args);};
+ const result=await research('robinhood',token,{reader:r,now:()=>1800000000000});
+ assert.equal(result.coverage.identity,'AVAILABLE');assert.equal(result.findings.find(f=>f.id==='developer-holding')?.quality,'VERIFIED');assert.ok(calls<=30);assert.ok(remaining>=8);
+});

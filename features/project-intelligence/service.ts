@@ -66,7 +66,11 @@ export function createTracking(deps:{store:StateStore;service:ResearchService;se
        current.last=merged;
        if(changes.length){const id=createHash('sha256').update(track.id+report.generatedAt+changes.join('|')).digest('hex');if(!s.notices.some(n=>n.id===id)&&s.notices.length<100)s.notices.push({id,track:track.id,user:track.user,text:`Project Intelligence — ${track.chain}\n${track.token}\n${changes.join('\n')}\nObserved: ${report.generatedAt}\nReview a fresh report for evidence.`,state:'PENDING',created:now()});}
       });
-     }catch{/* No failed research request is represented as a market event. */}
+     }catch{
+      // Back off failed or ineligible tracks so the same first two cannot
+      // monopolize every cycle. Preserve the last usable observation.
+      await deps.store.mutate(s=>{const current=s.tracks.find(t=>t.id===track.id);if(current&&current.next<=now())current.next=now()+300000;});
+     }
     }
     const pending=(await deps.store.read()).notices.filter(n=>n.state==='PENDING').slice(0,2);
     for(const notice of pending){

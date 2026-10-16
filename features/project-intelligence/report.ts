@@ -29,7 +29,9 @@ export async function research(chainInput:unknown,tokenInput:unknown,deps:Resear
   if(address(security.creator_address))add({id:'reported-creator',section:'developer',quality:'SOURCE_REPORTED',severity:'UNKNOWN',subject:security.creator_address.toLowerCase(),summary:'Security provider identifies this creator wallet; direct deployment proof is checked separately.',evidence:[source('GoPlus') ]});
   const lp=security.lp_holders;if(Array.isArray(lp)&&lp.length)add({id:'reported-lp',section:'market',quality:'SOURCE_REPORTED',severity:'CAUTION',summary:'LP-holder evidence is available from the security provider; lock contracts, expiry and coverage are not independently validated.',evidence:[source('GoPlus')],limits:'No safe or locked badge is issued from an unvalidated provider flag.'});
  }
- // Only receipt-verified direct deployments establish the developer in v1.
+ // Reserve final canonicality and selling-check capacity before optional research.
+ const optionalBudget=(cost:number)=>(r.remaining?.()??Infinity)>=cost+9;
+ // Direct and approved factory proofs establish the developer wallet.
  let creatorLaunchBlock:bigint|undefined;
  let pinned:Awaited<ReturnType<typeof pinnedBlock>>|undefined,snapshot:Snapshot|undefined,creator:string|undefined;
  try{
@@ -56,7 +58,7 @@ export async function research(chainInput:unknown,tokenInput:unknown,deps:Resear
    if(logs!==undefined){links=outgoingConnections(logs,token,creator,from,tip);report.coverage.connections='PARTIAL';for(const l of links)wallets.add(l.wallet);add({id:'connection-scope',section:'connections',quality:'VERIFIED',severity:'INFO',value:links.length,summary:`${links.length} direct token recipients retained from the bounded transfer window.`,evidence:[source('On-chain transfer window',undefined,pinned.block)],limits:'At most 512 blocks, 100 logs and 3 recipients. This does not establish all developer-linked wallets.'});}
    let fundingChecked=0;
    for(const tx of (history?.items??[]).slice(0,50)){
-    if(fundingChecked>=2)break;
+    if(fundingChecked>=2||!optionalBudget(2))break;
     if(!hash(tx.hash)||tx.from?.hash?.toLowerCase()!==creator||!address(tx.to?.hash)||!/^\d+$/.test(String(tx.value??''))||BigInt(tx.value)<=0n)continue;
     fundingChecked++;
     const transaction=await safe(()=>r.rpc(chain,'eth_getTransactionByHash',[tx.hash]));
@@ -67,6 +69,7 @@ export async function research(chainInput:unknown,tokenInput:unknown,deps:Resear
    }
   }
   for(const wallet of [...new Set([...links.map(l=>l.wallet),...wallets])].slice(0,11)){
+   if(!optionalBudget(links.some(l=>l.wallet===wallet)?2:1))break;
    if(snapshot.balances[wallet]===undefined){const balance=await safe(()=>contractRead(r,chain,token,pinned!.block,'balanceOf',wallet));if(typeof balance==='bigint')snapshot.balances[wallet]=balance;}
    if(links.some(l=>l.wallet===wallet)){const code=await safe(()=>r.rpc(chain,'eth_getCode',[wallet,pinned!.block]));if(code!=='0x')contractWallets.add(wallet);}
   }
@@ -77,6 +80,7 @@ export async function research(chainInput:unknown,tokenInput:unknown,deps:Resear
   if(creator){
    let examined=0,confirmed=0;
    if(Array.isArray(history?.items))for(const tx of history.items.slice(0,50)){
+    if(!optionalBudget(5))break;
     const ca=tx?.created_contract?.hash;
     if(!address(ca)||!hash(tx.hash)||ca.toLowerCase()===token||tx.from?.hash?.toLowerCase()!==creator||examined++>=3)continue;
     const proof=await safe(()=>verifiedCreator(r,chain,ca.toLowerCase(),{hash:ca,is_contract:true,creator_address_hash:creator,creation_transaction_hash:tx.hash},pinned!.block));if(proof?.creator!==creator||creatorLaunchBlock===undefined||BigInt(proof.block)>=creatorLaunchBlock)continue;
@@ -86,6 +90,7 @@ export async function research(chainInput:unknown,tokenInput:unknown,deps:Resear
    if(history){report.coverage.launches='PARTIAL';add({id:'history-scope',section:'launches',quality:'SOURCE_REPORTED',severity:'INFO',value:confirmed,summary:`${confirmed} prior token deployments confirmed within the sampled transaction page.`,evidence:[source('Blockscout address transactions')],limits:'At most 50 transactions sampled and 3 deployment candidates checked; this is not lifetime launch history.'});}
   }
   if(creator&&deps.history){const history=await safe(()=>deps.history!(chain,creator!));if(history)for(const finding of historyFindings(chain,creator,token,history,at))add(finding);}
+  if(!optionalBudget(1))report.limits.push('Optional wallet and deployment sampling may be shortened to preserve final validation and selling-check capacity.');
   const end=await r.rpc(chain,'eth_getBlockByNumber',[pinned.block,false]);if(end?.hash!==pinned.hash)throw Error('Pinned block changed');
  }catch{
   // A failed canonicality check invalidates every chain-derived finding.

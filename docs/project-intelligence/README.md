@@ -148,3 +148,17 @@ Rebased onto the production release containing returning-winner alerts. Changes 
 - Live database field queries succeeded. The public Robinhood probe remained incomplete; it is not release validation. No dedicated research service or PI configuration was found in the current Railway project. No existing service was changed, no new resource provisioned, and no test Telegram message was sent.
 
 Remaining release work: dedicated research RPC/explorer quota for both chains; social provider validation; independent LP lock evidence; reviewed live reference cases; separate Redis and full authenticated Mini App/track/restart validation. These gates remain unresolved, so this draft is not publicly deployable.
+
+## Provider access and scheduling follow-up — 16 October 2026
+
+Both full GitHub CI and isolated feature CI passed for the prior draft commit. Further feature-only repairs now reserve nine source requests before optional holder/funding/deployment sampling (one final block check plus selling-check allowance). With the normal 40-request report cap, optional work cannot consume that reserve. Low configured budgets can still yield partial mandatory coverage; no larger quota or new retries were added. Failed tracking requests back off five minutes while preserving their last observation, so two failing tracks cannot monopolize every minute. All 25 feature tests pass, including tight-budget canonicality and failed-track fairness.
+
+Read-only public access diagnostics (local environment, not Railway worker execution): official Robinhood RPC and PublicNode returned chain 4663, and official ARC RPC returned chain 5042. Robinhood explorer address API returned HTTP 403; the tested Blockscout multichain stats route returned HTTP 402; ARC explorer stats failed to connect within the six-second probe. These are observations of those requests, not evidence of token safety or a universal provider outage. No bypass, account creation or purchase was attempted. The current project has no separate research service; neither local research settings nor environment-level research shared variables were present.
+
+Before configuring a staging worker, obtain an independently scoped RPC/explorer plan with coverage for both chains. Configure values privately in the new service settings; never send keys in chat. A provider that supplies only chain-ID/basic RPC is insufficient: canonical blocks, receipts, token calls, bounded logs and the address/holder/transaction explorer routes must work. Social access is a separate requirement. Do not reuse the alert Redis or its paid RPC quota.
+
+Provider preflight (configured secrets are read from environment and never printed):
+
+`NODE_USE_ENV_PROXY=1 node --import tsx features/project-intelligence/preflight.ts --chain robinhood --token CONTRACT`
+
+Repeat with `--chain arc` and a real reviewed ARC project token. Missing configuration produces only setting names; failed responses produce bounded reason codes. A deliberate `--public` flag permits keyless diagnostics but is not approval for public deployment. The preflight makes at most eight reads, never sends Telegram messages, and does not substitute for outcome/social/selling/opt-in-delivery validation.
