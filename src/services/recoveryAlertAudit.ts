@@ -1,3 +1,4 @@
+import {createRecoveryAuditQueue} from './recoveryAuditQueue.js';
 import { normalizeNotificationMarketContext } from '../ui/notificationMarketContext.js';
 import { validOwnershipPercent, type OwnershipDisclosure } from '../ui/ownershipDisclosure.js';
 import { resolveVerifiedSemanticEntryPrice } from './alphaSemanticEventService.js';
@@ -28,7 +29,7 @@ export function buildRecoveryAlertAudit(event: UserFacingSemanticEvent, accepted
     dev_holding_percent: evidence?.percent ?? null, dev_holding_source: evidence ? 'ON_CHAIN_BALANCE' : null,
     dev_holding_evidence: evidence ? `Creator ${evidence.creator} balance at block ${evidence.block}; observed ${evidence.observedAt}` : null,
     creator_evidence: evidence ? { address: evidence.creator, observedAt: evidence.observedAt, block: evidence.block } : null,
-    raw_snapshot: { deliveryMode: 'RECOVERY', acceptedRecipients, performanceBaselineVerified: false },
+    raw_snapshot: { acceptedRecipientsScope: 'BATCH', deliveryMode: 'RECOVERY', acceptedRecipients, performanceBaselineVerified: false },
   };
 }
 export type AcceptedRecoveryRecipient={telegramId:string;tier:string;messageId:number|null;acceptedAt:string};
@@ -37,13 +38,24 @@ export function recoveryRecipientRows(eventId:number,recipients:AcceptedRecovery
   .map(r=>[r.telegramId,r])).values()].slice(0,500).map(r=>({alert_event_id:eventId,telegram_id:r.telegramId,tier_at_delivery:r.tier,
     delivery_channel:'telegram',delivered_at:r.acceptedAt,metadata:{state:'DELIVERED',recovery:true,...(r.messageId!=null?{telegram_message_id:r.messageId}:{})}}));
 }
-let active = false; let pauseUntil = 0;
+type RecoveryAuditTask={event:UserFacingSemanticEvent;accepted:number;ownership?:OwnershipDisclosure|null;capturedAt:number;recovery:boolean;recipients:AcceptedRecoveryRecipient[]};
+const queue=createRecoveryAuditQueue<RecoveryAuditTask>({
+ now:Date.now,key:item=>`${item.recovery}:${item.event.eventIdentity}`,
+ merge:(a,b)=>{const recipients=[...new Map([...a.recipients,...b.recipients].map(r=>[r.telegramId,r])).values()].slice(0,500);
+  return {...a,accepted:Math.max(a.accepted,b.accepted,recipients.length),recipients};},
+ write:async({event,accepted,ownership,capturedAt,recovery,recipients})=>writeRecoveryAlertAudit(event,accepted,ownership,capturedAt,recovery,recipients),
+ failure:error=>console.warn('[RecoveryAlertAudit] UNAVAILABLE',{reason:error instanceof Error?error.message:String(error)}),
+});
+export function recordRecoveryAlertAudit(event:UserFacingSemanticEvent,accepted:number,ownership?:OwnershipDisclosure|null,capturedAt=Date.now(),recovery=true,recipients:AcceptedRecoveryRecipient[]=[]):Promise<void>{
+ const row=buildRecoveryAlertAudit(event,accepted,new Date(),ownership,capturedAt);
+ if(!row||(!recovery&&!row.creator_evidence))return Promise.resolve();
+ return queue.enqueue({event,accepted,ownership,capturedAt,recovery,recipients:recipients.slice(0,500)});
+}
 // One compact audit row per accepted event; never retry Telegram to repair audit.
-export async function recordRecoveryAlertAudit(event: UserFacingSemanticEvent, accepted: number, ownership?: OwnershipDisclosure | null, capturedAt = Date.now(), recovery = true, recipients:AcceptedRecoveryRecipient[]=[]): Promise<void> {
+async function writeRecoveryAlertAudit(event: UserFacingSemanticEvent, accepted: number, ownership?: OwnershipDisclosure | null, capturedAt = Date.now(), recovery = true, recipients:AcceptedRecoveryRecipient[]=[]): Promise<void> {
   const row = buildRecoveryAlertAudit(event, accepted, new Date(), ownership, capturedAt);
-  if (!row || (!recovery && !row.creator_evidence) || active || Date.now() < pauseUntil) return;
-  active = true;
-  try {
+  if (!row || (!recovery && !row.creator_evidence)) return;
+  {
     const { supabase } = await import('./supabase.js');
     const write = recovery
       ? supabase.from('alpha_alert_events').upsert(row, { onConflict: 'event_identity', ignoreDuplicates: true })
@@ -59,8 +71,5 @@ export async function recordRecoveryAlertAudit(event: UserFacingSemanticEvent, a
       if(rows.length){const result=await supabase.from('alpha_alert_event_deliveries').upsert(rows,{onConflict:'alert_event_id,telegram_id,delivery_channel',ignoreDuplicates:true}).abortSignal(AbortSignal.timeout(1500));if(result.error)throw result.error;}
     }
     console.log('[RecoveryAlertAudit] RECORDED', { type: event.type, token: event.assetId, accepted });
-  } catch (error) {
-    pauseUntil = Date.now() + 60_000;
-    console.warn('[RecoveryAlertAudit] UNAVAILABLE', { reason: error instanceof Error ? error.message : String(error) });
-  } finally { active = false; }
+  }
 }
