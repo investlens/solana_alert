@@ -29,14 +29,14 @@ export function rememberRuntimeSubscriber(args: {
 }
 
 export function runtimeDeliverableUsers(options?: { allRealtime?: boolean }) {
-  const allRealtime = Boolean(options?.allRealtime);
+  // Realtime eligibility is a capability, never a synthetic paid subscription.
 
   return [...subscribers.values()].map((subscriber) => ({
     telegram_id: subscriber.telegramId,
     username: subscriber.username,
     first_name: subscriber.firstName,
-    tier: subscriber.isAdmin ? 'admin' : allRealtime ? 'paid' : 'free',
-    subscription_status: subscriber.isAdmin || allRealtime ? 'active' : 'none',
+    tier: subscriber.isAdmin ? 'admin' : 'free',
+    subscription_status: subscriber.isAdmin ? 'active' : 'none',
     free_trial_used: 0,
     free_trial_limit: 5,
     paid_active_until: null,

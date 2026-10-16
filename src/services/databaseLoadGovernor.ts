@@ -1,4 +1,9 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 export type DatabaseWorkClass = 'CRITICAL' | 'BACKGROUND';
+
+const workContext = new AsyncLocalStorage<DatabaseWorkClass>();
+export const currentDatabaseWorkClass = () => workContext.getStore();
 
 type GovernorState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
 
@@ -85,7 +90,7 @@ export async function runDatabaseWork<T>(workClass: DatabaseWorkClass, fn: () =>
   if (!canStartDatabaseWork(workClass)) return null;
   if (workClass === 'BACKGROUND') activeBackground += 1;
   try {
-    const result = await fn();
+    const result = await workContext.run(workClass, fn);
     recordDatabaseSuccess(workClass);
     return result;
   } catch (error) {

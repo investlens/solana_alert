@@ -249,7 +249,13 @@ export async function deliverAlphaSemanticEvent(args: {
       : await discloseAlertDexPaid(deliveryMessage, deliveryButtons ?? [], args.event.assetId);
     deliveryMessage = card.text; deliveryButtons = card.buttons;
   }
-  if (dependencies === productionDependencies && args.event.chain.toLowerCase() === 'robinhood' && !isUndelayedRiskEvent(args.event.type)) deliveryMessage = await discloseRobinhoodKeyStats(deliveryMessage,args.event.assetId,false,['DEX_PAID','BOOST'].includes(args.event.type)?(launchType==='PONS'||launchType==='FLAP'?`Trusted ${launchType} route`:args.event.type==='DEX_PAID'?'See sellability disclosure':'Verified flags · not a guarantee'):undefined);
+  // Promotion stats were already resolved above. A second cold-cache wait can
+  // add another 2.5 seconds without changing eligibility; existing card edits
+  // fill optional evidence as it finishes.
+  if (dependencies === productionDependencies && args.event.chain.toLowerCase() === 'robinhood' &&
+      !isUndelayedRiskEvent(args.event.type) && !['DEX_PAID','BOOST'].includes(args.event.type)) {
+    deliveryMessage = await discloseRobinhoodKeyStats(deliveryMessage,args.event.assetId);
+  }
   if (dependencies === productionDependencies && ['DEX_PAID','BOOST'].includes(args.event.type) && args.event.chain==='robinhood') {
     const raw=args.event.rawSnapshot ?? getEphemeralSemanticEventEvidence(args.event.eventIdentity);
     const card=buildPromotionEventCard({kind:args.event.type as 'DEX_PAID'|'BOOST',text:deliveryMessage,token:args.event.assetId,launchType,
