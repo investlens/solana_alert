@@ -1,3 +1,4 @@
+import {flushVerifiedPonsDex} from '../../services/ponsDexReachedEvidence.js';
 import type {PonsLaunch} from './ponsHistoricalLaunchScanner.js';
 import {createReturningWinnerQueue,returningWinnerCard,parseWinnerSnapshot,returningWinnerHistory,type WinnerHistory} from './ponsReturningWinner.js';
 import {runDatabaseWork} from '../../services/databaseLoadGovernor.js';
@@ -43,7 +44,8 @@ export async function deliverReturningWinner(launch:PonsLaunch,history:WinnerHis
 export async function recheckReturningWinner(launch:PonsLaunch,load:()=>Promise<unknown>,now:()=>number):Promise<WinnerHistory|null>{
  const payload=await load(),snapshot=parseWinnerSnapshot(payload,now());
  if(!snapshot)throw new Error('Returning-winner qualification unavailable');
- return returningWinnerHistory(launch,snapshot,now());
+ const history=returningWinnerHistory(launch,snapshot,now());
+ return history?.history_scope==='PRIOR_LAUNCHES'?history:null;
 }
 const worker=createReturningWinnerQueue({
  now:Date.now,
@@ -86,6 +88,7 @@ export function queuePonsReturningWinner(launch:PonsLaunch):void {
 }
 export async function processPonsReturningWinners():Promise<void>{
  if(!enabled())return;
+ await flushVerifiedPonsDex();
  await worker.tick();
  const stats=worker.stats();if(stats.pending||stats.active)console.log('[ReturningWinnerDev] QUEUE',stats);
 }

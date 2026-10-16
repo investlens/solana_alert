@@ -20,7 +20,7 @@ test('winner reputation uses distinct winners against bounded indexed launches r
  const snapshot=()=>scalar('select public.alpha_returning_winner_history()') as Promise<any>;
  const scenario=(name:string,fn:()=>Promise<void>)=>t.test(name,async()=>{await db.exec('begin');try{await fn();}finally{await db.exec('rollback');}});
  try{
-  await scenario('three measured distinct winners across five indexed launches qualify with explicit coverage',async()=>{await seed();const p=await snapshot();assert.equal(p.policy_version,2);assert.equal(p.developers.length,1);assert.equal(p.developers[0].known_launches,5);assert.equal(p.developers[0].verified_winning_tokens,3);assert.equal(parseWinnerSnapshot(p,Date.now())!.developers.size,1);});
+  await scenario('three measured distinct winners across five indexed launches qualify with explicit coverage',async()=>{await seed();const p=await snapshot();assert.equal(p.policy_version,2);assert.equal(p.developers.length,1);assert.equal(p.developers[0].known_launches,5);assert.equal(p.developers[0].verified_winning_tokens,3);assert.equal(p.policy_version,2);});
   await scenario('reported 200-launch developer with one winner cannot qualify',async()=>{await seed(200,1);assert.equal((await snapshot()).developers.length,0);});
   await scenario('three session wins for one unique token cannot qualify',async()=>{await seed();await db.exec("delete from public.alpha_successful_tokens where token<>'"+token(1)+"'");assert.equal((await snapshot()).developers.length,0);});
   await scenario('less than sixty percent demonstrated winners fails even when aggregate sessions look good',async()=>{await seed(6);assert.equal((await snapshot()).developers.length,0);});

@@ -13,7 +13,9 @@ const launch=(n=1):PonsLaunch=>({chain:'robinhood',protocol:'pons',protocol_vers
  block_number:String((factory.startBlock??1n)+1n),block_timestamp:new Date(now-5000).toISOString(),transaction_hash:'0x'+'a'.repeat(64),log_index:0});
 const winner=(token=address(4),at=now-3600000)=>({chain:'robinhood',token,creator:address(2),creator_source:'PONS_FACTORY_EVENT',price_unit:'USD',baseline_price:100,final_roi:50,sampled_low_roi:0,
  samples:[110,120,150].map((price,i)=>({status:'MEASURED',price,at:new Date(at-[345*60000,300*60000,1000][i]).toISOString()})),assessed_at:new Date(at).toISOString()});
-const payload=()=>({policy_version:2,as_of:new Date(now).toISOString(),capped:false,developers:[{creator:address(2),assessed_sessions:5,winners:3,failed:1,neutral:0,incomplete:1,known_launches:5,launches_24h:1,verified_winning_tokens:3,prior_winners:[winner(),winner(address(5)),winner(address(6))]}]});
+const reference=(token=address(4),at=now-3600000)=>({token,pool:address(400),source:'PONS_V2_GRADUATED_MAPPED_POOL',observed_at:new Date(at).toISOString()});
+const payload=()=>({policy_version:4,as_of:new Date(now).toISOString(),capped:false,developers:[{creator:address(2),known_launches:10,dex_projects:3,history_scope:'PRIOR_LAUNCHES',dex_references:[reference(),reference(address(5)),reference(address(6))]}]});
+
 const flush=()=>new Promise<void>(r=>setImmediate(r));
 test('only fresh exact approved PONS launch events qualify',()=>{
  assert.equal(freshVerifiedPonsLaunch(launch(),now),true);
@@ -29,21 +31,19 @@ test('prior winners require verified identity, measured arithmetic and complete 
   {...winner(),samples:[...winner().samples].reverse()}])assert.equal(validPriorWinner(bad,address(2)),false);
 });
 test('self, future, stale and unverified history cannot create a returning-winner alert',()=>{
- const snapshot=parseWinnerSnapshot(payload(),now)!;assert.equal(returningWinnerHistory(launch(),snapshot,now)?.winners,3);
- for(const prior of [winner(launch().token_address),winner(address(4),now+1000)]){
-  const p=payload();p.developers[0].prior_winners=[prior];const parsed=parseWinnerSnapshot(p,now)!;
+ const snapshot=parseWinnerSnapshot(payload(),now)!;assert.equal(returningWinnerHistory(launch(),snapshot,now)?.dex_projects,3);
+ for(const prior of [reference(launch().token_address),reference(address(4),now+1000)]){
+  const p=payload();p.developers[0].dex_references=[prior];const parsed=parseWinnerSnapshot(p,now)!;
   assert.equal(returningWinnerHistory(launch(),parsed,now),null);
  }
- const p=payload();p.developers[0].assessed_sessions=999;assert.equal(parseWinnerSnapshot(p,now)!.developers.size,0);
+ const p=payload();p.developers[0].known_launches=200;assert.equal(parseWinnerSnapshot(p,now)!.developers.size,0);
  assert.equal(parseWinnerSnapshot({...payload(),as_of:new Date(now-6*60000).toISOString()},now),null);
 });
-test('card clearly distinguishes session coverage, limited samples and reserve-ratio returns',()=>{
+test('card states the thirty percent DEX ratio separately from investment returns',()=>{
  const history=returningWinnerHistory(launch(),parseWinnerSnapshot(payload(),now)!,now)!;
- history.prior_winners[0].price_unit='ETH_RESERVE_RATIO';
  const text=returningWinnerCard(launch(),history,{name:'<fake>',symbol:'A&B'});
- assert.match(text,/3 recorded winning tokens \/ 5 indexed PONS launches/);assert.match(text,/Incomplete 1/);assert.match(text,/Limited history sample/);
- assert.match(text,/curve reserve ratio/);assert.match(text,/coverage is partial/);assert.match(text,/LP status Unverified/);assert.match(text,/&lt;fake&gt;/);
- assert.doesNotMatch(text,/token is safe|guaranteed|buy now|5 seconds|30 seconds/i);
+ assert.match(text,/3 \/ 10 prior projects · 30.0%/);assert.match(text,/new launch is excluded/);assert.match(text,/LP status Unverified/);assert.match(text,/&lt;fake&gt;/);
+ assert.doesNotMatch(text,/six-hour|6h sample|RETURNING WINNER|buy now|5 seconds|30 seconds/i);
 });
 test('queue coalesces history reads and duplicate launches; waiting work stays bounded and expires',async()=>{
  let reads=0,sends=0,clock=now;const q=createReturningWinnerQueue({now:()=>clock,load:async()=>{reads++;return payload();},send:async()=>{sends++;}});
@@ -74,7 +74,7 @@ test('recipient dedup is separate, preferences respected, and every sent recipie
  const history=returningWinnerHistory(launch(),parseWinnerSnapshot(payload(),now)!,now)!;
  const deps={now:()=>now,recipients:async()=>['1','pro','free','muted'],enabled:async(users:string[])=>users.filter(u=>u!=='muted'),
   claim:async(key:string)=>{if(keys.has(key))return 'EXISTS' as const;keys.add(key);return 'CLAIMED' as const;},wait:async(user:string,at:number)=>{assert.equal(at,now);waited.push(user);},
-  send:async(user:string,text:string,keyboard:any)=>{assert.match(text,/RETURNING WINNER/);assert.match(keyboard[0][0].url,/ponsfamily/);sent.push(user);}};
+  send:async(user:string,text:string,keyboard:any)=>{assert.match(text,/DEX TRACK RECORD/);assert.match(keyboard[0][0].url,/ponsfamily/);sent.push(user);}};
  assert.equal((await deliverReturningWinner(launch(),history,deps)).delivered,3);
  assert.equal((await deliverReturningWinner(launch(),history,deps)).deduplicated,3);
  assert.deepEqual([...sent].sort(),['1','free','pro']);assert.equal(waited.length,3);
@@ -100,18 +100,19 @@ test('returning-winner hook is optional, respects registry blocks and cannot bre
  assert.equal(result.status,'NORMAL_PATH');assert.equal(calls,1);
  await createPonsLiveLaunchRouter({...base,lookupDeveloper:async()=>({isBlocked:true,riskTier:'SCAMMER',tier:'SCAMMER'}) as any,queueReturningWinner:()=>{calls++;}})(launch());assert.equal(calls,1);
 });
-test('winner reputation rejects one-hit, high-volume, low-coverage, duplicate and legacy history',()=>{
- const good=payload();assert.equal(parseWinnerSnapshot(good,now)!.developers.size,1);
- for(const patch of [{known_launches:200},{known_launches:1383},{known_launches:50},{known_launches:6},{launches_24h:6},{verified_winning_tokens:1},{known_launches:undefined},{verified_winning_tokens:99},
-  {prior_winners:[winner(),winner(),winner()]}]){
-  const p=payload();Object.assign(p.developers[0],patch);assert.equal(parseWinnerSnapshot(p,now)!.developers.size,0,JSON.stringify(patch));
+test('thirty percent is exact, without sixty percent or fixed launch-count caps',()=>{
+ assert.equal(parseWinnerSnapshot(payload(),now)!.developers.size,1);
+ for(const [projects,dex,allowed] of [[10,3,true],[200,6,false],[200,60,true],[10,2,false],[3,1,true]] as const){
+  const p=payload();p.developers[0].known_launches=projects;p.developers[0].dex_projects=dex;p.developers[0].dex_references=[reference()];
+  assert.equal(parseWinnerSnapshot(p,now)!.developers.size,allowed?1:0);
  }
- assert.equal(parseWinnerSnapshot({...good,policy_version:1},now),null);
+ assert.equal(parseWinnerSnapshot({...payload(),policy_version:2},now),null);
 });
-
-test('cached positives are freshly rechecked and cannot bypass changing launch coverage or cadence',async()=>{
+test('fresh recheck requires prior-project scope and cannot use the shortlist as final qualification',async()=>{
  assert.ok(await recheckReturningWinner(launch(),async()=>payload(),()=>now));
- const p=payload();p.developers[0].launches_24h=6;
+ const p=payload();p.developers[0].known_launches=200;
  assert.equal(await recheckReturningWinner(launch(),async()=>p,()=>now),null);
+ const candidate=payload();candidate.developers[0].history_scope='SHORTLIST';
+ assert.equal(await recheckReturningWinner(launch(),async()=>candidate,()=>now),null);
  await assert.rejects(()=>recheckReturningWinner(launch(),async()=>null,()=>now),/unavailable/);
 });

@@ -1,3 +1,4 @@
+import {observeVerifiedPonsDex} from './ponsDexReachedEvidence.js';
 import { readRobinhoodTokenIdentity, type TokenIdentity } from './researchTokenIdentity.js';
 import { getIndexedVerifiedPonsLaunch, getPonsLaunchState } from '../chains/robinhood/ponsLaunchState.js';
 import { getVerifiedPonsPublicContext, getPonsV1PoolMapping } from '../chains/robinhood/ponsPublicContext.js';
@@ -77,7 +78,7 @@ export async function discloseRobinhoodKeyStats(text:string,token:string,preBond
       };
       const venueWork=venue().then(stats=>{
         // Slow independent supply reads must not hide an already verified market.
-        if(stats)publish(stats);
+        if(stats){publish(stats);observeVerifiedPonsDex(token,stats);}
         return stats;
       });
       work=Promise.allSettled([marketWork,readResearchTokenSupply(token,'robinhood'),venueWork,identityWork]).then(([market,supply,context])=>{

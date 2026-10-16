@@ -1,65 +1,65 @@
-# Returning Winner Developer — PONS
+# Developer DEX Track Record — PONS
 
-An independent discovery feed, `RH_RETURNING_WINNER_DEV`, for a fresh verified
-PONS factory launch from a wallet meeting the version-two measured developer quality policy.
-This does not replace the older market-cap-peak-based developer alert, Boost,
-DEX Paid, or ordinary launch filtering.
+The existing `RH_RETURNING_WINNER_DEV` preference/delivery key is preserved, but
+success now means reaching the official DEX pool, not an alert-price return.
 
-## Evidence and presentation
+## User rule
 
-- The existing live listener supplies the exact approved factory, token, deployer,
-  transaction, log index, block and timestamp. Reject invalid factory/version/block
-  mappings, launches older than ten minutes and future timestamps over 30 seconds.
-- Match the exact Robinhood-chain deployer to an internally consistent creator
-  summary and a retained winner with verified PONS/creation-receipt provenance.
-- Independently validate all three measured, ordered sample prices and recorded
-  ROI arithmetic. The prior assessment must precede the new launch; the token
-  itself cannot count as its own prior winner.
-- Exclude reviewed harmful developers/prior tokens from this new feed and honor
-  existing blocked/risk developer registry decisions. Other alerts are unchanged.
-- Show distinct winning-token / indexed-launch counts prominently, and complete assessed **sessions**, failures, neutral results and incomplete
-  results separately. These counts are a tracked sample, not all launches or a
-  promise about performance. Session wins alone never qualify. Version two requires at least three distinct verified PONS winning tokens, at least 60% demonstrated winning-token coverage of indexed PONS launches, fewer than 50 indexed launch events, and no more than five launches in 24 hours. Unknown census coverage fails closed. These are conservative discovery thresholds, not a promise of returns.
-- Label USD-price and native curve-reserve-ratio returns separately. Link the new
-  token directly to PONS, avoiding an empty pre-bond DEX page. Names are reused only
-  from existing exact-token cached PONS context; otherwise show name pending.
-- LP status remains explicitly unverified. Do not turn launch provenance or a
-  previous winner into a safety claim. There is no automatic trading.
+At least **30% of all distinct indexed prior PONS projects** must have independently
+established official DEX-reach evidence. Three of ten qualifies; six of 200 does
+not; sixty of 200 qualifies. No 60% threshold, minimum three price winners, 50-launch
+cap or five-launch-per-day cap remains in this feed's qualification rule. Existing
+reviewed harmful-history and router security/registry blocks remain separate.
 
-## Delivery and load
+The current/new launch is excluded. For final qualification, both the previous
+launch and its DEX evidence must precede the new launch. Later observations cannot
+create retrospective qualification. Unknown DEX status remains in the denominator
+and contributes nothing to the numerator. Small histories are labelled; DEX reach
+is not profit, quality, liquidity protection or investment safety.
 
-The continuous PONS process alone injects the new queue hook. Replay/once modes
-never inject it. Normal launch work does not await history reads or Telegram sends.
-No historical Telegram backfill is performed.
+## Evidence and limitations
 
-One background-governed history snapshot per five minutes is shared across all
-launches, capped at 1,000 developers and three winner references per developer.
-Keep the earliest winner and two most recent references so a recent assessment
-cannot hide all earlier qualifying history. Failed/denied snapshot reads retry no
-more than once per minute. A full snapshot reports its capped coverage.
+`alpha_pons_dex_reached` retains one compact row per exact token: creator/factory
+from the authoritative launch census, official mapped pool, evidence type and
+observation time. V2 needs existing curve-token/graduated=true verification plus
+an exact-token official pool mapping and a usable matching DEX pair; V1 uses its
+verified direct-to-pool launch provenance and official mapping. A secondary pair,
+DEX-paid order, market-cap milestone or positive price return is insufficient.
 
-Hold at most 100 fresh launch references in RAM, two delivery jobs in flight, and
-one deferred retry of a job if the recipient/claim store is unavailable. Pending
-launches expire after ten minutes. The existing compact-outcome minute timer also
-drains this queue; no new timer, worker, market scan, image render or price poll.
+Capture observes the existing validated venue result in alert stats enrichment.
+There are no extra market/RPC requests, no scanner and no image work. Capture is
+asynchronous, background-governed, max ten observations per batch/minute per
+process, queue cap fifty, five-minute pending expiry and bounded daily suppression.
+The existing PONS minute callback also drains its local pending observations.
+Public database roles cannot read or submit evidence. This backend evidence ledger
+is an internal trust boundary, not a public attestation protocol.
 
-Reuse subscriber loading, explicit feed preferences, tier release scheduling and
-bounded recipient lanes. Recipient-level seven-day Redis claims use an independent
-`alphaos:returning-winner:` prefix. Redis ambiguity fails closed, and ambiguous
-Telegram responses retain their claim rather than blindly repeating messages.
-Aggregate feed-health/timing logs contain no recipient IDs. Existing mute caches
-remain compatible when this new feed is added, avoiding a subscriber-query burst.
-The new feed reads its sparse mute preferences in one bounded database batch per
-qualifying event. This prevents older workers' legacy cache format from overriding
-a persisted new-feed mute. Its settings menu and toggle read the same source.
+Historical price results are preserved for their original purpose, never relabelled
+as DEX-graduation evidence. Existing records do not constitute a complete historical
+graduation census. Unverified historical projects cannot silently become successes.
+The card explicitly describes indexed coverage, which may be incomplete.
 
-This launch-discovery card adds no price baseline or extra outcome sampling. Any
-later qualifying normal/Boost/DEX alert continues its existing tracking independently.
+## Eligibility and delivery
 
-## Quality fix — 16 October 2026
+A five-minute background snapshot shortlists at most 1,000 developer wallets that
+have DEX evidence. Counts use the existing chain/deployer/time index and the complete
+indexed history for those candidates, not a newest-fifty sample. Shared shortlisting
+allows one prospective launch difference; **one fresh exact-token/developer check
+is mandatory before any delivery**, with exact prior-launch counts and the 30% rule.
+A shortlist can never directly render a card. At most three DEX references are kept,
+including the earliest and two latest to avoid hiding all older evidence.
 
-A developer with one recorded winner and hundreds of launches was incorrectly eligible under version one. The feed was paused during the repair; Boost/DEX rules and timing were not changed. Version two rejects legacy snapshots and one-hit/sparse/high-frequency cases. Count unique token addresses rather than repeated outcome sessions. Recalculate retained winner arithmetic in both SQL and TypeScript. Winning PONS tokens must match an approved factory/version/block census record. Preserve harmful-history exclusions and private backend-only access.
+The continuous PONS listener, pending cap 100, two delivery jobs, recipient-level
+seven-day deduplication, persisted mutes and existing private timing are retained.
+No replay/backfill Telegram sends, trading, new service or interval. Boost/DEX
+eligibility, delivery claims, existing alert text and timing are unchanged. The only
+shared stats integration adds asynchronous evidence capture after a validated venue
+result is published; it never waits for persistence or changes returned stats.
 
-Census reads use the existing chain/deployer/time index and inspect at most 51 rows per candidate (at most 1,000 summary candidates) on the existing five-minute refresh. Fifty or more rows fail conservatively; no unbounded lifetime count is performed in the worker. Each cached positive receives one fresh exact-wallet/token qualification read before recipient lookup or delivery. This catches additional launches that changed launch cadence or denominator during the shared-cache interval. No per-user qualification requests, new service, market scans or price polling.
+## Validation
 
-At least three distinct references must pass and precede the new launch; the new token cannot count itself. The card distinguishes measured winner-token coverage from session outcomes and partial census coverage. Incomplete/unmeasured launches are never declared scams or silently counted as winning. No developer currently meets the new three-winner threshold; absence of this feed alone is expected until verified evidence qualifies.
+Tests include 3/10 pass, 6/200 fail, 60/200 pass, unknown status, current-launch
+exclusion, duplicate events, future proof, private access, queue limits and exact
+venue proof. Sparse price-win history alone cannot qualify. Legacy policy snapshots
+fail closed. The rollout pauses this feed until the new worker and database policy
+are verified, then restores its enabled setting.
