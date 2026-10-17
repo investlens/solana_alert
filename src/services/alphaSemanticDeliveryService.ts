@@ -1,3 +1,6 @@
+import {recordPromotionOutcome} from './promotionOutcomeCapture.js';
+import {capturePromotionOutcomeBaseline} from './promotionOutcomeBaseline.js';
+import type {AlertKeyStats} from '../ui/alertKeyStats.js';
 import {semanticRecipientPreferences} from './semanticRecipientPreferences.js';
 import {acquireBoostRecipientClaim} from './boostDeliveryGuard.js';
 import {forEachDeliveryRecipient} from './recipientDeliveryTiming.js';
@@ -227,6 +230,7 @@ export async function deliverAlphaSemanticEvent(args: {
     // Resolve the public exact-contract creator before starting ownership work.
     paidCreator=paidCreator ?? cachedRobinhoodAlertStats(args.event.assetId)?.creator ?? null;
   }
+  let renderedPromotionStats:AlertKeyStats|null=null;
   const outcomeStats = args.event.chain === 'robinhood' && ['DEX_PAID','BOOST'].includes(args.event.type) ? cachedRobinhoodAlertStats(args.event.assetId) : null;
   const deliveryStartedAt = Date.now();
   const users = (await dependencies.getUsers()).sort((a, b) => recipientDelayMs(a, deliveryStartedAt) - recipientDelayMs(b, deliveryStartedAt));
@@ -267,12 +271,17 @@ export async function deliverAlphaSemanticEvent(args: {
   }
   if (dependencies === productionDependencies && ['DEX_PAID','BOOST'].includes(args.event.type) && args.event.chain==='robinhood') {
     const raw=args.event.rawSnapshot ?? getEphemeralSemanticEventEvidence(args.event.eventIdentity);
+    const finalStats=cachedRobinhoodAlertStats(args.event.assetId);
+    renderedPromotionStats=finalStats?{...finalStats}:null;
     const card=buildPromotionEventCard({kind:args.event.type as 'DEX_PAID'|'BOOST',text:deliveryMessage,token:args.event.assetId,launchType,
-      stats:cachedRobinhoodAlertStats(args.event.assetId),securityNote:paidSecurityNote??boostSecurityNote,lpStatus,buttons:deliveryButtons??[],
+      stats:renderedPromotionStats,securityNote:paidSecurityNote??boostSecurityNote,lpStatus,buttons:deliveryButtons??[],
       paymentTimestamp:typeof raw?.paymentTimestamp==='number'?raw.paymentTimestamp:null});
     deliveryMessage=card.text;deliveryButtons=card.buttons;
   }
-  if(exitPairId){const cardPool=cachedRobinhoodAlertStats(args.event.assetId)?.chartUrl?.split('/').pop()?.split(/[?#]/)[0];if(cardPool?.toLowerCase()!==exitPairId.toLowerCase()){console.warn('[AlphaSemanticDelivery] WITHHELD checked exit pool differs from card venue');return {delivered:0,failed:0};}}
+  if(exitPairId){const cardPool=(['BOOST','DEX_PAID'].includes(args.event.type)?renderedPromotionStats:cachedRobinhoodAlertStats(args.event.assetId))?.chartUrl?.split('/').pop()?.split(/[?#]/)[0];if(cardPool?.toLowerCase()!==exitPairId.toLowerCase()){console.warn('[AlphaSemanticDelivery] WITHHELD checked exit pool differs from card venue');return {delivered:0,failed:0};}}
+  const promotionBaseline=dependencies===productionDependencies&&args.event.chain==='robinhood'&&['BOOST','DEX_PAID'].includes(args.event.type)
+    ?capturePromotionOutcomeBaseline({eventIdentity:args.event.eventIdentity,token:args.event.assetId,feed:args.event.type as 'BOOST'|'DEX_PAID',stats:renderedPromotionStats,expectedPair:exitPairId}):null;
+  let firstAcceptedAt:string|null=null;
   const enrichmentTargets: PromotionEditTarget[] = [];
   const renderedCharacters = deliveryMessage.length;
   const renderedBytes = Buffer.byteLength(deliveryMessage, 'utf8');
@@ -319,6 +328,7 @@ export async function deliverAlphaSemanticEvent(args: {
         args.onSendStarted?.();
         const result = await retryTelegramRejection(() => dependencies.send(user.telegram_id, deliveryMessage, deliveryButtons));
         telegramAccepted = true;
+        firstAcceptedAt??=new Date().toISOString();
         if (dependencies === productionDependencies) recordDeliveryAccepted(user, deliveryStartedAt, args.event.eventIdentity, isUndelayedRiskEvent(args.event.type));
         if(ephemeralMode)acceptedRecipients.push({telegramId:String(user.telegram_id),tier:user.tier,messageId:typeof result==='number'?result:null,acceptedAt:new Date().toISOString()});
         if (recipientClaim?.state === 'CLAIMED') {
@@ -414,7 +424,8 @@ export async function deliverAlphaSemanticEvent(args: {
     if (feed) { recordFeedDelivery(feed,'ACCEPTED',accepted); recordFeedDelivery(feed,'PROCESSING_FAILED',failed); }
   }
   if (dependencies === productionDependencies && accepted > 0) void recordRecoveryAlertAudit(args.event, accepted, baselineOwnership, ownershipCapturedAt, ephemeralMode, acceptedRecipients);
-  if (dependencies === productionDependencies && isPositiveSemanticEvent(args.event.type)) {
+  if(promotionBaseline&&firstAcceptedAt)void recordPromotionOutcome(promotionBaseline,firstAcceptedAt);
+  if (dependencies === productionDependencies && isPositiveSemanticEvent(args.event.type) && !promotionBaseline) {
     const raw = args.event.rawSnapshot ?? getEphemeralSemanticEventEvidence(args.event.eventIdentity) ?? {};
     const stats=outcomeStats;
     const verifiedPair=stats?.source?.includes('DEXScreener')?stats.chartUrl?.match(/^https:\/\/dexscreener\.com\/robinhood\/(0x(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64}))(?:[?#]|$)/)?.[1]:null;
