@@ -31,9 +31,17 @@ not a verification of it. There is deliberately no live adapter yet.
 
 `compareReportedDemand` compares consecutive non-overlapping windows from the same
 token, creator and venue, with at most a one-minute gap. It reports non-creator
-wallet counts, repeat buy wallets, quote amounts and reported creator sales.
+trade-initiator counts, repeat buy initiators, quote amounts and reported creator sales.
 Quote amounts remain in the page's quote asset. They are not converted to USD.
 Repeat buying is not balance retention; different wallets may share ownership.
+Live receipt validation found that a page trader can initiate a routed buy without
+receiving any of the purchased tokens. Output therefore says **initiators**, not
+buyers or holders. `inspectDemandReceipt` separately matches an exact V4 receipt
+log and reports gross swap amounts versus initiator net token transfers. It does
+not verify chain identity, pool-key membership, finality, beneficiary ownership,
+holding retention or executable exit depth; those remain separate requirements.
+
+See `CONFIRMED_DEMAND_LIVE_VALIDATION_20261017.md` for the bounded live sample.
 
 The result is always `INSUFFICIENT_EVIDENCE`, with `eligibleForAlert: false`.
 This is an evidence readiness tool, not a signal generator or outcome study.

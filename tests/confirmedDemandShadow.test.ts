@@ -12,9 +12,9 @@ test('reports activity without claiming independent demand or eligibility', () =
   const first = read([trade(), trade(1, 980, creator), trade(2, 970, buyer, 'sell')]).window!;
   const second = read([trade(3, 1290), trade(4, 1280, creator, 'sell')], null, 1_300_000).window!;
   const result = compareReportedDemand(first, second);
-  assert.equal(result.first.reportedNonCreatorBuyWallets, 1);
+  assert.equal(result.first.reportedNonCreatorBuyInitiators, 1);
   assert.equal(result.first.reportedNonCreatorBuyQuote, 0.1);
-  assert.equal(result.reportedRepeatBuyWallets, 1);
+  assert.equal(result.reportedRepeatBuyInitiators, 1);
   assert.equal(result.second.reportedCreatorSells, 1);
   assert.equal(result.eligibleForAlert, false);
   assert.ok(result.missing.includes('RELATED_WALLET_ASSESSMENT'));
@@ -52,9 +52,9 @@ test('zero reported creator sales still leaves distribution and sellability unkn
   assert.equal(r.second.reportedCreatorSells, 0);
   assert.ok(r.missing.includes('CREATOR_DISTRIBUTION_COVERAGE'));
   assert.equal(r.eligibleForAlert, false);
-  assert.equal(compareReportedDemand({ ...first, trades: [{ ...first.trades[0], wallet: creator.toUpperCase().replace('0X', '0x') }] }, second).first.reportedNonCreatorBuyWallets, 0);
+  assert.equal(compareReportedDemand({ ...first, trades: [{ ...first.trades[0], wallet: creator.toUpperCase().replace('0X', '0x') }] }, second).first.reportedNonCreatorBuyInitiators, 0);
 });
 test('empty complete pages are evidence of no reported activity, never a positive signal', () => {
   const r = compareReportedDemand(read([]).window!, read([], null, 1_300_000).window!);
-  assert.equal(r.first.reportedSells, 0); assert.equal(r.reportedRepeatBuyWallets, 0); assert.equal(r.eligibleForAlert, false);
+  assert.equal(r.first.reportedSells, 0); assert.equal(r.reportedRepeatBuyInitiators, 0); assert.equal(r.eligibleForAlert, false);
 });

@@ -64,7 +64,7 @@ export function compareReportedDemand(first: DemandWindow, second: DemandWindow)
     const buyQuote = buys.reduce((sum, t) => sum + t.quoteAmount, 0);
     const sellQuote = sells.reduce((sum, t) => sum + t.quoteAmount, 0);
     if (!finite(buyQuote) || !finite(sellQuote)) throw Error('Amount overflow');
-    return { reportedNonCreatorBuyWallets: new Set(buys.map(t => t.wallet)).size,
+    return { reportedNonCreatorBuyInitiators: new Set(buys.map(t => t.wallet)).size,
       reportedNonCreatorBuyQuote: buyQuote, reportedSellQuote: sellQuote,
       reportedSells: sells.length, reportedCreatorSells: sells.filter(t => t.wallet === w.creator.toLowerCase()).length };
   };
@@ -72,10 +72,10 @@ export function compareReportedDemand(first: DemandWindow, second: DemandWindow)
   const priorBuyers = new Set(first.trades.filter(t => t.side === 'buy' && t.wallet !== first.creator.toLowerCase()).map(t => t.wallet));
   const repeated = new Set(second.trades.filter(t => t.side === 'buy' && t.wallet !== second.creator.toLowerCase() && priorBuyers.has(t.wallet)).map(t => t.wallet));
   return { mode: 'OFFLINE_SHADOW' as const, status: 'INSUFFICIENT_EVIDENCE' as const, eligibleForAlert: false as const,
-    first: a, second: b, reportedRepeatBuyWallets: repeated.size,
+    first: a, second: b, reportedRepeatBuyInitiators: repeated.size,
     missing: ['CHAIN_VERIFIED_SWAPS', 'RELATED_WALLET_ASSESSMENT', 'BUYER_BALANCE_RETENTION',
       'CREATOR_DISTRIBUTION_COVERAGE', 'EXECUTABLE_EXIT_DEPTH', 'COMPARABLE_RETEST', 'LP_LOCK_STATUS'],
-    caveats: ['Non-creator wallets are not established independent buyers.',
+    caveats: ['Reported traders may be initiators, not token recipients; independence is unverified.',
       'Repeat buys do not prove retained holdings.', 'No reported creator sale does not establish no distribution.',
       'Quote amounts are in the page quote asset, not USD.', 'Reported sells do not establish current sellability.'] };
 }
