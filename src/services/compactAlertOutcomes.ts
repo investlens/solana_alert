@@ -29,16 +29,19 @@ function exclude(args: CompactAlertBaseline) {
   else if (excluded.size < 32) excluded.set(key, { chain: args.chain, feed: args.feed.slice(0, 64), count: 1 });
 }
 
+export type CompactAdmission='NO_ACCEPTANCE'|'DISABLED'|'UNSUPPORTED_CHAIN'|'LOCAL_REUSED'|'LOCAL_BUSY'|'COOLDOWN'|'RATE_LIMIT'|'NO_BASELINE'|'REGISTERED'|'REUSED'|'KNOWN_WINNER'|'CAPACITY'|'INVALID'|'DATABASE_UNAVAILABLE'|'UNEXPECTED';
 // Best effort after confirmed Telegram acceptance. Never retry or delay alert delivery.
-export async function recordCompactAlert(args: CompactAlertBaseline, accepted: number): Promise<void> {
+export async function recordCompactAlert(args: CompactAlertBaseline, accepted: number): Promise<CompactAdmission> {
   if (accepted > 0) removeAlertedCandidate(args.chain,args.token);
-  if (!compactOutcomesEnabled() || accepted <= 0 || !['solana','robinhood','arc'].includes(args.chain)) return;
+  if(accepted<=0)return 'NO_ACCEPTANCE';
+  if(!compactOutcomesEnabled())return 'DISABLED';
+  if(!['solana','robinhood','arc'].includes(args.chain))return 'UNSUPPORTED_CHAIN';
   const now = Date.now(); const key = `${args.chain}:${args.chain === 'solana' ? args.token : args.token.toLowerCase()}`;
   for (const [k, expires] of seen) if (expires < now) seen.delete(k);
-  if (seen.has(key)) return;
+  if (seen.has(key)) return 'LOCAL_REUSED';
   if (Math.floor(now / 60000) !== minute) { minute = Math.floor(now / 60000); registrations = 0; }
-  if (registering || now < pausedUntil || registrations >= 20) { exclude(args); return; }
-  if (!positive(args.price) || !args.pair) { exclude(args); console.log('[CompactOutcomes] EXCLUDED reason=NO_COMPARABLE_BASELINE feed=' + args.feed); return; }
+  if (registering || now < pausedUntil || registrations >= 20) { exclude(args); return registering?'LOCAL_BUSY':now<pausedUntil?'COOLDOWN':'RATE_LIMIT'; }
+  if (!positive(args.price) || !args.pair) { exclude(args); console.log('[CompactOutcomes] EXCLUDED reason=NO_COMPARABLE_BASELINE feed=' + args.feed); return 'NO_BASELINE'; }
   registering = true; registrations++;
   try {
     const { supabase } = await import('./supabase.js');
@@ -53,7 +56,8 @@ export async function recordCompactAlert(args: CompactAlertBaseline, accepted: n
       seen.set(key, now + 6 * 60 * 60000);
     } else exclude(args);
     console.log('[CompactOutcomes] ADMISSION', { chain: args.chain, token: args.token, status: data });
-  } catch { pausedUntil = Date.now() + 60000; exclude(args); console.warn('[CompactOutcomes] admission unavailable; paused for 60s'); }
+    return ['REGISTERED','REUSED','KNOWN_WINNER','CAPACITY','INVALID','NO_BASELINE'].includes(data)?data as CompactAdmission:'UNEXPECTED';
+  } catch { pausedUntil = Date.now() + 60000; exclude(args); console.warn('[CompactOutcomes] admission unavailable; paused for 60s'); return 'DATABASE_UNAVAILABLE'; }
   finally { registering = false; }
 }
 
