@@ -6,6 +6,7 @@ import {createReturningWinnerQueue,freshVerifiedPonsLaunch,parseWinnerSnapshot,r
 import {deliverReturningWinner,recheckReturningWinner} from '../src/chains/robinhood/ponsReturningWinnerDelivery.js';
 import {LIVE_ALERT_FEEDS,resolveLivePreferences,compatibleLivePreferences} from '../src/services/liveAlertPreferences.js';
 import {createPonsLiveLaunchRouter} from '../src/chains/robinhood/ponsLiveLaunchRouter.js';
+import {cleanAlertCard} from '../src/ui/alertCardLayout.js';
 const now=Date.parse('2026-10-16T10:00:00Z'),address=(n:number)=>'0x'+n.toString(16).padStart(40,'0');
 const factory=getPonsFactoryDeployments().find(f=>f.id==='v2-current')!;
 const launch=(n=1):PonsLaunch=>({chain:'robinhood',protocol:'pons',protocol_version:factory.id,factory_address:factory.address,
@@ -13,7 +14,7 @@ const launch=(n=1):PonsLaunch=>({chain:'robinhood',protocol:'pons',protocol_vers
  block_number:String((factory.startBlock??1n)+1n),block_timestamp:new Date(now-5000).toISOString(),transaction_hash:'0x'+'a'.repeat(64),log_index:0});
 const winner=(token=address(4),at=now-3600000)=>({chain:'robinhood',token,creator:address(2),creator_source:'PONS_FACTORY_EVENT',price_unit:'USD',baseline_price:100,final_roi:50,sampled_low_roi:0,
  samples:[110,120,150].map((price,i)=>({status:'MEASURED',price,at:new Date(at-[345*60000,300*60000,1000][i]).toISOString()})),assessed_at:new Date(at).toISOString()});
-const reference=(token=address(4),at=now-3600000)=>({token,pool:address(400),source:'PONS_V2_GRADUATED_MAPPED_POOL',observed_at:new Date(at).toISOString()});
+const reference=(token=address(4),at=now-3600000)=>({token,pool:address(400),source:'PONS_V2_GRADUATED_MAPPED_POOL' as const,observed_at:new Date(at).toISOString()});
 const payload=()=>({policy_version:4,as_of:new Date(now).toISOString(),capped:false,developers:[{creator:address(2),known_launches:10,dex_projects:3,history_scope:'PRIOR_LAUNCHES',dex_references:[reference(),reference(address(5)),reference(address(6))]}]});
 
 const flush=()=>new Promise<void>(r=>setImmediate(r));
@@ -42,8 +43,20 @@ test('self, future, stale and unverified history cannot create a returning-winne
 test('card states the thirty percent DEX ratio separately from investment returns',()=>{
  const history=returningWinnerHistory(launch(),parseWinnerSnapshot(payload(),now)!,now)!;
  const text=returningWinnerCard(launch(),history,{name:'<fake>',symbol:'A&B'});
- assert.match(text,/3 \/ 10 prior projects · 30.0%/);assert.match(text,/new launch is excluded/);assert.match(text,/LP status Unverified/);assert.match(text,/&lt;fake&gt;/);
+ assert.match(text,/3 \/ 10 prior projects · 30.0%/);assert.match(text,/new launch is excluded/);assert.match(text,/LP lock: <b>Unable to verify/);assert.match(text,/&lt;fake&gt;/);
+ assert.match(text,/Investment performance: Unverified/);
  assert.doesNotMatch(text,/six-hour|6h sample|RETURNING WINNER|buy now|5 seconds|30 seconds/i);
+});
+test('small developer samples remain factual and render one grouped LP warning',()=>{
+ const history={creator:address(2),known_launches:3,dex_projects:1,dex_references:[reference()],history_scope:'PRIOR_LAUNCHES' as const};
+ const text=cleanAlertCard(returningWinnerCard(launch(),history));
+ assert.match(text,/1 \/ 3 prior projects · 33.3%/);
+ assert.match(text,/Limited launch history sample/);assert.match(text,/Investment performance: Unverified/);
+ assert.match(text,/name unavailable/);assert.doesNotMatch(text,/name pending|winning developer|proven developer/i);
+ assert.equal((text.match(/LP lock:/g)??[]).length,1);
+ assert.equal((text.match(/RISKY ALERT — LP LOCK STATUS UNAVAILABLE/g)??[]).length,1);
+ assert.ok(text.indexOf('<b>RISK</b>')<text.indexOf('RISKY ALERT'));
+ assert.equal(cleanAlertCard(text),text);
 });
 test('queue coalesces history reads and duplicate launches; waiting work stays bounded and expires',async()=>{
  let reads=0,sends=0,clock=now;const q=createReturningWinnerQueue({now:()=>clock,load:async()=>{reads++;return payload();},send:async()=>{sends++;}});

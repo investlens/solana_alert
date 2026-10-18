@@ -1,6 +1,7 @@
 import {getPonsFactoryDeployments} from './ponsContracts.js';
 import type {PonsLaunch} from './ponsHistoricalLaunchScanner.js';
 import {escapeTelegramHtml as esc} from '../../ui/escapeHtml.js';
+import {lpLockNote} from '../../ui/lpLockNote.js';
 
 const address=(v:unknown):v is string=>typeof v==='string'&&/^0x[a-f0-9]{40}$/i.test(v)&&!/^0x0{40}$/i.test(v);
 const hash=(v:unknown)=>typeof v==='string'&&/^0x[a-f0-9]{64}$/i.test(v);
@@ -52,18 +53,18 @@ export function returningWinnerHistory(launch:PonsLaunch,snapshot:WinnerSnapshot
 }
 export function returningWinnerCard(launch:PonsLaunch,history:WinnerHistory,metadata?:{name?:string|null;symbol?:string|null}):string {
  if(history.history_scope!=='PRIOR_LAUNCHES'||history.dex_projects*10<history.known_launches*3)throw Error('Prior DEX history required');
- const names=[metadata?.name?.slice(0,48),metadata?.symbol?.slice(0,16)].filter(Boolean).map(esc).join(' · ')||'New PONS token · name pending';
+ const names=[metadata?.name?.trim().slice(0,48),metadata?.symbol?.trim().slice(0,16)].filter(Boolean).map(esc).join(' · ')||'New PONS token · name unavailable';
  return ['📊 <b>ALPHAOS · DEVELOPER DEX TRACK RECORD</b>',names,'Robinchain · Verified PONS factory launch','',
   `<code>${esc(launch.token_address)}</code>`,`Developer <code>${esc(history.creator)}</code>`,'',
   `<b>DEX reached: ${history.dex_projects} / ${history.known_launches} prior projects · ${(100*history.dex_projects/history.known_launches).toFixed(1)}%</b>`,
-  'Qualifies at 30% verified DEX reach.',
-  ...(history.known_launches<10?['⚠️ Limited launch history sample']:[]),
+  ...(history.known_launches<10?['⚠️ <b>Limited launch history sample</b>']:[]),
+  'Meets the 30% DEX-reach rule.',
+  '<b>Investment performance: Unverified</b>',
   ...history.dex_references.map(r=>`DEX project: <a href="https://robinhoodchain.blockscout.com/token/${r.token}">${r.token.slice(0,8)}…${r.token.slice(-6)}</a>`),
-  'Distinct indexed prior projects; the new launch is excluded.',
-  'Unverified DEX status does not count as success. Indexed history may be incomplete.',
-  'DEX reach is not a profitable-trade or safety guarantee.',
+  'Indexed prior launches only; the new launch is excluded. History may be incomplete.',
+  'DEX graduation does not establish sustained demand, profits or safety.',
   ...(history.checked_at?[`History checked ${history.checked_at.slice(0,16).replace('T',' ')} UTC`]:[]),
-  'LP status Unverified'].join('\n');
+  '', '<b>RISK</b>', lpLockNote('UNKNOWN')].join('\n');
 }
 
 export function createReturningWinnerQueue(deps:{now:()=>number;load:()=>Promise<unknown>;send:(launch:PonsLaunch,history:WinnerHistory)=>Promise<void>}) {
