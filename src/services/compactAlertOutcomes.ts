@@ -3,6 +3,7 @@ import { governedDexScreenerJson } from './dexscreenerRequestGovernor.js';
 import {processCompactRunner,type RunnerSample} from './compactRunnerMilestones.js';
 import { reconcileDeveloperOutcomeLinks } from './developerOutcomeLinkage.js';
 import { runCustomDeveloperVerification } from './customDeveloperWorker.js';
+import { runPrebondResearchCycle } from './prebondResearch.js';
 
 export const compactOutcomesEnabled = () => String(process.env.ALPHA_COMPACT_OUTCOMES_ENABLED ?? 'true').toLowerCase() === 'true';
 export type CompactAlertBaseline = {
@@ -147,6 +148,7 @@ export async function runCompactOutcomeCycle(): Promise<void> {
       if(['CHECKPOINT','WINNER','FAILED','NEUTRAL','INCOMPLETE'].includes(result.data))void processCompactRunner(row,sample).catch(()=>console.warn('[RunnerCard] milestone delivery unavailable'));
       console.log('[CompactOutcomes] CHECKPOINT',{chain:row.chain,token:row.token,slot:row.checkpoint,result:result.data,shadow});
     }
+    await runPrebondResearchCycle(Math.max(0,2-(data??[]).length));
     // One rotating active-token peek per existing minute timer. No new worker,
     // raw history or outcome-row writes; fixed checkpoint accounting stays intact.
     const active = await supabase.from('alpha_compact_tracking')

@@ -3,6 +3,7 @@ import {recordCompactAlert,type CompactAdmission} from './compactAlertOutcomes.j
 import type {PromotionOutcomeBaseline} from './promotionOutcomeBaseline.js';
 import {withDatabaseRequestPriority} from './databaseLoadGovernor.js';
 import {supabase} from './supabase.js';
+import {observePrebondPromotion} from './prebondResearch.js';
 type Job={baseline:PromotionOutcomeBaseline;firstAcceptedAt:string;admission?:CompactAdmission};
 export function createPromotionOutcomeCapture(deps:{register:typeof recordCompactAlert;save:(job:Job)=>Promise<void>;report:(data:Record<string,unknown>)=>void;now:()=>number}){
  const queue=createRecoveryAuditQueue<Job>({now:deps.now,key:j=>j.baseline.event_identity,
@@ -25,6 +26,6 @@ const recorder=createPromotionOutcomeCapture({now:Date.now,register:recordCompac
     .abortSignal(AbortSignal.timeout(2000));
   if(error)throw error;if(data==='CAPACITY')throw Error('Baseline ledger capacity');
   if(!['RECORDED','EARLIER_ACCEPTANCE_RECORDED','EXISTS'].includes(data))throw Error('Invalid baseline acknowledgement');
- }),report:data=>console.log('[PromotionOutcomeCapture]',JSON.stringify(data)),
+ }).then(()=>{void observePrebondPromotion(job.baseline).catch(()=>{});}),report:data=>console.log('[PromotionOutcomeCapture]',JSON.stringify(data)),
 });
 export const recordPromotionOutcome=(baseline:PromotionOutcomeBaseline,firstAcceptedAt:string)=>recorder.record(baseline,firstAcceptedAt);
