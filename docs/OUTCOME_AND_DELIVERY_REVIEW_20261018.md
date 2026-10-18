@@ -63,7 +63,8 @@ Cross-restart continuity cannot be guaranteed during that outage and is logged
 explicitly. A timed-out operation may still write the same original timestamp.
 No ambiguous send is replayed and no claim is bypassed by this clock.
 
-Only the semantic alert delivery path is changed. Other specialized feed senders
+Safety-critical undelayed events bypass this lookup entirely. Only the semantic
+alert delivery path is changed. Other specialized feed senders
 remain as before. Existing admin/Pro/free release policy is unchanged. The fix
 prevents repeated tier waiting on retries; it does not solve provider backoff or
 security-check latency. No production clock keys are backfilled or fabricated.

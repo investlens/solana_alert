@@ -235,7 +235,7 @@ export async function deliverAlphaSemanticEvent(args: {
   const outcomeStats = args.event.chain === 'robinhood' && ['DEX_PAID','BOOST'].includes(args.event.type) ? cachedRobinhoodAlertStats(args.event.assetId) : null;
   const attemptStartedAt = Date.now();
   let deliveryStartedAt = attemptStartedAt;
-  const deliveryClock=dependencies===productionDependencies
+  const deliveryClock=dependencies===productionDependencies&&!isUndelayedRiskEvent(args.event.type)
     ?eventDeliveryStartedAt(`${args.event.chain}:${args.event.eventIdentity}`,attemptStartedAt)
     :Promise.resolve(attemptStartedAt);
   const users = (await dependencies.getUsers()).sort((a, b) => recipientDelayMs(a, deliveryStartedAt) - recipientDelayMs(b, deliveryStartedAt));
