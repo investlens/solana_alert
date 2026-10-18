@@ -1,4 +1,5 @@
 import {recordPromotionOutcome} from './promotionOutcomeCapture.js';
+import {eventDeliveryStartedAt} from './eventDeliveryClock.js';
 import {capturePromotionOutcomeBaseline} from './promotionOutcomeBaseline.js';
 import type {AlertKeyStats} from '../ui/alertKeyStats.js';
 import {semanticRecipientPreferences} from './semanticRecipientPreferences.js';
@@ -232,7 +233,11 @@ export async function deliverAlphaSemanticEvent(args: {
   }
   let renderedPromotionStats:AlertKeyStats|null=null;
   const outcomeStats = args.event.chain === 'robinhood' && ['DEX_PAID','BOOST'].includes(args.event.type) ? cachedRobinhoodAlertStats(args.event.assetId) : null;
-  const deliveryStartedAt = Date.now();
+  const attemptStartedAt = Date.now();
+  let deliveryStartedAt = attemptStartedAt;
+  const deliveryClock=dependencies===productionDependencies&&!isUndelayedRiskEvent(args.event.type)
+    ?eventDeliveryStartedAt(`${args.event.chain}:${args.event.eventIdentity}`,attemptStartedAt)
+    :Promise.resolve(attemptStartedAt);
   const users = (await dependencies.getUsers()).sort((a, b) => recipientDelayMs(a, deliveryStartedAt) - recipientDelayMs(b, deliveryStartedAt));
   const recipientLoadMs=Date.now()-deliveryStartedAt;
   const liveFeed = semanticLiveFeed(args.event.type, args.event.chain);
@@ -288,6 +293,7 @@ export async function deliverAlphaSemanticEvent(args: {
   let delivered = 0; let failed = 0; let accepted = 0;let alreadyConfirmed=0;const countConfirmation=args.protectBoostRecipients===true||(dependencies===productionDependencies&&args.event.type==='DEX_PAID');
   const acceptedRecipients:AcceptedRecoveryRecipient[]=[];
   const recipientPreferences = await eligibility;
+  deliveryStartedAt=await deliveryClock;
   if(dependencies===productionDependencies)console.log('[AlphaSemanticDelivery] PREPARED',JSON.stringify({
     eventIdentity:args.event.eventIdentity,recipients:users.length,securityMs:safetyFinishedAt-processingStartedAt,
     preparationMs:Date.now()-safetyFinishedAt,recipientLoadMs,deliveryClockElapsedMs:Date.now()-deliveryStartedAt,
