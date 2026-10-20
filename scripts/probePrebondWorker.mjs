@@ -55,21 +55,17 @@ export async function readPrebondResearchQuote(token, curve, rpc, now = Date.now
 // One-shot, read-only diagnostic. Not imported by any startup/alert path.
 import { requestRobinhoodRpcResilient } from '../src/chains/robinhood/rpc.js';
 import { withRequestDeadline, throwIfRequestAborted } from '../src/services/requestDeadline.js';
-import { withDatabaseRequestPriority } from '../src/services/databaseLoadGovernor.js';
-import { supabase } from '../src/services/supabase.js';
 import { getPonsFactoryDeployments } from '../src/chains/robinhood/ponsContracts.js';
 const log = (value) => console.log('[PrebondRpcProbe]', JSON.stringify(value));
 const watchdog = setTimeout(() => { log({ status: 'PROBE_DEADLINE', researchCollection: false }); process.exit(0); }, 20_000);
 try {
     log({ status: 'START', readOnly: true, researchCollection: false, maxCandidates: 3, snapshotDeadlineMs: 4000 });
-    const { data, error } = await withDatabaseRequestPriority('BACKGROUND', async () => await supabase.from('pons_launches')
-        .select('token_address,curve_address,factory_address,protocol_version,block_timestamp').eq('chain', 'robinhood').eq('protocol_version', 'v2-current')
-        .order('block_timestamp', { ascending: false }).limit(3).abortSignal(AbortSignal.timeout(2000)));
-    if (error)
-        throw Error('SOURCE_UNAVAILABLE');
-    const chain = await withRequestDeadline(2000, () => requestRobinhoodRpcResilient({ method: 'eth_chainId', params: [] }));
-    if (chain !== '0x1237')
-        throw Error('CHAIN_UNVERIFIED');
+    // Public identities read from the verified launch index at 2026-10-20 05:44 UTC.
+    const data = [{"token_address": "0x33d23702096327dfce561f0de3c3cbf98f8b2226", "curve_address": "0x8fa6ff5f4db250d8a08ef73900ee60512c01a9b4", "factory_address": "0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e", "protocol_version": "v2-current"}, {"token_address": "0x2f1548c8818d673bbb16d783d4b382f348227801", "curve_address": "0xe15e222130f49567c882529cb79c9f7ee4147d03", "factory_address": "0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e", "protocol_version": "v2-current"}, {"token_address": "0xf3ef6ca6202264a30b37adc6b9230cacd07d1473", "curve_address": "0xcf6c33a603a2ed327a675a406f2570049f7fef97", "factory_address": "0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e", "protocol_version": "v2-current"}];
+    const chainStarted=Date.now();
+    const chain=await withRequestDeadline(2000,()=>requestRobinhoodRpcResilient({method:"eth_chainId",params:[]}));
+    log({status:"CHAIN_CHECK",elapsedMs:Date.now()-chainStarted,verified:chain==="0x1237"});
+    if(chain!=="0x1237")throw Error("CHAIN_UNVERIFIED");
     for (const row of data ?? []) {
         if (!getPonsFactoryDeployments().some(f => f.enabled && f.generation === 'v2' && f.id === row.protocol_version && f.address.toLowerCase() === row.factory_address?.toLowerCase()))
             continue;
