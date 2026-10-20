@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {PGlite} from '@electric-sql/pglite';import {readFileSync} from 'node:fs';
-const migration=readFileSync(new URL('../supabase/migrations/20261018152600_prebond_promotion_research.sql',import.meta.url),'utf8');
+const migration=readFileSync(new URL('../supabase/migrations/20261020072452_prebond_promotion_research.sql',import.meta.url),'utf8');
 const token='0x'+'1'.repeat(40),curve='0x'+'2'.repeat(40),hash='0x'+'a'.repeat(64);
 test('isolated research ledger validates provenance, leases, sampling windows, caps and grants',async()=>{
  const db=new PGlite();try{

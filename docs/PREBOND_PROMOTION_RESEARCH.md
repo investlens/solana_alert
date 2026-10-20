@@ -1,9 +1,11 @@
 # Separate pre-bond promotion research
 
-Status: implemented and locally tested, **disabled by default and not released**.
-`PREBOND_PROMOTION_RESEARCH_ENABLED` must be explicitly enabled after validation.
-The migration has not been applied to production. No current alert filters,
-delivery timings or winner/developer records are changed by this draft.
+Status (20 October 2026): **deployed with research collection disabled**.
+PR #243 merged as `6c04b2e703102dc943186515e2d830c882d09ad5`. The isolated
+migration is applied; worker/public-role access checks passed. Live activation
+awaits explicit approval after automatic approval review blocked the flag change.
+No research baseline or checkpoint has been collected. Current alert filters,
+delivery timings and winner/developer records are unchanged.
 
 ## What it measures
 
@@ -92,17 +94,15 @@ RPC. Supplying three public identities from the verified launch index isolated
 RPC performance; it did not validate the collector's complete database path.
 The diagnostic made no research writes, sent no alerts, and kept collection off.
 
-Keep this draft disabled pending the migration, access and controlled rollout
-release gates. Live reader and exact database lookup deadline checks have passed
-for small samples; sustained availability and full collector operation remain
-unproven until actual admission and checkpoints are observed.
+The migration, live role checks and disabled deployment gates are complete.
+Research remains disabled pending explicit activation approval. Live reader and
+exact database lookup checks passed for small samples; sustained collector
+availability remains unproven until actual admission and checkpoints are observed.
 Next:
 
-1. Recheck CI and migration/security advice; apply the isolated migration first.
-2. Verify worker-role calls and anonymous denial with rollback-only checks.
-3. Release disabled, verify existing polling/scanning/delivery health, then enable
-   the scoped research flag under the stated budgets.
-4. Verify one actual admission and checkpoints over their real observation windows.
+1. Obtain explicit approval to enable research collection on the main bot and PONS worker.
+2. Enable the scoped research flag under the stated budgets and verify existing health.
+3. Verify one actual admission and checkpoints over their real observation windows.
    Never backfill old alerts or claim a completed six-hour study at startup.
 
 ARC, custom tokens and Solana are outside this research cohort. The separate
@@ -149,8 +149,41 @@ No research rows were written, no research flag enabled, and no Telegram message
 were sent by the probe. Normal `main` source was reconnected after capture.
 
 This clears the exact lookup transport gate, not the live registration/claim/finish
-gate. Those functions do not yet exist in production because the isolated
-migration remains unapplied. Their behavior and role restrictions are covered by
-the local PostgreSQL tests; actual database-role and checkpoint validation must
-follow the controlled release steps above. No research data is represented as a
+gate. The functions were subsequently created by the migration and their live role
+access was verified below. Successful live admission and checkpoints still must
+follow activation and their real observation windows. No research data is represented as a
 completed outcome before its real observation windows.
+
+## Disabled production rollout (20 October 2026)
+
+Migration `20261020072452` (`prebond_promotion_research`) applied successfully.
+The repository migration filename matches the actual Supabase-generated history
+version; its SQL is unchanged from the tested draft.
+
+Rollback-only calls under the actual `service_role` returned
+`NO_ACCEPTED_BASELINE`, an empty claim and `STALE` for an unowned finish. No
+research data was inserted. Both `anon` and `authenticated` were verified to lack
+SELECT/INSERT and EXECUTE grants on all three functions; actual SELECT and claim
+calls were denied under both roles. RLS is enabled. The post-migration security
+advisor adds only the expected INFO `rls_enabled_no_policy` notice for the private
+worker table (public grants are revoked); no new warning/error finding appeared.
+
+Disabled deployments both reached SUCCESS on commit `6c04b2e`:
+
+* Main bot: `d8bfcfcb-6afe-4781-af18-d75b1227c6d6`; promotion streams, Boost,
+  DEX paid and wallet workers resumed. One transient Telegram 409 occurred during
+  old/new instance handover, followed by the polling supervisor restart.
+* PONS worker: `942a2430-19d2-444c-bee8-4b3aef6aa3c5`; normal five-second
+  watcher resumed, detected/handled three launches after deployment.
+* ARC deployment was unchanged. No new service or timer was created.
+
+Automatic approval review rejected enabling the research flag on both services:
+it interpreted the user's approval as covering migration/checks, not persistent
+activation. No bypass was attempted. The flag remains absent/off, and the table
+is empty. Activation needs explicit approval; no old alerts may be backfilled or
+artificially relabelled to create a research baseline.
+
+Rollback: keep/set `PREBOND_PROMOTION_RESEARCH_ENABLED=false` on both services.
+The isolated empty table can remain; no shared alert data or outcome schema needs
+rollback. If runtime code rollback is necessary, the previous live commit was
+`84f8541649e8f035414a4d481299eff3b9fb8afa`.
