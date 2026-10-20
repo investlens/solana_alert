@@ -15,7 +15,7 @@
     "pons:outcome-report": "tsx scripts/reportPonsOutcomes.ts",
     "pons:collect-outcomes": "tsx scripts/collectPonsOutcomes.ts",
     "pons:refresh-dev-registry": "tsx scripts/refreshPonsDeveloperRegistry.ts",
-    "pons:live-dev": "node --import tsx scripts/probePrebondWorker.mjs; tsx scripts/runPonsLiveDev.ts",
+    "pons:live-dev": "node --import tsx scripts/probePrebondWorker.ts 0x33d23702096327dfce561f0de3c3cbf98f8b2226 0x2f1548c8818d673bbb16d783d4b382f348227801 0xf3ef6ca6202264a30b37adc6b9230cacd07d1473; tsx scripts/runPonsLiveDev.ts",
     "pons:learn-devs": "tsx scripts/learnPonsDevelopers.ts"
   },
   "dependencies": {
