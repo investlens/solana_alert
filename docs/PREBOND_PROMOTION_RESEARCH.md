@@ -75,8 +75,24 @@ were made from the development environment via its network path, not Railway;
 they do not establish a production RPC outage. They also do not prove the live
 reader can complete within its production deadline.
 
-Keep this draft unmerged and the feature disabled until a fresh live snapshot
-passes identity, timestamp and pinned-block checks within the deadline. Then:
+Worker-side read-only validation on 20 October 2026 at 05:45 UTC passed
+chain identity and measured two native-quote snapshots in 240 ms and 236 ms
+(six calls each, individual calls 33–45 ms). Both used pinned block 93219369,
+hash `0x3047cd653ddf97c64829a9bce9821745dd7729fccc1f0a2b5e845ce8d4f1c619`,
+with fresh chain timestamps and validated token/curve identities. A third candidate
+returned `UNAVAILABLE / NON_NATIVE_QUOTE` in 143 ms, as designed. No provider
+replacement or relaxed deadline is justified by this sample. These reserve ratios
+are not USD prices or executable investment returns.
+
+The first worker probe's optional latest-launch database lookup timed out before
+RPC. Supplying three public identities from the verified launch index isolated
+RPC performance; it did not validate the collector's complete database path.
+The diagnostic made no research writes, sent no alerts, and kept collection off.
+
+Keep this draft unmerged and disabled pending database-path verification and the
+remaining release gates. The live reader deadline gate has passed for this small
+sample; sustained availability and full collector operation remain unproven.
+Next:
 
 1. Recheck CI and migration/security advice; apply the isolated migration first.
 2. Verify worker-role calls and anonymous denial with rollback-only checks.
