@@ -51,12 +51,15 @@ or runner notification tables. No user-facing alert is sent by this feature.
 * Baseline collection occurs after confirmed delivery and successful baseline
   persistence, fire-and-forget. It is never awaited by initial alert fanout.
 * Database calls use the existing background transport lane and two-second
-  deadlines. Failures pause optional work for sixty seconds. No ambiguous
+  operation deadlines (including queued time and response consumption). SDK
+  automatic retries are disabled per research request; the shared alert client
+  and its retry behavior are unchanged. Failures pause optional work for sixty seconds. No ambiguous
   Telegram send is repeated; this module has no Telegram dependency.
 
 ## Verification and release gate
 
-Typecheck and all 1,041 repository tests passed. New tests execute the migration
+Typecheck and all 1,047 repository tests passed (20 October retest; zero failures
+or skipped tests, with test concurrency limited to two). New tests execute the migration
 in PostgreSQL/PGlite and check acceptance/provenance validation, rate/active/total
 caps, retention batches, lease handling, missed windows, venue transition,
 complete sampled change and access restrictions. Reader tests check fixed-block
@@ -89,9 +92,10 @@ RPC. Supplying three public identities from the verified launch index isolated
 RPC performance; it did not validate the collector's complete database path.
 The diagnostic made no research writes, sent no alerts, and kept collection off.
 
-Keep this draft unmerged and disabled pending database-path verification and the
-remaining release gates. The live reader deadline gate has passed for this small
-sample; sustained availability and full collector operation remain unproven.
+Keep this draft disabled pending the migration, access and controlled rollout
+release gates. Live reader and exact database lookup deadline checks have passed
+for small samples; sustained availability and full collector operation remain
+unproven until actual admission and checkpoints are observed.
 Next:
 
 1. Recheck CI and migration/security advice; apply the isolated migration first.
@@ -103,3 +107,50 @@ Next:
 
 ARC, custom tokens and Solana are outside this research cohort. The separate
 Confirmed Demand draft and developer card PR are not included.
+
+## Database-path repair (20 October 2026)
+
+The failed original diagnostic used an unindexed latest-launch ordering. Its
+PostgreSQL plan scans and sorts an estimated 47,466 matching rows. This is not
+the collector query: the exact-token lookup uses `pons_launches_token_factory_idx`
+and completed in 0.163 ms server execution time in a read-only production check.
+The revised protocol-filtered, two-row-limit query also used that index and took
+1.394 ms in a subsequent read-only check.
+SQL timing excludes the worker HTTP path and does not establish the cause of the
+original transport timeout. No new index or broad scan was added.
+
+The isolated store now awaits lazy builders inside background/deadline scopes,
+checks cancellation before starting and after resolving a request, and explicitly
+disables SDK automatic retries on each research operation. The lookup filters
+one token/chain/protocol, reads at most two records, and rejects ambiguous or
+unverified provenance rather than choosing an arbitrary first row. Coordinator
+failure logs identify the phase and elapsed time; raw errors and credentials
+are not emitted. Existing alert/client transport files remain untouched.
+
+A manual read-only check uses the same store lookup (one to three public token
+addresses; no migration, writes, RPC samples, or Telegram sends):
+
+```sh
+node --import tsx scripts/probePrebondWorker.ts <token-address>
+```
+
+The store tests exercise the installed Supabase SDK with a controlled transport,
+including exact filtering/row bounds, verified/ambiguous identities, transient
+errors without retries, transport cancellation, late responses, already-expired
+parents, and isolated registration/claim/finish endpoints. These transport tests
+complement the PostgreSQL ledger and pinned-block reader tests.
+
+At 06:01 UTC on 20 October, the exact same store lookup ran read-only on the
+existing Railway PONS worker against three public token identities. All returned
+`VERIFIED` in 738 ms, 675 ms and 669 ms, within the unchanged two-second budget.
+The third identity was the non-native quote rejected by the separate RPC probe:
+a verified launch identity does not mean a supported quote or research admission.
+No research rows were written, no research flag enabled, and no Telegram messages
+were sent by the probe. Normal `main` source was reconnected after capture.
+
+This clears the exact lookup transport gate, not the live registration/claim/finish
+gate. Those functions do not yet exist in production because the isolated
+migration remains unapplied. Their behavior and role restrictions are covered by
+the local PostgreSQL tests; actual database-role and checkpoint validation must
+follow the controlled release steps above. No research data is represented as a
+completed outcome before its real observation windows.
