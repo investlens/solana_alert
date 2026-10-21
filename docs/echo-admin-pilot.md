@@ -1,75 +1,100 @@
-# AlphaOS Echo — admin pilot
+# AlphaOS Echo — QuickNode admin pilot
 
-Implementation validation: TypeScript check and 1,058 repository tests pass,
-including 11 Echo tests. Live provider delivery, HTTP deployment and Telegram
-receipt remain unvalidated; do not describe this draft as an active pilot.
+The current pilot uses standard Solana HTTPS RPC plus WebSocket subscriptions.
+It does not require Helius. The original enhanced-webhook receiver remains an
+unused standalone draft, not the deployment entrypoint.
 
-Isolated Helius enhanced-SWAP webhook receiver. It is not imported by the existing
-bot or chain workers. No shared settings, migrations, pollers or trading code are
-changed. No new dependencies. No transaction signing or live buys.
+No shared bot startup, subscriber delivery, chain services, settings or schemas
+are modified. No private key or trading execution is used. Live buys are not
+implemented. Stop calculations are offline helpers; simulated fills are pending.
 
-## Scope
+## Coverage and accuracy
 
-Watch Cupsey, Thedetective, Croakie and Chairman using the public profile wallets
-in `src/echo/signals.ts`. These are research candidates, not validated profitable
-traders. Their other wallets and unsupported swap formats are outside coverage.
+Watch the four public Pump profile wallets of Cupsey, Thedetective, Croakie and
+Chairman. These are research candidates, not validated profitable traders.
 
-Only a wallet's own aggregate swap input/output can produce an alert. Native SOL,
-wrapped SOL and USDC quote legs are supported. Transfers, gifts, token-to-token
-swaps, ambiguous multiple legs, malformed data, failed transactions and events
-older than 120 seconds are withheld. RPC independently checks confirmed/finalized
-status. Receipt is not evidence of token safety, liquidity or an executable exit.
+Each wallet has a separate logsSubscribe at confirmed commitment. Only explicit
+Pump.fun / PumpSwap buy, sell, buy_exact_sol_in and buy_exact_quote_in instructions
+with pinned discriminators/account layouts can qualify. The watched wallet must
+sign and be the instruction user; its specified token account must show the
+matching mint, owner and net balance direction. Matching CPI instructions are
+supported, but not every aggregator route preserves the watched wallet as user.
+Other DEX venues and ambiguous multiple trades are withheld. This is not full
+wallet trading coverage. A program mention, receipt, gift or transfer is not a buy.
 
-## Separate worker configuration
+Quote amounts are token-account net change where available. Native SOL wallet
+changes include fees and account rent and are explicitly labelled. Unavailable
+quote amounts stay unavailable. No quoted balance change is a claimed exact fill.
+Alerts say security is not assessed. A trader's purchase does not bypass safety
+checks for any future execution feature.
 
-One replica only; persistent volume required for the dedup file. Start command:
-`npx tsx scripts/runEchoAdmin.ts`. Configure privately in the service dashboard:
+## Separate Railway service
 
-- `ECHO_ENABLED=true`
-- `ECHO_MODE=alerts` (every other mode fails startup)
-- `OWNER_CHAT_ID` and `ECHO_ADMIN_CHAT_ID`: identical positive private-owner ID
-- `TELEGRAM_BOT_TOKEN`: existing bot token; worker only sends, never polls Telegram
-- `ECHO_WEBHOOK_AUTH`: random secret of at least 32 characters
-- `ECHO_SOLANA_RPC_URL`: HTTPS Solana mainnet RPC
-- `ECHO_STATE_PATH=/data/echo-deliveries.json` on the persistent volume
-- `PORT`: platform-assigned port
+Project: alphaos-engine; production environment.
+Service: alphaos-echo-admin (92734a90-45e3-45fb-a314-414d6c313f1b).
+One replica in us-west2; a 100 MB persistent volume at /data stores delivery
+deduplication. The service is prepared without source or a running deployment.
+Do not connect source until private endpoints are configured and CI has passed.
 
-Create an enhanced Helius webhook for SWAP transactions, with only the four
-wallet addresses. Point it at `https://<worker-domain>/helius`, with authHeader
-equal to ECHO_WEBHOOK_AUTH. Do not put credentials in URLs or logs. Provider
-entitlements/credits must be checked before activating; do not upgrade a plan
-automatically. No API keys are requested in chat.
+Start command: node --import tsx scripts/runEchoQuicknode.ts, Node 22.
 
-Health endpoint `/health` reports receiver availability, mode and last delivery/error
-times. It does not prove that the provider subscription is active. Verify a real
-supported trade against its on-chain transaction and admin receipt before calling
-the pilot live. Test no Pro/Free messages, provider retries, restart dedup, missed
-or delayed callbacks and provider usage. Do not send dummy alerts to subscribers.
+Preconfigured privately on this new service:
 
-## Delivery limitations
+- ECHO_ENABLED=true, ECHO_MODE=alerts
+- ECHO_STATE_PATH=/data/echo-deliveries.json
+- OWNER_CHAT_ID and ECHO_ADMIN_CHAT_ID: references to the main service's owner
+- TELEGRAM_BOT_TOKEN: reference to the main service's bot token (send only)
+- ADMIN_TRADING_ENABLED=false, AUTO_TRADE_MODE=paper
 
-Authenticated callbacks are processed serially; busy receivers return 503 for
-provider retry rather than buffering indefinitely. Requests and upstream calls
-are bounded. Successful delivery IDs are atomically persisted, retained 24 hours
-and capped at 10,000. Events expire after 120 seconds; prolonged outages can miss
-alerts. There is no recovery backfill yet. Telegram has no idempotency key: a
-crash/timeout between sending and persisting acknowledgment can cause a duplicate.
-No exactly-once or immediate-execution guarantee is made.
+User supplies only these two private variables on **alphaos-echo-admin**:
 
-## Paper and live trading follow-up
+- ECHO_SOLANA_RPC_URL: QuickNode HTTPS endpoint
+- ECHO_SOLANA_WS_URL: same endpoint's WSS URL
 
-`openPaperStop`/`updatePaperStop` provide tested offline stop calculations matching
-the existing ROI tiers. They do not open simulated positions or claim fills.
-Paper fills require executable entry/exit quotes at observation time, fees,
-slippage, quote freshness, persistent positions and restart tests. Live execution
-requires a separate wallet, small explicit sizing and loss limits, security/sell
-route validation and an emergency switch. No private key belongs on this receiver.
+Do not paste credentials in chat, commits, documentation or logs. Do not change
+existing services' SOLANA_RPC_URL or flags. No marketplace add-on is needed.
+Mainnet genesis and Telegram getMe are checked before subscribing. No test message
+or getUpdates call is sent. No Helius authentication or webhook is required.
 
-## Sources checked 21 October 2026
+## Recovery, limits and diagnostics
 
-- https://github.com/helius-labs/core-ai/blob/main/helius-plugin/skills/build/references/webhooks.md
-- https://github.com/helius-labs/core-ai/blob/main/helius-plugin/skills/build/references/enhanced-transactions.md
-- https://pump.fun/profile/cupsey
-- https://pump.fun/profile/thedetective
-- https://pump.fun/profile/croakie
-- https://pump.fun/profile/chairman
+The WebSocket adapter waits for all four subscription acknowledgments. Errors,
+disconnects and subscription timeouts reconnect with 1–30 second backoff.
+Each successful connection reconciles recent signatures; a second sweep runs
+every minute: four address reads, at most 20 signatures each, no deep history.
+Only observations with on-chain block times at most 120 seconds old can alert.
+Outages longer than this and wallets with more than 20 signatures in the recovery
+window can miss events. Reconciliation is bounded recovery, not complete replay.
+
+A serial queue deduplicates pending signatures, caps at 64 jobs, and makes at most
+three attempts per queued job. Every successful transaction is persistently marked
+processed. Telegram acceptance is persisted per signal. Entries retain 24 hours
+and cap at 10,000. HTTP calls time out after eight seconds; provider rate limits
+back off. A lost Telegram acknowledgment/crash can still cause a duplicate because
+Telegram does not expose an idempotency key. No exactly-once guarantee is made.
+
+/health returns 503 unless all subscriptions acknowledged, reconciliation is
+recent, no rate-limit backoff is active and the queue is below its warning limit.
+It reports queue drops/reconnects and latest RPC/delivery/error/reconciliation
+timestamps, without credentials. It cannot prove completeness of wallet coverage.
+
+## Validation and rollout
+
+Test parser behaviour for raw RPC JSON and PublicKey wrappers, signed buys/sells,
+gifts, wrong ownership, failed/stale trades, quote attribution, config guards,
+subscription acknowledgments/reconnects, queue bursts/retries, persistent dedup
+and trailing-stop progression. Run TypeScript and the full repository suite.
+
+After URLs are saved, deploy only the separate service from the Echo branch.
+Verify actual QuickNode HTTP/WSS authentication, mainnet identity, four live
+subscription acknowledgments and provider usage; then reconcile a real supported
+wallet transaction with its admin receipt. No real admin receipt has been tested
+yet. Do not describe the prepared worker as live or profitable before validation.
+
+## Primary references checked 21 October 2026
+
+- https://solana.com/docs/rpc/websocket/logssubscribe
+- https://solana.com/docs/rpc/http/gettransaction
+- https://solana.com/docs/rpc/http/getsignaturesforaddress
+- https://github.com/pump-fun/pump-public-docs/blob/main/idl/pump.json
+- https://github.com/pump-fun/pump-public-docs/blob/main/idl/pump_amm.json

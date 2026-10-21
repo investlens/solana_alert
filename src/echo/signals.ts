@@ -15,7 +15,8 @@ export type EchoTransaction = {
 };
 export type EchoSignal = {
   id: string; wallet: string; caller: string; signature: string; timestamp: number;
-  mint: string; side: 'BUY' | 'SELL'; tokenAmount: number; quoteAmount: number; quoteSymbol: string;
+  mint: string; side: 'BUY' | 'SELL'; tokenAmount: number; quoteAmount: number | null; quoteSymbol: string;
+  quoteBasis?: 'token-account net change' | 'wallet SOL net change; includes fees/rent' | 'unavailable';
 };
 function address(value: unknown): value is string {
   try { return typeof value === 'string' && new PublicKey(value).toBase58() === value; } catch { return false; }
@@ -58,7 +59,8 @@ export function extractEchoSignals(tx: EchoTransaction, nowSeconds: number, maxA
 }
 export function echoCard(s: EchoSignal, nowSeconds: number): string {
   return `<b>📡 ALPHAOS ECHO · ADMIN TEST</b>\n${s.caller} · ${s.side}\n<code>${s.mint}</code>\n` +
-    `${s.quoteAmount.toFixed(4)} ${s.quoteSymbol} · ${Math.max(0, Math.round(nowSeconds - s.timestamp))}s since trade\n` +
+    `${s.quoteAmount == null ? 'Quote amount unavailable' : s.quoteAmount.toFixed(4) + ' ' + s.quoteSymbol} · ${Math.max(0, Math.round(nowSeconds - s.timestamp))}s since trade\n` +
+    (s.quoteBasis && s.quoteBasis !== 'unavailable' ? `${s.quoteBasis}\n` : '') +
     `Confirmed wallet activity · Security not assessed\nLive auto-buy OFF · Research candidate`;
 }
 
