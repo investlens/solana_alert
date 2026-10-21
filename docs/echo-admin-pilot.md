@@ -93,6 +93,25 @@ yet. Do not describe the prepared worker as live or profitable before validation
 
 ## Primary references checked 21 October 2026
 
+### Transaction-version correction
+
+Croakie's confirmed PumpSwap buy at 2026-10-21 16:23:34 UTC used transaction
+version 1. The original request ceiling of 0 rejected it with RPC -32015.
+The corrected reader explicitly requests maxSupportedTransactionVersion=1;
+the existing JSON parser identifies its inner PumpSwap instruction without
+relaxing owner, signer, failure or freshness checks. Its public transaction is
+saved as tests/fixtures/echo-croakie-v1.json for regression coverage.
+
+Private minute-level health logs now report RPC/delivery failures, queue drops,
+parsed signal counts and accepted deliveries. RPC errors log numeric codes only,
+never endpoints or credentials. ECHO_VALIDATE_V1_SIGNATURE optionally performs a
+single historical API read at startup to validate provider v1 retrieval/parsing;
+this diagnostic never queues or delivers the historical trade. Remove the
+diagnostic variable after checking rollout logs. Missed old trades are not
+reissued as fresh alerts.
+
+- https://solana.com/developers/cookbook/transactions/versions
+
 - https://solana.com/docs/rpc/websocket/logssubscribe
 - https://solana.com/docs/rpc/http/gettransaction
 - https://solana.com/docs/rpc/http/getsignaturesforaddress
