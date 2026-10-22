@@ -24,6 +24,39 @@ function tokenBalance(pre: Balance[], post: Balance[], index: number, mint: stri
   const amount = Number(delta) / 10 ** decimals;
   return Number.isFinite(amount) ? amount : null;
 }
+export type EchoRejectReason = 'invalid_or_stale' | 'unsupported_program_or_instruction' | 'wallet_not_signer' | 'unsupported_quote' | 'unresolved_accounts' | 'ambiguous_or_unverified_balance';
+// Pure, bounded diagnostics: no RPC calls, token data, wallet identifiers, or signatures in logs.
+export function classifyEchoRejection(tx: ParsedTransactionWithMeta | null, signature: string, now: number): EchoRejectReason {
+  if (!tx?.meta || tx.meta.err != null || tx.transaction.signatures[0] !== signature ||
+      !Number.isFinite(tx.blockTime) || tx.blockTime! <= 0 || tx.blockTime! > now + 15 || now - tx.blockTime! > 120)
+    return 'invalid_or_stale';
+  const keys = tx.transaction.message.accountKeys;
+  const instructions = [...tx.transaction.message.instructions, ...(tx.meta.innerInstructions ?? []).flatMap(x => x.instructions)];
+  let matched = false, authorized = false, quoteOk = false, accountsOk = false;
+  for (const ix of instructions) {
+    if (!('data' in ix) || !('accounts' in ix)) continue;
+    const program = key(ix.programId);
+    if (program !== ECHO_PUMP && program !== ECHO_PUMP_SWAP) continue;
+    let data: Uint8Array;
+    try { data = bs58.decode(ix.data); } catch { continue; }
+    const tag = Buffer.from(data.subarray(0, 8)).toString('hex');
+    if (data.length < 24 || ![BUY, SELL, CURVE_EXACT_BUY, AMM_EXACT_BUY].includes(tag)) continue;
+    matched = true;
+    const curve = program === ECHO_PUMP, a = ix.accounts.map(key), wallet = a[curve ? 6 : 1];
+    if (!ECHO_WALLETS[wallet] || !keys.some(k => k.signer && key(k.pubkey) === wallet)) continue;
+    authorized = true;
+    const mint = a[curve ? 2 : 3], quote = curve ? SOL_MINT : a[4];
+    if (!mint || ![SOL_MINT, USDC].includes(quote) || [SOL_MINT, USDC].includes(mint)) continue;
+    quoteOk = true;
+    if (keys.some(k => key(k.pubkey) === a[5]) &&
+        (curve || keys.some(k => key(k.pubkey) === a[6]))) accountsOk = true;
+  }
+  if (!matched) return 'unsupported_program_or_instruction';
+  if (!authorized) return 'wallet_not_signer';
+  if (!quoteOk) return 'unsupported_quote';
+  if (!accountsOk) return 'unresolved_accounts';
+  return 'ambiguous_or_unverified_balance';
+}
 export function extractRpcEchoSignals(tx: ParsedTransactionWithMeta | null, signature: string, now: number): EchoSignal[] {
   if (!tx?.meta || tx.meta.err != null || tx.transaction.signatures[0] !== signature || !Number.isFinite(tx.blockTime) ||
       tx.blockTime! <= 0 || tx.blockTime! > now + 15 || now - tx.blockTime! > 120) return [];
