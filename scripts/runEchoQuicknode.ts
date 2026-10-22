@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { readQuicknodeEchoConfig } from '../src/echo/quicknodeConfig.js';
 import { EchoStore } from '../src/echo/store.js';
 import { ECHO_WALLETS, echoCard } from '../src/echo/signals.js';
-import { extractRpcEchoSignals } from '../src/echo/rpcSignals.js';
+import { extractRpcEchoSignals, classifyEchoRejection, type EchoRejectReason } from '../src/echo/rpcSignals.js';
 import { EchoQueue } from '../src/echo/queue.js';
 import { startEchoSubscription } from '../src/echo/subscription.js';
 import { readEchoTransaction } from '../src/echo/readTransaction.js';
@@ -16,6 +16,7 @@ let backoffUntil = 0, lastRpcAt: number | null = null, lastDeliveryAt: number | 
 let deliveryBackoffUntil = 0;
 let lastErrorAt: number | null = null, lastReconcileAt: number | null = null, stopping = false;
 const diagnostics = { fetched: 0, signals: 0, delivered: 0, noSignal: 0, rpcFailures: 0, deliveryFailures: 0 };
+const rejectionCounts: Partial<Record<EchoRejectReason, number>> = {};
 async function rpc(method: string, params: unknown[] = []) {
   if (Date.now() < backoffUntil) throw new Error('RPC backing off');
   try {
@@ -60,7 +61,7 @@ const queue = new EchoQueue(async signature => {
   diagnostics.fetched++;
   const signals = extractRpcEchoSignals(tx, signature, Date.now() / 1000);
   diagnostics.signals += signals.length;
-  if (!signals.length) diagnostics.noSignal++;
+  if (!signals.length) { diagnostics.noSignal++; const reason = classifyEchoRejection(tx, signature, Date.now() / 1000); rejectionCounts[reason] = (rejectionCounts[reason] ?? 0) + 1; }
   for (const signal of signals) {
     if (store.has(signal.id)) continue;
     const result = await fetch(`https://api.telegram.org/bot${config.botToken}/sendMessage`, { method: 'POST',
@@ -100,7 +101,7 @@ const tick = setInterval(() => { if (!stopping && Date.now() >= Math.max(backoff
 const sweep = setInterval(() => { void reconcile(); }, 60_000);
 const heartbeat = setInterval(() => console.log('[Echo] HEALTH', { subscriptions: subscription.state.acknowledgedWallets,
   websocketReady: subscription.state.ready, reconnects: subscription.state.reconnects, queued: queue.size, dropped: queue.dropped,
-  lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt, ...diagnostics }), 60_000);
+  lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt, ...diagnostics, rejectionCounts }), 60_000);
 const server = createServer((req, res) => {
   if (req.method !== 'GET' || req.url !== '/health') { res.writeHead(404); res.end(); return; }
   const ready = !stopping && subscription.state.ready && Date.now() >= Math.max(backoffUntil, deliveryBackoffUntil) &&
