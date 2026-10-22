@@ -17,6 +17,7 @@ export function startEchoSubscription(options: Options) {
     if (stopped) return;
     state.ready = false; state.acknowledgedWallets = 0;
     const ids = new Set<number>();
+    const expectedWallets = Object.keys(ECHO_WALLETS).length;
     const requests = new Set<number>();
     const lost = () => {
       if (socket !== current || stopped) return;
@@ -43,11 +44,11 @@ export function startEchoSubscription(options: Options) {
       try { message = JSON.parse(event.data); } catch { return; }
       if (!message || typeof message !== 'object') return;
       state.lastMessageAt = Date.now();
-      if (Number.isInteger(message.id) && message.id >= 1 && message.id <= 4) {
+      if (Number.isInteger(message.id) && message.id >= 1 && message.id <= expectedWallets) {
         if (message.error || !Number.isSafeInteger(message.result) || message.result < 0) { lost(); return; }
         if (requests.has(message.id)) return;
         requests.add(message.id); ids.add(message.result); state.acknowledgedWallets = ids.size;
-        if (ids.size === 4 && !state.ready) { state.ready = true; delay = 1000; if (timeout) cancel(timeout); options.onReady(); }
+        if (ids.size === expectedWallets && !state.ready) { state.ready = true; delay = 1000; if (timeout) cancel(timeout); options.onReady(); }
         return;
       }
       if (message.method !== 'logsNotification' || !ids.has(message.params?.subscription)) return;
