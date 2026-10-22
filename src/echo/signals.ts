@@ -57,11 +57,30 @@ export function extractEchoSignals(tx: EchoTransaction, nowSeconds: number, maxA
   }
   return result;
 }
+// Public X associations are references, not proof that the account controls the trading wallet.
+const ECHO_SOCIAL_X: Readonly<Record<string, string>> = Object.freeze({
+  Cupsey: 'Cupseyy',
+  Croakie: 'croakie_',
+  Chairman: 'Chairman_DN',
+});
 export function echoCard(s: EchoSignal, nowSeconds: number): string {
-  return `<b>📡 ALPHAOS ECHO · ADMIN TEST</b>\n${s.caller} · ${s.side}\n<code>${s.mint}</code>\n` +
-    `${s.quoteAmount == null ? 'Quote amount unavailable' : s.quoteAmount.toFixed(4) + ' ' + s.quoteSymbol} · ${Math.max(0, Math.round(nowSeconds - s.timestamp))}s since trade\n` +
-    (s.quoteBasis && s.quoteBasis !== 'unavailable' ? `${s.quoteBasis}\n` : '') +
-    `Confirmed wallet activity · Security not assessed\nLive auto-buy OFF · Research candidate`;
+  const short = (v: string) => v.length > 15 ? v.slice(0, 7) + '…' + v.slice(-6) : v;
+  const age = Math.max(0, Math.round(nowSeconds - s.timestamp));
+  const x = ECHO_SOCIAL_X[s.caller];
+  const link = x ? ` | <a href="https://x.com/${x}">X @${x}</a>` : '';
+  const amount = s.quoteAmount == null ? 'Quote amount: unavailable' :
+    s.quoteBasis === 'wallet SOL net change; includes fees/rent'
+      ? `Wallet SOL net change: ~${s.quoteAmount.toFixed(4)} ${s.quoteSymbol} (fees/rent included; not exact swap size)`
+      : `Quote amount: ${s.quoteAmount.toFixed(4)} ${s.quoteSymbol}`;
+  return `<b>📡 ALPHAOS ECHO | ${s.side === 'BUY' ? '🟢 BUY' : '🔴 SELL'}</b>\n` +
+    `<b>Caller:</b> ${s.caller}${link}\n` +
+    `<b>Token:</b> <code>${s.mint}</code>\n` +
+    `<b>Token quantity:</b> ${s.tokenAmount.toLocaleString('en-US', { maximumFractionDigits: 6 })}\n` +
+    `<b>${amount}</b>\n` +
+    `<b>Age:</b> ${age}s | <b>Chain:</b> Solana\n` +
+    `<b>Wallet:</b> <code>${short(s.wallet)}</code>\n` +
+    `<b>Status:</b> Confirmed supported swap; token security not assessed\n` +
+    `⚠️ Research only · Live auto-buy OFF`;
 }
 
 export type PaperStop = { entry: number; peak: number; stop: number; closed: boolean };
