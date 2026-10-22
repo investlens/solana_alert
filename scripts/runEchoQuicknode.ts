@@ -156,11 +156,11 @@ async function lookupEchoMarket(mint: string): Promise<EchoMarket | null> {
 async function enhanceEchoMessage(signal: ReturnType<typeof extractRpcEchoSignals>[number], messageId: number, baseText: string) {
   const market = await lookupEchoMarket(signal.mint);
   if (!market) return;
-  const heading = market.symbol ? `<b>Token:</b> ${escapeHtml(market.name)} (${escapeHtml(market.symbol)})\\n` : '';
+  const heading = market.symbol ? `<b>Token:</b> ${escapeHtml(market.name)} (${escapeHtml(market.symbol)})\n` : '';
   const details = [market.marketCap != null ? `Market cap: ${compactUsd(market.marketCap)}` : '',
     market.liquidity != null ? `Pool liquidity: ${compactUsd(market.liquidity)}` : ''].filter(Boolean).join(' | ');
   if (!heading && !details) return;
-  const text = baseText + '\\n' + heading + (details ? escapeHtml(details) + '\\n' : '') + '<i>Market snapshot: third-party, may change. Not a security check.</i>';
+  const text = baseText + '\n' + heading + (details ? escapeHtml(details) + '\n' : '') + '<i>Market snapshot: third-party, may change. Not a security check.</i>';
   try {
     const response = await fetch(`https://api.telegram.org/bot${config.botToken}/editMessageText`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(1500),
