@@ -63,24 +63,31 @@ const ECHO_SOCIAL_X: Readonly<Record<string, string>> = Object.freeze({
   Croakie: 'croakie_',
   Chairman: 'Chairman_DN',
 });
-export function echoCard(s: EchoSignal, nowSeconds: number): string {
-  const short = (v: string) => v.length > 15 ? v.slice(0, 7) + '…' + v.slice(-6) : v;
+export type EchoCardMarket = { name: string; symbol: string; marketCap: number | null; liquidity: number | null };
+function escapeEchoHtml(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+export function echoCard(s: EchoSignal, nowSeconds: number, market?: EchoCardMarket | null): string {
   const age = Math.max(0, Math.round(nowSeconds - s.timestamp));
   const x = ECHO_SOCIAL_X[s.caller];
-  const link = x ? ` | <a href="https://x.com/${x}">X @${x}</a>` : '';
-  const amount = s.quoteAmount == null ? 'Quote amount: unavailable' :
+  const social = x ? ` · <a href="https://x.com/${x}">@${x}</a>` : '';
+  const label = market && (market.name || market.symbol)
+    ? `<b>${escapeEchoHtml(market.symbol || market.name)}</b>${market.name && market.name !== market.symbol ? ' · ' + escapeEchoHtml(market.name) : ''}`
+    : '<b>Name pending</b>';
+  const formatUsd = (v: number | null | undefined) => v != null && Number.isFinite(v) && v > 0
+    ? '$' + v.toLocaleString('en-US', { maximumFractionDigits: 0 }) : 'Unavailable';
+  const quote = s.quoteAmount == null ? 'Unavailable' :
     s.quoteBasis === 'wallet SOL net change; includes fees/rent'
-      ? `Wallet SOL net change: ~${s.quoteAmount.toFixed(4)} ${s.quoteSymbol} (fees/rent included; not exact swap size)`
-      : `Quote amount: ${s.quoteAmount.toFixed(4)} ${s.quoteSymbol}`;
-  return `<b>📡 ALPHAOS ECHO | ${s.side === 'BUY' ? '🟢 BUY' : '🔴 SELL'}</b>\n` +
-    `<b>Caller:</b> ${s.caller}${link}\n` +
-    `<b>Token:</b> <code>${s.mint}</code>\n` +
-    `<b>Token quantity:</b> ${s.tokenAmount.toLocaleString('en-US', { maximumFractionDigits: 6 })}\n` +
-    `<b>${amount}</b>\n` +
-    `<b>Age:</b> ${age}s | <b>Chain:</b> Solana\n` +
-    `<b>Wallet:</b> <code>${short(s.wallet)}</code>\n` +
-    `<b>Status:</b> Confirmed supported swap; token security not assessed\n` +
-    `⚠️ Research only · Live auto-buy OFF`;
+      ? `~${s.quoteAmount.toFixed(4)} ${escapeEchoHtml(s.quoteSymbol)} wallet change (not exact trade size)`
+      : `${s.quoteAmount.toFixed(4)} ${escapeEchoHtml(s.quoteSymbol)}`;
+  return `<b>📡 ECHO · ${s.side === 'BUY' ? '🟢 BUY' : '🔴 SELL'} · ${escapeEchoHtml(s.caller)}</b>\n` +
+    `${label}\n` +
+    `💰 <b>MC:</b> ${formatUsd(market?.marketCap)} · <b>LP:</b> ${formatUsd(market?.liquidity)}\n` +
+    `💱 <b>Trade:</b> ${quote}\n` +
+    `🪙 <b>Tokens:</b> ${s.tokenAmount.toLocaleString('en-US', { maximumFractionDigits: 4 })}\n` +
+    `⏱ <b>Age:</b> ${age}s${social}\n` +
+    `\n<b>CA:</b> <code>${escapeEchoHtml(s.mint)}</code>\n` +
+    `<i>Verified swap · Research only · Auto-buy OFF</i>`;
 }
 
 export type PaperStop = { entry: number; peak: number; stop: number; closed: boolean };
