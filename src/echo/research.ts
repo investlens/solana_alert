@@ -8,7 +8,7 @@ type Trial = {
   entry: number | null; entryAt: number | null; pool: string | null;
   stop: PaperStop | null; exitAt: number | null; exitPrice: number | null;
   peak: number | null; points: Sample[]; checkpoints: Record<string, number | null>;
-  status: 'AWAITING_PRICE' | 'TRACKING' | 'EXIT_OBSERVED' | 'CENSORED';
+  status: 'AWAITING_PRICE' | 'TRACKING' | 'EXIT_OBSERVED' | 'CENSORED' | 'COMPLETE';
 };
 type State = { version: 1; trials: Trial[] };
 const windows = [300, 900, 1800, 3600, 21600, 86400] as const;
@@ -96,9 +96,17 @@ export class EchoResearch {
                 t.checkpoints[key]=clamp(usd/t.entry!-1);
               }
             }
-            if (now-t.deliveryAt>=horizon) {t.status='CENSORED';}
+            // Keep collecting checkpoints until the 24h horizon; finalize outside the fetch loop.
           }
         } catch {this.lastError='PRICE_SOURCE_UNAVAILABLE';}
+      }
+      for (const t of this.trials) {
+        if (now-t.deliveryAt>=horizon+300 && (t.status==='AWAITING_PRICE'||t.status==='TRACKING'||t.status==='EXIT_OBSERVED')) {
+          t.status=t.entry===null?'CENSORED':'COMPLETE';
+          console.log('[EchoResearch] OUTCOME',JSON.stringify({id:t.id,caller:t.caller,mint:t.mint,
+            deliveryAt:t.deliveryAt,entryAt:t.entryAt,entry:t.entry,exitAt:t.exitAt,exitPrice:t.exitPrice,
+            peak:t.peak,checkpoints:t.checkpoints,samples:t.points.length,markPriceOnly:true}));
+        }
       }
       // Keep completed outcomes 30 days. Never classify missing prices as losses.
       this.trials=this.trials.filter(t=>now-t.deliveryAt<30*86400);
