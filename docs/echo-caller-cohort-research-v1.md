@@ -45,3 +45,9 @@ slingoor, chester, Zrool, cooker, rambo, ferre, ogantd, hdegroot, alphaprophet, 
 Echo deployment f3a4ef75acb3ed9292dd74b4934a6a4173955de8 confirmed SUCCESS at planning.
 Existing research script: scripts/researchEchoOutcomes.ts.
 No new wallet activated by this file.
+
+## Candidate wallet verification — 2026-10-24
+
+- **Schoen — address corroborated, not activated:** Pump.fun public profile resolves to `5hAgYC8TJCcEZV7LTXAzkTrm7YL29YXyQQJPCNrG84zM`; independent KOL Brain and uwuu.ai attribute trading history to the same address. Sources: https://pump.fun/profile/schoen ; https://kolbrain.fun/brains/schoen_xyz ; https://uwuu.ai/trader/5hAgYC8TJCcEZV7LTXAzkTrm7YL29YXyQQJPCNrG84zM . KOL Brain reports extremely frequent trading (2,655 trades/7 days at its update) and low copyability (4/100); do not forward every trade to the admin chat or increase live RPC load without a bounded research-only sampler and successful throughput test. These figures are external and time-dependent, not independently backtested AlphaOS returns.
+- **ely — public identity confirmed, trade-signing address not independently proven:** Pump.fun profile `CE44oKS3wpUerx8afyeii56u5oQjBLZknzm4Q2CYHUz9` shows username ely and X ProofOfEly. Source: https://pump.fun/profile/CE44oKS3wpUerx8afyeii56u5oQjBLZknzm4Q2CYHUz9 . Remains research candidate, not active wallet.
+- **Activation gate:** confirm recent successful transactions signed by identified wallet using targeted RPC/explorer sample, verify supported Pump/PumpSwap instructions and realistic per-minute event rate; add only with bounded per-caller tracking, persistent dedup, and initial research-only alerts disabled for high-frequency wallet. No duplicate Railway services. Do not change existing four wallets on the strength of a profile page alone.
