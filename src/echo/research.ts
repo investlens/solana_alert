@@ -44,7 +44,7 @@ export class EchoResearch {
     if (!validMint(ev.mint) || !Number.isFinite(ev.deliveryAt)) return;
     const id = ev.signature+':'+ev.mint+':'+ev.caller;
     if (this.trials.some(t=>t.id===id)) return;
-    const active = this.trials.filter(t=>t.status==='TRACKING'||t.status==='AWAITING_PRICE');
+    const active = this.trials.filter(t=>(t.status==='TRACKING'||t.status==='AWAITING_PRICE'||t.status==='EXIT_OBSERVED') && ev.deliveryAt-t.deliveryAt<86400);
     if (active.length >= this.maxActive) {
       console.warn('[EchoResearch] CAP_REACHED',JSON.stringify({id,maxActive:this.maxActive}));
       return;
@@ -59,7 +59,7 @@ export class EchoResearch {
     this.working=true; this.nextTick=Date.now()+60_000;
     try {
       const now=Date.now()/1000;
-      const active=this.trials.filter(t=>t.status==='TRACKING'||t.status==='AWAITING_PRICE');
+      const active=this.trials.filter(t=>(t.status==='TRACKING'||t.status==='AWAITING_PRICE'||t.status==='EXIT_OBSERVED') && now-t.deliveryAt<horizon+300);
       const mints=[...new Set(active.map(t=>t.mint))].slice(0,this.maxActive);
       for (const mint of mints) {
         const matching=active.filter(t=>t.mint===mint);
@@ -96,7 +96,7 @@ export class EchoResearch {
                 t.checkpoints[key]=clamp(usd/t.entry!-1);
               }
             }
-            if (now-t.deliveryAt>=horizon) {t.status=t.exitAt===null?'CENSORED':'EXIT_OBSERVED';}
+            if (now-t.deliveryAt>=horizon) {t.status='CENSORED';}
           }
         } catch {this.lastError='PRICE_SOURCE_UNAVAILABLE';}
       }
@@ -108,7 +108,7 @@ export class EchoResearch {
   summary() {
     const counts:Record<string,number>={};
     for (const t of this.trials) counts[t.status]=(counts[t.status]||0)+1;
-    return {total:this.trials.length,counts,active:this.trials.filter(t=>t.status==='TRACKING'||t.status==='AWAITING_PRICE').length,
+    return {total:this.trials.length,counts,active:this.trials.filter(t=>(t.status==='TRACKING'||t.status==='AWAITING_PRICE'||t.status==='EXIT_OBSERVED') && Date.now()/1000-t.deliveryAt<horizon).length,
       lastError:this.lastError,liveTrading:false,markPriceOnly:true};
   }
 }
