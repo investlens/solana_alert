@@ -44,7 +44,7 @@ export class EchoResearch {
     if (!validMint(ev.mint) || !Number.isFinite(ev.deliveryAt)) return;
     const id = ev.signature+':'+ev.mint+':'+ev.caller;
     if (this.trials.some(t=>t.id===id)) return;
-    const active = this.trials.filter(t=>(t.status==='TRACKING'||t.status==='AWAITING_PRICE'||t.status==='EXIT_OBSERVED') && ev.deliveryAt-t.deliveryAt<86400);
+    const active = this.trials.filter(t=>(t.status==='TRACKING'||t.status==='AWAITING_PRICE'||t.status==='EXIT_OBSERVED') && Math.abs(ev.deliveryAt-t.deliveryAt)<86400);
     if (active.length >= this.maxActive) {
       console.warn('[EchoResearch] CAP_REACHED',JSON.stringify({id,maxActive:this.maxActive}));
       return;
@@ -79,7 +79,7 @@ export class EchoResearch {
             const usd=Number(p.priceUsd), liq=Number(p.liquidity.usd);
             const sample:Sample={at:now,usd,liquidityUsd:liq,pool:p.pairAddress};
             if (t.entry===null) {
-              if (now-t.deliveryAt>180) { t.status='CENSORED'; continue; }
+              if (now-t.deliveryAt>180) { t.status='CENSORED'; console.warn('[EchoResearch] ENTRY_UNAVAILABLE',JSON.stringify({id:t.id,delaySeconds:Math.round(now-t.deliveryAt)})); continue; }
               t.entry=usd;t.entryAt=now;t.pool=p.pairAddress;t.stop=openPaperStop(usd);t.peak=usd;
             }
             t.points.push(sample);
@@ -93,7 +93,8 @@ export class EchoResearch {
             for (const seconds of windows) {
               const key=String(seconds);
               if (!(key in t.checkpoints) && now-t.deliveryAt >= seconds) {
-                t.checkpoints[key]=clamp(usd/t.entry!-1);
+                // A late observation must not be presented as the requested checkpoint.
+                t.checkpoints[key]=now-t.deliveryAt<=seconds+90 ? clamp(usd/t.entry!-1) : null;
               }
             }
             // Keep collecting checkpoints until the 24h horizon; finalize outside the fetch loop.
