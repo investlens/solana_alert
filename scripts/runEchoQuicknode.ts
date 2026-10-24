@@ -87,7 +87,7 @@ async function echoMarket(mint: string): Promise<EchoMarket | null> {
   echoMarketCache.set(mint, { expiry: Date.now() + (data ? 60000 : 20000), data });
   return data;
 }
-async function enrichEchoCard(signal: ReturnType<typeof extractRpcEchoSignals>[number], messageId: number, baseCard: string) {
+async function enrichEchoCard(signal: ReturnType<typeof extractRpcEchoSignals>[number], messageId: number, _baseCard: string) {
   const market = await echoMarket(signal.mint);
   if (!market) return;
   const updatedCard = echoCard(signal, Date.now() / 1000, market);
