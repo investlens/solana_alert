@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { createServer } from 'node:http';
 import { readQuicknodeEchoConfig } from '../src/echo/quicknodeConfig.js';
 import { EchoStore } from '../src/echo/store.js';
+import { EchoResearch } from '../src/echo/research.js';
 import { ECHO_WALLETS, echoCard } from '../src/echo/signals.js';
 import { extractRpcEchoSignals, classifyEchoRejection, type EchoRejectReason } from '../src/echo/rpcSignals.js';
 import { EchoQueue } from '../src/echo/queue.js';
@@ -12,6 +13,8 @@ import { readEchoTransaction } from '../src/echo/readTransaction.js';
 // Helius requests, private keys or trade execution imports.
 const config = readQuicknodeEchoConfig(process.env);
 const store = new EchoStore(config.statePath); await store.load();
+const research = new EchoResearch(config.statePath+'.research-v1.json');
+await research.load();
 let backoffUntil = 0, lastRpcAt: number | null = null, lastDeliveryAt: number | null = null;
 let deliveryBackoffUntil = 0;
 let lastErrorAt: number | null = null, lastReconcileAt: number | null = null, stopping = false;
@@ -136,6 +139,7 @@ const queue = new EchoQueue(async signature => {
       telegramMessageId: result.result.message_id, quoteAmount: signal.quoteAmount, quoteSymbol: signal.quoteSymbol,
       quoteBasis: signal.quoteBasis || 'unavailable' }));
     await store.delivered(signal.id, Date.now() / 1000); lastDeliveryAt = Date.now(); diagnostics.delivered++;
+    if (signal.side === 'BUY') void research.addBuy({caller:signal.caller,mint:signal.mint,signature:signal.signature,deliveryAt:Date.now()/1000}).catch(() => console.warn('[EchoResearch] PERSIST_FAILED'));
     console.log('[Echo] ADMIN_DELIVERY_ACCEPTED', { caller: signal.caller, signature, side: signal.side, messageId: result.result.message_id });
   }
   await store.delivered(`tx:${signature}`, Date.now() / 1000);
@@ -159,9 +163,11 @@ async function reconcile() {
 const subscription = startEchoSubscription({ url: config.wsUrl, onSignature: signature => { if (!store.has(`tx:${signature}`)) queue.add(signature); }, onReady: () => { void reconcile(); } });
 const tick = setInterval(() => { if (!stopping && Date.now() >= Math.max(backoffUntil, deliveryBackoffUntil)) void queue.tick(); }, 250);
 const sweep = setInterval(() => { void reconcile(); }, 60_000);
+const researchTick = setInterval(() => { void research.tick().catch(() => console.warn('[EchoResearch] TICK_FAILED')); }, 60_000);
+void research.tick().catch(() => console.warn('[EchoResearch] INITIAL_TICK_FAILED'));
 const heartbeat = setInterval(() => console.log('[Echo] HEALTH', { subscriptions: subscription.state.acknowledgedWallets,
   websocketReady: subscription.state.ready, reconnects: subscription.state.reconnects, queued: queue.size, dropped: queue.dropped,
-  lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt, ...diagnostics, rejectionCounts }), 60_000);
+  lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt, ...diagnostics, rejectionCounts, research:research.summary() }), 60_000);
 const server = createServer((req, res) => {
   if (req.method !== 'GET' || req.url !== '/health') { res.writeHead(404); res.end(); return; }
   const ready = !stopping && subscription.state.ready && Date.now() >= Math.max(backoffUntil, deliveryBackoffUntil) &&
@@ -173,5 +179,5 @@ const server = createServer((req, res) => {
 });
 server.listen(config.port, '0.0.0.0', () => console.log('[Echo] RPC pilot started; only supported Pump/PumpSwap trades; live buying OFF.'));
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => {
-  stopping = true; clearInterval(tick); clearInterval(sweep); clearInterval(heartbeat); subscription.stop(); server.close();
+  stopping = true; clearInterval(tick); clearInterval(sweep); clearInterval(researchTick); clearInterval(heartbeat); subscription.stop(); server.close();
 });
