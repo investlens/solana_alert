@@ -62,7 +62,6 @@ if (validationSignature) {
 
 type EchoMarket = { name: string; symbol: string; marketCap: number | null; liquidity: number | null };
 const echoMarketCache = new Map<string, { expiry: number; data: EchoMarket | null }>();
-function escapeEchoHtml(v: string) { return v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 async function echoMarket(mint: string): Promise<EchoMarket | null> {
   const previous = echoMarketCache.get(mint);
   if (previous && previous.expiry > Date.now()) return previous.data;
@@ -91,16 +90,11 @@ async function echoMarket(mint: string): Promise<EchoMarket | null> {
 async function enrichEchoCard(signal: ReturnType<typeof extractRpcEchoSignals>[number], messageId: number, baseCard: string) {
   const market = await echoMarket(signal.mint);
   if (!market) return;
-  const detail = [
-    market.name || market.symbol ? '<b>Token:</b> ' + escapeEchoHtml(market.name) + ' (' + escapeEchoHtml(market.symbol) + ')' : '',
-    market.marketCap == null ? '' : '<b>Market cap:</b> $' + market.marketCap.toLocaleString('en-US', { maximumFractionDigits: 0 }),
-    market.liquidity == null ? '' : '<b>Liquidity:</b> $' + market.liquidity.toLocaleString('en-US', { maximumFractionDigits: 0 }),
-    '<i>Third-party snapshot; security not assessed.</i>'
-  ].filter(Boolean).join('\n');
+  const updatedCard = echoCard(signal, Date.now() / 1000, market);
   try {
     const response = await fetch('https://api.telegram.org/bot' + config.botToken + '/editMessageText', {
       method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(2000),
-      body: JSON.stringify({ chat_id: config.admin, message_id: messageId, text: baseCard + '\n\n' + detail,
+      body: JSON.stringify({ chat_id: config.admin, message_id: messageId, text: updatedCard,
         parse_mode: 'HTML', disable_web_page_preview: true,
         reply_markup: { inline_keyboard: [
           [{ text: 'Transaction', url: 'https://solscan.io/tx/' + signal.signature },
