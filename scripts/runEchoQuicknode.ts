@@ -54,6 +54,60 @@ if (validationSignature) {
   } catch { console.warn('[Echo] V1_API_PROBE', { status: 'UNAVAILABLE', historicalOnly: true, delivered: false }); }
 }
 
+
+type EchoMarket = { name: string; symbol: string; marketCap: number | null; liquidity: number | null };
+const echoMarketCache = new Map<string, { expiry: number; data: EchoMarket | null }>();
+function escapeEchoHtml(v: string) { return v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+async function echoMarket(mint: string): Promise<EchoMarket | null> {
+  const previous = echoMarketCache.get(mint);
+  if (previous && previous.expiry > Date.now()) return previous.data;
+  if (echoMarketCache.size > 80) echoMarketCache.clear();
+  let data: EchoMarket | null = null;
+  try {
+    const response = await fetch('https://api.dexscreener.com/latest/dex/tokens/' + mint, { signal: AbortSignal.timeout(1500) });
+    if (response.ok) {
+      const body = await response.json();
+      const pairs = (Array.isArray(body.pairs) ? body.pairs : []).filter((p: any) =>
+        p && p.chainId === 'solana' && p.baseToken && p.baseToken.address === mint &&
+        Number.isFinite(Number(p.liquidity?.usd)) && Number(p.liquidity.usd) > 0);
+      pairs.sort((a: any, b: any) => Number(b.liquidity.usd) - Number(a.liquidity.usd));
+      const pair = pairs[0];
+      if (pair) {
+        const marketCap = Number(pair.marketCap), liquidity = Number(pair.liquidity.usd);
+        data = { name: String(pair.baseToken.name || '').slice(0, 64), symbol: String(pair.baseToken.symbol || '').slice(0, 24),
+          marketCap: Number.isFinite(marketCap) && marketCap > 0 ? marketCap : null,
+          liquidity: Number.isFinite(liquidity) && liquidity > 0 ? liquidity : null };
+      }
+    }
+  } catch { /* optional lookup only */ }
+  echoMarketCache.set(mint, { expiry: Date.now() + (data ? 60000 : 20000), data });
+  return data;
+}
+async function enrichEchoCard(signal: ReturnType<typeof extractRpcEchoSignals>[number], messageId: number, baseCard: string) {
+  const market = await echoMarket(signal.mint);
+  if (!market) return;
+  const detail = [
+    market.name || market.symbol ? '<b>Token:</b> ' + escapeEchoHtml(market.name) + ' (' + escapeEchoHtml(market.symbol) + ')' : '',
+    market.marketCap == null ? '' : '<b>Market cap:</b> $' + market.marketCap.toLocaleString('en-US', { maximumFractionDigits: 0 }),
+    market.liquidity == null ? '' : '<b>Liquidity:</b> $' + market.liquidity.toLocaleString('en-US', { maximumFractionDigits: 0 }),
+    '<i>Third-party snapshot; security not assessed.</i>'
+  ].filter(Boolean).join('\n');
+  try {
+    const response = await fetch('https://api.telegram.org/bot' + config.botToken + '/editMessageText', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(2000),
+      body: JSON.stringify({ chat_id: config.admin, message_id: messageId, text: baseCard + '\n\n' + detail,
+        parse_mode: 'HTML', disable_web_page_preview: true,
+        reply_markup: { inline_keyboard: [
+          [{ text: 'Transaction', url: 'https://solscan.io/tx/' + signal.signature },
+           { text: 'Chart', url: 'https://dexscreener.com/solana/' + signal.mint }],
+          [{ text: 'Caller wallet', url: 'https://solscan.io/account/' + signal.wallet }]
+        ] } })
+    });
+    const result = await response.json();
+    if (result?.ok) console.log('[Echo] ENRICHED', JSON.stringify({ mint: signal.mint, signature: signal.signature }));
+  } catch { /* original delivered message remains */ }
+}
+
 const queue = new EchoQueue(async signature => {
   if (store.has(`tx:${signature}`)) return;
   const tx = await readEchoTransaction(signature, rpc);
@@ -64,9 +118,10 @@ const queue = new EchoQueue(async signature => {
   if (!signals.length) { diagnostics.noSignal++; const reason = classifyEchoRejection(tx, signature, Date.now() / 1000); rejectionCounts[reason] = (rejectionCounts[reason] ?? 0) + 1; }
   for (const signal of signals) {
     if (store.has(signal.id)) continue;
+    const baseCard = echoCard(signal, Date.now() / 1000);
     const result = await fetch(`https://api.telegram.org/bot${config.botToken}/sendMessage`, { method: 'POST',
       headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(8_000),
-      body: JSON.stringify({ chat_id: config.admin, text: echoCard(signal, Date.now() / 1000), parse_mode: 'HTML', disable_web_page_preview: true,
+      body: JSON.stringify({ chat_id: config.admin, text: baseCard, parse_mode: 'HTML', disable_web_page_preview: true,
         reply_markup: { inline_keyboard: [[{ text: 'Transaction', url: `https://solscan.io/tx/${signature}` }, { text: 'Chart', url: `https://dexscreener.com/solana/${signal.mint}` }]] } }),
     }).then(r => r.json()).catch(() => null);
     if (!result?.ok || !Number.isInteger(result.result?.message_id)) {
@@ -75,6 +130,11 @@ const queue = new EchoQueue(async signature => {
       console.warn('[Echo] ADMIN_DELIVERY_UNCONFIRMED', { code: Number.isFinite(result?.error_code) ? result.error_code : null });
       lastErrorAt = Date.now(); throw new Error('Echo admin delivery unconfirmed');
     }
+    void enrichEchoCard(signal, result.result.message_id, baseCard);
+    console.log('[Echo] RESEARCH_EVENT', JSON.stringify({ caller: signal.caller, wallet: signal.wallet, mint: signal.mint,
+      signature: signal.signature, side: signal.side, tradeAt: signal.timestamp, deliveryAt: Date.now() / 1000,
+      telegramMessageId: result.result.message_id, quoteAmount: signal.quoteAmount, quoteSymbol: signal.quoteSymbol,
+      quoteBasis: signal.quoteBasis || 'unavailable' }));
     await store.delivered(signal.id, Date.now() / 1000); lastDeliveryAt = Date.now(); diagnostics.delivered++;
     console.log('[Echo] ADMIN_DELIVERY_ACCEPTED', { caller: signal.caller, signature, side: signal.side, messageId: result.result.message_id });
   }
