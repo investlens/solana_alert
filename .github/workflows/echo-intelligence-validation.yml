@@ -1,0 +1,21 @@
+name: Echo Intelligence P0 validation
+on:
+  push:
+    branches:
+      - feat/echo-intelligence-p0-20261024
+  workflow_dispatch:
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - run: node --import tsx --test tests/echoResearch.test.ts tests/echoCardUi.test.ts
