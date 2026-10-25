@@ -18,4 +18,4 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run typecheck
-      - run: node --import tsx --test tests/echoResearch.test.ts tests/echoCardUi.test.ts tests/echoRejectionAudit.test.ts tests/echoExecutionSafety.test.ts tests/echoJupiterMissed.test.ts
+      - run: node --import tsx --test tests/echoResearch.test.ts tests/echoCardUi.test.ts tests/echoRejectionAudit.test.ts tests/echoExecutionSafety.test.ts tests/echoJupiterMissed.test.ts tests/echoJupiterCandidates.test.ts
