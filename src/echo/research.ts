@@ -11,10 +11,15 @@ type Trial = {
   milestones?: Record<string, number>;
   status: 'AWAITING_PRICE' | 'TRACKING' | 'EXIT_OBSERVED' | 'CENSORED' | 'COMPLETE';
 };
-type PaperEvent={id:string;kind:'ENTRY'|'EXIT'|'MILESTONE';mint:string;caller:string;entry:number;price:number;multiple?:number;roiPercent:number};
+type PaperEvent={id:string;kind:'ENTRY'|'EXIT'|'MILESTONE';mint:string;caller:string;entry:number;price:number;multiple?:number;roiPercent:number;paperUsd:number;quantity:number;exitValueUsd:number;netPnlUsd:number;costBpsPerSide:number};
 type State = { version: 1; trials: Trial[]; pending?:PaperEvent[] };
 const windows = [300, 900, 1800, 3600, 21600, 86400] as const;
 const horizon = 86400;
+const PAPER_USD=10;
+// Conservative illustration only; not measured actual routing costs.
+const SIMULATED_COST_BPS_PER_SIDE=100;
+const paperQuantity=(entry:number)=>PAPER_USD*(1-SIMULATED_COST_BPS_PER_SIDE/10000)/entry;
+const paperExitValue=(entry:number,price:number)=>paperQuantity(entry)*price*(1-SIMULATED_COST_BPS_PER_SIDE/10000);
 const multiples = [2,5,10,50,100] as const;
 const clamp = (x: number) => Math.round(x * 10000) / 100;
 const validMint = (mint: string) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint);
@@ -67,7 +72,9 @@ export class EchoResearch {
     if(t.entry===null)return;
     const id=t.id+':'+kind+':'+(multiple??'');
     if(this.pending.some(e=>e.id===id))return;
-    this.pending.push({id,kind,mint:t.mint,caller:t.caller,entry:t.entry,price,multiple,roiPercent:(price/t.entry-1)*100});
+    const quantity=paperQuantity(t.entry),exitValueUsd=paperExitValue(t.entry,price);
+    this.pending.push({id,kind,mint:t.mint,caller:t.caller,entry:t.entry,price,multiple,roiPercent:(price/t.entry-1)*100,
+      paperUsd:PAPER_USD,quantity,exitValueUsd,netPnlUsd:exitValueUsd-PAPER_USD,costBpsPerSide:SIMULATED_COST_BPS_PER_SIDE});
     if(this.pending.length>250){this.pending.shift();console.warn('[EchoResearch] OUTBOX_LIMIT_REACHED');}
   }
   private async flush(){if(!this.notify)return;
@@ -149,7 +156,10 @@ export class EchoResearch {
   summary() {
     const counts:Record<string,number>={};
     for (const t of this.trials) counts[t.status]=(counts[t.status]||0)+1;
-    return {total:this.trials.length,counts,active:this.trials.filter(t=>(t.status==='TRACKING'||t.status==='AWAITING_PRICE'||t.status==='EXIT_OBSERVED') && Date.now()/1000-t.deliveryAt<horizon).length,
+    const exits=this.trials.filter(t=>t.exitAt!==null&&t.entry!==null&&t.exitPrice!==null);
+    const totalPnl=exits.reduce((sum,t)=>sum+paperExitValue(t.entry!,t.exitPrice!)-PAPER_USD,0);
+    return {paperUsd:PAPER_USD,estimatedCostBpsPerSide:SIMULATED_COST_BPS_PER_SIDE,closedExits:exits.length,
+      closedNetPnlUsd:Math.round(totalPnl*100)/100,total:this.trials.length,counts,active:this.trials.filter(t=>(t.status==='TRACKING'||t.status==='AWAITING_PRICE'||t.status==='EXIT_OBSERVED') && Date.now()/1000-t.deliveryAt<horizon).length,
       lastError:this.lastError,pendingNotifications:this.pending.length,lastNotified:this.lastNotified,notificationErrors:this.notificationErrors,milestones:Object.fromEntries(multiples.map(n=>[String(n),this.trials.filter(t=>!!t.milestones?.[String(n)]).length])),liveTrading:false,markPriceOnly:true};
   }
 }
