@@ -23,13 +23,20 @@ try{await tiers.load();}catch{throw Error('Echo tier persistence unavailable: re
 const research = new EchoResearch(config.statePath+'.research-v1.json',async event=>{
  const icon=event.kind==='ENTRY'?'🧪':event.kind==='EXIT'?'🛑':'🏆';
  const title=event.kind==='ENTRY'?'PAPER ENTRY':event.kind==='EXIT'?'PAPER STOP EXIT':String(event.multiple)+'x OBSERVED';
- const msg=[icon+' <b>ALPHAOS · '+title+'</b>','<b>Source:</b> '+event.caller,
+ const usd=String.fromCharCode(36);
+ const fmt=(n:number)=>Number.isFinite(n)?n.toFixed(2):'Unavailable';
+ const msg=[icon+' <b>ALPHAOS · '+title+'</b>',
+  '<b>Source:</b> '+event.caller,
   '<b>Token:</b> <code>'+event.mint+'</code>',
   '<b>Entry USD:</b> '+event.entry.toPrecision(5),
   '<b>Observed USD:</b> '+event.price.toPrecision(5),
   '<b>Price change:</b> '+event.roiPercent.toFixed(1)+'%',
-  '<b>Simulated investment:</b> 
-  '<i>Paper only · mark-price simulation · hypothetical sale, not executable quote</i>'].join(String.fromCharCode(10));
+  '<b>Paper investment:</b> '+usd+fmt(event.paperUsd),
+  '<b>Units purchased:</b> '+event.quantity.toPrecision(6),
+  '<b>Hypothetical sale:</b> '+usd+fmt(event.exitValueUsd),
+  '<b>Net P&amp;L:</b> '+(event.netPnlUsd>=0?'+':'-')+usd+fmt(Math.abs(event.netPnlUsd)),
+  '<b>Assumed costs:</b> '+(event.costBpsPerSide/100).toFixed(1)+'% per side',
+  '<i>Paper only · estimated execution, not an actual fill</i>'].join(String.fromCharCode(10));
  const response=await fetch('https://api.telegram.org/bot'+config.botToken+'/sendMessage',{
   method:'POST',headers:{'content-type':'application/json'},signal:AbortSignal.timeout(8000),
   body:JSON.stringify({chat_id:config.admin,text:msg,parse_mode:'HTML',disable_web_page_preview:true,
