@@ -1,0 +1,49 @@
+name: Echo historical transaction audit (read-only)
+on:
+  push:
+    branches:
+      - feat/echo-intelligence-p0-20261024
+    paths:
+      - 'scripts/auditEchoSuccessfulTrades.ts'
+      - 'scripts/replayEchoJupiterAudit.ts'
+      - 'src/echo/jupiterCandidates.ts'
+      - 'tests/fixtures/echoJupiterMissed.ts'
+      - '.github/workflows/echo-historical-rpc-audit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Retry after the repository RPC secret was configured.
+    env:
+      ECHO_RPC_URL: ${{ secrets.ECHO_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Read-only RPC probe and output
+        shell: bash
+        run: |
+          if [ -z "$ECHO_RPC_URL" ]; then
+            echo "::error::ECHO_RPC_URL repository Actions secret is unavailable; audit NOT run."
+            exit 1
+          fi
+          node --import tsx scripts/auditEchoSuccessfulTrades.ts echo-transactions-audit.json
+      - name: Replay historical Jupiter signatures (read-only)
+        run: node --import tsx scripts/replayEchoJupiterAudit.ts echo-jupiter-replay.json
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: echo-read-only-historical-audit
+          path: |
+            echo-transactions-audit.json
+            echo-jupiter-replay.json
+          retention-days: 3

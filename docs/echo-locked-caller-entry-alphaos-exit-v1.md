@@ -25,3 +25,11 @@ Initial stop 20% below entry. From +30% ROI: 15% trail and +10% entry floor; +50
 3. Caller × conditions report of winners, recoverable winners, failures, missing data
 4. Comparison versus HODL, fixed-time exits and actual caller exits when verified
 5. Pattern discovery and out-of-sample validation; only then propose alert rules.
+
+## Clarification locked 2026-10-24 — comprehensive capture before filtering
+- Echo is currently in **observational discovery mode**: capture and notify on every confidently attributable BUY and SELL by a watched wallet regardless of valuation, liquidity, age, momentum or performance. The existing 4-wallet Pump/PumpSwap-only decoder is insufficient coverage; it is an implementation constraint, NOT a desired eligibility/quality boundary.
+- Expand transaction recognition across verified Solana swap routes (including aggregator routes) with reliable signer/trading authority, token-in/token-out balance deltas and trade intent; never classify transfers, self-transfers, airdrops, fees or balance changes alone as trades without corroborating swap evidence. Ambiguous events go into an explicit UNVERIFIED research bucket rather than being discarded as low quality.
+- Distinguish **all verified trade alerts** from **future recommended high-conviction alerts**. No market-quality cutoff or learnable score filters during cohort collection. Dedup distinct trade events; preserve every verifiable action as event evidence, but batch/rate-manage bursts without silently dropping study data.
+- Record unsupported/rejected reason and sample signatures privately to quantify missed coverage, while limiting sensitive info in public logs. Repair historical completeness after deploy.
+- Only after representative caller observations, post-alert price paths, tiered stop replays, adequate sample coverage and chronological out-of-sample evaluation should we PROPOSE boundaries. Never auto-activate these boundaries without explicit approval.
+- Do not modify current live scanner until the expanded parser has fixture-based regression tests against real signatures and a safe Echo-only rollout.
