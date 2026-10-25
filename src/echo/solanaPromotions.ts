@@ -7,6 +7,7 @@ const address=/^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 export class EchoSolanaPromotions {
  private seen=new Set<string>(); private initialized=false; private busy=false; private lastError:string|null=null;
  private lastPoll:number|null=null; private delivered=0; private failed=0;
+ private lastCycle={eligible:0,duplicates:0,accepted:0,failed:0};
  constructor(private readonly path:string,private readonly deliver:(e:Event)=>Promise<void>){}
  async load(){try{const data=JSON.parse(await readFile(this.path,'utf8'));if(data.version!==1||!Array.isArray(data.seen))throw Error('Bad promotion state');
  this.seen=new Set(data.seen.filter((x:unknown)=>typeof x==='string').slice(-2000));this.initialized=true;
@@ -14,7 +15,7 @@ export class EchoSolanaPromotions {
  private async save(){await mkdir(dirname(this.path),{recursive:true,mode:0o700});const tmp=this.path+'.tmp';
  await writeFile(tmp,JSON.stringify({version:1,seen:[...this.seen].slice(-2000)}),{mode:0o600});await rename(tmp,this.path);}
  async tick(){if(this.busy)return;this.busy=true;
- try{const events:Event[]=[];for(const [kind,path] of endpoints){
+ try{const events:Event[]=[];let duplicates=0,accepted=0,failures=0;for(const [kind,path] of endpoints){
  const res=await fetch('https://api.dexscreener.com/'+path,{signal:AbortSignal.timeout(5000)});
  if(!res.ok)throw Error('DexScreener HTTP '+res.status);const rows:unknown=await res.json();
  if(!Array.isArray(rows))throw Error('Invalid promotion feed');
@@ -27,11 +28,13 @@ export class EchoSolanaPromotions {
  }
  if(!this.initialized){for(const ev of events)this.seen.add(ev.id);await this.save();this.initialized=true;
  console.log('[EchoPromotions] BASELINED',{count:events.length,notSent:true});}
- else for(const ev of events){if(this.seen.has(ev.id))continue;
- try{await this.deliver(ev);this.seen.add(ev.id);await this.save();this.delivered++;console.log('[EchoPromotions] DELIVERED',{kind:ev.kind,mint:ev.mint});}
- catch{this.failed++;console.warn('[EchoPromotions] DELIVERY_FAILED',{kind:ev.kind,mint:ev.mint});}}
+ else for(const ev of events){if(this.seen.has(ev.id)){duplicates++;continue;}
+ try{await this.deliver(ev);this.seen.add(ev.id);await this.save();this.delivered++;accepted++;console.log('[EchoPromotions] DELIVERED',{kind:ev.kind,mint:ev.mint});}
+ catch{this.failed++;failures++;console.warn('[EchoPromotions] DELIVERY_FAILED',{kind:ev.kind,mint:ev.mint});}}
+ this.lastCycle={eligible:events.length,duplicates,accepted,failed:failures};
  this.lastPoll=Date.now();this.lastError=null;
+ console.log('[EchoPromotions] RECONCILE',JSON.stringify({...this.lastCycle,deliveredTotal:this.delivered,failedTotal:this.failed,unconfirmed:failures}));
  }catch(e){this.lastError=e instanceof Error?e.message:'unavailable';console.warn('[EchoPromotions] POLL_FAILED',this.lastError);}
  finally{this.busy=false;}}
- summary(){return {initialized:this.initialized,lastPoll:this.lastPoll,lastError:this.lastError,delivered:this.delivered,failed:this.failed};}
+ summary(){return {initialized:this.initialized,lastPoll:this.lastPoll,lastError:this.lastError,delivered:this.delivered,failed:this.failed,lastCycle:this.lastCycle};}
 }
