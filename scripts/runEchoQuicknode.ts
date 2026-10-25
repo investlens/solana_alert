@@ -107,7 +107,7 @@ async function echoMarket(mint: string): Promise<EchoMarket | null> {
       pairs.sort((a: any, b: any) => Number(b.liquidity.usd) - Number(a.liquidity.usd));
       const pair = pairs[0];
       if (pair) {
-        const marketCap = Number(pair.marketCap ?? pair.fdv), liquidity = Number(pair.liquidity?.usd);
+        const marketCap = Number(pair.marketCap), liquidity = Number(pair.liquidity?.usd);
         data = { name: String(pair.baseToken.name || '').slice(0, 64), symbol: String(pair.baseToken.symbol || '').slice(0, 24),
           marketCap: Number.isFinite(marketCap) && marketCap > 0 ? marketCap : null,
           liquidity: Number.isFinite(liquidity) && liquidity > 0 ? liquidity : null };
