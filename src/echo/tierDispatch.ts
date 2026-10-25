@@ -8,6 +8,7 @@ const validMint=(x:string)=>/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(x);
 export class EchoTierDispatcher {
  private items:Item[]=[];private busy=false;private lastError:string|null=null;
  private deliveredPaid=0;private deliveredFree=0;private failed=0;private checkedAt:number|null=null;
+ private recipientCounts={admin:0,paid:0,free:0};
  readonly configured:boolean;
  constructor(private readonly path:string,private readonly token:string,private readonly adminId:string,
   private readonly url:string|undefined,private readonly key:string|undefined){
@@ -40,10 +41,11 @@ export class EchoTierDispatcher {
   if(this.busy||!this.configured)return;
   const now=Date.now();
   const pending=this.items.filter(i=>!i.doneAt&&now-i.acceptedAt>=ECHO_TIER_DELAY_MS.paid);
-  if(!pending.length)return;
+  if(!pending.length&&this.checkedAt!==null&&now-this.checkedAt<60000)return;
   this.busy=true;
   try{
    const targets=await this.recipients();this.checkedAt=Date.now();
+   this.recipientCounts={admin:targets.admin.length,paid:targets.paid.length,free:targets.free.length};
    for(const item of pending.slice(0,15)){
     let remaining=false;
     for(const tier of ['paid','free'] as const){
@@ -68,5 +70,5 @@ export class EchoTierDispatcher {
   }catch(e){this.lastError=e instanceof Error?e.message:'Tier dispatcher unavailable';console.warn('[EchoTiers] FAIL_CLOSED',this.lastError);}
   finally{this.busy=false;}
  }
- summary(){return {configured:this.configured,queued:this.items.filter(i=>!i.doneAt).length,deliveredPaid:this.deliveredPaid,deliveredFree:this.deliveredFree,failed:this.failed,lastError:this.lastError,checkedAt:this.checkedAt};}
+ summary(){return {configured:this.configured,queued:this.items.filter(i=>!i.doneAt).length,deliveredPaid:this.deliveredPaid,deliveredFree:this.deliveredFree,failed:this.failed,lastError:this.lastError,checkedAt:this.checkedAt,recipientCounts:this.recipientCounts};}
 }
