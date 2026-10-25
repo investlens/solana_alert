@@ -21,9 +21,9 @@ export class EchoSolanaPromotions {
  if(!Array.isArray(rows))throw Error('Invalid promotion feed');
  for(const raw of rows){const x=raw as Record<string,unknown>;if(x.chainId!=='solana'||typeof x.tokenAddress!=='string'||!address.test(x.tokenAddress))continue;
  const amount=typeof x.totalAmount==='number'&&Number.isFinite(x.totalAmount)?x.totalAmount:undefined;
- const date=typeof x.date==='string'?x.date:undefined;
+ const date=(typeof x.date==='string'||typeof x.date==='number')&&String(x.date).trim()?String(x.date):undefined;
  // BOOST has no event ID; use changing totalAmount; ads use the published date and ad type.
- const suffix=kind==='BOOST'?String(amount??x.amount??'unknown'):String(date??'unknown')+':'+String(x.type??'unknown');
+ const suffix=kind==='BOOST'?String(amount??x.amount??'unknown'):String(date??x.url??'unknown')+':'+String(x.type??'unknown');
  events.push({id:kind+':'+x.tokenAddress+':'+suffix,kind,mint:x.tokenAddress,amount,date});}
  }
  if(!this.initialized){for(const ev of events)this.seen.add(ev.id);await this.save();this.initialized=true;
