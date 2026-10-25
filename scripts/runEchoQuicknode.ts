@@ -4,6 +4,7 @@ import { readQuicknodeEchoConfig } from '../src/echo/quicknodeConfig.js';
 import { EchoStore } from '../src/echo/store.js';
 import { EchoResearch } from '../src/echo/research.js';
 import { EchoSolanaPromotions } from '../src/echo/solanaPromotions.js';
+import { EchoTierDispatcher } from '../src/echo/tierDispatch.js';
 import { pumpCurveSnapshot } from '../src/echo/curveSnapshot.js';
 import { ECHO_WALLETS, echoCard } from '../src/echo/signals.js';
 import { extractRpcEchoSignals, classifyEchoRejection, type EchoRejectReason } from '../src/echo/rpcSignals.js';
@@ -15,6 +16,10 @@ import { readEchoTransaction } from '../src/echo/readTransaction.js';
 // Helius requests, private keys or trade execution imports.
 const config = readQuicknodeEchoConfig(process.env);
 const store = new EchoStore(config.statePath); await store.load();
+const tiers = new EchoTierDispatcher(config.statePath+'.solana-tiers-v1.json',config.botToken,config.admin,
+ process.env.ECHO_PUBLIC_TIERS_ENABLED==='true'?process.env.ECHO_SUBSCRIBER_SUPABASE_URL:undefined,
+ process.env.ECHO_PUBLIC_TIERS_ENABLED==='true'?process.env.ECHO_SUBSCRIBER_SUPABASE_SERVICE_KEY:undefined);
+try{await tiers.load();}catch{throw Error('Echo tier persistence unavailable: refusing unsafe public distribution');}
 const research = new EchoResearch(config.statePath+'.research-v1.json',async event=>{
  const icon=event.kind==='ENTRY'?'🧪':event.kind==='EXIT'?'🛑':'🏆';
  const title=event.kind==='ENTRY'?'PAPER ENTRY':event.kind==='EXIT'?'PAPER STOP EXIT':String(event.multiple)+'x OBSERVED';
@@ -150,6 +155,7 @@ const promotions = new EchoSolanaPromotions(config.statePath+'.solana-promotions
     body:JSON.stringify({chat_id:config.admin,text,parse_mode:'HTML',disable_web_page_preview:true,reply_markup:buttons})
   }).then(r=>r.json());
   if(!response?.ok||!Number.isInteger(response.result?.message_id))throw Error('Telegram promotion delivery unconfirmed');
+  await tiers.enqueue({id:ev.id,mint:ev.mint,text,buttons,acceptedAt:Date.now()}).catch(()=>console.warn('[EchoTiers] PROMOTION_QUEUE_WRITE_FAILED'));
   if(researchReady) void research.addBuy({caller:ev.kind==='BOOST'?'SOLANA_BOOST':'SOLANA_DEX_PAID',mint:ev.mint,signature:ev.id,deliveryAt:Date.now()/1000}).catch(()=>console.warn('[EchoResearch] PROMOTION_PAPER_PERSIST_FAILED'));
 
 });
@@ -183,6 +189,8 @@ const queue = new EchoQueue(async signature => {
       telegramMessageId: result.result.message_id, quoteAmount: signal.quoteAmount, quoteSymbol: signal.quoteSymbol,
       quoteBasis: signal.quoteBasis || 'unavailable' }));
     await store.delivered(signal.id, Date.now() / 1000); lastDeliveryAt = Date.now(); diagnostics.delivered++;
+    await tiers.enqueue({id:signal.id,mint:signal.mint,text:baseCard,acceptedAt:Date.now(),buttons:{inline_keyboard:[
+      [{text:'🔎 Transaction',url:'https://solscan.io/tx/'+signal.signature},{text:'📈 Chart',url:'https://dexscreener.com/solana/'+signal.mint}]]}}).catch(()=>console.warn('[EchoTiers] CALLER_QUEUE_WRITE_FAILED'));
     if (researchReady && signal.side === 'BUY') void research.addBuy({caller:signal.caller,mint:signal.mint,signature:signal.signature,deliveryAt:Date.now()/1000}).catch(() => console.warn('[EchoResearch] PERSIST_FAILED'));
 
     console.log('[Echo] ADMIN_DELIVERY_ACCEPTED', { caller: signal.caller, signature, side: signal.side, messageId: result.result.message_id });
@@ -212,9 +220,10 @@ const promotionTick=setInterval(()=>{if(promotionsReady)void promotions.tick();}
 if(promotionsReady)void promotions.tick();
 const researchTick = setInterval(() => { if (researchReady) void research.tick().catch(() => console.warn('[EchoResearch] TICK_FAILED')); }, 60_000);
 if (researchReady) void research.tick().catch(() => console.warn('[EchoResearch] INITIAL_TICK_FAILED'));
+const tierTick=setInterval(()=>{void tiers.tick().catch(()=>console.warn('[EchoTiers] TICK_FAILED'));},1000);
 const heartbeat = setInterval(() => console.log('[Echo] HEALTH', { subscriptions: subscription.state.acknowledgedWallets,
   websocketReady: subscription.state.ready, reconnects: subscription.state.reconnects, queued: queue.size, dropped: queue.dropped,
-  lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt, ...diagnostics, promotions: promotionsReady ? promotions.summary() : {enabled:false}, research: researchReady ? research.summary() : {enabled:false}, rejectionCounts }), 60_000);
+  lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt, ...diagnostics, promotions: promotionsReady ? promotions.summary() : {enabled:false}, research: researchReady ? research.summary() : {enabled:false},tiers:tiers.summary(), rejectionCounts }), 60_000);
 const server = createServer((req, res) => {
   if (req.method !== 'GET' || req.url !== '/health') { res.writeHead(404); res.end(); return; }
   const ready = !stopping && subscription.state.ready && Date.now() >= Math.max(backoffUntil, deliveryBackoffUntil) &&
@@ -226,5 +235,5 @@ const server = createServer((req, res) => {
 });
 server.listen(config.port, '0.0.0.0', () => console.log('[Echo] RPC pilot started; only supported Pump/PumpSwap trades; live buying OFF.'));
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => {
-  stopping = true; clearInterval(tick); clearInterval(sweep); clearInterval(researchTick); clearInterval(promotionTick); clearInterval(heartbeat); subscription.stop(); server.close();
+  stopping = true; clearInterval(tick); clearInterval(sweep); clearInterval(researchTick); clearInterval(promotionTick); clearInterval(tierTick); clearInterval(heartbeat); subscription.stop(); server.close();
 });
