@@ -10,11 +10,11 @@ test('all paper opportunities are counted even when the pricing cap is reached',
  try {
   const a=new EchoResearch(path); await a.load();
   const mint='So11111111111111111111111111111111111111112',deliveryAt=Date.now()/1000;
-  for(let i=0;i<18;i++) await a.addBuy({caller:'fixture',mint,signature:String(i).padStart(64,'1'),deliveryAt});
+  for(let i=0;i<66;i++) await a.addBuy({caller:'fixture',mint,signature:String(i).padStart(64,'1'),deliveryAt});
   const data=JSON.parse(await readFile(path,'utf8'));
-  assert.equal(data.trials.length,18);
+  assert.equal(data.trials.length,66);
   assert.equal(data.trials.filter((v:any)=>v.status==='CENSORED').length,2);
-  assert.equal(data.trials.filter((v:any)=>v.status==='AWAITING_PRICE').length,16);
+  assert.equal(data.trials.filter((v:any)=>v.status==='AWAITING_PRICE').length,64);
  } finally {await rm(dir,{recursive:true,force:true});}
 });
 test('existing paper trailing stop uses the agreed ROI tiers',()=>{
