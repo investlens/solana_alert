@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { readQuicknodeEchoConfig } from '../src/echo/quicknodeConfig.js';
 import { EchoStore } from '../src/echo/store.js';
 import { EchoResearch } from '../src/echo/research.js';
+import { EchoSolanaPromotions } from '../src/echo/solanaPromotions.js';
 import { ECHO_WALLETS, echoCard } from '../src/echo/signals.js';
 import { extractRpcEchoSignals, classifyEchoRejection, type EchoRejectReason } from '../src/echo/rpcSignals.js';
 import { EchoQueue } from '../src/echo/queue.js';
@@ -107,6 +108,20 @@ async function enrichEchoCard(signal: ReturnType<typeof extractRpcEchoSignals>[n
   } catch { /* original delivered message remains */ }
 }
 
+const promotions = new EchoSolanaPromotions(config.statePath+'.solana-promotions-v1.json',async ev => {
+  const text = (ev.kind==='BOOST'?'🚀 SOLANA · DEXSCREENER BOOST':'💳 SOLANA · DEXSCREENER PAID AD')+'\n'
+    +'🪙 Token: <code>'+ev.mint+'</code>\n'
+    +(ev.kind==='BOOST'&&ev.amount!=null?'⚡ Active boost total: '+ev.amount+'\n':'')
+    +'🔎 <a href="https://dexscreener.com/solana/'+ev.mint+'">DexScreener chart</a>\n'
+    +'⚠️ Paid promotion only. Caller BUY/SELL not verified; no trade implied.';
+  const response=await fetch('https://api.telegram.org/bot'+config.botToken+'/sendMessage',{
+    method:'POST',headers:{'content-type':'application/json'},signal:AbortSignal.timeout(8000),
+    body:JSON.stringify({chat_id:config.admin,text,parse_mode:'HTML',disable_web_page_preview:true})
+  }).then(r=>r.json());
+  if(!response?.ok||!Number.isInteger(response.result?.message_id))throw Error('Telegram promotion delivery unconfirmed');
+});
+let promotionsReady=false;
+try{await promotions.load();promotionsReady=true;}catch{console.warn('[EchoPromotions] DISABLED: invalid state');}
 const queue = new EchoQueue(async signature => {
   if (store.has(`tx:${signature}`)) return;
   const tx = await readEchoTransaction(signature, rpc);
@@ -160,11 +175,13 @@ async function reconcile() {
 const subscription = startEchoSubscription({ url: config.wsUrl, onSignature: signature => { if (!store.has(`tx:${signature}`)) queue.add(signature); }, onReady: () => { void reconcile(); } });
 const tick = setInterval(() => { if (!stopping && Date.now() >= Math.max(backoffUntil, deliveryBackoffUntil)) void queue.tick(); }, 250);
 const sweep = setInterval(() => { void reconcile(); }, 60_000);
+const promotionTick=setInterval(()=>{if(promotionsReady)void promotions.tick();},30_000);
+if(promotionsReady)void promotions.tick();
 const researchTick = setInterval(() => { if (researchReady) void research.tick().catch(() => console.warn('[EchoResearch] TICK_FAILED')); }, 60_000);
 if (researchReady) void research.tick().catch(() => console.warn('[EchoResearch] INITIAL_TICK_FAILED'));
 const heartbeat = setInterval(() => console.log('[Echo] HEALTH', { subscriptions: subscription.state.acknowledgedWallets,
   websocketReady: subscription.state.ready, reconnects: subscription.state.reconnects, queued: queue.size, dropped: queue.dropped,
-  lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt, ...diagnostics, research: researchReady ? research.summary() : {enabled:false}, rejectionCounts }), 60_000);
+  lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt, ...diagnostics, promotions: promotionsReady ? promotions.summary() : {enabled:false}, research: researchReady ? research.summary() : {enabled:false}, rejectionCounts }), 60_000);
 const server = createServer((req, res) => {
   if (req.method !== 'GET' || req.url !== '/health') { res.writeHead(404); res.end(); return; }
   const ready = !stopping && subscription.state.ready && Date.now() >= Math.max(backoffUntil, deliveryBackoffUntil) &&
@@ -176,5 +193,5 @@ const server = createServer((req, res) => {
 });
 server.listen(config.port, '0.0.0.0', () => console.log('[Echo] RPC pilot started; only supported Pump/PumpSwap trades; live buying OFF.'));
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => {
-  stopping = true; clearInterval(tick); clearInterval(sweep); clearInterval(researchTick); clearInterval(heartbeat); subscription.stop(); server.close();
+  stopping = true; clearInterval(tick); clearInterval(sweep); clearInterval(researchTick); clearInterval(promotionTick); clearInterval(heartbeat); subscription.stop(); server.close();
 });
