@@ -118,23 +118,40 @@ async function echoMarket(mint: string): Promise<EchoMarket | null> {
   return data;
 }
 async function enrichEchoCard(signal: ReturnType<typeof extractRpcEchoSignals>[number], messageId: number, _baseCard: string) {
-  const market = await echoMarket(signal.mint);
-  if (!market) return;
-  const updatedCard = echoCard(signal, Date.now() / 1000, market);
-  try {
-    const response = await fetch('https://api.telegram.org/bot' + config.botToken + '/editMessageText', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(2000),
-      body: JSON.stringify({ chat_id: config.admin, message_id: messageId, text: updatedCard,
-        parse_mode: 'HTML', disable_web_page_preview: true,
-        reply_markup: { inline_keyboard: [
-          [{ text: 'Transaction', url: 'https://solscan.io/tx/' + signal.signature },
-           { text: 'Chart', url: 'https://dexscreener.com/solana/' + signal.mint }],
-          [{ text: 'Caller wallet', url: 'https://solscan.io/account/' + signal.wallet }]
-        ] } })
-    });
-    const result = await response.json();
-    if (result?.ok) console.log('[Echo] ENRICHED', JSON.stringify({ mint: signal.mint, signature: signal.signature }));
-  } catch { /* original delivered message remains */ }
+  // Pump.fun launch-phase pairs can be absent from DexScreener momentarily.
+  // Retry briefly and use creator/curve data when no quoted DEX pool exists.
+  for (const delay of [0,2500,7000,15000]) {
+    if(delay) await new Promise(resolve=>setTimeout(resolve,delay));
+    const market = await echoMarket(signal.mint);
+    const curve = (!market?.marketCap || !market?.name) ? await pumpCurveSnapshot(signal.mint,config.rpcUrl) : null;
+    const enriched = {
+      name:market?.name || curve?.name || '',
+      symbol:market?.symbol || curve?.symbol || '',
+      marketCap:market?.marketCap ?? curve?.marketCap ?? null,
+      liquidity:market?.liquidity ?? null
+    };
+    if(!enriched.name&&!enriched.symbol&&enriched.marketCap===null&&enriched.liquidity===null)continue;
+    const updatedCard = echoCard(signal, Date.now() / 1000, enriched);
+    try {
+      const response = await fetch('https://api.telegram.org/bot' + config.botToken + '/editMessageText', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(5000),
+        body: JSON.stringify({ chat_id: config.admin, message_id: messageId, text: updatedCard,
+          parse_mode: 'HTML', disable_web_page_preview: true,
+          reply_markup: { inline_keyboard: [
+            [{ text: 'Transaction', url: 'https://solscan.io/tx/' + signal.signature },
+             { text: 'Chart', url: 'https://dexscreener.com/solana/' + signal.mint }],
+            [{ text: 'Caller wallet', url: 'https://solscan.io/account/' + signal.wallet }]
+          ] } })
+      });
+      const result = await response.json();
+      if(result?.ok || result?.description==='Bad Request: message is not modified'){
+        console.log('[Echo] ENRICHED',JSON.stringify({mint:signal.mint,signature:signal.signature,hasMarketCap:enriched.marketCap!==null,hasLiquidity:enriched.liquidity!==null,hasName:!!enriched.name}));
+        return;
+      }
+      console.warn('[Echo] ENRICHMENT_EDIT_FAILED',{code:result?.error_code??null});
+    } catch {console.warn('[Echo] ENRICHMENT_RETRY',{mint:signal.mint});}
+  }
+  console.warn('[Echo] ENRICHMENT_UNAVAILABLE',{mint:signal.mint,signature:signal.signature});
 }
 
 const promotions = new EchoSolanaPromotions(config.statePath+'.solana-promotions-v1.json',async ev => {
