@@ -22,7 +22,7 @@ export class EchoResearch {
   private writes = Promise.resolve();
   private nextTick = 0;
   private lastError: string | null = null;
-  private readonly maxActive = 16;
+  private readonly maxActive = 64;
   constructor(private readonly path: string) {}
   async load() {
     try {
