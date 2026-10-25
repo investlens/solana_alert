@@ -23,7 +23,7 @@ const research = new EchoResearch(config.statePath+'.research-v1.json',async eve
   '<b>Entry USD:</b> '+event.entry.toPrecision(5),
   '<b>Observed USD:</b> '+event.price.toPrecision(5),
   '<b>Change:</b> '+event.roiPercent.toFixed(1)+'%',
-  '<i>Paper only · observed prices · no actual trade</i>'].join('\\n');
+  '<i>Paper only · observed prices · no actual trade</i>'].join(String.fromCharCode(10));
  const response=await fetch('https://api.telegram.org/bot'+config.botToken+'/sendMessage',{
   method:'POST',headers:{'content-type':'application/json'},signal:AbortSignal.timeout(8000),
   body:JSON.stringify({chat_id:config.admin,text:msg,parse_mode:'HTML',disable_web_page_preview:true,
