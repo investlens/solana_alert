@@ -6,9 +6,16 @@ export async function pumpCurveSnapshot(mint:string,rpcUrl:string):Promise<Curve
  if(!validAddress(mint))return null;
  try{
   // Unofficial frontend endpoint: best-effort only; may change or require auth.
-  const res=await fetch('https://frontend-api-v3.pump.fun/coins/'+mint,{signal:AbortSignal.timeout(1800)});
-  if(!res.ok)return null;
-  const coin=await res.json() as Record<string,unknown>;
+  let coin:Record<string,unknown>|null=null;
+  for(const endpoint of ['coins-v2/','coins/']){
+   try{
+    const res=await fetch('https://frontend-api-v3.pump.fun/'+endpoint+mint,{signal:AbortSignal.timeout(1800)});
+    if(!res.ok)continue;
+    const body=await res.json() as Record<string,unknown>;
+    if(body?.mint===mint){coin=body;break;}
+   }catch{/* Try the other endpoint. */}
+  }
+  if(!coin)return null;
   if(coin.mint!==mint||coin.complete===true)return null;
   const creator=validAddress(coin.creator)?coin.creator:null;
   let devHoldingPercent:number|null=null;
