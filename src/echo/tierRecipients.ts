@@ -14,7 +14,7 @@ export function eligibleEchoRecipients(rows:readonly EchoSubscriber[], now=new D
   else if(row.tier==='paid'&&row.subscription_status==='active'&&row.paid_active_until
     && Number.isFinite(Date.parse(row.paid_active_until))&&Date.parse(row.paid_active_until)>now.getTime())
     result.paid.push(row.telegram_id);
-  else if(row.tier==='free'&&row.subscription_status==='none'&&Number(row.free_trial_used)<Number(row.free_trial_limit))
+  else if(row.tier==='free'&&row.subscription_status!=='active')
     result.free.push(row.telegram_id);
   else continue;
   seen.add(row.telegram_id);
