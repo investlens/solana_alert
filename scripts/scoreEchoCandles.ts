@@ -19,6 +19,8 @@ const checkpoints=[300,900,1800,3600,21600,86400];
 const results:any[]=[];
 for(const [key,a] of firstBuys){
  const all=byMint.get(a.mint)||[];
+ // OHLCV timestamps denote candle OPEN, not close. A candle close can only be
+ // observed after the full minute; require its full interval after delivery.
  const entry=all.find(c=>c.observedAt>=a.deliveryAt&&c.observedAt<=a.deliveryAt+120);
  const item:any={caller:a.caller,mint:a.mint,deliveryAt:a.deliveryAt,entryAt:entry?.observedAt??null,pool:entry?.pool??null,
   entryCloseUsd:entry?.closeUsd??null,returnsPct:{},coverage:{},classification:'UNSCORED'};
@@ -28,12 +30,12 @@ for(const [key,a] of firstBuys){
   item.returnsPct[String(seconds)]=c?Math.round((c.closeUsd/entry.closeUsd-1)*10000)/100:null;
   item.coverage[String(seconds)]=c?'CANDLE_CLOSE_PROXY':'MISSING';
  }
- if(entry)item.classification='GROSS_MARK_ONLY';
+ if(entry)item.classification='UNSCORED_POOL_IDENTITY_UNVERIFIED';
  results.push(item);
 }
 const counts:Record<string,{opportunities:number,pricedEntries:number,priced24h:number}>={};
 for(const x of results){const n=counts[x.caller]??{opportunities:0,pricedEntries:0,priced24h:0};n.opportunities++;if(x.entryAt!==null)n.pricedEntries++;if(x.returnsPct['86400']!==null)n.priced24h++;counts[x.caller]=n;}
 await writeFile(outputPath,JSON.stringify({schema:'echo.candle.research.v1',source:'geckoterminal_1m_ohlcv',
- note:'First BUY per caller/token only. OHLCV candle closes are NOT executable fills, may have survivorship bias. No profit rankings or trailing-stop simulation until historical pool identity and buy/sell executable pricing are validated.',
+ note:'First BUY per caller/token only. OHLCV candle closes are NOT executable fills. Pool chosen by present-day reserve can have survivorship bias; all opportunities remain UNSCORED until historical pool attribution and executable pricing are validated.',
  opportunities:results.length,byCaller:counts,results},null,2));
 console.log(JSON.stringify({opportunities:results.length,byCaller:counts}));
