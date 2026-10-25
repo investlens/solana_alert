@@ -103,24 +103,24 @@ async function echoMarket(mint: string): Promise<EchoMarket | null> {
       const body = await response.json();
       const pairs = (Array.isArray(body.pairs) ? body.pairs : []).filter((p: any) =>
         p && p.chainId === 'solana' && p.baseToken && p.baseToken.address === mint &&
-        Number.isFinite(Number(p.liquidity?.usd)) && Number(p.liquidity.usd) > 0);
+        (Number(p.priceUsd) > 0 || Number(p.marketCap)>0 || Number(p.fdv)>0 || !!p.baseToken.name));
       pairs.sort((a: any, b: any) => Number(b.liquidity.usd) - Number(a.liquidity.usd));
       const pair = pairs[0];
       if (pair) {
-        const marketCap = Number(pair.marketCap), liquidity = Number(pair.liquidity.usd);
+        const marketCap = Number(pair.marketCap ?? pair.fdv), liquidity = Number(pair.liquidity?.usd);
         data = { name: String(pair.baseToken.name || '').slice(0, 64), symbol: String(pair.baseToken.symbol || '').slice(0, 24),
           marketCap: Number.isFinite(marketCap) && marketCap > 0 ? marketCap : null,
           liquidity: Number.isFinite(liquidity) && liquidity > 0 ? liquidity : null };
       }
     }
   } catch { /* optional lookup only */ }
-  echoMarketCache.set(mint, { expiry: Date.now() + (data ? 60000 : 20000), data });
+  echoMarketCache.set(mint, { expiry: Date.now() + (data?.marketCap&&data?.liquidity&&data?.name ? 60000 : 2500), data });
   return data;
 }
 async function enrichEchoCard(signal: ReturnType<typeof extractRpcEchoSignals>[number], messageId: number, _baseCard: string) {
   // Pump.fun launch-phase pairs can be absent from DexScreener momentarily.
   // Retry briefly and use creator/curve data when no quoted DEX pool exists.
-  for (const delay of [0,2500,7000,15000]) {
+  for (const delay of [0,2500,7000,15000,30000,60000]) {
     if(delay) await new Promise(resolve=>setTimeout(resolve,delay));
     const market = await echoMarket(signal.mint);
     const curve = (!market?.marketCap || !market?.name) ? await pumpCurveSnapshot(signal.mint,config.rpcUrl) : null;
@@ -131,6 +131,7 @@ async function enrichEchoCard(signal: ReturnType<typeof extractRpcEchoSignals>[n
       liquidity:market?.liquidity ?? null
     };
     if(!enriched.name&&!enriched.symbol&&enriched.marketCap===null&&enriched.liquidity===null)continue;
+    // A partial early response should not permanently stop enrichment while fields are missing.
     const updatedCard = echoCard(signal, Date.now() / 1000, enriched);
     try {
       const response = await fetch('https://api.telegram.org/bot' + config.botToken + '/editMessageText', {
@@ -146,7 +147,8 @@ async function enrichEchoCard(signal: ReturnType<typeof extractRpcEchoSignals>[n
       const result = await response.json();
       if(result?.ok || result?.description==='Bad Request: message is not modified'){
         console.log('[Echo] ENRICHED',JSON.stringify({mint:signal.mint,signature:signal.signature,hasMarketCap:enriched.marketCap!==null,hasLiquidity:enriched.liquidity!==null,hasName:!!enriched.name}));
-        return;
+        if(enriched.name && enriched.marketCap!==null && enriched.liquidity!==null)return;
+        continue;
       }
       console.warn('[Echo] ENRICHMENT_EDIT_FAILED',{code:result?.error_code??null});
     } catch {console.warn('[Echo] ENRICHMENT_RETRY',{mint:signal.mint});}
