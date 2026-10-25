@@ -5,6 +5,9 @@ on:
       - feat/echo-intelligence-p0-20261024
     paths:
       - 'scripts/auditEchoSuccessfulTrades.ts'
+      - 'scripts/replayEchoJupiterAudit.ts'
+      - 'src/echo/jupiterCandidates.ts'
+      - 'tests/fixtures/echoJupiterMissed.ts'
       - '.github/workflows/echo-historical-rpc-audit.yml'
   workflow_dispatch:
 permissions:
@@ -34,9 +37,13 @@ jobs:
             exit 1
           fi
           node --import tsx scripts/auditEchoSuccessfulTrades.ts echo-transactions-audit.json
+      - name: Replay historical Jupiter signatures (read-only)
+        run: node --import tsx scripts/replayEchoJupiterAudit.ts echo-jupiter-replay.json
       - uses: actions/upload-artifact@v4
         if: success()
         with:
           name: echo-read-only-historical-audit
-          path: echo-transactions-audit.json
+          path: |
+            echo-transactions-audit.json
+            echo-jupiter-replay.json
           retention-days: 3
