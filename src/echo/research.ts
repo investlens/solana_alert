@@ -25,7 +25,7 @@ export class EchoResearch {
   private nextTick = 0;
   private lastError: string | null = null;
   private readonly maxActive = 64;
-  constructor(private readonly path: string) {}
+  constructor(private readonly path: string, private readonly notify?: (event:{kind:'ENTRY'|'EXIT'|'MILESTONE';mint:string;caller:string;entry:number;price:number;multiple?:number;roiPercent:number})=>Promise<void>) {}
   async load() {
     try {
       const parsed = JSON.parse(await readFile(this.path,'utf8')) as State;
@@ -87,6 +87,7 @@ export class EchoResearch {
             if (t.entry===null) {
               if (now-t.deliveryAt>180) { t.status='CENSORED'; console.warn('[EchoResearch] ENTRY_UNAVAILABLE',JSON.stringify({id:t.id,delaySeconds:Math.round(now-t.deliveryAt)})); continue; }
               t.entry=usd;t.entryAt=now;t.pool=p.pairAddress;t.stop=openPaperStop(usd);t.peak=usd;
+              if(this.notify) await this.notify({kind:'ENTRY',mint:t.mint,caller:t.caller,entry:usd,price:usd,roiPercent:0}).catch(()=>console.warn('[EchoResearch] ENTRY_NOTIFY_FAILED'));
             }
             t.points.push(sample);
             if (t.points.length>1500) t.points.shift();
@@ -95,10 +96,12 @@ export class EchoResearch {
             for (const multiple of multiples) if (usd >= t.entry! * multiple && !t.milestones[String(multiple)]) {
               t.milestones[String(multiple)] = now;
               console.log('[EchoResearch] MILESTONE',JSON.stringify({id:t.id,caller:t.caller,mint:t.mint,multiple,at:now,markPriceOnly:true}));
+              if(this.notify) await this.notify({kind:'MILESTONE',mint:t.mint,caller:t.caller,entry:t.entry!,price:usd,multiple,roiPercent:(usd/t.entry!-1)*100}).catch(()=>console.warn('[EchoResearch] MILESTONE_NOTIFY_FAILED'));
             }
             if (t.stop && t.exitAt===null) {
               const next=updatePaperStop(t.stop,usd);
-              if (next.closed) {t.exitAt=now;t.exitPrice=usd;t.status='EXIT_OBSERVED';}
+              if (next.closed) {t.exitAt=now;t.exitPrice=usd;t.status='EXIT_OBSERVED';
+                if(this.notify) await this.notify({kind:'EXIT',mint:t.mint,caller:t.caller,entry:t.entry!,price:usd,roiPercent:(usd/t.entry!-1)*100}).catch(()=>console.warn('[EchoResearch] EXIT_NOTIFY_FAILED'));}
               else {t.stop=next;t.status='TRACKING';}
             }
             for (const seconds of windows) {
