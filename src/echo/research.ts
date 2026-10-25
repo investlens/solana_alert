@@ -8,11 +8,13 @@ type Trial = {
   entry: number | null; entryAt: number | null; pool: string | null;
   stop: PaperStop | null; exitAt: number | null; exitPrice: number | null;
   peak: number | null; points: Sample[]; checkpoints: Record<string, number | null>;
+  milestones?: Record<string, number>;
   status: 'AWAITING_PRICE' | 'TRACKING' | 'EXIT_OBSERVED' | 'CENSORED' | 'COMPLETE';
 };
 type State = { version: 1; trials: Trial[] };
 const windows = [300, 900, 1800, 3600, 21600, 86400] as const;
 const horizon = 86400;
+const multiples = [2,5,10,50,100] as const;
 const clamp = (x: number) => Math.round(x * 10000) / 100;
 const validMint = (mint: string) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint);
 /** Research-only, minute-resolution MARK-price observations, not executable fill quotes. */
@@ -48,13 +50,13 @@ export class EchoResearch {
     if (active.length >= this.maxActive) {
       // Preserve the opportunity and explicitly mark lack of price coverage.
       this.trials.push({id,...ev,entry:null,entryAt:null,pool:null,stop:null,exitAt:null,exitPrice:null,peak:null,
-        points:[],checkpoints:{},status:'CENSORED'});
+        points:[],checkpoints:{},milestones:{},status:'CENSORED'});
       await this.persist();
       console.warn('[EchoResearch] CAP_REACHED_UNPRICED',JSON.stringify({id,maxActive:this.maxActive}));
       return;
     }
     this.trials.push({id,...ev,entry:null,entryAt:null,pool:null,stop:null,exitAt:null,exitPrice:null,peak:null,
-      points:[],checkpoints:{},status:'AWAITING_PRICE'});
+      points:[],checkpoints:{},milestones:{},status:'AWAITING_PRICE'});
     await this.persist();
     console.log('[EchoResearch] BUY_RECORDED',JSON.stringify({id}));
   }
@@ -91,6 +93,11 @@ export class EchoResearch {
             if (t.stop && t.exitAt===null) {
               const next=updatePaperStop(t.stop,usd);
               t.peak=Math.max(t.peak||usd,usd);
+              t.milestones ??= {};
+              for (const multiple of multiples) if (usd >= t.entry! * multiple && !t.milestones[String(multiple)]) {
+                t.milestones[String(multiple)] = now;
+                console.log('[EchoResearch] MILESTONE',JSON.stringify({id:t.id,caller:t.caller,mint:t.mint,multiple,at:now,markPriceOnly:true}));
+              }
               if (next.closed) {t.exitAt=now;t.exitPrice=usd;t.status='EXIT_OBSERVED';}
               else {t.stop=next;t.status='TRACKING';}
             }
@@ -110,7 +117,7 @@ export class EchoResearch {
           t.status=t.entry===null?'CENSORED':'COMPLETE';
           console.log('[EchoResearch] OUTCOME',JSON.stringify({id:t.id,caller:t.caller,mint:t.mint,
             deliveryAt:t.deliveryAt,entryAt:t.entryAt,entry:t.entry,exitAt:t.exitAt,exitPrice:t.exitPrice,
-            peak:t.peak,checkpoints:t.checkpoints,samples:t.points.length,markPriceOnly:true}));
+            peak:t.peak,milestones:t.milestones??{},checkpoints:t.checkpoints,samples:t.points.length,markPriceOnly:true}));
         }
       }
       // Keep completed outcomes 30 days. Never classify missing prices as losses.
@@ -122,6 +129,6 @@ export class EchoResearch {
     const counts:Record<string,number>={};
     for (const t of this.trials) counts[t.status]=(counts[t.status]||0)+1;
     return {total:this.trials.length,counts,active:this.trials.filter(t=>(t.status==='TRACKING'||t.status==='AWAITING_PRICE'||t.status==='EXIT_OBSERVED') && Date.now()/1000-t.deliveryAt<horizon).length,
-      lastError:this.lastError,liveTrading:false,markPriceOnly:true};
+      lastError:this.lastError,milestones:Object.fromEntries(multiples.map(n=>[String(n),this.trials.filter(t=>!!t.milestones?.[String(n)]).length])),liveTrading:false,markPriceOnly:true};
   }
 }
