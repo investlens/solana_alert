@@ -90,14 +90,14 @@ export class EchoResearch {
             }
             t.points.push(sample);
             if (t.points.length>1500) t.points.shift();
+            t.peak=Math.max(t.peak||usd,usd);
+            t.milestones ??= {};
+            for (const multiple of multiples) if (usd >= t.entry! * multiple && !t.milestones[String(multiple)]) {
+              t.milestones[String(multiple)] = now;
+              console.log('[EchoResearch] MILESTONE',JSON.stringify({id:t.id,caller:t.caller,mint:t.mint,multiple,at:now,markPriceOnly:true}));
+            }
             if (t.stop && t.exitAt===null) {
               const next=updatePaperStop(t.stop,usd);
-              t.peak=Math.max(t.peak||usd,usd);
-              t.milestones ??= {};
-              for (const multiple of multiples) if (usd >= t.entry! * multiple && !t.milestones[String(multiple)]) {
-                t.milestones[String(multiple)] = now;
-                console.log('[EchoResearch] MILESTONE',JSON.stringify({id:t.id,caller:t.caller,mint:t.mint,multiple,at:now,markPriceOnly:true}));
-              }
               if (next.closed) {t.exitAt=now;t.exitPrice=usd;t.status='EXIT_OBSERVED';}
               else {t.stop=next;t.status='TRACKING';}
             }
