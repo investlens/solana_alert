@@ -17,11 +17,20 @@ const config = readQuicknodeEchoConfig(process.env);
 const store = new EchoStore(config.statePath); await store.load();
 const research = new EchoResearch(config.statePath+'.research-v1.json',async event=>{
  const icon=event.kind==='ENTRY'?'🧪':event.kind==='EXIT'?'🛑':'🏆';
- const title=event.kind==='ENTRY'?'PAPER ENTRY':event.kind==='EXIT'?'PAPER STOP EXIT':event.multiple+'× OBSERVED';
- const text=icon+' <b>ALPHAOS · '+title+'</b>\n'
-   +'<b>Source:</b> '+event.caller+'\n'
-   +'<b>Token:</b> <code>'+event.mint+'</code>\n'
-   +'<b>Entry:</b> 
+ const title=event.kind==='ENTRY'?'PAPER ENTRY':event.kind==='EXIT'?'PAPER STOP EXIT':String(event.multiple)+'x OBSERVED';
+ const msg=[icon+' <b>ALPHAOS · '+title+'</b>','<b>Source:</b> '+event.caller,
+  '<b>Token:</b> <code>'+event.mint+'</code>',
+  '<b>Entry USD:</b> '+event.entry.toPrecision(5),
+  '<b>Observed USD:</b> '+event.price.toPrecision(5),
+  '<b>Change:</b> '+event.roiPercent.toFixed(1)+'%',
+  '<i>Paper only · observed prices · no actual trade</i>'].join('\\n');
+ const response=await fetch('https://api.telegram.org/bot'+config.botToken+'/sendMessage',{
+  method:'POST',headers:{'content-type':'application/json'},signal:AbortSignal.timeout(8000),
+  body:JSON.stringify({chat_id:config.admin,text:msg,parse_mode:'HTML',disable_web_page_preview:true,
+   reply_markup:{inline_keyboard:[[{text:'📈 Chart',url:'https://dexscreener.com/solana/'+event.mint}]]}})}).then(r=>r.json());
+ if(!response?.ok||!Number.isInteger(response.result?.message_id))throw Error('Paper notification unconfirmed');
+ console.log('[EchoResearch] NOTIFIED',JSON.stringify({kind:event.kind,mint:event.mint,multiple:event.multiple??null}));
+});
 let researchReady = false;
 try { await research.load(); researchReady = true; }
 catch { console.warn('[EchoResearch] STARTUP_DISABLED: research state unavailable, alerts unaffected'); }
