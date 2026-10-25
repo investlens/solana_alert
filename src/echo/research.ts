@@ -32,7 +32,7 @@ export class EchoResearch {
     } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
   }
   private persist() {
-    this.writes = this.writes.then(async () => {
+    this.writes = this.writes.catch(() => {}).then(async () => {
       await mkdir(dirname(this.path),{recursive:true,mode:0o700});
       const tmp = this.path+'.tmp';
       await writeFile(tmp,JSON.stringify({version:1,trials:this.trials} satisfies State),{mode:0o600});
@@ -46,7 +46,11 @@ export class EchoResearch {
     if (this.trials.some(t=>t.id===id)) return;
     const active = this.trials.filter(t=>(t.status==='TRACKING'||t.status==='AWAITING_PRICE'||t.status==='EXIT_OBSERVED') && Math.abs(ev.deliveryAt-t.deliveryAt)<86400);
     if (active.length >= this.maxActive) {
-      console.warn('[EchoResearch] CAP_REACHED',JSON.stringify({id,maxActive:this.maxActive}));
+      // Preserve the opportunity and explicitly mark lack of price coverage.
+      this.trials.push({id,...ev,entry:null,entryAt:null,pool:null,stop:null,exitAt:null,exitPrice:null,peak:null,
+        points:[],checkpoints:{},status:'CENSORED'});
+      await this.persist();
+      console.warn('[EchoResearch] CAP_REACHED_UNPRICED',JSON.stringify({id,maxActive:this.maxActive}));
       return;
     }
     this.trials.push({id,...ev,entry:null,entryAt:null,pool:null,stop:null,exitAt:null,exitPrice:null,peak:null,
