@@ -13,6 +13,7 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Retry after the repository RPC secret was configured.
     env:
       ECHO_RPC_URL: ${{ secrets.ECHO_RPC_URL }}
     steps:
