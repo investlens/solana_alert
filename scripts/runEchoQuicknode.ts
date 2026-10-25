@@ -109,14 +109,26 @@ async function enrichEchoCard(signal: ReturnType<typeof extractRpcEchoSignals>[n
 }
 
 const promotions = new EchoSolanaPromotions(config.statePath+'.solana-promotions-v1.json',async ev => {
-  const text = (ev.kind==='BOOST'?'🚀 SOLANA · DEXSCREENER BOOST':'💳 SOLANA · DEXSCREENER PAID AD')+'\n'
-    +'🪙 Token: <code>'+ev.mint+'</code>\n'
-    +(ev.kind==='BOOST'&&ev.amount!=null?'⚡ Active boost total: '+ev.amount+'\n':'')
-    +'🔎 <a href="https://dexscreener.com/solana/'+ev.mint+'">DexScreener chart</a>\n'
-    +'⚠️ Paid promotion only. Caller BUY/SELL not verified; no trade implied.';
+  const market = await echoMarket(ev.mint);
+  const escape = (v:string) => v.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const money = (n:number|null|undefined) => n!=null && Number.isFinite(n) && n>0
+    ? '$'+n.toLocaleString('en-US',{maximumFractionDigits:0}) : 'Unavailable';
+  const title = ev.kind==='BOOST' ? '🚀 ALPHAOS · SOLANA BOOST' : '💳 ALPHAOS · SOLANA DEX PAID';
+  const name = market?.symbol || market?.name || 'Token name pending';
+  const text = '<b>'+title+'</b>\n'
+    +'<b>'+escape(name)+'</b>'+(market?.name && market.name!==name?' · '+escape(market.name):'')+'\n'
+    +'💰 <b>MC:</b> '+money(market?.marketCap)+' · <b>LP:</b> '+money(market?.liquidity)+'\n'
+    +(ev.kind==='BOOST'?'⚡ <b>Active boosts:</b> '+(ev.amount ?? 'Unavailable')+'\n':'📢 <b>Promotion:</b> DexScreener paid advertisement\n')
+    +'\n<b>CA:</b> <code>'+ev.mint+'</code>\n'
+    +'<i>Paid promotion · Caller trade unverified · Research only</i>';
+  const buttons = {inline_keyboard:[
+    [{text:'📈 DexScreener',url:'https://dexscreener.com/solana/'+ev.mint},
+     {text:'🔎 Solscan',url:'https://solscan.io/token/'+ev.mint}],
+    [{text:'📋 Copy CA',copy_text:{text:ev.mint}}]
+  ]};
   const response=await fetch('https://api.telegram.org/bot'+config.botToken+'/sendMessage',{
     method:'POST',headers:{'content-type':'application/json'},signal:AbortSignal.timeout(8000),
-    body:JSON.stringify({chat_id:config.admin,text,parse_mode:'HTML',disable_web_page_preview:true})
+    body:JSON.stringify({chat_id:config.admin,text,parse_mode:'HTML',disable_web_page_preview:true,reply_markup:buttons})
   }).then(r=>r.json());
   if(!response?.ok||!Number.isInteger(response.result?.message_id))throw Error('Telegram promotion delivery unconfirmed');
 });
