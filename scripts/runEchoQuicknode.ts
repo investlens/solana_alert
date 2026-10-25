@@ -135,6 +135,8 @@ const promotions = new EchoSolanaPromotions(config.statePath+'.solana-promotions
     body:JSON.stringify({chat_id:config.admin,text,parse_mode:'HTML',disable_web_page_preview:true,reply_markup:buttons})
   }).then(r=>r.json());
   if(!response?.ok||!Number.isInteger(response.result?.message_id))throw Error('Telegram promotion delivery unconfirmed');
+  if(researchReady) void research.addBuy({caller:ev.kind==='BOOST'?'SOLANA_BOOST':'SOLANA_DEX_PAID',mint:ev.mint,signature:ev.id,deliveryAt:Date.now()/1000}).catch(()=>console.warn('[EchoResearch] PROMOTION_PAPER_PERSIST_FAILED'));
+
 });
 let promotionsReady=false;
 try{await promotions.load();promotionsReady=true;}catch{console.warn('[EchoPromotions] DISABLED: invalid state');}
