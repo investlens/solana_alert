@@ -4,6 +4,7 @@ import { readQuicknodeEchoConfig } from '../src/echo/quicknodeConfig.js';
 import { EchoStore } from '../src/echo/store.js';
 import { EchoResearch } from '../src/echo/research.js';
 import { EchoSolanaPromotions } from '../src/echo/solanaPromotions.js';
+import { pumpCurveSnapshot } from '../src/echo/curveSnapshot.js';
 import { ECHO_WALLETS, echoCard } from '../src/echo/signals.js';
 import { extractRpcEchoSignals, classifyEchoRejection, type EchoRejectReason } from '../src/echo/rpcSignals.js';
 import { EchoQueue } from '../src/echo/queue.js';
@@ -110,14 +111,17 @@ async function enrichEchoCard(signal: ReturnType<typeof extractRpcEchoSignals>[n
 
 const promotions = new EchoSolanaPromotions(config.statePath+'.solana-promotions-v1.json',async ev => {
   const market = await echoMarket(ev.mint);
+  const curve = market?.marketCap ? null : await pumpCurveSnapshot(ev.mint,config.rpcUrl);
   const escape = (v:string) => v.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const money = (n:number|null|undefined) => n!=null && Number.isFinite(n) && n>0
     ? '$'+n.toLocaleString('en-US',{maximumFractionDigits:0}) : 'Unavailable';
   const title = ev.kind==='BOOST' ? '🚀 ALPHAOS · SOLANA BOOST' : '💳 ALPHAOS · SOLANA DEX PAID';
-  const name = market?.symbol || market?.name || 'Token name pending';
+  const name = market?.symbol || curve?.symbol || market?.name || curve?.name || 'Token name pending';
   const text = '<b>'+title+'</b>\n'
     +'<b>'+escape(name)+'</b>'+(market?.name && market.name!==name?' · '+escape(market.name):'')+'\n'
-    +'💰 <b>MC:</b> '+money(market?.marketCap)+' · <b>LP:</b> '+money(market?.liquidity)+'\n'
+    +'💰 <b>MC:</b> '+money(market?.marketCap ?? curve?.marketCap)+' · <b>LP:</b> '+(market?.liquidity ? money(market.liquidity) : 'No verified DEX LP')+'\n'
+    +(curve?.marketCap && !market?.marketCap?'📈 <i>MC: pre-bonding estimate (Pump.fun)</i>\n':'')
+    +(curve?.devHoldingPercent!=null?'👤 <b>Dev holding:</b> '+curve.devHoldingPercent.toFixed(2)+'% (creator wallet only)\n':'')
     +(ev.kind==='BOOST'?'⚡ <b>Active boosts:</b> '+(ev.amount ?? 'Unavailable')+'\n':'📢 <b>Promotion:</b> DexScreener paid advertisement\n')
     +'\n<b>CA:</b> <code>'+ev.mint+'</code>\n'
     +'<i>Paid promotion · Caller trade unverified · Research only</i>';
