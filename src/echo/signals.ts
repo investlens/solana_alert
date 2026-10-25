@@ -5,6 +5,7 @@ export const ECHO_WALLETS: Readonly<Record<string, string>> = Object.freeze({
   '6qudAN2kV8mtCcYJxb5QQ6Vr15itdHHdeVbYm99NKMhy': 'Thedetective',
   '7fEXteaTtmX1uR8fpChEXsevM4icH5vq8LNL9dzDupX2': 'Croakie',
   'Be24Gbf5KisDk1LcWWZsBn8dvB816By7YzYF5zWZnRR6': 'Chairman',
+  '5YRgrP3mjGzrzirYYN5HAQH19cTYREYwGxW6XRJQUzij': 'WHALE · slingoor',
 });
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const QUOTES = new Map([[SOL_MINT, 'SOL'], ['EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'USDC']]);
