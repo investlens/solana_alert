@@ -221,7 +221,7 @@ const queue = new EchoQueue(async signature => {
     await store.delivered(signal.id, Date.now() / 1000); lastDeliveryAt = Date.now(); diagnostics.delivered++;
     await tiers.enqueue({id:signal.id,mint:signal.mint,text:baseCard,acceptedAt:Date.now(),buttons:{inline_keyboard:[
       [{text:'🔎 Transaction',url:'https://solscan.io/tx/'+signal.signature},{text:'📈 Chart',url:'https://dexscreener.com/solana/'+signal.mint}]]}}).catch(()=>console.warn('[EchoTiers] CALLER_QUEUE_WRITE_FAILED'));
-    if (researchReady && signal.side === 'BUY') void research.addBuy({caller:signal.caller,mint:signal.mint,signature:signal.signature,deliveryAt:Date.now()/1000}).catch(() => console.warn('[EchoResearch] PERSIST_FAILED'));
+    if (researchReady && signal.side === 'BUY') void research.addBuy({caller:signal.caller,mint:signal.mint,signature:signal.signature,deliveryAt:Date.now()/1000}).then(() => { if (signal.caller === 'WHALE · slingoor') void research.tick(true).catch(() => console.warn('[EchoResearch] PRIORITY_TICK_FAILED')); }).catch(() => console.warn('[EchoResearch] PERSIST_FAILED'));
 
     console.log('[Echo] ADMIN_DELIVERY_ACCEPTED', { caller: signal.caller, signature, side: signal.side, messageId: result.result.message_id });
   }

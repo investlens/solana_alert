@@ -94,9 +94,9 @@ export class EchoResearch {
       catch{this.notificationErrors++;console.warn('[EchoResearch] NOTIFICATION_RETRY_PENDING',{kind:event.kind});break;}
     }
   }
-  async tick() {
-    if (this.working || Date.now()<this.nextTick) return;
-    this.working=true; this.nextTick=Date.now()+60_000;
+  async tick(priority = false) {
+    if (this.working || (!priority && Date.now()<this.nextTick)) return;
+    this.working=true; if (!priority) this.nextTick=Date.now()+60_000;
     try {
       const now=Date.now()/1000;
       const active=this.trials.filter(t=>(t.status==='TRACKING'||t.status==='AWAITING_PRICE'||t.status==='EXIT_OBSERVED') && now-t.deliveryAt<horizon+300);
