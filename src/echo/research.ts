@@ -168,7 +168,22 @@ export class EchoResearch {
     for (const t of this.trials) counts[t.status]=(counts[t.status]||0)+1;
     const exits=this.trials.filter(t=>t.exitAt!==null&&t.entry!==null&&t.exitPrice!==null);
     const totalPnl=exits.reduce((sum,t)=>sum+paperExitValue(t.entry!,t.exitPrice!)-PAPER_USD,0);
-    return {paperUsd:PAPER_USD,uniqueTokensReserved:this.onceMints.size,suppressedRepeatBuys:this.suppressedRepeatBuys,estimatedCostBpsPerSide:SIMULATED_COST_BPS_PER_SIDE,closedExits:exits.length,
+    const bySource:Record<string,{opportunities:number;exits:number;wins:number;losses:number;netPnlUsd:number;awaitingPrice:number;censored:number;milestones:Record<string,number>}>= {};
+    for(const t of this.trials){
+      const source=t.caller==='SOLANA_BOOST'?'BOOST':t.caller==='SOLANA_DEX_PAID'?'DEX_PAID':t.caller;
+      const group=bySource[source]??={opportunities:0,exits:0,wins:0,losses:0,netPnlUsd:0,awaitingPrice:0,censored:0,milestones:{'2':0,'5':0,'10':0,'50':0,'100':0}};
+      group.opportunities++;
+      if(t.status==='AWAITING_PRICE')group.awaitingPrice++;
+      if(t.status==='CENSORED')group.censored++;
+      if(t.exitAt!==null && t.entry!==null && t.exitPrice!==null){
+        const pnl=paperExitValue(t.entry,t.exitPrice)-PAPER_USD;
+        group.exits++;group.netPnlUsd+=pnl;
+        if(pnl>0)group.wins++;else group.losses++;
+      }
+      for(const n of multiples)if(t.milestones?.[String(n)])group.milestones[String(n)]++;
+    }
+    for(const group of Object.values(bySource))group.netPnlUsd=Math.round(group.netPnlUsd*100)/100;
+    return {bySource,paperUsd:PAPER_USD,uniqueTokensReserved:this.onceMints.size,suppressedRepeatBuys:this.suppressedRepeatBuys,estimatedCostBpsPerSide:SIMULATED_COST_BPS_PER_SIDE,closedExits:exits.length,
       closedNetPnlUsd:Math.round(totalPnl*100)/100,total:this.trials.length,counts,active:this.trials.filter(t=>(t.status==='TRACKING'||t.status==='AWAITING_PRICE'||t.status==='EXIT_OBSERVED') && Date.now()/1000-t.deliveryAt<horizon).length,
       lastError:this.lastError,pendingNotifications:this.pending.length,lastNotified:this.lastNotified,notificationErrors:this.notificationErrors,milestones:Object.fromEntries(multiples.map(n=>[String(n),this.trials.filter(t=>!!t.milestones?.[String(n)]).length])),liveTrading:false,markPriceOnly:true};
   }
