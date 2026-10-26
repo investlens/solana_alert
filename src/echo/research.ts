@@ -12,7 +12,7 @@ type Trial = {
   status: 'AWAITING_PRICE' | 'TRACKING' | 'EXIT_OBSERVED' | 'CENSORED' | 'COMPLETE';
 };
 type PaperEvent={id:string;kind:'ENTRY'|'EXIT'|'MILESTONE';mint:string;caller:string;entry:number;price:number;multiple?:number;roiPercent:number;paperUsd:number;quantity:number;exitValueUsd:number;netPnlUsd:number;costBpsPerSide:number};
-type State = { version: 1; trials: Trial[]; pending?:PaperEvent[] };
+type State = { version: 1; trials: Trial[]; pending?:PaperEvent[]; onceMints?:string[] };
 const windows = [300, 900, 1800, 3600, 21600, 86400] as const;
 const horizon = 86400;
 const PAPER_USD=10;
@@ -26,6 +26,9 @@ const validMint = (mint: string) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint);
 /** Research-only, minute-resolution MARK-price observations, not executable fill quotes. */
 export class EchoResearch {
   private trials: Trial[] = [];
+  // A token may enter the $10 paper portfolio only once across all callers and promotions.
+  // This ledger survives trial retention expiry and service restarts.
+  private onceMints = new Set<string>(); private suppressedRepeatBuys=0;
   private pending:PaperEvent[]=[]; private lastNotified:number|null=null; private notificationErrors=0;
   private working = false;
   private writes = Promise.resolve();
@@ -38,6 +41,7 @@ export class EchoResearch {
       const parsed = JSON.parse(await readFile(this.path,'utf8')) as State;
       if (parsed.version !== 1 || !Array.isArray(parsed.trials)) throw new Error('Invalid research state');
       this.trials = parsed.trials;
+      this.onceMints = new Set([...(Array.isArray(parsed.onceMints)?parsed.onceMints:[]),...parsed.trials.map(t=>t.mint)].filter(validMint));
       this.pending=Array.isArray(parsed.pending)?parsed.pending.slice(-250):[];
     } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
   }
@@ -45,7 +49,7 @@ export class EchoResearch {
     this.writes = this.writes.catch(() => {}).then(async () => {
       await mkdir(dirname(this.path),{recursive:true,mode:0o700});
       const tmp = this.path+'.tmp';
-      await writeFile(tmp,JSON.stringify({version:1,trials:this.trials,pending:this.pending} satisfies State),{mode:0o600});
+      await writeFile(tmp,JSON.stringify({version:1,trials:this.trials,pending:this.pending,onceMints:[...this.onceMints]} satisfies State),{mode:0o600});
       await rename(tmp,this.path);
     });
     return this.writes;
@@ -53,7 +57,13 @@ export class EchoResearch {
   async addBuy(ev: { caller:string; mint:string; signature:string; deliveryAt:number }) {
     if (!validMint(ev.mint) || !Number.isFinite(ev.deliveryAt)) return;
     const id = ev.signature+':'+ev.mint+':'+ev.caller;
-    if (this.trials.some(t=>t.id===id)) return;
+    if (this.onceMints.has(ev.mint)) {
+      this.suppressedRepeatBuys++;
+      console.log('[EchoResearch] REPEAT_BUY_SKIPPED',JSON.stringify({mint:ev.mint,caller:ev.caller,reason:'one_paper_position_per_token'}));
+      return;
+    }
+    // Reserve synchronously before the first await to prevent parallel duplicate entries.
+    this.onceMints.add(ev.mint);
     const active = this.trials.filter(t=>(t.status==='TRACKING'||t.status==='AWAITING_PRICE'||t.status==='EXIT_OBSERVED') && Math.abs(ev.deliveryAt-t.deliveryAt)<86400);
     if (active.length >= this.maxActive) {
       // Preserve the opportunity and explicitly mark lack of price coverage.
@@ -158,7 +168,7 @@ export class EchoResearch {
     for (const t of this.trials) counts[t.status]=(counts[t.status]||0)+1;
     const exits=this.trials.filter(t=>t.exitAt!==null&&t.entry!==null&&t.exitPrice!==null);
     const totalPnl=exits.reduce((sum,t)=>sum+paperExitValue(t.entry!,t.exitPrice!)-PAPER_USD,0);
-    return {paperUsd:PAPER_USD,estimatedCostBpsPerSide:SIMULATED_COST_BPS_PER_SIDE,closedExits:exits.length,
+    return {paperUsd:PAPER_USD,uniqueTokensReserved:this.onceMints.size,suppressedRepeatBuys:this.suppressedRepeatBuys,estimatedCostBpsPerSide:SIMULATED_COST_BPS_PER_SIDE,closedExits:exits.length,
       closedNetPnlUsd:Math.round(totalPnl*100)/100,total:this.trials.length,counts,active:this.trials.filter(t=>(t.status==='TRACKING'||t.status==='AWAITING_PRICE'||t.status==='EXIT_OBSERVED') && Date.now()/1000-t.deliveryAt<horizon).length,
       lastError:this.lastError,pendingNotifications:this.pending.length,lastNotified:this.lastNotified,notificationErrors:this.notificationErrors,milestones:Object.fromEntries(multiples.map(n=>[String(n),this.trials.filter(t=>!!t.milestones?.[String(n)]).length])),liveTrading:false,markPriceOnly:true};
   }
