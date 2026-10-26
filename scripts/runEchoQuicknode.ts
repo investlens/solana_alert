@@ -97,23 +97,26 @@ async function echoMarket(mint: string): Promise<EchoMarket | null> {
   if (previous && previous.expiry > Date.now()) return previous.data;
   if (echoMarketCache.size > 80) echoMarketCache.clear();
   let data: EchoMarket | null = null;
-  try {
-    const response = await fetch('https://api.dexscreener.com/latest/dex/tokens/' + mint, { signal: AbortSignal.timeout(1500) });
-    if (response.ok) {
-      const body = await response.json();
-      const pairs = (Array.isArray(body.pairs) ? body.pairs : []).filter((p: any) =>
-        p && p.chainId === 'solana' && p.baseToken && p.baseToken.address === mint &&
-        (Number(p.priceUsd) > 0 || Number(p.marketCap)>0 || Number(p.fdv)>0 || !!p.baseToken.name));
-      pairs.sort((a: any, b: any) => Number(b.liquidity.usd) - Number(a.liquidity.usd));
-      const pair = pairs[0];
-      if (pair) {
-        const marketCap = Number(pair.marketCap), liquidity = Number(pair.liquidity?.usd);
-        data = { name: String(pair.baseToken.name || '').slice(0, 64), symbol: String(pair.baseToken.symbol || '').slice(0, 24),
-          marketCap: Number.isFinite(marketCap) && marketCap > 0 ? marketCap : null,
-          liquidity: Number.isFinite(liquidity) && liquidity > 0 ? liquidity : null };
-      }
-    }
-  } catch { /* optional lookup only */ }
+  for (const endpoint of [
+    'https://api.dexscreener.com/tokens/v1/solana/'+mint,
+    'https://api.dexscreener.com/latest/dex/tokens/'+mint
+  ]) {
+    try {
+      const response=await fetch(endpoint,{signal:AbortSignal.timeout(3500)});
+      if(!response.ok){console.warn('[EchoMarket] HTTP',{status:response.status});continue;}
+      const body=await response.json();
+      const rows=Array.isArray(body)?body:(Array.isArray(body?.pairs)?body.pairs:[]);
+      const pairs=rows.filter((p:any)=>p?.chainId==='solana' && p?.baseToken?.address===mint);
+      pairs.sort((a:any,b:any)=>(Number(b?.liquidity?.usd)||0)-(Number(a?.liquidity?.usd)||0));
+      const pair=pairs.find((p:any)=>Number(p?.liquidity?.usd)>0) ?? pairs[0];
+      if(!pair)continue;
+      const marketCap=Number(pair.marketCap),liquidity=Number(pair?.liquidity?.usd);
+      data={name:String(pair.baseToken?.name||'').slice(0,64),symbol:String(pair.baseToken?.symbol||'').slice(0,24),
+        marketCap:Number.isFinite(marketCap)&&marketCap>0?marketCap:null,
+        liquidity:Number.isFinite(liquidity)&&liquidity>0?liquidity:null};
+      if(data.name&&data.marketCap&&data.liquidity)break;
+    } catch {console.warn('[EchoMarket] LOOKUP_FAILED',{mint});}
+  }
   echoMarketCache.set(mint, { expiry: Date.now() + (data?.marketCap&&data?.liquidity&&data?.name ? 60000 : 2500), data });
   return data;
 }
