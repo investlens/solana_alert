@@ -4,16 +4,24 @@ import { setTimeout, clearTimeout } from 'node:timers';
 type Socket = { addEventListener(type: string, listener: (event: any) => void): void; send(data: string): void; close(): void };
 type Timer = number | NodeJS.Timeout;
 type Options = {
-  url: string; onSignature(signature: string, wallet: string): void; onReady(): void;
+  url: string; fallbackUrl?: string | null; onSignature(signature: string, wallet: string): void; onReady(): void;
   socket?: (url: string) => Socket;
   later?: (callback: () => void, milliseconds: number) => Timer;
   cancel?: (timer: Timer) => void;
 };
 export function startEchoSubscription(options: Options) {
   const later = options.later ?? setTimeout, cancel = options.cancel ?? clearTimeout;
-  const state = { ready: false, acknowledgedWallets: 0, reconnects: 0, lastMessageAt: null as number | null, lastDisconnectReason: 'none' as string, lastConnectedAt: null as number | null, skippedNonSwapLogs: 0, observedTradeSignatures: 0 };
+  const state = { ready: false, acknowledgedWallets: 0, reconnects: 0, lastMessageAt: null as number | null, lastDisconnectReason: 'none' as string, lastConnectedAt: null as number | null, activeProvider: 'primary' as 'primary' | 'fallback', skippedNonSwapLogs: 0, observedTradeSignatures: 0 };
   let socket: Socket | null = null, stopped = false, reconnect: Timer | undefined;
-  let timeout: Timer | undefined, delay = 1000;
+  let timeout: Timer | undefined, delay = 1000, consecutiveFailures = 0, useFallback = false;
+  function failedAttempt() {
+    consecutiveFailures++;
+    if (options.fallbackUrl && consecutiveFailures >= 3) {
+      useFallback = !useFallback;
+      consecutiveFailures = 0;
+      delay = 1000; // Test the independent provider promptly, without a reconnect storm.
+    }
+  }
   function connect() {
     if (stopped) return;
     state.ready = false; state.acknowledgedWallets = 0;
@@ -27,12 +35,14 @@ export function startEchoSubscription(options: Options) {
       socket = null; state.ready = false; state.acknowledgedWallets = 0; state.lastDisconnectReason = reason;
       if (timeout) cancel(timeout);
       try { current.close(); } catch { /* no provider URLs in logs */ }
-      state.reconnects++;
+      state.reconnects++; failedAttempt();
       reconnect = later(connect, delay); delay = Math.min(60_000, delay * 2);
     };
     let current: Socket;
-    try { current = (options.socket ?? (url => new WebSocket(url)))(options.url); }
-    catch { state.lastDisconnectReason = 'socket_constructor_failed'; state.reconnects++; reconnect = later(connect, delay); delay = Math.min(60_000, delay * 2); return; }
+    const endpoint = useFallback && options.fallbackUrl ? options.fallbackUrl : options.url;
+    state.activeProvider = useFallback && options.fallbackUrl ? 'fallback' : 'primary';
+    try { current = (options.socket ?? (url => new WebSocket(url)))(endpoint); }
+    catch { state.lastDisconnectReason = 'socket_constructor_failed'; state.reconnects++; failedAttempt(); reconnect = later(connect, delay); delay = Math.min(60_000, delay * 2); return; }
     socket = current;
     timeout = later(() => lost('subscription_ack_timeout'), 10_000);
     current.addEventListener('open', () => {
@@ -52,7 +62,7 @@ export function startEchoSubscription(options: Options) {
         if (message.error || !Number.isSafeInteger(message.result) || message.result < 0) { lost('subscription_rejected_' + String(message.error?.code ?? 'invalid_ack')); return; }
         if (requests.has(message.id)) return;
         requests.add(message.id); ids.add(message.result); walletForSubscription.set(message.result, wallets[message.id - 1]); state.acknowledgedWallets = ids.size;
-        if (ids.size === expectedWallets && !state.ready) { state.ready = true; delay = 1000; if (timeout) cancel(timeout); options.onReady(); }
+        if (ids.size === expectedWallets && !state.ready) { state.ready = true; delay = 1000; consecutiveFailures = 0; if (timeout) cancel(timeout); options.onReady(); }
         return;
       }
       if (message.method !== 'logsNotification' || !ids.has(message.params?.subscription)) return;
