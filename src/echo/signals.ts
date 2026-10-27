@@ -18,6 +18,7 @@ export type EchoSignal = {
   id: string; wallet: string; caller: string; signature: string; timestamp: number;
   mint: string; side: 'BUY' | 'SELL'; tokenAmount: number; quoteAmount: number | null; quoteSymbol: string;
   quoteBasis?: 'token-account net change' | 'wallet SOL net change; includes fees/rent' | 'unavailable';
+  quoteMint?: string;
 };
 function address(value: unknown): value is string {
   try { return typeof value === 'string' && new PublicKey(value).toBase58() === value; } catch { return false; }
@@ -85,6 +86,7 @@ export function echoCard(s: EchoSignal, nowSeconds: number, market?: EchoCardMar
     `${label}\n` +
     `💰 <b>MC:</b> ${formatUsd(market?.marketCap)} · <b>LP:</b> ${formatUsd(market?.liquidity)}\n` +
     `💱 <b>Trade:</b> ${quote}\n` +
+    (s.quoteMint ? `🔁 <b>Input mint:</b> <code>${escapeEchoHtml(s.quoteMint)}</code>\n` : '') +
     `🪙 <b>Tokens:</b> ${s.tokenAmount.toLocaleString('en-US', { maximumFractionDigits: 4 })}\n` +
     `⏱ <b>Age:</b> ${age}s${social}\n` +
     `\n<b>CA:</b> <code>${escapeEchoHtml(s.mint)}</code>\n` +
