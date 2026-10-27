@@ -49,39 +49,85 @@ let researchReady = false;
 try { await research.load(); researchReady = true; }
 catch { console.warn('[EchoResearch] STARTUP_DISABLED: research state unavailable, alerts unaffected'); }
 let backoffUntil = 0, reconcileBackoffUntil = 0, lastRpcAt: number | null = null, lastDeliveryAt: number | null = null;
+let fallbackBackoffUntil = 0, fallbackReconcileBackoffUntil = 0;
 let deliveryBackoffUntil = 0;
-let historyLimitStreak = 0;
-function historyRateLimited(retryHeader: string | null) {
-  historyLimitStreak++;
-  const retry = retryHeader == null ? 0 : Number(retryHeader);
-  const exponential = Math.min(900_000, 60_000 * (2 ** Math.min(4, historyLimitStreak - 1)));
-  reconcileBackoffUntil = Date.now() + Math.min(900_000, Math.max(exponential, Number.isFinite(retry) ? retry * 1000 : 0));
-}
+let historyLimitStreak = 0, fallbackHistoryLimitStreak = 0;
 let lastErrorAt: number | null = null, lastReconcileAt: number | null = null, stopping = false;
-const diagnostics = { fetched: 0, signals: 0, delivered: 0, noSignal: 0, rpcFailures: 0, deliveryFailures: 0 };
+const diagnostics = { fetched: 0, signals: 0, delivered: 0, noSignal: 0, rpcFailures: 0,
+  fallbackRpcUses: 0, deliveryFailures: 0 };
 const rejectionCounts: Partial<Record<EchoRejectReason, number>> = {};
-async function rpc(method: string, params: unknown[] = []) {
-  if (Date.now() < (method === 'getSignaturesForAddress' ? reconcileBackoffUntil : backoffUntil)) throw new Error('RPC backing off');
+function historyRateLimited(retryHeader: string | null, fallback = false) {
+  if (fallback) fallbackHistoryLimitStreak++; else historyLimitStreak++;
+  const streak = fallback ? fallbackHistoryLimitStreak : historyLimitStreak;
+  const retry = retryHeader == null ? 0 : Number(retryHeader);
+  const exponential = Math.min(900_000, 60_000 * 2 ** Math.min(4, streak - 1));
+  const until = Date.now() + Math.min(900_000, Math.max(exponential, Number.isFinite(retry) ? retry * 1000 : 0));
+  if (fallback) fallbackReconcileBackoffUntil = until;
+  else reconcileBackoffUntil = until;
+}
+const rpcBackoff = (method: string, fallback: boolean) => method === 'getSignaturesForAddress'
+  ? (fallback ? fallbackReconcileBackoffUntil : reconcileBackoffUntil)
+  : (fallback ? fallbackBackoffUntil : backoffUntil);
+const liveRpcAvailable = () => Date.now() >= backoffUntil ||
+  (Boolean(config.fallbackRpcUrl) && Date.now() >= fallbackBackoffUntil);
+const historyRpcAvailable = () => Date.now() >= reconcileBackoffUntil ||
+  (Boolean(config.fallbackRpcUrl) && Date.now() >= fallbackReconcileBackoffUntil);
+
+/** Transaction reads are always read-only. Independent fallback is optional,
+ * does not double-send successful requests, and never attempts signing/trades.
+ */
+async function rpc(method: string, params: unknown[] = [], forceFallback = false): Promise<any> {
+  const primaryReady = Date.now() >= rpcBackoff(method, false);
+  const backupReady = Boolean(config.fallbackRpcUrl) && Date.now() >= rpcBackoff(method, true);
+  const useBackup = forceFallback || (!primaryReady && backupReady);
+  if (useBackup ? !backupReady : !primaryReady) throw new Error('Echo RPC backing off');
+  const endpoint = useBackup ? config.fallbackRpcUrl! : config.rpcUrl;
   try {
-    const response = await fetch(config.rpcUrl, { method: 'POST', headers: { 'content-type': 'application/json' },
+    const response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: AbortSignal.timeout(8_000) });
     if (response.status === 429) {
-      const retry = Number(response.headers.get('retry-after'));
-      if (method === 'getSignaturesForAddress') historyRateLimited(response.headers.get('retry-after'));
-      else backoffUntil = Date.now() + Math.min(300_000, Math.max(30_000, Number.isFinite(retry) ? retry * 1000 : 60_000));
+      if (method === 'getSignaturesForAddress') historyRateLimited(response.headers.get('retry-after'), useBackup);
+      else {
+        const header = response.headers.get('retry-after');
+        const seconds = header === null ? 60 : Number(header);
+        const retryMs = Math.min(300_000, Math.max(30_000, Number.isFinite(seconds) ? seconds * 1000 : 60_000));
+        if (useBackup) fallbackBackoffUntil = Date.now() + retryMs;
+        else backoffUntil = Date.now() + retryMs;
+      }
     }
-    if (!response.ok) { console.warn('[Echo] RPC_HTTP_FAILURE', { method, status: response.status }); throw new Error('RPC HTTP failure'); }
+    if (!response.ok) {
+      console.warn('[Echo] RPC_HTTP_FAILURE', { method, status: response.status,
+        provider: useBackup ? 'fallback' : 'primary' });
+      throw new Error('RPC HTTP failure');
+    }
     const data = await response.json();
-    if (data.error && (data.error.code === 429 || data.error.code === -32005 || /rate.?limit|credits.*exceed/i.test(String(data.error.message)))) {
-      if (method === 'getSignaturesForAddress') historyRateLimited(null); else backoffUntil = Date.now() + 60_000;
+    if (data.error && (data.error.code === 429 || data.error.code === -32005 ||
+        /rate.?limit|credits.*exceed/i.test(String(data.error.message)))) {
+      if (method === 'getSignaturesForAddress') historyRateLimited(null, useBackup);
+      else if (useBackup) fallbackBackoffUntil = Date.now() + 60_000;
+      else backoffUntil = Date.now() + 60_000;
     }
     if (data.error || !Object.prototype.hasOwnProperty.call(data, 'result')) {
-      console.warn('[Echo] RPC_RESPONSE_FAILURE', { method, code: Number.isFinite(data.error?.code) ? data.error.code : null });
+      console.warn('[Echo] RPC_RESPONSE_FAILURE', { method,
+        provider: useBackup ? 'fallback' : 'primary',
+        code: Number.isFinite(data.error?.code) ? data.error.code : null });
       throw new Error('RPC response failure');
     }
-    if (method === 'getSignaturesForAddress') { historyLimitStreak = 0; reconcileBackoffUntil = 0; }
-    lastRpcAt = Date.now(); return data.result;
-  } catch { diagnostics.rpcFailures++; lastErrorAt = Date.now(); throw new Error(`Echo RPC ${method} unavailable`); }
+    if (method === 'getSignaturesForAddress') {
+      if (useBackup) { fallbackHistoryLimitStreak = 0; fallbackReconcileBackoffUntil = 0; }
+      else { historyLimitStreak = 0; reconcileBackoffUntil = 0; }
+    }
+    if (useBackup) diagnostics.fallbackRpcUses++;
+    lastRpcAt = Date.now();
+    return data.result;
+  } catch {
+    if (!useBackup && backupReady) {
+      // Primary is unavailable; try the independently configured read-only endpoint.
+      try { return await rpc(method, params, true); } catch { /* report an unavailable read */ }
+    }
+    diagnostics.rpcFailures++; lastErrorAt = Date.now();
+    throw new Error(`Echo RPC ${method} unavailable`);
+  }
 }
 if (await rpc('getGenesisHash') !== '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d') throw new Error('Echo RPC is not Solana mainnet');
 // Read-only Telegram validation. Never sends a dummy alert or starts getUpdates.
@@ -243,7 +289,7 @@ const queue = new EchoQueue(async signature => {
 }, Date.now, config.statePath + '.pending-v1.json');
 let reconciling = false;
 async function reconcile() {
-  if (reconciling || stopping || Date.now() < reconcileBackoffUntil || queue.size > 64) return;
+  if (reconciling || stopping || !historyRpcAvailable() || queue.size > 64) return;
   reconciling = true;
   try {
     // Recover up to 30 minutes of recent signatures; delayed recoveries are clearly aged on cards.
@@ -257,8 +303,8 @@ async function reconcile() {
   } catch { lastErrorAt = Date.now(); console.warn('[Echo] Reconciliation unavailable; bounded retry scheduled.'); }
   finally { reconciling = false; }
 }
-const subscription = startEchoSubscription({ url: config.wsUrl, onSignature: (signature, wallet) => { if (!store.has(`tx:${signature}`)) queue.add(signature, ECHO_WALLETS[wallet] === 'WHALE · slingoor'); }, onReady: () => { void reconcile(); } });
-const tick = setInterval(() => { if (!stopping && Date.now() >= Math.max(backoffUntil, deliveryBackoffUntil)) void queue.tick(); }, 250);
+const subscription = startEchoSubscription({ url: config.wsUrl, fallbackUrl: config.fallbackWsUrl, onSignature: (signature, wallet) => { if (!store.has(`tx:${signature}`)) queue.add(signature, ECHO_WALLETS[wallet] === 'WHALE · slingoor'); }, onReady: () => { void reconcile(); } });
+const tick = setInterval(() => { if (!stopping && liveRpcAvailable() && Date.now() >= deliveryBackoffUntil) void queue.tick(); }, 250);
 // Reduce history polling (especially on an active WebSocket) so live BUY processing
 // gets priority over expensive archive scans. After 429, adaptive backoff applies.
 const sweep = setInterval(() => { void reconcile(); }, 180_000);
@@ -270,12 +316,13 @@ const tierTick=setInterval(()=>{void tiers.tick().catch(()=>console.warn('[EchoT
 const heartbeat = setInterval(() => console.log('[Echo] HEALTH', { subscriptions: subscription.state.acknowledgedWallets,
   websocketReady: subscription.state.ready, reconnects: subscription.state.reconnects,
   lastDisconnectReason: subscription.state.lastDisconnectReason, lastConnectedAt: subscription.state.lastConnectedAt,
+  activeWebSocketProvider: subscription.state.activeProvider,
   skippedNonSwapLogs: subscription.state.skippedNonSwapLogs, observedTradeSignatures: subscription.state.observedTradeSignatures, queued: queue.size, dropped: queue.dropped,
   lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt, ...diagnostics, promotions: promotionsReady ? promotions.summary() : {enabled:false}, research: researchReady ? JSON.stringify(research.summary()) : {enabled:false},tiers:tiers.summary(), rejectionCounts }), 60_000);
 const server = createServer((req, res) => {
   if (req.method !== 'GET' || req.url !== '/health') { res.writeHead(404); res.end(); return; }
   // A healthy WebSocket must not be marked down merely because history reconciliation is rate-limited.
-  const ready = !stopping && subscription.state.ready && Date.now() >= Math.max(backoffUntil, deliveryBackoffUntil) && queue.size < 2048;
+  const ready = !stopping && subscription.state.ready && liveRpcAvailable() && Date.now() >= deliveryBackoffUntil && queue.size < 2048;
   res.writeHead(ready ? 200 : 503, { 'content-type': 'application/json' });
   res.end(JSON.stringify({ service: 'alphaos-echo', source: 'standard-solana-rpc', mode: 'alerts', ready, liveBuying: false,
     subscriptions: subscription.state.acknowledgedWallets, reconnects: subscription.state.reconnects,
