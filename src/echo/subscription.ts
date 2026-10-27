@@ -4,7 +4,7 @@ import { setTimeout, clearTimeout } from 'node:timers';
 type Socket = { addEventListener(type: string, listener: (event: any) => void): void; send(data: string): void; close(): void };
 type Timer = number | NodeJS.Timeout;
 type Options = {
-  url: string; onSignature(signature: string): void; onReady(): void;
+  url: string; onSignature(signature: string, wallet: string): void; onReady(): void;
   socket?: (url: string) => Socket;
   later?: (callback: () => void, milliseconds: number) => Timer;
   cancel?: (timer: Timer) => void;
@@ -18,6 +18,8 @@ export function startEchoSubscription(options: Options) {
     if (stopped) return;
     state.ready = false; state.acknowledgedWallets = 0;
     const ids = new Set<number>();
+    const wallets = Object.keys(ECHO_WALLETS);
+    const walletForSubscription = new Map<number, string>();
     const expectedWallets = Object.keys(ECHO_WALLETS).length;
     const requests = new Set<number>();
     const lost = (reason = 'closed') => {
@@ -26,11 +28,11 @@ export function startEchoSubscription(options: Options) {
       if (timeout) cancel(timeout);
       try { current.close(); } catch { /* no provider URLs in logs */ }
       state.reconnects++;
-      reconnect = later(connect, delay); delay = Math.min(30_000, delay * 2);
+      reconnect = later(connect, delay); delay = Math.min(60_000, delay * 2);
     };
     let current: Socket;
     try { current = (options.socket ?? (url => new WebSocket(url)))(options.url); }
-    catch { state.lastDisconnectReason = 'socket_constructor_failed'; state.reconnects++; reconnect = later(connect, delay); delay = Math.min(30_000, delay * 2); return; }
+    catch { state.lastDisconnectReason = 'socket_constructor_failed'; state.reconnects++; reconnect = later(connect, delay); delay = Math.min(60_000, delay * 2); return; }
     socket = current;
     timeout = later(() => lost('subscription_ack_timeout'), 10_000);
     current.addEventListener('open', () => {
@@ -49,7 +51,7 @@ export function startEchoSubscription(options: Options) {
       if (Number.isInteger(message.id) && message.id >= 1 && message.id <= expectedWallets) {
         if (message.error || !Number.isSafeInteger(message.result) || message.result < 0) { lost('subscription_rejected_' + String(message.error?.code ?? 'invalid_ack')); return; }
         if (requests.has(message.id)) return;
-        requests.add(message.id); ids.add(message.result); state.acknowledgedWallets = ids.size;
+        requests.add(message.id); ids.add(message.result); walletForSubscription.set(message.result, wallets[message.id - 1]); state.acknowledgedWallets = ids.size;
         if (ids.size === expectedWallets && !state.ready) { state.ready = true; delay = 1000; if (timeout) cancel(timeout); options.onReady(); }
         return;
       }
@@ -58,7 +60,8 @@ export function startEchoSubscription(options: Options) {
       if (value?.err != null || !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(value?.signature ?? '')) return;
       if (!mayContainWalletSwap(value.logs)) { state.skippedNonSwapLogs++; return; }
       state.observedTradeSignatures++;
-      options.onSignature(value.signature);
+      const wallet = walletForSubscription.get(message.params.subscription);
+      if (wallet) options.onSignature(value.signature, wallet);
     });
     current.addEventListener('close', (event: any) => lost('closed_' + String(Number.isInteger(event?.code) ? event.code : 'unknown')));
     current.addEventListener('error', () => lost('socket_error'));
