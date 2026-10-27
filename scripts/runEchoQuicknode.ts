@@ -296,6 +296,12 @@ async function reconcile() {
     for (const wallet of Object.keys(ECHO_WALLETS)) {
       const rows = await rpc('getSignaturesForAddress', [wallet, { limit: 100, commitment: 'confirmed' }]);
       if (!Array.isArray(rows)) throw new Error('Echo signature list unavailable');
+      if (rows.length >= 100 && rows[rows.length - 1]?.blockTime != null &&
+          Date.now() / 1000 - rows[rows.length - 1].blockTime <= 1800)
+        console.warn('[Echo] HISTORY_COVERAGE_INCOMPLETE', {
+          caller: ECHO_WALLETS[wallet], reason: 'signature-page-limit',
+          notice: 'Read-only catch-up did not cover the full 30-minute window'
+        });
       for (const row of rows.reverse()) if (row.err == null && Number.isFinite(row.blockTime) && Date.now() / 1000 - row.blockTime <= 1800 &&
         /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') && !store.has(`tx:${row.signature}`)) queue.add(row.signature);
     }
@@ -307,7 +313,12 @@ const subscription = startEchoSubscription({ url: config.wsUrl, fallbackUrl: con
 const tick = setInterval(() => { if (!stopping && liveRpcAvailable() && Date.now() >= deliveryBackoffUntil) void queue.tick(); }, 250);
 // Reduce history polling (especially on an active WebSocket) so live BUY processing
 // gets priority over expensive archive scans. After 429, adaptive backoff applies.
-const sweep = setInterval(() => { void reconcile(); }, 180_000);
+// When connected, verify history periodically without spending archive credits every
+// three minutes. During a disconnect, request bounded catch-up with provider backoff.
+const sweep = setInterval(() => {
+  if (!subscription.state.ready || lastReconcileAt == null || Date.now() - lastReconcileAt >= 15 * 60_000)
+    void reconcile();
+}, 60_000);
 const promotionTick=setInterval(()=>{if(promotionsReady)void promotions.tick();},30_000);
 if(promotionsReady)void promotions.tick();
 const researchTick = setInterval(() => { if (researchReady) void research.tick().catch(() => console.warn('[EchoResearch] TICK_FAILED')); }, 60_000);
@@ -330,7 +341,7 @@ const server = createServer((req, res) => {
     skippedNonSwapLogs: subscription.state.skippedNonSwapLogs, observedTradeSignatures: subscription.state.observedTradeSignatures,
     queued: queue.size, dropped: queue.dropped, lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt }));
 });
-server.listen(config.port, '0.0.0.0', () => console.log('[Echo] RPC pilot started; only supported Pump/PumpSwap trades; live buying OFF.'));
+server.listen(config.port, '0.0.0.0', () => console.log('[Echo] Alert-only watcher started; Pump/PumpSwap/Jupiter BUY routes; live buying OFF.'));
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => {
   stopping = true; clearInterval(tick); clearInterval(sweep); clearInterval(researchTick); clearInterval(promotionTick); clearInterval(tierTick); clearInterval(heartbeat); subscription.stop(); server.close();
 });
