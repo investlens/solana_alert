@@ -25,4 +25,6 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
       - name: Echo-focused tests
-        run: npx tsx --test tests/echoSlingoorReliability.test.ts tests/echoSubscriptionReliability.test.ts tests/echoBuyOnlyTransferRejection.test.ts tests/echoLogPrefilter.test.ts tests/echoJupiterRouteSignals.test.ts
+        run: npx tsx --test tests/echoSlingoorReliability.test.ts tests/echoSubscriptionReliability.test.ts tests/echoBuyOnlyTransferRejection.test.ts tests/echoLogPrefilter.test.ts tests/echoJupiterRouteSignals.test.ts tests/echoPriorityQueue.test.ts
+      - name: All repository tests
+        run: npm test
