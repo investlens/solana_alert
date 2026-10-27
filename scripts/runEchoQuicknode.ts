@@ -8,6 +8,7 @@ import { EchoTierDispatcher } from '../src/echo/tierDispatch.js';
 import { pumpCurveSnapshot } from '../src/echo/curveSnapshot.js';
 import { ECHO_WALLETS, echoCard } from '../src/echo/signals.js';
 import { extractRpcEchoSignals, classifyEchoRejection, type EchoRejectReason } from '../src/echo/rpcSignals.js';
+import { extractJupiterRoutedEchoBuys } from '../src/echo/jupiterRouteSignals.js';
 import { EchoQueue } from '../src/echo/queue.js';
 import { startEchoSubscription } from '../src/echo/subscription.js';
 import { readEchoTransaction } from '../src/echo/readTransaction.js';
@@ -207,7 +208,8 @@ const queue = new EchoQueue(async signature => {
   const tx = await readEchoTransaction(signature, rpc);
   if (tx == null) throw new Error('Confirmed transaction pending');
   diagnostics.fetched++;
-  const signals = extractRpcEchoSignals(tx, signature, Date.now() / 1000);
+  const directSignals = extractRpcEchoSignals(tx, signature, Date.now() / 1000);
+  const signals = directSignals.length ? directSignals : extractJupiterRoutedEchoBuys(tx, signature, Date.now() / 1000);
   diagnostics.signals += signals.length;
   if (!signals.length) { diagnostics.noSignal++; const reason = classifyEchoRejection(tx, signature, Date.now() / 1000); rejectionCounts[reason] = (rejectionCounts[reason] ?? 0) + 1; }
   for (const signal of signals) {
@@ -229,7 +231,7 @@ const queue = new EchoQueue(async signature => {
     console.log('[Echo] RESEARCH_EVENT', JSON.stringify({ caller: signal.caller, wallet: signal.wallet, mint: signal.mint,
       signature: signal.signature, side: signal.side, tradeAt: signal.timestamp, deliveryAt: Date.now() / 1000,
       telegramMessageId: result.result.message_id, quoteAmount: signal.quoteAmount, quoteSymbol: signal.quoteSymbol,
-      quoteBasis: signal.quoteBasis || 'unavailable' }));
+      quoteBasis: signal.quoteBasis || 'unavailable', inputMint: signal.quoteMint || null }));
     await store.delivered(signal.id, Date.now() / 1000); lastDeliveryAt = Date.now(); diagnostics.delivered++;
     await tiers.enqueue({id:signal.id,mint:signal.mint,text:baseCard,acceptedAt:Date.now(),buttons:{inline_keyboard:[
       [{text:'🔎 Transaction',url:'https://solscan.io/tx/'+signal.signature},{text:'📈 Chart',url:'https://dexscreener.com/solana/'+signal.mint}]]}}).catch(()=>console.warn('[EchoTiers] CALLER_QUEUE_WRITE_FAILED'));
