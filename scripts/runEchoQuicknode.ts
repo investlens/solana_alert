@@ -47,23 +47,26 @@ const research = new EchoResearch(config.statePath+'.research-v1.json',async eve
 let researchReady = false;
 try { await research.load(); researchReady = true; }
 catch { console.warn('[EchoResearch] STARTUP_DISABLED: research state unavailable, alerts unaffected'); }
-let backoffUntil = 0, lastRpcAt: number | null = null, lastDeliveryAt: number | null = null;
+let backoffUntil = 0, reconcileBackoffUntil = 0, lastRpcAt: number | null = null, lastDeliveryAt: number | null = null;
 let deliveryBackoffUntil = 0;
 let lastErrorAt: number | null = null, lastReconcileAt: number | null = null, stopping = false;
 const diagnostics = { fetched: 0, signals: 0, delivered: 0, noSignal: 0, rpcFailures: 0, deliveryFailures: 0 };
 const rejectionCounts: Partial<Record<EchoRejectReason, number>> = {};
 async function rpc(method: string, params: unknown[] = []) {
-  if (Date.now() < backoffUntil) throw new Error('RPC backing off');
+  if (Date.now() < (method === 'getSignaturesForAddress' ? reconcileBackoffUntil : backoffUntil)) throw new Error('RPC backing off');
   try {
     const response = await fetch(config.rpcUrl, { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: AbortSignal.timeout(8_000) });
     if (response.status === 429) {
       const retry = Number(response.headers.get('retry-after'));
-      backoffUntil = Date.now() + Math.min(300_000, Math.max(30_000, Number.isFinite(retry) ? retry * 1000 : 60_000));
+      if (method === 'getSignaturesForAddress') reconcileBackoffUntil = Date.now() + Math.min(300_000, Math.max(30_000, Number.isFinite(retry) ? retry * 1000 : 60_000));
+      else backoffUntil = Date.now() + Math.min(300_000, Math.max(30_000, Number.isFinite(retry) ? retry * 1000 : 60_000));
     }
     if (!response.ok) { console.warn('[Echo] RPC_HTTP_FAILURE', { method, status: response.status }); throw new Error('RPC HTTP failure'); }
     const data = await response.json();
-    if (data.error && (data.error.code === 429 || data.error.code === -32005 || /rate.?limit|credits.*exceed/i.test(String(data.error.message)))) backoffUntil = Date.now() + 60_000;
+    if (data.error && (data.error.code === 429 || data.error.code === -32005 || /rate.?limit|credits.*exceed/i.test(String(data.error.message)))) {
+      if (method === 'getSignaturesForAddress') reconcileBackoffUntil = Date.now() + 60_000; else backoffUntil = Date.now() + 60_000;
+    }
     if (data.error || !Object.prototype.hasOwnProperty.call(data, 'result')) {
       console.warn('[Echo] RPC_RESPONSE_FAILURE', { method, code: Number.isFinite(data.error?.code) ? data.error.code : null });
       throw new Error('RPC response failure');
@@ -200,7 +203,8 @@ const queue = new EchoQueue(async signature => {
   diagnostics.signals += signals.length;
   if (!signals.length) { diagnostics.noSignal++; const reason = classifyEchoRejection(tx, signature, Date.now() / 1000); rejectionCounts[reason] = (rejectionCounts[reason] ?? 0) + 1; }
   for (const signal of signals) {
-    if (store.has(signal.id)) continue;
+    // User requested only confirmed BUY notifications, never incoming transfers or SELLs.
+    if (signal.side !== 'BUY' || store.has(signal.id)) continue;
     const baseCard = echoCard(signal, Date.now() / 1000);
     const result = await fetch(`https://api.telegram.org/bot${config.botToken}/sendMessage`, { method: 'POST',
       headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(8_000),
@@ -229,14 +233,14 @@ const queue = new EchoQueue(async signature => {
 });
 let reconciling = false;
 async function reconcile() {
-  if (reconciling || stopping || Date.now() < backoffUntil) return;
+  if (reconciling || stopping || Date.now() < reconcileBackoffUntil) return;
   reconciling = true;
   try {
-    // 4 address reads/minute; at most 20 recent signatures each. No deep history.
+    // Recover up to 30 minutes of recent signatures; delayed recoveries are clearly aged on cards.
     for (const wallet of Object.keys(ECHO_WALLETS)) {
-      const rows = await rpc('getSignaturesForAddress', [wallet, { limit: 20, commitment: 'confirmed' }]);
+      const rows = await rpc('getSignaturesForAddress', [wallet, { limit: 100, commitment: 'confirmed' }]);
       if (!Array.isArray(rows)) throw new Error('Echo signature list unavailable');
-      for (const row of rows.reverse()) if (row.err == null && Number.isFinite(row.blockTime) && Date.now() / 1000 - row.blockTime <= 120 &&
+      for (const row of rows.reverse()) if (row.err == null && Number.isFinite(row.blockTime) && Date.now() / 1000 - row.blockTime <= 1800 &&
         /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') && !store.has(`tx:${row.signature}`)) queue.add(row.signature);
     }
     lastReconcileAt = Date.now();
