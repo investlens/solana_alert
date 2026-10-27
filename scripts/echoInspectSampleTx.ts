@@ -1,3 +1,5 @@
+import { extractJupiterRoutedEchoBuys } from '../src/echo/jupiterRouteSignals.js';
+
 /**
  * Read-only one-shot public RPC diagnostic for user-supplied Slingoor signature.
  * Never uses a private key, signs, submits, or changes subscriptions.
@@ -27,8 +29,10 @@ for (const endpoint of ['https://api.mainnet-beta.solana.com','https://solana-rp
       }
     }
     const walletDeltas=[...deltas].map(([mint,v])=>({mint,change:Number(v.delta)/10**v.decimals}));
+    const recognizedBuys = extractJupiterRoutedEchoBuys(tx,signature,tx.blockTime + 1);
+    const classifications = recognizedBuys.map(s=>({side:s.side,mint:s.mint,inputMint:s.quoteMint,tokenAmount:s.tokenAmount,quoteAmount:s.quoteAmount,caller:s.caller}));
     console.log('SAMPLE_TX_PROBE',JSON.stringify({outcome:'FOUND',success:tx.meta?.err===null,
-      slot:tx.slot,blockTime:tx.blockTime,signers,programs,walletDeltas}));
+      slot:tx.slot,blockTime:tx.blockTime,signers,programs,walletDeltas,classifications}));
     process.exit(0);
   }catch{console.log('SAMPLE_TX_PROBE',JSON.stringify({rpcHost:new URL(endpoint).hostname,outcome:'NETWORK_UNAVAILABLE'}));}
 }
