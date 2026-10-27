@@ -1,31 +1,65 @@
-// Bounded, retryable signature queue. Do not discard a real BUY merely because
-// the RPC provider returned HTTP 429 or a transaction was temporarily unavailable.
-// Queue jobs remain until a confirmed decision or a manual operational reset.
-// This is in-memory only: a durable journal is still required for crash recovery.
+import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { dirname } from 'node:path';
+
+type PendingJob = { nextAt: number; attempts: number; insertedAt: number };
+const VALID_SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
+
+/**
+ * Persist signature backlog before returning from add(). Small, single-process
+ * queue with an atomic rename on the private Echo volume. No executable trades.
+ * For multi-replica deployment, replace with a transactional shared queue.
+ */
 export class EchoQueue {
-  private jobs = new Map<string, { nextAt: number; attempts: number }>();
+  private jobs = new Map<string, PendingJob>();
   private running = false;
   dropped = 0;
-  constructor(private readonly process: (signature: string) => Promise<void>, private readonly now = Date.now) {}
+  constructor(private readonly process: (signature: string) => Promise<void>,
+    private readonly now = Date.now, private readonly journalPath?: string) {
+    if (!journalPath) return;
+    try {
+      const saved = JSON.parse(readFileSync(journalPath, 'utf8'));
+      if (saved.version !== 1 || !Array.isArray(saved.pending)) throw Error('Invalid Echo pending journal');
+      for (const item of saved.pending) {
+        if (!Array.isArray(item) || item.length !== 2 || !VALID_SIGNATURE.test(item[0]) ||
+          !Number.isFinite(item[1]?.nextAt) || !Number.isInteger(item[1]?.attempts) ||
+          !Number.isFinite(item[1]?.insertedAt)) throw Error('Invalid pending item');
+        this.jobs.set(item[0], item[1]);
+      }
+      if (this.jobs.size > 4096) throw Error('Echo pending journal exceeds capacity');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
   get size() { return this.jobs.size; }
+  private persist() {
+    if (!this.journalPath) return;
+    mkdirSync(dirname(this.journalPath), { recursive: true, mode: 0o700 });
+    const temporary = this.journalPath + '.tmp';
+    writeFileSync(temporary, JSON.stringify({ version: 1, pending: [...this.jobs] }), { mode: 0o600 });
+    renameSync(temporary, this.journalPath);
+  }
   add(signature: string) {
-    if (this.jobs.has(signature)) return;
+    if (!VALID_SIGNATURE.test(signature) || this.jobs.has(signature)) return;
     if (this.jobs.size >= 4096) { this.dropped++; return; }
-    this.jobs.set(signature, { nextAt: this.now(), attempts: 0 });
+    this.jobs.set(signature, { nextAt: this.now(), attempts: 0, insertedAt: this.now() });
+    // Fail closed if storage is down: caller sees an error, service must stop.
+    try { this.persist(); } catch (error) { this.jobs.delete(signature); throw error; }
   }
   async tick() {
     if (this.running) return;
     this.running = true;
     try {
-      const next = Array.from(this.jobs).find(([, job]) => this.now() >= job.nextAt);
+      const next = [...this.jobs].find(([, job]) => this.now() >= job.nextAt);
       if (!next) return;
       const [signature, job] = next;
-      try { await this.process(signature); this.jobs.delete(signature); }
-      catch {
+      try {
+        await this.process(signature);
+        this.jobs.delete(signature);
+        this.persist();
+      } catch {
         job.attempts++;
-        // Keep unresolved transactions for recovery. Retry progressively more slowly
-        // under load; do not turn a provider outage into irrevocably lost signals.
         job.nextAt = this.now() + Math.min(60_000, 500 * 2 ** Math.min(7, job.attempts));
+        this.persist();
       }
     } finally { this.running = false; }
   }
