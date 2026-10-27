@@ -100,7 +100,7 @@ async function check(label: 'primary' | 'fallback', rpcUrl: string, wsUrl: strin
   } catch (error) {
     // Never print URLs, secret query strings or RPC error bodies.
     console.warn('[EchoPreDeploy] PROVIDER_UNAVAILABLE', JSON.stringify({
-      provider:label, category: error instanceof Error ? error.message.replace(/https?:[^ ]+/g,'[redacted]').slice(0,64) : 'UNKNOWN'
+      provider:label, category: error instanceof Error && /^(?:HTTP_\\d{3}|RPC_REJECTED|WRONG_CHAIN|HISTORY_UNAVAILABLE|SAMPLE_TX_UNAVAILABLE|SAMPLE_BUY_NOT_DETECTED|WEBSOCKET_ACK_TIMEOUT|WEBSOCKET_SUBSCRIPTION_REJECTED|WEBSOCKET_CONNECT_FAILED|WEBSOCKET_CLOSED)$/.test(error.message) ? error.message : 'PROBE_ERROR'
     }));
     return false;
   }
