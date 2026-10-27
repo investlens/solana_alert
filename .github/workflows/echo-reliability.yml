@@ -1,0 +1,28 @@
+name: Echo reliability checks
+
+on:
+  push:
+    branches:
+      - feat/echo-slingoor-livebuy-safety-20261027
+  pull_request:
+    branches:
+      - feat/echo-admin-pilot-20261021
+
+permissions:
+  contents: read
+
+jobs:
+  echo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Echo-focused tests
+        run: npx tsx --test tests/echoSlingoorReliability.test.ts tests/echoSubscriptionReliability.test.ts
