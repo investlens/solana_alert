@@ -65,7 +65,6 @@ async function rpc(method: string, params: unknown[] = []) {
     const response = await fetch(config.rpcUrl, { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: AbortSignal.timeout(8_000) });
     if (response.status === 429) {
-      const retry = Number(response.headers.get('retry-after'));
       if (method === 'getSignaturesForAddress') historyRateLimited(response.headers.get('retry-after'));
       else backoffUntil = Date.now() + Math.min(300_000, Math.max(30_000, Number.isFinite(retry) ? retry * 1000 : 60_000));
     }
