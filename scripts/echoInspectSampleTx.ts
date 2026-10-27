@@ -1,0 +1,34 @@
+/**
+ * Read-only one-shot public RPC diagnostic for user-supplied Slingoor signature.
+ * Never uses a private key, signs, submits, or changes subscriptions.
+ * A public RPC may rate limit this call; absence of data means UNAVAILABLE.
+ */
+const signature = '5W5d2xZT8K2QTmpixHviNrt5E38esAhqmjNVfqxmfm4Jz8RoEfwsW6efsEJ6ptxT1tj5sxeGFj8UicopFP5TT3Ed';
+const slingoor = '5YRgrP3mjGzrzirYYN5HAQH19cTYREYwGxW6XRJQUzij';
+for (const endpoint of ['https://api.mainnet-beta.solana.com','https://solana-rpc.publicnode.com']) {
+  try {
+    const response = await fetch(endpoint, {
+      method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({jsonrpc:'2.0',id:1,method:'getTransaction',params:[signature,{
+        encoding:'jsonParsed',commitment:'confirmed',maxSupportedTransactionVersion:1
+      }]}),signal:AbortSignal.timeout(8000)
+    });
+    if(!response.ok){console.log('SAMPLE_TX_PROBE',JSON.stringify({rpcHost:new URL(endpoint).hostname,status:response.status,outcome:'UNAVAILABLE'}));continue;}
+    const data=await response.json();
+    const tx=data.result;
+    if(!tx){console.log('SAMPLE_TX_PROBE',JSON.stringify({rpcHost:new URL(endpoint).hostname,code:data.error?.code??null,outcome:'UNAVAILABLE'}));continue;}
+    const accounts=tx.transaction?.message?.accountKeys??[];
+    const signers=accounts.filter((a:any)=>a.signer).map((a:any)=>a.pubkey);
+    const programs=[...new Set((tx.transaction?.message?.instructions??[]).map((ix:any)=>ix.programId))];
+    const deltas=new Map<string,{decimals:number,delta:bigint}>();
+    for(const [direction,rows] of [[-1n,tx.meta?.preTokenBalances??[]],[1n,tx.meta?.postTokenBalances??[]]] as const){
+      for(const row of rows){if(row.owner!==slingoor)continue;const cur=deltas.get(row.mint);
+        deltas.set(row.mint,{decimals:row.uiTokenAmount.decimals,delta:(cur?.delta??0n)+direction*BigInt(row.uiTokenAmount.amount)});
+      }
+    }
+    const walletDeltas=[...deltas].map(([mint,v])=>({mint,change:Number(v.delta)/10**v.decimals}));
+    console.log('SAMPLE_TX_PROBE',JSON.stringify({outcome:'FOUND',success:tx.meta?.err===null,
+      slot:tx.slot,blockTime:tx.blockTime,signers,programs,walletDeltas}));
+    process.exit(0);
+  }catch{console.log('SAMPLE_TX_PROBE',JSON.stringify({rpcHost:new URL(endpoint).hostname,outcome:'NETWORK_UNAVAILABLE'}));}
+}
