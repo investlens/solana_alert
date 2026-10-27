@@ -1,4 +1,5 @@
 import { ECHO_WALLETS } from './signals.js';
+import { mayContainWalletSwap } from './logPrefilter.js';
 import { setTimeout, clearTimeout } from 'node:timers';
 type Socket = { addEventListener(type: string, listener: (event: any) => void): void; send(data: string): void; close(): void };
 type Timer = number | NodeJS.Timeout;
@@ -10,7 +11,7 @@ type Options = {
 };
 export function startEchoSubscription(options: Options) {
   const later = options.later ?? setTimeout, cancel = options.cancel ?? clearTimeout;
-  const state = { ready: false, acknowledgedWallets: 0, reconnects: 0, lastMessageAt: null as number | null, lastDisconnectReason: 'none' as string, lastConnectedAt: null as number | null };
+  const state = { ready: false, acknowledgedWallets: 0, reconnects: 0, lastMessageAt: null as number | null, lastDisconnectReason: 'none' as string, lastConnectedAt: null as number | null, skippedNonSwapLogs: 0, observedTradeSignatures: 0 };
   let socket: Socket | null = null, stopped = false, reconnect: Timer | undefined;
   let timeout: Timer | undefined, delay = 1000;
   function connect() {
@@ -55,6 +56,8 @@ export function startEchoSubscription(options: Options) {
       if (message.method !== 'logsNotification' || !ids.has(message.params?.subscription)) return;
       const value = message.params?.result?.value;
       if (value?.err != null || !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(value?.signature ?? '')) return;
+      if (!mayContainWalletSwap(value.logs)) { state.skippedNonSwapLogs++; return; }
+      state.observedTradeSignatures++;
       options.onSignature(value.signature);
     });
     current.addEventListener('close', (event: any) => lost('closed_' + String(Number.isInteger(event?.code) ? event.code : 'unknown')));
