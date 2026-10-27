@@ -230,7 +230,7 @@ const queue = new EchoQueue(async signature => {
     console.log('[Echo] ADMIN_DELIVERY_ACCEPTED', { caller: signal.caller, signature, side: signal.side, messageId: result.result.message_id });
   }
   await store.delivered(`tx:${signature}`, Date.now() / 1000);
-});
+}, Date.now, config.statePath + '.pending-v1.json');
 let reconciling = false;
 async function reconcile() {
   if (reconciling || stopping || Date.now() < reconcileBackoffUntil) return;
