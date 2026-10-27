@@ -78,7 +78,7 @@ export function echoCard(s: EchoSignal, nowSeconds: number, market?: EchoCardMar
     s.quoteBasis === 'wallet SOL net change; includes fees/rent'
       ? `~${s.quoteAmount.toFixed(4)} ${escapeEchoHtml(s.quoteSymbol)} wallet change (not exact trade size)`
       : `${s.quoteAmount.toFixed(4)} ${escapeEchoHtml(s.quoteSymbol)}`;
-  return `<b>📡 ECHO · ${s.side === 'BUY' ? '🟢 BUY' : '🔴 SELL'} · ${escapeEchoHtml(s.caller)}</b>\n` +
+  return `<b>${s.caller === 'WHALE · slingoor' && s.side === 'BUY' ? '⚡ ALPHAOS ECHO · PREMIUM · SLINGOOR BUY' : '📡 ECHO · ' + (s.side === 'BUY' ? '🟢 BUY' : '🔴 SELL') + ' · ' + escapeEchoHtml(s.caller)}</b>\n` +
     `${label}\n` +
     `💰 <b>MC:</b> ${formatUsd(market?.marketCap)} · <b>LP:</b> ${formatUsd(market?.liquidity)}\n` +
     `💱 <b>Trade:</b> ${quote}\n` +
