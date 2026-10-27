@@ -46,6 +46,19 @@ test('Jupiter router BUY: exact debit and net received token, one alert', () => 
   assert.equal(v[0].quoteMint,usdc);
   assert.equal(v[0].quoteBasis,'token-account net change');
 });
+test('Jupiter v6 V2 route decodes same verified net asset BUY as classic router', () => {
+  const tx=make();
+  const data=bs58.encode(Buffer.concat([
+    createHash('sha256').update('global:shared_accounts_route_v2').digest().subarray(0,8),
+    Buffer.alloc(20)
+  ]));
+  const v2=make({transaction:{...tx.transaction,message:{...tx.transaction.message,
+    instructions:[{programId:jup,accounts:[caller],data}]}}});
+  const results=extractJupiterRoutedEchoBuys(v2,signature,1002);
+  assert.equal(results.length,1);
+  assert.equal(results[0].quoteAmount,10);
+  assert.equal(results[0].tokenAmount,2);
+});
 test('Transfers, invalid router data and caller-not-signer produce zero BUYs', () => {
   const tx=make();
   const noRoute=make({transaction:{...tx.transaction,
