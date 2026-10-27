@@ -257,7 +257,7 @@ async function reconcile() {
   } catch { lastErrorAt = Date.now(); console.warn('[Echo] Reconciliation unavailable; bounded retry scheduled.'); }
   finally { reconciling = false; }
 }
-const subscription = startEchoSubscription({ url: config.wsUrl, onSignature: signature => { if (!store.has(`tx:${signature}`)) queue.add(signature); }, onReady: () => { void reconcile(); } });
+const subscription = startEchoSubscription({ url: config.wsUrl, onSignature: (signature, wallet) => { if (!store.has(`tx:${signature}`)) queue.add(signature, ECHO_WALLETS[wallet] === 'WHALE · slingoor'); }, onReady: () => { void reconcile(); } });
 const tick = setInterval(() => { if (!stopping && Date.now() >= Math.max(backoffUntil, deliveryBackoffUntil)) void queue.tick(); }, 250);
 // Reduce history polling (especially on an active WebSocket) so live BUY processing
 // gets priority over expensive archive scans. After 429, adaptive backoff applies.
