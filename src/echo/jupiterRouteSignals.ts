@@ -17,6 +17,11 @@ const ROUTE_NAMES = [
   'shared_accounts_route',
   'shared_accounts_route_with_token_ledger',
   'shared_accounts_exact_out_route',
+  // Jupiter v6's newer Token-2022-aware routing instructions.
+  'route_v2',
+  'exact_out_route_v2',
+  'shared_accounts_route_v2',
+  'shared_accounts_exact_out_route_v2',
 ] as const;
 const ROUTE_TAGS = new Set(ROUTE_NAMES.map(name =>
   createHash('sha256').update('global:' + name).digest('hex').slice(0, 16)));
