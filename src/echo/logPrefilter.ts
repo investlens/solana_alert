@@ -30,6 +30,9 @@ export function mayContainWalletSwap(logs: unknown): boolean {
     if (typeof line !== 'string') return true; // Unrecognized data: fail open.
     const invoked = INVOCATION.exec(line);
     if (invoked && TRADING_PROGRAM_IDS.has(invoked[1])) return true;
+    // Unknown DEX programs may still use standard Anchor swap instruction logs.
+    // Fetch for full signer/balance validation; never trust text as BUY proof.
+    if (/^Program log: Instruction: (Buy|BuyExactIn|Swap|SwapBaseIn|SwapBaseOut|Route|ExactOutRoute|SharedAccountsRoute)\b/i.test(line)) return true;
   }
   return false;
 }
