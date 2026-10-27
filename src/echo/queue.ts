@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-type PendingJob = { nextAt: number; attempts: number; insertedAt: number };
+type PendingJob = { nextAt: number; attempts: number; insertedAt: number; priority?: boolean };
 const VALID_SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
 
 /**
@@ -22,7 +22,8 @@ export class EchoQueue {
       for (const item of saved.pending) {
         if (!Array.isArray(item) || item.length !== 2 || !VALID_SIGNATURE.test(item[0]) ||
           !Number.isFinite(item[1]?.nextAt) || !Number.isInteger(item[1]?.attempts) ||
-          !Number.isFinite(item[1]?.insertedAt)) throw Error('Invalid pending item');
+          !Number.isFinite(item[1]?.insertedAt) ||
+          (item[1]?.priority !== undefined && typeof item[1].priority !== 'boolean')) throw Error('Invalid pending item');
         this.jobs.set(item[0], item[1]);
       }
       if (this.jobs.size > 4096) throw Error('Echo pending journal exceeds capacity');
@@ -38,10 +39,15 @@ export class EchoQueue {
     writeFileSync(temporary, JSON.stringify({ version: 1, pending: [...this.jobs] }), { mode: 0o600 });
     renameSync(temporary, this.journalPath);
   }
-  add(signature: string) {
-    if (!VALID_SIGNATURE.test(signature) || this.jobs.has(signature)) return;
+  add(signature: string, priority = false) {
+    if (!VALID_SIGNATURE.test(signature)) return;
+    const existing = this.jobs.get(signature);
+    if (existing) {
+      if (priority && !existing.priority) { existing.priority = true; this.persist(); }
+      return;
+    }
     if (this.jobs.size >= 4096) { this.dropped++; return; }
-    this.jobs.set(signature, { nextAt: this.now(), attempts: 0, insertedAt: this.now() });
+    this.jobs.set(signature, { nextAt: this.now(), attempts: 0, insertedAt: this.now(), priority });
     // Fail closed if storage is down: caller sees an error, service must stop.
     try { this.persist(); } catch (error) { this.jobs.delete(signature); throw error; }
   }
@@ -49,7 +55,8 @@ export class EchoQueue {
     if (this.running) return;
     this.running = true;
     try {
-      const next = [...this.jobs].find(([, job]) => this.now() >= job.nextAt);
+      const due = [...this.jobs].filter(([, job]) => this.now() >= job.nextAt);
+      const next = due.find(([, job]) => job.priority) ?? due[0];
       if (!next) return;
       const [signature, job] = next;
       try {
