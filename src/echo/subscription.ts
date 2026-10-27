@@ -10,7 +10,7 @@ type Options = {
 };
 export function startEchoSubscription(options: Options) {
   const later = options.later ?? setTimeout, cancel = options.cancel ?? clearTimeout;
-  const state = { ready: false, acknowledgedWallets: 0, reconnects: 0, lastMessageAt: null as number | null };
+  const state = { ready: false, acknowledgedWallets: 0, reconnects: 0, lastMessageAt: null as number | null, lastDisconnectReason: 'none' as string, lastConnectedAt: null as number | null };
   let socket: Socket | null = null, stopped = false, reconnect: Timer | undefined;
   let timeout: Timer | undefined, delay = 1000;
   function connect() {
@@ -19,9 +19,9 @@ export function startEchoSubscription(options: Options) {
     const ids = new Set<number>();
     const expectedWallets = Object.keys(ECHO_WALLETS).length;
     const requests = new Set<number>();
-    const lost = () => {
+    const lost = (reason = 'closed') => {
       if (socket !== current || stopped) return;
-      socket = null; state.ready = false; state.acknowledgedWallets = 0;
+      socket = null; state.ready = false; state.acknowledgedWallets = 0; state.lastDisconnectReason = reason;
       if (timeout) cancel(timeout);
       try { current.close(); } catch { /* no provider URLs in logs */ }
       state.reconnects++;
@@ -29,14 +29,15 @@ export function startEchoSubscription(options: Options) {
     };
     let current: Socket;
     try { current = (options.socket ?? (url => new WebSocket(url)))(options.url); }
-    catch { state.reconnects++; reconnect = later(connect, delay); delay = Math.min(30_000, delay * 2); return; }
+    catch { state.lastDisconnectReason = 'socket_constructor_failed'; state.reconnects++; reconnect = later(connect, delay); delay = Math.min(30_000, delay * 2); return; }
     socket = current;
-    timeout = later(lost, 10_000);
+    timeout = later(() => lost('subscription_ack_timeout'), 10_000);
     current.addEventListener('open', () => {
       if (socket !== current || stopped) return;
+      state.lastConnectedAt = Date.now();
       try {
         Object.keys(ECHO_WALLETS).forEach((wallet, i) => current.send(JSON.stringify({ jsonrpc: '2.0', id: i + 1, method: 'logsSubscribe', params: [{ mentions: [wallet] }, { commitment: 'confirmed' }] })));
-      } catch { lost(); }
+      } catch { lost('subscription_send_failed'); }
     });
     current.addEventListener('message', event => {
       if (socket !== current || stopped || typeof event.data !== 'string' || event.data.length > 1_000_000) return;
@@ -45,7 +46,7 @@ export function startEchoSubscription(options: Options) {
       if (!message || typeof message !== 'object') return;
       state.lastMessageAt = Date.now();
       if (Number.isInteger(message.id) && message.id >= 1 && message.id <= expectedWallets) {
-        if (message.error || !Number.isSafeInteger(message.result) || message.result < 0) { lost(); return; }
+        if (message.error || !Number.isSafeInteger(message.result) || message.result < 0) { lost('subscription_rejected_' + String(message.error?.code ?? 'invalid_ack')); return; }
         if (requests.has(message.id)) return;
         requests.add(message.id); ids.add(message.result); state.acknowledgedWallets = ids.size;
         if (ids.size === expectedWallets && !state.ready) { state.ready = true; delay = 1000; if (timeout) cancel(timeout); options.onReady(); }
@@ -56,8 +57,8 @@ export function startEchoSubscription(options: Options) {
       if (value?.err != null || !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(value?.signature ?? '')) return;
       options.onSignature(value.signature);
     });
-    current.addEventListener('close', lost);
-    current.addEventListener('error', lost);
+    current.addEventListener('close', (event: any) => lost('closed_' + String(Number.isInteger(event?.code) ? event.code : 'unknown')));
+    current.addEventListener('error', () => lost('socket_error'));
   }
   connect();
   return { state, stop() { stopped = true; state.ready = false; if (timeout) cancel(timeout); if (reconnect) cancel(reconnect); const old = socket; socket = null; try { old?.close(); } catch {} } };
