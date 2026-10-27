@@ -256,15 +256,17 @@ const researchTick = setInterval(() => { if (researchReady) void research.tick()
 if (researchReady) void research.tick().catch(() => console.warn('[EchoResearch] INITIAL_TICK_FAILED'));
 const tierTick=setInterval(()=>{void tiers.tick().catch(()=>console.warn('[EchoTiers] TICK_FAILED'));},1000);
 const heartbeat = setInterval(() => console.log('[Echo] HEALTH', { subscriptions: subscription.state.acknowledgedWallets,
-  websocketReady: subscription.state.ready, reconnects: subscription.state.reconnects, queued: queue.size, dropped: queue.dropped,
+  websocketReady: subscription.state.ready, reconnects: subscription.state.reconnects,
+  lastDisconnectReason: subscription.state.lastDisconnectReason, lastConnectedAt: subscription.state.lastConnectedAt, queued: queue.size, dropped: queue.dropped,
   lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt, ...diagnostics, promotions: promotionsReady ? promotions.summary() : {enabled:false}, research: researchReady ? JSON.stringify(research.summary()) : {enabled:false},tiers:tiers.summary(), rejectionCounts }), 60_000);
 const server = createServer((req, res) => {
   if (req.method !== 'GET' || req.url !== '/health') { res.writeHead(404); res.end(); return; }
-  const ready = !stopping && subscription.state.ready && Date.now() >= Math.max(backoffUntil, deliveryBackoffUntil) &&
-    lastReconcileAt != null && Date.now() - lastReconcileAt < 90_000 && queue.size < 48;
+  // A healthy WebSocket must not be marked down merely because history reconciliation is rate-limited.
+  const ready = !stopping && subscription.state.ready && Date.now() >= Math.max(backoffUntil, deliveryBackoffUntil) && queue.size < 2048;
   res.writeHead(ready ? 200 : 503, { 'content-type': 'application/json' });
   res.end(JSON.stringify({ service: 'alphaos-echo', source: 'standard-solana-rpc', mode: 'alerts', ready, liveBuying: false,
     subscriptions: subscription.state.acknowledgedWallets, reconnects: subscription.state.reconnects,
+    lastDisconnectReason: subscription.state.lastDisconnectReason, lastConnectedAt: subscription.state.lastConnectedAt,
     queued: queue.size, dropped: queue.dropped, lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt }));
 });
 server.listen(config.port, '0.0.0.0', () => console.log('[Echo] RPC pilot started; only supported Pump/PumpSwap trades; live buying OFF.'));
