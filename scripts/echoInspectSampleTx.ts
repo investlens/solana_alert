@@ -1,4 +1,5 @@
 import { extractJupiterRoutedEchoBuys } from '../src/echo/jupiterRouteSignals.js';
+import bs58 from 'bs58';
 
 /**
  * Read-only one-shot public RPC diagnostic for user-supplied Slingoor signature.
@@ -21,7 +22,11 @@ for (const endpoint of ['https://api.mainnet-beta.solana.com','https://solana-rp
     if(!tx){console.log('SAMPLE_TX_PROBE',JSON.stringify({rpcHost:new URL(endpoint).hostname,code:data.error?.code??null,outcome:'UNAVAILABLE'}));continue;}
     const accounts=tx.transaction?.message?.accountKeys??[];
     const signers=accounts.filter((a:any)=>a.signer).map((a:any)=>a.pubkey);
-    const programs=[...new Set((tx.transaction?.message?.instructions??[]).map((ix:any)=>ix.programId))];
+    const instructions = tx.transaction?.message?.instructions ?? [];
+    const programs=[...new Set(instructions.map((ix:any)=>ix.programId))];
+    const jupiterTags = instructions.filter((ix:any)=>ix.programId==='JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4')
+      .map((ix:any)=>({length: typeof ix.data==='string' ? bs58.decode(ix.data).length : null,
+        discriminator: typeof ix.data==='string' ? Buffer.from(bs58.decode(ix.data).subarray(0,8)).toString('hex') : null }));
     const deltas=new Map<string,{decimals:number,delta:bigint}>();
     for(const [direction,rows] of [[-1n,tx.meta?.preTokenBalances??[]],[1n,tx.meta?.postTokenBalances??[]]] as const){
       for(const row of rows){if(row.owner!==slingoor)continue;const cur=deltas.get(row.mint);
@@ -32,7 +37,7 @@ for (const endpoint of ['https://api.mainnet-beta.solana.com','https://solana-rp
     const recognizedBuys = extractJupiterRoutedEchoBuys(tx,signature,tx.blockTime + 1);
     const classifications = recognizedBuys.map(s=>({side:s.side,mint:s.mint,inputMint:s.quoteMint,tokenAmount:s.tokenAmount,quoteAmount:s.quoteAmount,caller:s.caller}));
     console.log('SAMPLE_TX_PROBE',JSON.stringify({outcome:'FOUND',success:tx.meta?.err===null,
-      slot:tx.slot,blockTime:tx.blockTime,signers,programs,walletDeltas,classifications}));
+      slot:tx.slot,blockTime:tx.blockTime,signers,programs,jupiterTags,walletDeltas,classifications}));
     process.exit(0);
   }catch{console.log('SAMPLE_TX_PROBE',JSON.stringify({rpcHost:new URL(endpoint).hostname,outcome:'NETWORK_UNAVAILABLE'}));}
 }
