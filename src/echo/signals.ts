@@ -80,7 +80,7 @@ export function echoCard(s: EchoSignal, nowSeconds: number, market?: EchoCardMar
     ? '$' + v.toLocaleString('en-US', { maximumFractionDigits: 0 }) : 'Unavailable';
   const quote = s.quoteAmount == null ? 'Unavailable' :
     s.quoteBasis === 'wallet SOL net change; includes fees/rent'
-      ? `~${s.quoteAmount.toFixed(4)} ${escapeEchoHtml(s.quoteSymbol)} wallet change (not exact trade size)`
+      ? `~${s.quoteAmount.toFixed(4)} ${escapeEchoHtml(s.quoteSymbol)} wallet change (includes fees/rent; not exact trade size)`
       : `${s.quoteAmount.toFixed(4)} ${escapeEchoHtml(s.quoteSymbol)}`;
   return `<b>${s.caller === 'WHALE · slingoor' && s.side === 'BUY' ? '⚡ ALPHAOS ECHO · PREMIUM · SLINGOOR BUY' : '📡 ECHO · ' + (s.side === 'BUY' ? '🟢 BUY' : '🔴 SELL') + ' · ' + escapeEchoHtml(s.caller)}</b>\n` +
     `${label}\n` +
@@ -90,7 +90,7 @@ export function echoCard(s: EchoSignal, nowSeconds: number, market?: EchoCardMar
     `🪙 <b>Tokens:</b> ${s.tokenAmount.toLocaleString('en-US', { maximumFractionDigits: 4 })}\n` +
     `⏱ <b>Age:</b> ${age}s${social}\n` +
     `\n<b>CA:</b> <code>${escapeEchoHtml(s.mint)}</code>\n` +
-    `<i>Verified swap · Research only · Auto-buy OFF</i>`;
+    `<i>Verified swap · Security not assessed · Research only · Auto-buy OFF</i>`;
 }
 
 export type PaperStop = { entry: number; peak: number; stop: number; closed: boolean };
