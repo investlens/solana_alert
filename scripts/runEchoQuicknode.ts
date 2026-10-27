@@ -49,6 +49,13 @@ try { await research.load(); researchReady = true; }
 catch { console.warn('[EchoResearch] STARTUP_DISABLED: research state unavailable, alerts unaffected'); }
 let backoffUntil = 0, reconcileBackoffUntil = 0, lastRpcAt: number | null = null, lastDeliveryAt: number | null = null;
 let deliveryBackoffUntil = 0;
+let historyLimitStreak = 0;
+function historyRateLimited(retryHeader: string | null) {
+  historyLimitStreak++;
+  const retry = retryHeader == null ? 0 : Number(retryHeader);
+  const exponential = Math.min(900_000, 60_000 * (2 ** Math.min(4, historyLimitStreak - 1)));
+  reconcileBackoffUntil = Date.now() + Math.min(900_000, Math.max(exponential, Number.isFinite(retry) ? retry * 1000 : 0));
+}
 let lastErrorAt: number | null = null, lastReconcileAt: number | null = null, stopping = false;
 const diagnostics = { fetched: 0, signals: 0, delivered: 0, noSignal: 0, rpcFailures: 0, deliveryFailures: 0 };
 const rejectionCounts: Partial<Record<EchoRejectReason, number>> = {};
@@ -59,18 +66,19 @@ async function rpc(method: string, params: unknown[] = []) {
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: AbortSignal.timeout(8_000) });
     if (response.status === 429) {
       const retry = Number(response.headers.get('retry-after'));
-      if (method === 'getSignaturesForAddress') reconcileBackoffUntil = Date.now() + Math.min(300_000, Math.max(30_000, Number.isFinite(retry) ? retry * 1000 : 60_000));
+      if (method === 'getSignaturesForAddress') historyRateLimited(response.headers.get('retry-after'));
       else backoffUntil = Date.now() + Math.min(300_000, Math.max(30_000, Number.isFinite(retry) ? retry * 1000 : 60_000));
     }
     if (!response.ok) { console.warn('[Echo] RPC_HTTP_FAILURE', { method, status: response.status }); throw new Error('RPC HTTP failure'); }
     const data = await response.json();
     if (data.error && (data.error.code === 429 || data.error.code === -32005 || /rate.?limit|credits.*exceed/i.test(String(data.error.message)))) {
-      if (method === 'getSignaturesForAddress') reconcileBackoffUntil = Date.now() + 60_000; else backoffUntil = Date.now() + 60_000;
+      if (method === 'getSignaturesForAddress') historyRateLimited(null); else backoffUntil = Date.now() + 60_000;
     }
     if (data.error || !Object.prototype.hasOwnProperty.call(data, 'result')) {
       console.warn('[Echo] RPC_RESPONSE_FAILURE', { method, code: Number.isFinite(data.error?.code) ? data.error.code : null });
       throw new Error('RPC response failure');
     }
+    if (method === 'getSignaturesForAddress') { historyLimitStreak = 0; reconcileBackoffUntil = 0; }
     lastRpcAt = Date.now(); return data.result;
   } catch { diagnostics.rpcFailures++; lastErrorAt = Date.now(); throw new Error(`Echo RPC ${method} unavailable`); }
 }
@@ -233,7 +241,7 @@ const queue = new EchoQueue(async signature => {
 }, Date.now, config.statePath + '.pending-v1.json');
 let reconciling = false;
 async function reconcile() {
-  if (reconciling || stopping || Date.now() < reconcileBackoffUntil) return;
+  if (reconciling || stopping || Date.now() < reconcileBackoffUntil || queue.size > 64) return;
   reconciling = true;
   try {
     // Recover up to 30 minutes of recent signatures; delayed recoveries are clearly aged on cards.
@@ -249,7 +257,9 @@ async function reconcile() {
 }
 const subscription = startEchoSubscription({ url: config.wsUrl, onSignature: signature => { if (!store.has(`tx:${signature}`)) queue.add(signature); }, onReady: () => { void reconcile(); } });
 const tick = setInterval(() => { if (!stopping && Date.now() >= Math.max(backoffUntil, deliveryBackoffUntil)) void queue.tick(); }, 250);
-const sweep = setInterval(() => { void reconcile(); }, 60_000);
+// Reduce history polling (especially on an active WebSocket) so live BUY processing
+// gets priority over expensive archive scans. After 429, adaptive backoff applies.
+const sweep = setInterval(() => { void reconcile(); }, 180_000);
 const promotionTick=setInterval(()=>{if(promotionsReady)void promotions.tick();},30_000);
 if(promotionsReady)void promotions.tick();
 const researchTick = setInterval(() => { if (researchReady) void research.tick().catch(() => console.warn('[EchoResearch] TICK_FAILED')); }, 60_000);
