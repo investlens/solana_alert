@@ -35,7 +35,7 @@ export class EchoResearch {
   private nextTick = 0;
   private lastError: string | null = null;
   private readonly maxActive = 64;
-  constructor(private readonly path: string, private readonly notify?: (event:{kind:'ENTRY'|'EXIT'|'MILESTONE';mint:string;caller:string;entry:number;price:number;multiple?:number;roiPercent:number})=>Promise<void>) {}
+  constructor(private readonly path: string, private readonly notify?: (event:PaperEvent)=>Promise<void>) {}
   async load() {
     try {
       const parsed = JSON.parse(await readFile(this.path,'utf8')) as State;
