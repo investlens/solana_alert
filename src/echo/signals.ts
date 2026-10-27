@@ -1,8 +1,12 @@
 import { PublicKey } from '@solana/web3.js';
 
-// Active monitoring scope: Slingoor only. Historical caller research remains persisted.
+// Active caller BUY alerts: Slingoor premium + independently attributed research wallets.
+// Never substitute social handles or partial addresses for actual wallet keys.
+// Historical Croakie, Cupsey, and Thedetective records stay persisted but are not monitored.
 export const ECHO_WALLETS: Readonly<Record<string, string>> = Object.freeze({
   '5YRgrP3mjGzrzirYYN5HAQH19cTYREYwGxW6XRJQUzij': 'WHALE · slingoor',
+  'Be24Gbf5KisDk1LcWWZsBn8dvB816By7YzYF5zWZnRR6': 'Chairman',
+  'DNfuF1L62WWyW3pNakVkyGGFzVVhj4Yr52jSmdTyeBHm': 'Gake · research',
 });
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const QUOTES = new Map([[SOL_MINT, 'SOL'], ['EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'USDC']]);
