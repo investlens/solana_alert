@@ -1,5 +1,6 @@
 -- Echo shadow ONLY: atomic reservation prototype. Never authorizes signing.
--- Depends on echo_admin_pilot_shadow_ledger.sql, echo_admin_shadow_wallet_budget.sql\n-- and echo_admin_shadow_budget_evidence_hardening.sql.
+-- Depends on echo_admin_pilot_shadow_ledger.sql, echo_admin_shadow_wallet_budget.sql
+-- and echo_admin_shadow_budget_evidence_hardening.sql.
 -- Requires explicit DBA privilege review before application to an isolated database.
 BEGIN;
 CREATE OR REPLACE FUNCTION echo_admin_shadow_reserve_atomic(
@@ -42,7 +43,15 @@ BEGIN
     b.observed_balance_lamports-b.reserved_lamports-p_amount-p_fee_cap<b.min_reserve_lamports THEN
   RETURN false;
  END IF;
- -- Bind evidence to this exact caller/signature/mint, never a wallet-wide boolean.\n IF NOT EXISTS (SELECT 1 FROM echo_admin_verified_caller_buy_evidence e\n   WHERE e.caller_wallet=p_caller AND e.source_signature=p_signature\n     AND e.mint=p_mint AND e.verified=true AND e.finalized=true\n     AND e.observed_at>=now()-interval '60 seconds'\n     AND e.observed_at<=now()+interval '5 seconds') THEN\n  RETURN false;\n END IF;\n -- Prevent duplicate reservation even after the position has been sold.
+ -- Bind evidence to this exact caller/signature/mint, never a wallet-wide boolean.
+ IF NOT EXISTS (SELECT 1 FROM echo_admin_verified_caller_buy_evidence e
+   WHERE e.caller_wallet=p_caller AND e.source_signature=p_signature
+     AND e.mint=p_mint AND e.verified=true AND e.finalized=true
+     AND e.observed_at>=now()-interval '60 seconds'
+     AND e.observed_at<=now()+interval '5 seconds') THEN
+  RETURN false;
+ END IF;
+ -- Prevent duplicate reservation even after the position has been sold.
  INSERT INTO echo_admin_buy_intents(execution_wallet,mint,caller_wallet,source_signature,amount_lamports)
  VALUES(p_wallet,p_mint,p_caller,p_signature,p_amount)
  ON CONFLICT(execution_wallet,mint) DO NOTHING;
