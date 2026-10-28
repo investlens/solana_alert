@@ -10,7 +10,7 @@ describe('Echo atomic reservation verified-evidence denials',()=>{
   const db=new PGlite();
   try{
    for(const f of ['echo_admin_pilot_shadow_ledger.sql','echo_admin_shadow_wallet_budget.sql',
-     'echo_admin_shadow_budget_evidence_hardening.sql','echo_admin_shadow_atomic_reservation.sql'])
+     'echo_admin_shadow_budget_evidence_hardening.sql','echo_admin_shadow_per_intent_evidence.sql','echo_admin_shadow_atomic_reservation.sql'])
     await db.exec(await readFile(new URL(f,dir),'utf8'));
    await db.query('INSERT INTO echo_admin_execution_controls(execution_wallet,emergency_stop) VALUES($1,false)',[wallet]);
    await db.query(`INSERT INTO echo_admin_shadow_wallet_budget
