@@ -1,5 +1,5 @@
 -- Echo shadow ONLY: atomic reservation prototype. Never authorizes signing.
--- Depends on echo_admin_pilot_shadow_ledger.sql and echo_admin_shadow_wallet_budget.sql.
+-- Depends on echo_admin_pilot_shadow_ledger.sql, echo_admin_shadow_wallet_budget.sql\n-- and echo_admin_shadow_budget_evidence_hardening.sql.
 -- Requires explicit DBA privilege review before application to an isolated database.
 BEGIN;
 CREATE OR REPLACE FUNCTION echo_admin_shadow_reserve_atomic(
@@ -30,9 +30,13 @@ BEGIN
  SELECT * INTO b FROM echo_admin_shadow_wallet_budget
   WHERE execution_wallet=p_wallet FOR UPDATE;
  IF NOT FOUND OR NOT b.reconciliation_fresh OR NOT b.rpc_healthy OR
-    b.observed_at IS NULL OR b.observed_at<now()-interval '60 seconds' OR
+    b.observed_at IS NULL OR b.observed_at<now()-interval '60 seconds' OR b.observed_at>now()+interval '5 seconds' OR
+    NOT b.daily_loss_verified OR NOT b.daily_window_verified OR NOT b.caller_evidence_verified OR
+    b.daily_window_start IS NULL OR b.daily_window_start>now() OR
+    b.daily_window_start<now()-interval '24 hours' OR
     b.open_positions+b.pending_positions>=2 OR
-    b.daily_loss_limit_lamports<=0 OR b.daily_loss_lamports>=b.daily_loss_limit_lamports OR
+    b.daily_loss_limit_lamports<=0 OR b.daily_loss_limit_lamports>150000000 OR
+    b.daily_loss_lamports>=b.daily_loss_limit_lamports OR
     b.daily_gross_cap_lamports<=0 OR
     b.daily_spent_lamports+p_amount+p_fee_cap>b.daily_gross_cap_lamports OR
     b.observed_balance_lamports-b.reserved_lamports-p_amount-p_fee_cap<b.min_reserve_lamports THEN
