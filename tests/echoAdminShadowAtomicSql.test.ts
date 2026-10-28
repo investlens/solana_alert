@@ -10,13 +10,13 @@ describe('Echo atomic shadow SQL',()=>{
  it('rejects disabled, duplicate, over-budget, stale and over-position reservations',async()=>{
   const db=new PGlite();
   try{
-   for(const file of ['echo_admin_pilot_shadow_ledger.sql','echo_admin_shadow_wallet_budget.sql','echo_admin_shadow_atomic_reservation.sql'])
+   for(const file of ['echo_admin_pilot_shadow_ledger.sql','echo_admin_shadow_wallet_budget.sql','echo_admin_shadow_budget_evidence_hardening.sql','echo_admin_shadow_atomic_reservation.sql'])
     await db.exec(await readFile(new URL(file,sqlDir),'utf8'));
    await db.query(`INSERT INTO echo_admin_execution_controls(execution_wallet,emergency_stop) VALUES($1,false)`,[wallet]);
    await db.query(`INSERT INTO echo_admin_shadow_wallet_budget
     (execution_wallet,observed_balance_lamports,min_reserve_lamports,daily_gross_cap_lamports,
-     daily_loss_limit_lamports,reconciliation_fresh,rpc_healthy,observed_at)
-    VALUES($1,500000000,100000000,300000000,150000000,true,true,now())`,[wallet]);
+     daily_loss_limit_lamports,reconciliation_fresh,rpc_healthy,observed_at,\n     daily_loss_verified,daily_window_verified,caller_evidence_verified,daily_window_start)
+    VALUES($1,500000000,100000000,300000000,150000000,true,true,now(),true,true,true,now())`,[wallet]);
    const reserve=async(m:string)=>{
     await db.exec('BEGIN ISOLATION LEVEL SERIALIZABLE');
     try{
