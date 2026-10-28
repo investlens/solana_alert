@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { ECHO_ADMIN_PILOT, evaluateEchoAdminPilot } from '../src/echo/adminPilotConfig';
+import { ECHO_ADMIN_PILOT, evaluateEchoAdminPilot } from '../src/echo/adminPilotConfig.js';
 
 const good = {
   callerWallet: ECHO_ADMIN_PILOT.callerWallets[0], side: 'BUY' as const,
