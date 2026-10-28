@@ -23,6 +23,6 @@ export function inspectPumpV3Buy(i:PumpV3Instruction):Readonly<{
   return deny('MINT_OR_QUOTE_MISMATCH');
  if(i.accounts[8]!==i.callerWallet||!i.signerAccounts.includes(i.callerWallet))
   return deny('CALLER_NOT_SIGNER');
- if(decoded.maxQuoteCost>100000000n)return deny('OVER_PILOT_MAX_QUOTE');
+ // Caller trade size is not our execution size. The 0.1 SOL cap belongs\n // to our separate unsigned execution quote and database reservation gate.\n // Rejecting larger caller buys here would silently miss real caller signals.
  return {matched:true,reason:'V3_ENVELOPE_MATCH_ONLY',verifiedBuy:false};
 }
