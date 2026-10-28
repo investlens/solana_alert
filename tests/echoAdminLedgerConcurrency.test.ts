@@ -27,7 +27,7 @@ describe('Echo shadow ledger atomic dedup', () => {
       };
       const outcomes = await Promise.all(Array.from({length: 20},(_,i)=>reserve('sig'+i)));
       assert.equal(outcomes.filter(Boolean).length,1);
-      const row = await db.query('SELECT count(*)::integer AS n FROM intents');
+      const row = await db.query<{ n: number }>('SELECT count(*)::integer AS n FROM intents');
       assert.equal(row.rows[0]?.n,1);
       assert.equal(await reserve('late-replay'),false);
       assert.equal(await db.query(
