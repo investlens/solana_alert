@@ -13,6 +13,10 @@ export type PumpV3Evidence=Readonly<{
  finalized:boolean;
  transactionSucceeded:boolean;
  trustedRpc:boolean;
+ /** Optional exact lamport balances for the transaction message accounts. */
+ preBalances?:readonly number[];
+ postBalances?:readonly number[];
+ feeLamports?:number;
 }>;
 export function inspectPumpV3Evidence(e:PumpV3Evidence):Readonly<{
  candidate:boolean;verifiedBuy:false;reason:string;receivedTokens:bigint
@@ -27,6 +31,18 @@ export function inspectPumpV3Evidence(e:PumpV3Evidence):Readonly<{
  if(!balances.valid)return deny(balances.reason);
  const delta=balances.deltas.filter(d=>d.mint===e.instruction.targetMint);
  if(delta.length!==1||delta[0]!.delta<=0n)return deny('NO_UNAMBIGUOUS_TOKEN_RECEIPT');
+ // A candidate must never be promoted to verified merely by token receipt.
+ // When native balance evidence is supplied, reject malformed or absent payer debit.
+ if(e.preBalances!==undefined||e.postBalances!==undefined||e.feeLamports!==undefined){
+  const index=e.instruction.accounts.indexOf(e.instruction.callerWallet);
+  const pre=e.preBalances?.[index],post=e.postBalances?.[index],fee=e.feeLamports;
+  if(index<0||!Number.isSafeInteger(pre)||!Number.isSafeInteger(post)||
+     !Number.isSafeInteger(fee)||pre!<0||post!<0||fee!<0||
+     e.preBalances?.length!==e.instruction.accounts.length||
+     e.postBalances?.length!==e.instruction.accounts.length)
+   return deny('INVALID_NATIVE_BALANCE_EVIDENCE');
+  if(pre!-post!-fee!<=0)return deny('NO_NATIVE_SOL_PAYMENT_EVIDENCE');
+ }
  return {candidate:true,verifiedBuy:false,reason:'PUMP_V3_CANDIDATE_NEEDS_DEBIT_AND_CPI_VERIFICATION',
   receivedTokens:delta[0]!.delta};
 }
