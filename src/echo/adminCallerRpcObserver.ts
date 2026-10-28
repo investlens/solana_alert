@@ -27,6 +27,14 @@ export async function observeEchoCallerBuy(
   if(!tx.meta||tx.meta.err!==null||!tx.transaction||
    !Array.isArray(tx.transaction.signatures)||
    tx.transaction.signatures[0]!==input.signature)return deny('UNVERIFIED_TRANSACTION');
+  // JSON-RPC getTransaction can return a processed result even when the
+  // caller requested finalized; require an independent finalized status.
+  const statusRaw=await transport('getSignatureStatuses',[[input.signature],{searchTransactionHistory:true}]);
+  const status=(statusRaw as {result?:{value?:unknown}}|null)?.result?.value;
+  const entry=Array.isArray(status)?status[0]:null;
+  if(!entry||typeof entry!=='object'||
+     (entry as {confirmationStatus?:unknown}).confirmationStatus!=='finalized'||
+     (entry as {err?:unknown}).err!==null)return deny('NOT_FINALIZED_OR_FAILED');
   const keys=tx.transaction.message?.accountKeys;
   if(!Array.isArray(keys))return deny('MISSING_SIGNER_EVIDENCE');
   const signer=keys.some((k:unknown)=>k!==null&&typeof k==='object'&&
