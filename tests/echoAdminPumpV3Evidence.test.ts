@@ -18,6 +18,16 @@ describe('Echo Pump v3 evidence inspection',()=>{
   assert.equal(r.candidate,true);assert.equal(r.receivedTokens,1000n);
   assert.equal(r.verifiedBuy,false);
  });
+ it('rejects missing native debit, malformed balances and fee-only changes',()=>{
+  const balances=Array.from({length:17},()=>0);
+  const paid=[...balances];paid[8]=1000000;
+  const after=[...balances];after[8]=900000;
+  assert.equal(inspectPumpV3Evidence({...base,preBalances:paid,postBalances:after,feeLamports:5000}).candidate,true);
+  assert.equal(inspectPumpV3Evidence({...base,preBalances:paid,postBalances:paid,feeLamports:5000}).candidate,false);
+  assert.equal(inspectPumpV3Evidence({...base,preBalances:paid,postBalances:paid.map((v,i)=>i===8?995000:v),feeLamports:5000}).candidate,false);
+  assert.equal(inspectPumpV3Evidence({...base,preBalances:paid,postBalances:after.slice(0,16),feeLamports:5000}).candidate,false);
+  assert.equal(inspectPumpV3Evidence({...base,preBalances:paid,postBalances:after,feeLamports:-1}).candidate,false);
+ });
  it('rejects failed transaction, wrong mint and no receipt',()=>{
   for(const patch of [{transactionSucceeded:false},{trustedRpc:false},
    {postTokenBalances:token('0')},{instruction:{...base.instruction,targetMint:'B'.repeat(44)}}]){
