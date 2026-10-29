@@ -40,16 +40,17 @@ export class EchoQueue {
     renameSync(temporary, this.journalPath);
   }
   add(signature: string, priority = false) {
-    if (!VALID_SIGNATURE.test(signature)) return;
+    if (!VALID_SIGNATURE.test(signature)) return false;
     const existing = this.jobs.get(signature);
     if (existing) {
       if (priority && !existing.priority) { existing.priority = true; this.persist(); }
-      return;
+      return true;
     }
-    if (this.jobs.size >= 4096) { this.dropped++; return; }
+    if (this.jobs.size >= 4096) { this.dropped++; return false; }
     this.jobs.set(signature, { nextAt: this.now(), attempts: 0, insertedAt: this.now(), priority });
     // Fail closed if storage is down: caller sees an error, service must stop.
     try { this.persist(); } catch (error) { this.jobs.delete(signature); throw error; }
+    return true;
   }
   async tick() {
     if (this.running) return;
