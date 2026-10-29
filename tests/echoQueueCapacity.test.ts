@@ -4,7 +4,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EchoQueue } from '../src/echo/queue.js';
-const signature=(i:number)=>'1'.repeat(80-String(i).length)+String(i);
+const alphabet='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+const signature=(i:number)=>{ let n=i+1, suffix=''; do { suffix=alphabet[n%alphabet.length]+suffix; n=Math.floor(n/alphabet.length); } while(n>0); return '1'.repeat(80-suffix.length)+suffix; };
 test('full durable queue rejects new signatures without claiming acceptance',()=>{
  const dir=mkdtempSync(join(tmpdir(),'echo-queue-capacity-'));
  try {
