@@ -288,22 +288,38 @@ const queue = new EchoQueue(async signature => {
   await store.delivered(`tx:${signature}`, Date.now() / 1000);
 }, Date.now, config.statePath + '.pending-v1.json');
 let reconciling = false;
+// Limit historical RPC consumption per pass; continue from the last cursor on the next pass.
+const historyCursors = new Map<string, string>();
+const historyWindowSeconds = 1800;
+const historyPagesPerPass = 3;
 async function reconcile() {
   if (reconciling || stopping || !historyRpcAvailable() || queue.size > 64) return;
   reconciling = true;
   try {
-    // Recover up to 30 minutes of recent signatures; delayed recoveries are clearly aged on cards.
+    const cutoff = Date.now() / 1000 - historyWindowSeconds;
     for (const wallet of Object.keys(ECHO_WALLETS)) {
-      const rows = await rpc('getSignaturesForAddress', [wallet, { limit: 100, commitment: 'confirmed' }]);
-      if (!Array.isArray(rows)) throw new Error('Echo signature list unavailable');
-      if (rows.length >= 100 && rows[rows.length - 1]?.blockTime != null &&
-          Date.now() / 1000 - rows[rows.length - 1].blockTime <= 1800)
-        console.warn('[Echo] HISTORY_COVERAGE_INCOMPLETE', {
-          caller: ECHO_WALLETS[wallet], reason: 'signature-page-limit',
-          notice: 'Read-only catch-up did not cover the full 30-minute window'
-        });
-      for (const row of rows.reverse()) if (row.err == null && Number.isFinite(row.blockTime) && Date.now() / 1000 - row.blockTime <= 1800 &&
-        /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') && !store.has(`tx:${row.signature}`)) queue.add(row.signature);
+      let before = historyCursors.get(wallet);
+      let complete = false;
+      for (let page = 0; page < historyPagesPerPass; page++) {
+        if (stopping || !historyRpcAvailable() || queue.size > 64) break;
+        const rows = await rpc('getSignaturesForAddress', [wallet, { limit: 100, commitment: 'confirmed', ...(before ? { before } : {}) }]);
+        if (!Array.isArray(rows)) throw new Error('Echo signature list unavailable');
+        for (const row of [...rows].reverse()) if (row.err == null && Number.isFinite(row.blockTime) && row.blockTime >= cutoff &&
+          /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') && !store.has(`tx:${row.signature}`)) queue.add(row.signature);
+        const oldest = rows[rows.length - 1];
+        if (rows.length < 100 || (Number.isFinite(oldest?.blockTime) && oldest.blockTime < cutoff)) {
+          complete = true;
+          historyCursors.delete(wallet);
+          break;
+        }
+        if (!oldest?.signature || oldest.signature === before) break;
+        before = oldest.signature;
+        historyCursors.set(wallet, before);
+      }
+      if (!complete) console.warn('[Echo] HISTORY_COVERAGE_INCOMPLETE', {
+        caller: ECHO_WALLETS[wallet], reason: 'pagination-pending',
+        notice: 'Catch-up cursor retained for a bounded follow-up pass'
+      });
     }
     lastReconcileAt = Date.now();
   } catch { lastErrorAt = Date.now(); console.warn('[Echo] Reconciliation unavailable; bounded retry scheduled.'); }
