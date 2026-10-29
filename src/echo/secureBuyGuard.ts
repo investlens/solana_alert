@@ -17,7 +17,7 @@ export type SecureEchoDecision = { allowed: true; reservationKey: string; totalR
 export function validateSecureEchoBuy(input: SecureEchoBuy): SecureEchoDecision {
   if (input.killSwitchEngaged) return { allowed: false, reason: 'KILL_SWITCH' };
   const admitted = validateBuyAdmission(input.event, input.ownerWallet);
-  if (!admitted.allowed) return { allowed: false, reason: admitted.reason };
+  if (admitted.allowed === false) return { allowed: false, reason: admitted.reason };
   if (![input.nowMs,input.observedAtMs,input.spentTodayLamports,input.walletBalanceLamports,input.reserveLamports,input.slippageBps].every(Number.isSafeInteger))
     return { allowed: false, reason: 'INVALID_NUMERIC_INPUT' };
   if (input.observedAtMs > input.nowMs || input.nowMs - input.observedAtMs > MAX_SIGNAL_AGE_MS)
@@ -26,7 +26,7 @@ export function validateSecureEchoBuy(input: SecureEchoBuy): SecureEchoDecision 
       !input.liquidityVerified || !input.sellRouteVerified) return { allowed: false, reason: 'TOKEN_OR_ROUTE_UNVERIFIED' };
   if (input.slippageBps < 0 || input.slippageBps > MAX_SLIPPAGE_BPS) return { allowed: false, reason: 'SLIPPAGE_CAP' };
   const fee = validateEchoLandingBudget(input.landing);
-  if (!fee.allowed) return { allowed: false, reason: fee.reason };
+  if (fee.allowed === false) return { allowed: false, reason: fee.reason };
   const lamports = Math.round(input.event.amountSol * 1e9);
   const reserved = lamports + fee.totalLandingLamports;
   if (input.spentTodayLamports < 0 || input.walletBalanceLamports < 0 || input.reserveLamports < 0 ||
