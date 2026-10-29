@@ -391,7 +391,7 @@ async function reconcile() {
         const rows = await rpc('getSignaturesForAddress', [wallet, { limit: 100, commitment: 'confirmed', ...(before ? { before } : {}) }]);
         if (!Array.isArray(rows)) throw new Error('Echo signature list unavailable');
         for (const row of [...rows].reverse()) if (row.err == null && Number.isFinite(row.blockTime) && row.blockTime >= cutoff &&
-          /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') && !store.has(`tx:${row.signature}`)) queue.add(row.signature);
+          /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') && !store.has(`tx:${row.signature}`)) { if (!queue.add(row.signature)) throw Error('Echo history queue full: cursor not advanced'); }
         const oldest = rows[rows.length - 1];
         if (rows.length < 100 || (Number.isFinite(oldest?.blockTime) && oldest.blockTime < cutoff)) {
           complete = true;
@@ -413,7 +413,7 @@ async function reconcile() {
   } catch { lastErrorAt = Date.now(); console.warn('[Echo] Reconciliation unavailable; bounded retry scheduled.'); }
   finally { reconciling = false; }
 }
-const subscription = startEchoSubscription({ url: config.wsUrl, fallbackUrl: config.fallbackWsUrl, onSignature: (signature, wallet) => { if (!store.has(`tx:${signature}`)) queue.add(signature, ECHO_WALLETS[wallet] === 'WHALE · slingoor'); }, onReady: () => { void reconcile(); } });
+const subscription = startEchoSubscription({ url: config.wsUrl, fallbackUrl: config.fallbackWsUrl, onSignature: (signature, wallet) => { if (!store.has(`tx:${signature}`)) { const accepted=queue.add(signature, ECHO_WALLETS[wallet] === 'WHALE · slingoor'); if (!accepted) { lastErrorAt=Date.now(); console.error('[Echo] WS_QUEUE_REJECTED', { caller: ECHO_WALLETS[wallet], queued: queue.size, dropped: queue.dropped }); void reconcile(); } } }, onReady: () => { void reconcile(); } });
 const tick = setInterval(() => { if (!stopping && liveRpcAvailable() && Date.now() >= deliveryBackoffUntil) void queue.tick(); }, 250);
 // Reduce history polling (especially on an active WebSocket) so live BUY processing
 // gets priority over expensive archive scans. After 429, adaptive backoff applies.
