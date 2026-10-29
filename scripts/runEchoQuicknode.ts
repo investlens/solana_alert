@@ -319,12 +319,13 @@ async function reconcile() {
   try {
     const cutoff = Date.now() / 1000 - historyWindowSeconds;
     for (const wallet of Object.keys(ECHO_WALLETS)) {
+      if (stopping || !historyRpcAvailable() || queue.size > 64) break;
       // Always inspect the newest signatures first, even while an older backlog cursor
       // is pending. Otherwise busy wallets can indefinitely hide fresh BUYs.
       const headRows = await rpc('getSignaturesForAddress', [wallet, { limit: 100, commitment: 'confirmed' }]);
       if (!Array.isArray(headRows)) throw new Error('Echo head signature list unavailable');
       for (const row of [...headRows].reverse()) if (row.err == null && Number.isFinite(row.blockTime) && row.blockTime >= cutoff &&
-          typeof row.signature === 'string' && !store.has(`tx:${row.signature}`)) queue.add(row.signature, ECHO_WALLETS[wallet] === 'WHALE · slingoor');
+          /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') && !store.has(`tx:${row.signature}`)) queue.add(row.signature);
       let before = historyCursors.get(wallet);
       let complete = !before && (headRows.length < 100 ||
         (Number.isFinite(headRows[headRows.length - 1]?.blockTime) && headRows[headRows.length - 1].blockTime < cutoff));
