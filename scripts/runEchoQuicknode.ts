@@ -1,5 +1,7 @@
 import 'dotenv/config';
 import { createServer } from 'node:http';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { readQuicknodeEchoConfig } from '../src/echo/quicknodeConfig.js';
 import { EchoStore } from '../src/echo/store.js';
 import { EchoResearch } from '../src/echo/research.js';
@@ -289,7 +291,26 @@ const queue = new EchoQueue(async signature => {
 }, Date.now, config.statePath + '.pending-v1.json');
 let reconciling = false;
 // Limit historical RPC consumption per pass; continue from the last cursor on the next pass.
+// Persist pagination cursors on the same private volume as the durable alert queue.
+const historyCursorPath = config.statePath + '.history-cursors-v1.json';
 const historyCursors = new Map<string, string>();
+try {
+  const saved = JSON.parse(readFileSync(historyCursorPath, 'utf8'));
+  if (saved.version !== 1 || !Array.isArray(saved.cursors)) throw Error('Invalid history cursor journal');
+  for (const entry of saved.cursors) {
+    if (!Array.isArray(entry) || entry.length !== 2 || !(entry[0] in ECHO_WALLETS) ||
+      !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(entry[1])) throw Error('Invalid history cursor');
+    historyCursors.set(entry[0], entry[1]);
+  }
+} catch (error) {
+  if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+}
+function persistHistoryCursors() {
+  mkdirSync(dirname(historyCursorPath), { recursive: true, mode: 0o700 });
+  const temp = historyCursorPath + '.tmp';
+  writeFileSync(temp, JSON.stringify({ version: 1, cursors: [...historyCursors] }), { mode: 0o600 });
+  renameSync(temp, historyCursorPath);
+}
 const historyWindowSeconds = 1800;
 const historyPagesPerPass = 3;
 async function reconcile() {
@@ -310,11 +331,13 @@ async function reconcile() {
         if (rows.length < 100 || (Number.isFinite(oldest?.blockTime) && oldest.blockTime < cutoff)) {
           complete = true;
           historyCursors.delete(wallet);
+          persistHistoryCursors();
           break;
         }
         if (!oldest?.signature || oldest.signature === before) break;
         before = oldest.signature;
         historyCursors.set(wallet, before);
+        persistHistoryCursors();
       }
       if (!complete) console.warn('[Echo] HISTORY_COVERAGE_INCOMPLETE', {
         caller: ECHO_WALLETS[wallet], reason: 'pagination-pending',
