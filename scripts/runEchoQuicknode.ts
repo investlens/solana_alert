@@ -319,9 +319,23 @@ async function reconcile() {
   try {
     const cutoff = Date.now() / 1000 - historyWindowSeconds;
     for (const wallet of Object.keys(ECHO_WALLETS)) {
+      // Always inspect the newest signatures first, even while an older backlog cursor
+      // is pending. Otherwise busy wallets can indefinitely hide fresh BUYs.
+      const headRows = await rpc('getSignaturesForAddress', [wallet, { limit: 100, commitment: 'confirmed' }]);
+      if (!Array.isArray(headRows)) throw new Error('Echo head signature list unavailable');
+      for (const row of [...headRows].reverse()) if (row.err == null && Number.isFinite(row.blockTime) && row.blockTime >= cutoff &&
+          typeof row.signature === 'string' && !store.has(`tx:${row.signature}`)) queue.add(row.signature, ECHO_WALLETS[wallet] === 'WHALE · slingoor');
       let before = historyCursors.get(wallet);
-      let complete = false;
-      for (let page = 0; page < historyPagesPerPass; page++) {
+      let complete = !before && (headRows.length < 100 ||
+        (Number.isFinite(headRows[headRows.length - 1]?.blockTime) && headRows[headRows.length - 1].blockTime < cutoff));
+      if (!before && !complete && headRows[headRows.length - 1]?.signature) {
+        before = headRows[headRows.length - 1].signature;
+        historyCursors.set(wallet, before);
+        persistHistoryCursors();
+      }
+      // Reserve the first RPC request for fresh signals; use the remaining
+      // bounded budget to catch up from the durable backlog cursor.
+      for (let page = 1; page < historyPagesPerPass && !complete && before; page++) {
         if (stopping || !historyRpcAvailable() || queue.size > 64) break;
         const rows = await rpc('getSignaturesForAddress', [wallet, { limit: 100, commitment: 'confirmed', ...(before ? { before } : {}) }]);
         if (!Array.isArray(rows)) throw new Error('Echo signature list unavailable');
