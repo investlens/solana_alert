@@ -346,6 +346,16 @@ async function reconcile() {
       let fresh = freshCursors.get(wallet) ?? { checkpoint: null, before: null, candidate: null };
       let headRows: Array<{ signature: string; err: unknown; blockTime: number | null }> = [];
       let freshComplete = false;
+      // An unfinished scan must not hide newer live activity. Probe the head on
+      // each pass without changing the saved pagination position.
+      if (fresh.before) {
+        const newest = await rpc('getSignaturesForAddress', [wallet, { limit: 100, commitment: 'confirmed' }]);
+        if (!Array.isArray(newest)) throw Error('Echo newest signature probe unavailable');
+        for (const row of [...newest].reverse()) if (row.err == null &&
+          Number.isFinite(row.blockTime) && row.blockTime >= cutoff &&
+          /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') &&
+          !store.has(`tx:${row.signature}`)) queue.add(row.signature);
+      }
       for (let page = 0; page < historyPagesPerPass && !freshComplete; page++) {
         if (stopping || !historyRpcAvailable() || queue.size > 64) break;
         const rows = await rpc('getSignaturesForAddress', [wallet,
