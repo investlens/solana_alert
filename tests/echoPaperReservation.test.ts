@@ -23,3 +23,20 @@ test('storage errors and invalid signals fail closed',async()=>{
   const invalid={...input,simulationPassed:false};
   assert.equal((await reserveEchoPaperIntent(invalid,broken)).reserved,false);
 });
+
+test('simultaneous callers cannot both reserve the same mint',async()=>{
+  const keys=new Set<string>();
+  const store:EchoReservationStore={async insertOnce(row){
+    const key=row.executionWallet+':'+row.mint;
+    if(keys.has(key))return false;
+    keys.add(key); // stand-in for database atomic unique insert
+    await Promise.resolve();
+    return true;
+  }};
+  const results=await Promise.all([
+    reserveEchoPaperIntent(input,store),
+    reserveEchoPaperIntent({...input,event:{...input.event,callerWallet:CHAIRMAN_WALLET}},store),
+  ]);
+  assert.equal(results.filter(r=>r.reserved).length,1);
+  assert.equal(results.filter(r=>!r.reserved&&r.reason==='DUPLICATE_TOKEN').length,1);
+});
