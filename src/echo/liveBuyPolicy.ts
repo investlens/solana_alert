@@ -4,6 +4,8 @@
  * This module can be used in shadow/paper mode until explicitly approved.
  */
 export const SLINGOOR_WALLET = '5YRgrP3mjGzrzirYYN5HAQH19cTYREYwGxW6XRJQUzij';
+export const CHAIRMAN_WALLET = 'Be24Gbf5KisDk1LcWWZsBn8dvB816By7YzYF5zWZnRR6';
+export const ELIGIBLE_CALLER_WALLETS: ReadonlySet<string> = new Set([SLINGOOR_WALLET, CHAIRMAN_WALLET]);
 export const MAX_SOL_PER_BUY = 0.1;
 export const LIVE_EXECUTION_ENABLED = false as const;
 export const AUTO_SELL_ENABLED = false as const;
@@ -25,7 +27,7 @@ export function validateBuyAdmission(
   event: BuyAdmission,
   ownerWallet: string,
 ): AdmissionResult {
-  if (event.callerWallet !== SLINGOOR_WALLET) return { allowed: false, reason: 'CALLER_NOT_ELIGIBLE' };
+  if (!ELIGIBLE_CALLER_WALLETS.has(event.callerWallet)) return { allowed: false, reason: 'CALLER_NOT_ELIGIBLE' };
   if (event.side !== 'BUY' || !event.isVerifiedSwap) return { allowed: false, reason: 'NOT_VERIFIED_BUY' };
   if (!Number.isFinite(event.amountSol) || event.amountSol <= 0 || event.amountSol > MAX_SOL_PER_BUY)
     return { allowed: false, reason: 'AMOUNT_OUT_OF_RANGE' };
