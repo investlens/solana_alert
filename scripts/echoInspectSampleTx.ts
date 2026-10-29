@@ -38,7 +38,7 @@ for (const endpoint of ['https://api.mainnet-beta.solana.com','https://solana-rp
     const classifications = recognizedBuys.map(s=>({side:s.side,mint:s.mint,inputMint:s.quoteMint,tokenAmount:s.tokenAmount,quoteAmount:s.quoteAmount,caller:s.caller}));
     console.log('SAMPLE_TX_PROBE',JSON.stringify({outcome:'FOUND',success:tx.meta?.err===null,
       slot:tx.slot,blockTime:tx.blockTime,signers,programs,jupiterTags,walletDeltas,classifications}));
-    if (tx.meta?.err !== null || signers.indexOf(slingoor) === -1 || recognizedBuys.length !== 1 || recognizedBuys[0].side !== 'BUY' || recognizedBuys[0].caller !== slingoor) {
+    if (tx.meta?.err !== null || signers.indexOf(slingoor) === -1 || recognizedBuys.length !== 1 || recognizedBuys[0].side !== 'BUY' || recognizedBuys[0].caller !== 'WHALE · slingoor') {
       console.error('SAMPLE_TX_VALIDATION_FAILED');
       process.exit(1);
     }
