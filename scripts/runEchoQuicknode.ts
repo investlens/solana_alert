@@ -351,6 +351,7 @@ async function reconcile() {
       if (fresh.before) {
         const newest = await rpc('getSignaturesForAddress', [wallet, { limit: 100, commitment: 'confirmed' }]);
         if (!Array.isArray(newest)) throw Error('Echo newest signature probe unavailable');
+        headRows = newest;
         for (const row of [...newest].reverse()) if (row.err == null &&
           Number.isFinite(row.blockTime) && row.blockTime >= cutoff &&
           /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') &&
@@ -361,7 +362,7 @@ async function reconcile() {
         const rows = await rpc('getSignaturesForAddress', [wallet,
           { limit: 100, commitment: 'confirmed', ...(fresh.before ? { before: fresh.before } : {}) }]);
         if (!Array.isArray(rows)) throw Error('Echo fresh signature page unavailable');
-        if (page === 0) headRows = rows;
+        if (page === 0 && !headRows.length) headRows = rows;
         const progress = advanceFreshScan(fresh, rows);
         for (const row of [...progress.scanned].reverse()) if (row.err == null &&
           Number.isFinite(row.blockTime) && row.blockTime! >= cutoff &&
@@ -419,7 +420,7 @@ const tick = setInterval(() => { if (!stopping && liveRpcAvailable() && Date.now
 // When connected, verify history periodically without spending archive credits every
 // three minutes. During a disconnect, request bounded catch-up with provider backoff.
 const sweep = setInterval(() => {
-  if (!subscription.state.ready || historyCursors.size > 0 || lastReconcileAt == null || Date.now() - lastReconcileAt >= 15 * 60_000)
+  if (!subscription.state.ready || historyCursors.size > 0 || [...freshCursors.values()].some(cursor => cursor.before !== null) || lastReconcileAt == null || Date.now() - lastReconcileAt >= 15 * 60_000)
     void reconcile();
 }, 60_000);
 const promotionTick=setInterval(()=>{if(promotionsReady)void promotions.tick();},30_000);
