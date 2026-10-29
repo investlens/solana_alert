@@ -5,7 +5,7 @@ export function verifyEchoExecutionWallet(signerPublicKey:string,expectedWallet=
  try {
   const signer=new PublicKey(signerPublicKey);
   const expected=new PublicKey(expectedWallet);
-  return signer.toBase58()===expected.toBase58() && signer.isOnCurve();
+  return signer.toBase58()===expected.toBase58() && PublicKey.isOnCurve(signer.toBytes());
  } catch { return false; }
 }
 /** Fail closed before any signing, quote submission or Telegram action. */
