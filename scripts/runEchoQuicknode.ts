@@ -332,7 +332,7 @@ const tick = setInterval(() => { if (!stopping && liveRpcAvailable() && Date.now
 // When connected, verify history periodically without spending archive credits every
 // three minutes. During a disconnect, request bounded catch-up with provider backoff.
 const sweep = setInterval(() => {
-  if (!subscription.state.ready || lastReconcileAt == null || Date.now() - lastReconcileAt >= 15 * 60_000)
+  if (!subscription.state.ready || historyCursors.size > 0 || lastReconcileAt == null || Date.now() - lastReconcileAt >= 15 * 60_000)
     void reconcile();
 }, 60_000);
 const promotionTick=setInterval(()=>{if(promotionsReady)void promotions.tick();},30_000);
