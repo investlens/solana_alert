@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EchoQueue } from '../src/echo/queue.js';
 import { ECHO_WALLETS } from '../src/echo/signals.js';
-import { validateBuyAdmission, LIVE_EXECUTION_ENABLED, AUTO_SELL_ENABLED } from '../src/echo/liveBuyPolicy.js';
+import { validateBuyAdmission, LIVE_EXECUTION_ENABLED, AUTO_SELL_ENABLED, CHAIRMAN_WALLET } from '../src/echo/liveBuyPolicy.js';
 
 const signature = '3'.repeat(88);
 const wallet = '5YRgrP3mjGzrzirYYN5HAQH19cTYREYwGxW6XRJQUzij';
@@ -15,12 +15,13 @@ test('caller registry only contains explicitly tracked valid addresses', () => {
   assert.deepEqual(Object.values(ECHO_WALLETS).sort(), ['Chairman','WHALE · slingoor'].sort());
   assert.equal(Object.keys(ECHO_WALLETS).length, 2);
 });
-test('Slingoor is the only eligible caller and live execution remains disabled', () => {
+test('Slingoor and Chairman are eligible for paper admission and live execution remains disabled', () => {
   assert.equal(LIVE_EXECUTION_ENABLED, false);
   assert.equal(AUTO_SELL_ENABLED, false);
   const input = { callerWallet: wallet, mint, amountSol: .1, side: 'BUY' as const,
     isVerifiedSwap: true, transactionSignature: signature };
   assert.equal(validateBuyAdmission(input, wallet).allowed, true);
+  assert.equal(validateBuyAdmission({ ...input, callerWallet: CHAIRMAN_WALLET }, wallet).allowed, true);
   assert.equal(validateBuyAdmission({ ...input, amountSol: .10001 }, wallet).allowed, false);
   assert.equal(validateBuyAdmission({ ...input, callerWallet: '5'.repeat(44) }, wallet).allowed, false);
   assert.equal(validateBuyAdmission({ ...input, isVerifiedSwap: false }, wallet).allowed, false);
