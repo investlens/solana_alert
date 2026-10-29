@@ -354,7 +354,7 @@ async function reconcile() {
         for (const row of [...newest].reverse()) if (row.err == null &&
           Number.isFinite(row.blockTime) && row.blockTime >= cutoff &&
           /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') &&
-          !store.has(`tx:${row.signature}`)) queue.add(row.signature);
+          !store.has(`tx:${row.signature}`)) { if (!queue.add(row.signature)) throw Error('Echo queue full: cursor not advanced'); }
       }
       for (let page = 0; page < historyPagesPerPass && !freshComplete; page++) {
         if (stopping || !historyRpcAvailable() || queue.size > 64) break;
@@ -366,7 +366,7 @@ async function reconcile() {
         for (const row of [...progress.scanned].reverse()) if (row.err == null &&
           Number.isFinite(row.blockTime) && row.blockTime! >= cutoff &&
           /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') &&
-          !store.has(`tx:${row.signature}`)) queue.add(row.signature!);
+          !store.has(`tx:${row.signature}`)) { if (!queue.add(row.signature!)) throw Error('Echo queue full: fresh cursor not advanced'); }
         fresh = progress.state;
         freshComplete = progress.complete;
         freshCursors.set(wallet, fresh);
