@@ -2,7 +2,7 @@
  * Never advance the checkpoint until the scan has reached the previous checkpoint.
  */
 export type FreshScanState = { checkpoint: string | null; before: string | null; candidate: string | null };
-export type SignatureRow = { signature?: string; blockTime?: number | null };
+export type SignatureRow = { signature?: string; blockTime?: number | null; err?: unknown };
 export function advanceFreshScan(state: FreshScanState, rows: SignatureRow[], pageLimit = 100):
  { state: FreshScanState; complete: boolean; scanned: SignatureRow[] } {
   if (pageLimit < 1) throw new Error('Invalid page limit');
