@@ -14,6 +14,7 @@ import { extractJupiterRoutedEchoBuys } from '../src/echo/jupiterRouteSignals.js
 import { EchoQueue } from '../src/echo/queue.js';
 import { startEchoSubscription } from '../src/echo/subscription.js';
 import { readEchoTransaction } from '../src/echo/readTransaction.js';
+import { advanceFreshScan, type FreshScanState } from '../src/echo/freshScan.js';
 
 // Independent executable: no shared startup/config, database, bot polling,
 // Helius requests, private keys or trade execution imports.
@@ -311,6 +312,26 @@ function persistHistoryCursors() {
   writeFileSync(temp, JSON.stringify({ version: 1, cursors: [...historyCursors] }), { mode: 0o600 });
   renameSync(temp, historyCursorPath);
 }
+// Fresh frontier is independent from the bounded historical archive cursor.
+const freshCursorPath = config.statePath + '.fresh-cursors-v1.json';
+const freshCursors = new Map<string, FreshScanState>();
+try {
+  const saved = JSON.parse(readFileSync(freshCursorPath, 'utf8'));
+  if (saved.version !== 1 || !Array.isArray(saved.cursors)) throw Error('Invalid fresh cursor journal');
+  for (const [wallet, state] of saved.cursors) {
+    if (!(wallet in ECHO_WALLETS) || !state || typeof state !== 'object' ||
+      !['checkpoint','before','candidate'].every(k => state[k] === null ||
+        (typeof state[k] === 'string' && /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(state[k]))))
+      throw Error('Invalid fresh cursor');
+    freshCursors.set(wallet, state);
+  }
+} catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+function persistFreshCursors() {
+  mkdirSync(dirname(freshCursorPath), { recursive: true, mode: 0o700 });
+  const temp = freshCursorPath + '.tmp';
+  writeFileSync(temp, JSON.stringify({ version: 1, cursors: [...freshCursors] }), { mode: 0o600 });
+  renameSync(temp, freshCursorPath);
+}
 const historyWindowSeconds = 1800;
 const historyPagesPerPass = 3;
 async function reconcile() {
@@ -320,12 +341,30 @@ async function reconcile() {
     const cutoff = Date.now() / 1000 - historyWindowSeconds;
     for (const wallet of Object.keys(ECHO_WALLETS)) {
       if (stopping || !historyRpcAvailable() || queue.size > 64) break;
-      // Always inspect the newest signatures first, even while an older backlog cursor
-      // is pending. Otherwise busy wallets can indefinitely hide fresh BUYs.
-      const headRows = await rpc('getSignaturesForAddress', [wallet, { limit: 100, commitment: 'confirmed' }]);
-      if (!Array.isArray(headRows)) throw new Error('Echo head signature list unavailable');
-      for (const row of [...headRows].reverse()) if (row.err == null && Number.isFinite(row.blockTime) && row.blockTime >= cutoff &&
-          /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') && !store.has(`tx:${row.signature}`)) queue.add(row.signature);
+      // Page the fresh frontier independently; never advance its checkpoint until
+      // reaching the previous checkpoint (or exhausting the available signatures).
+      let fresh = freshCursors.get(wallet) ?? { checkpoint: null, before: null, candidate: null };
+      let headRows: Array<{ signature: string; err: unknown; blockTime: number | null }> = [];
+      let freshComplete = false;
+      for (let page = 0; page < historyPagesPerPass && !freshComplete; page++) {
+        if (stopping || !historyRpcAvailable() || queue.size > 64) break;
+        const rows = await rpc('getSignaturesForAddress', [wallet,
+          { limit: 100, commitment: 'confirmed', ...(fresh.before ? { before: fresh.before } : {}) }]);
+        if (!Array.isArray(rows)) throw Error('Echo fresh signature page unavailable');
+        if (page === 0) headRows = rows;
+        const progress = advanceFreshScan(fresh, rows);
+        for (const row of [...progress.scanned].reverse()) if (row.err == null &&
+          Number.isFinite(row.blockTime) && row.blockTime! >= cutoff &&
+          /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') &&
+          !store.has(`tx:${row.signature}`)) queue.add(row.signature!);
+        fresh = progress.state;
+        freshComplete = progress.complete;
+        freshCursors.set(wallet, fresh);
+        persistFreshCursors();
+      }
+      if (!freshComplete) console.warn('[Echo] FRESH_COVERAGE_INCOMPLETE', {
+        caller: ECHO_WALLETS[wallet], reason: 'fresh-pagination-pending'
+      });
       let before = historyCursors.get(wallet);
       let complete = !before && (headRows.length < 100 ||
         (Number.isFinite(headRows[headRows.length - 1]?.blockTime) && headRows[headRows.length - 1].blockTime < cutoff));
