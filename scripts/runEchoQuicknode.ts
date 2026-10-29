@@ -346,6 +346,12 @@ async function reconcile() {
       let fresh = freshCursors.get(wallet) ?? { checkpoint: null, before: null, candidate: null };
       let headRows: Array<{ signature: string; err: unknown; blockTime: number | null }> = [];
       let freshComplete = false;
+      let freshPagesScanned = 0;
+      let historyPagesScanned = 0;
+      let freshOldestBlockTime: number | null = null;
+      let historyOldestBlockTime: number | null = null;
+      const freshCursorBeforePass = fresh.before;
+      const historyCursorBeforePass = historyCursors.get(wallet) ?? null;
       // An unfinished scan must not hide newer live activity. Probe the head on
       // each pass without changing the saved pagination position.
       if (fresh.before) {
@@ -362,6 +368,8 @@ async function reconcile() {
         const rows = await rpc('getSignaturesForAddress', [wallet,
           { limit: 100, commitment: 'confirmed', ...(fresh.before ? { before: fresh.before } : {}) }]);
         if (!Array.isArray(rows)) throw Error('Echo fresh signature page unavailable');
+        freshPagesScanned++;
+        if (rows.length && Number.isFinite(rows[rows.length - 1]?.blockTime)) freshOldestBlockTime = rows[rows.length - 1].blockTime;
         if (page === 0 && !headRows.length) headRows = rows;
         const progress = advanceFreshScan(fresh, rows);
         for (const row of [...progress.scanned].reverse()) if (row.err == null &&
@@ -390,6 +398,8 @@ async function reconcile() {
         if (stopping || !historyRpcAvailable() || queue.size > 64) break;
         const rows = await rpc('getSignaturesForAddress', [wallet, { limit: 100, commitment: 'confirmed', ...(before ? { before } : {}) }]);
         if (!Array.isArray(rows)) throw new Error('Echo signature list unavailable');
+        historyPagesScanned++;
+        if (rows.length && Number.isFinite(rows[rows.length - 1]?.blockTime)) historyOldestBlockTime = rows[rows.length - 1].blockTime;
         for (const row of [...rows].reverse()) if (row.err == null && Number.isFinite(row.blockTime) && row.blockTime >= cutoff &&
           /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') && !store.has(`tx:${row.signature}`)) { if (!queue.add(row.signature)) throw Error('Echo history queue full: cursor not advanced'); }
         const oldest = rows[rows.length - 1];
@@ -404,6 +414,13 @@ async function reconcile() {
         historyCursors.set(wallet, before);
         persistHistoryCursors();
       }
+      console.log('[Echo] COVERAGE_PROGRESS', {
+        caller: ECHO_WALLETS[wallet], freshComplete, historyComplete: complete,
+        freshPagesScanned, historyPagesScanned, freshOldestBlockTime, historyOldestBlockTime,
+        freshCursorAdvanced: freshCursorBeforePass !== fresh.before,
+        historyCursorAdvanced: historyCursorBeforePass !== (historyCursors.get(wallet) ?? null),
+        freshPending: fresh.before !== null, historyPending: historyCursors.has(wallet)
+      });
       if (!complete) console.warn('[Echo] HISTORY_COVERAGE_INCOMPLETE', {
         caller: ECHO_WALLETS[wallet], reason: 'pagination-pending',
         notice: 'Catch-up cursor retained for a bounded follow-up pass'
