@@ -22,11 +22,11 @@ test('Postgres unique constraint rejects repeat and cross-caller buys after rest
   await db.close();
   db=new PGlite(dir);
   await assert.rejects(db.query(sql,row('5'.repeat(32))),/duplicate key value violates unique constraint/);
-  const result=await db.query('select count(*)::int as n from echo_live_buy_intents');
+  const result=await db.query<{n:number}>('select count(*)::int as n from echo_live_buy_intents');
   assert.equal(result.rows[0]?.n,1);
   await db.query(sql,row('3'.repeat(32),'6'.repeat(32)));
   await db.query(sql,row('3'.repeat(32),'2'.repeat(32),'7'.repeat(32)));
-  const distinct=await db.query('select count(*)::int as n from echo_live_buy_intents');
+  const distinct=await db.query<{n:number}>('select count(*)::int as n from echo_live_buy_intents');
   assert.equal(distinct.rows[0]?.n,3);
   await db.close();
  } finally { rmSync(dir,{recursive:true,force:true}); }
@@ -39,7 +39,7 @@ test('Postgres resolves competing same-token reservations to exactly one winner'
   const results=await Promise.allSettled([db.query(sql,row('3'.repeat(32))),db.query(sql,row('5'.repeat(32)))]);
   assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
   assert.equal(results.filter(r=>r.status==='rejected').length,1);
-  const count=await db.query('select count(*)::int as n from echo_live_buy_intents');
+  const count=await db.query<{n:number}>('select count(*)::int as n from echo_live_buy_intents');
   assert.equal(count.rows[0]?.n,1);
  } finally { await db.close(); }
 });
