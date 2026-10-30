@@ -8,7 +8,7 @@ test('mark-price 2x milestone remains recorded even after a paper stop exit',asy
  const dir=await mkdtemp(join(tmpdir(),'echo-milestones-'));const path=join(dir,'research.json');
  const fetchOriginal=globalThis.fetch,dateNowOriginal=Date.now;
  const mint='So11111111111111111111111111111111111111112';let price=1;
- globalThis.fetch=(async()=>({ok:true,json:async()=>({pairs:[{chainId:'solana',baseToken:{address:mint},pairAddress:'pool-1',priceUsd:String(price),liquidity:{usd:30000}}]})})) as typeof fetch;
+ globalThis.fetch=(async()=>({ok:true,json:async()=>({pairs:[{chainId:'solana',baseToken:{address:mint},pairAddress:'pool-1',priceUsd:String(price),liquidity:{usd:30000}}]})})) as unknown as typeof fetch;
  const t=dateNowOriginal();
  try{
    const engine=new EchoResearch(path);await engine.load();
