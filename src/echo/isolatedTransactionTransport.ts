@@ -46,7 +46,7 @@ export async function submitEchoSignedTransaction(args:{
     args.killSwitchEngaged)return {kind:'REJECTED',reason:'LIVE_SUBMISSION_DISABLED'};
  if(!validRpc(args.rpcUrl))return {kind:'REJECTED',reason:'INVALID_RPC_URL'};
  const decoded=readSignedEchoTransaction(args.signedBase64,args.expectedWallet);
- if(!decoded.ok)return {kind:'REJECTED',reason:decoded.reason};
+ if('reason' in decoded)return {kind:'REJECTED',reason:decoded.reason};
  try{
   const response=await post(args.rpcUrl,{
    method:'POST',headers:{'content-type':'application/json'},
