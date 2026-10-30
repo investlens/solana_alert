@@ -1,5 +1,8 @@
 import { upsertUser } from '../core/subscriptions.js';
 import { registerTraderTools } from './traderTools.js';
+import { EchoPreviewLedger } from '../echo/manualPreviewLedger.js';
+import { createEchoPreviewCallbackHandler } from '../echo/manualPreviewCallbackHandler.js';
+import { ECHO_PREVIEW_CALLBACK_PREFIX } from '../echo/telegramManualPreview.js';
 import { alphaosFeatureGuide, alphaosHomeText } from '../product/featureGuide.js';
 import { Markup, Telegraf } from 'telegraf';
 import { config } from '../config.js';
@@ -216,6 +219,33 @@ export function createBot(persistSubscriber:typeof upsertUser=upsertUser) {
     );
     return;
   });
+
+  // Single Telegram update owner: the existing Telegraf bot. No separate
+  // Echo getUpdates/webhook consumer. Disabled unless explicitly configured.
+  if (process.env.ECHO_MANUAL_PREVIEW_ENABLED === 'true') {
+    const path=process.env.ECHO_PREVIEW_STATE_PATH?.trim();
+    if (!path?.startsWith('/')) throw Error('ECHO_PREVIEW_PERSISTENT_PATH_REQUIRED');
+    const ledger=new EchoPreviewLedger(path);
+    const ready=ledger.load(); // fail closed on missing/corrupt persistent journal
+    const onPreview=createEchoPreviewCallbackHandler({
+      ownerChatId:String(config.adminTelegramId),walletEnv:process.env,ledger,
+    });
+    bot.action(/^echo_preview:/, async ctx=>{
+      try{
+        await ready;
+        const callback=ctx.callbackQuery as any;
+        const res=await onPreview({
+          id:String(callback.id??''),from:{id:Number(ctx.from?.id??0)},
+          message:ctx.chat?{chat:{id:Number(ctx.chat.id)}}:undefined,
+          data:String(callback.data??''),
+        });
+        await ctx.answerCbQuery(res.text.slice(0,180),{show_alert:true}).catch(()=>{});
+      }catch{
+        await ctx.answerCbQuery('Preview unavailable: persistent storage error',{show_alert:true}).catch(()=>{});
+      }
+    });
+    console.log('[EchoPreview] OWNER_ROUTER_CONFIGURED; trade execution disabled');
+  }
 
   registerAddressScreening(bot);
   registerBotCommands(bot);
