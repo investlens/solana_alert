@@ -53,7 +53,7 @@ export async function readOnlyJupiterSwapPreview(request:EchoSwapSimulationReque
       return {ok:false,reason:'UNTRUSTED_TRANSACTION_SIGNERS'};
     // Reject lookup tables until addresses can be resolved and independently
     // classified. Compiled indexes alone cannot establish the programs invoked.
-    if (tx.message.addressTableLookups.length !== 0)
+    if (tx.message.version !== 0 || tx.message.addressTableLookups.length !== 0)
       return {ok:false,reason:'UNRESOLVED_LOOKUP_TABLES'};
     if (tx.message.header.numRequiredSignatures !== 1)
       return {ok:false,reason:'UNTRUSTED_TRANSACTION_SIGNERS'};
