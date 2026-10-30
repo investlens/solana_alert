@@ -9,6 +9,7 @@ on:
       - feat/echo-trade-readiness-guards-20261030
       - feat/echo-nonbroadcast-preview-20261030
       - feat/echo-callback-owner-simulation-20261030
+      - fix/echo-unsigned-instruction-guard-20261030
       - fix/echo-durable-audit-outbox-20261030
       - feat/echo-supabase-audit-20261030
       - feat/echo-verified-market-card-20261030
