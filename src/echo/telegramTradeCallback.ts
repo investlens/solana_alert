@@ -1,53 +1,39 @@
-/** Telegram callback preparation only: no bot registration, signing or execution. */
-import { createHmac, timingSafeEqual } from 'node:crypto';
+/** Opaque Telegram callback IDs (<=64 bytes); no signing, RPC or trade execution. */
+import { randomBytes } from 'node:crypto';
 import { validateManualEchoIntent, type ManualEchoIntent } from './manualTradeIntent.js';
-
-export type EchoCallbackPayload = {
-  intent: ManualEchoIntent;
-  expiresAtMs: number;
-  nonce: string;
-};
-export type EchoCallbackDecision =
-  | { allowed: true; intent: ManualEchoIntent; nonce: string }
-  | { allowed: false; reason: string };
-
-/** Caller must provide the Telegram-verified from.id, not an ID from callback_data. */
-export function authorizeEchoTelegramCallback(
-  token: string, secret: string, telegramVerifiedUserId: string,
-  nowMs: number, consumeNonce: (nonce: string, expiresAtMs: number) => Promise<boolean>,
-): Promise<EchoCallbackDecision> {
-  return authorize(token, secret, telegramVerifiedUserId, nowMs, consumeNonce);
+export type StoredEchoCallback = { intent: ManualEchoIntent; expiresAtMs: number };
+export interface EchoCallbackStore {
+  /** Must atomically consume once, returning null for missing/expired/replayed tokens. */
+  consumeOnce(token: string): Promise<StoredEchoCallback | null>;
+  insertOnce(token: string, payload: StoredEchoCallback): Promise<boolean>;
 }
-async function authorize(token: string, secret: string, userId: string, nowMs: number,
- consumeNonce: (nonce: string, expiresAtMs: number) => Promise<boolean>): Promise<EchoCallbackDecision> {
-  if (!secret || secret.length < 32 || !userId || !Number.isSafeInteger(nowMs))
-    return { allowed: false, reason: 'INVALID_AUTH_CONFIG' };
-  const parts = token.split('.');
-  if (parts.length !== 2 || parts[0].length > 4096 || !/^[a-f0-9]{64}$/.test(parts[1]))
-    return { allowed: false, reason: 'INVALID_CALLBACK_TOKEN' };
-  const expected = createHmac('sha256', secret).update(parts[0]).digest();
-  const supplied = Buffer.from(parts[1], 'hex');
-  if (!timingSafeEqual(expected, supplied)) return { allowed: false, reason: 'INVALID_SIGNATURE' };
-  let payload: EchoCallbackPayload;
-  try { payload = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8')) as EchoCallbackPayload; }
-  catch { return { allowed: false, reason: 'INVALID_CALLBACK_PAYLOAD' }; }
-  if (!payload || !payload.intent || !Number.isSafeInteger(payload.expiresAtMs) ||
-      payload.expiresAtMs < nowMs || payload.expiresAtMs > nowMs + 60_000 ||
-      typeof payload.nonce !== 'string' || !/^[a-zA-Z0-9_-]{16,64}$/.test(payload.nonce))
-    return { allowed: false, reason: 'EXPIRED_OR_INVALID_CALLBACK' };
-  if (payload.intent.telegramUserId !== userId)
-    return { allowed: false, reason: 'UNAUTHORIZED_ADMIN' };
-  const decision = validateManualEchoIntent(payload.intent);
-  if (!decision.allowed) return { allowed: false, reason: decision.reason };
-  try {
-    if (!await consumeNonce(payload.nonce, payload.expiresAtMs))
-      return { allowed: false, reason: 'CALLBACK_REPLAY' };
-  } catch { return { allowed: false, reason: 'NONCE_STORE_UNAVAILABLE' }; }
-  return { allowed: true, intent: payload.intent, nonce: payload.nonce };
+export function newEchoCallbackToken(): string { return 'echo_' + randomBytes(24).toString('base64url'); }
+export async function createEchoTradeCallback(
+ store: EchoCallbackStore, intent: ManualEchoIntent, nowMs: number,
+): Promise<{created:true; token:string}|{created:false;reason:string}> {
+ const check=validateManualEchoIntent(intent);
+ if (!check.allowed) return {created:false,reason:check.reason};
+ if (!Number.isSafeInteger(nowMs)) return {created:false,reason:'INVALID_CLOCK'};
+ const token=newEchoCallbackToken();
+ try {
+  if (!await store.insertOnce(token,{intent,expiresAtMs:nowMs+60_000}))
+   return {created:false,reason:'TOKEN_COLLISION'};
+  return {created:true,token};
+ } catch { return {created:false,reason:'CALLBACK_STORE_UNAVAILABLE'}; }
 }
-/** Tokens must be created server-side, never from client-controlled callback fields. */
-export function signEchoCallbackPayload(payload: EchoCallbackPayload, secret: string): string {
-  if (secret.length < 32) throw Error('INVALID_AUTH_CONFIG');
-  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  return body + '.' + createHmac('sha256', secret).update(body).digest('hex');
+/** Telegram user ID must come from verified callback_query.from.id, never callback_data. */
+export async function authorizeEchoTelegramCallback(
+ store: EchoCallbackStore, token: string, verifiedTelegramUserId: string, nowMs: number,
+): Promise<{allowed:true;intent:ManualEchoIntent}|{allowed:false;reason:string}> {
+ if (!/^echo_[A-Za-z0-9_-]{32}$/.test(token) || !verifiedTelegramUserId || !Number.isSafeInteger(nowMs))
+  return {allowed:false,reason:'INVALID_CALLBACK'};
+ let saved:StoredEchoCallback|null;
+ try { saved=await store.consumeOnce(token); }
+ catch { return {allowed:false,reason:'CALLBACK_STORE_UNAVAILABLE'}; }
+ if (!saved || !Number.isSafeInteger(saved.expiresAtMs) || nowMs>saved.expiresAtMs)
+  return {allowed:false,reason:'EXPIRED_OR_REPLAYED'};
+ if (saved.intent.telegramUserId!==verifiedTelegramUserId)
+  return {allowed:false,reason:'UNAUTHORIZED_ADMIN'};
+ const check=validateManualEchoIntent(saved.intent);
+ return check.allowed ? {allowed:true,intent:saved.intent} : {allowed:false,reason:check.reason};
 }
