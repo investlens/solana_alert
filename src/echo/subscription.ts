@@ -77,8 +77,10 @@ export function startEchoSubscription(options: Options) {
         return;
       }
       state.observedTradeSignatures++;
-      state.walletQueued[wallet] = (state.walletQueued[wallet] ?? 0) + 1;
+      // Count callback handoffs only after the admission callback returns.
+      // A throwing callback must not be reported as successfully forwarded.
       options.onSignature(value.signature, wallet);
+      state.walletQueued[wallet] = (state.walletQueued[wallet] ?? 0) + 1;
     });
     current.addEventListener('close', (event: any) => lost('closed_' + String(Number.isInteger(event?.code) ? event.code : 'unknown')));
     current.addEventListener('error', () => lost('socket_error'));
