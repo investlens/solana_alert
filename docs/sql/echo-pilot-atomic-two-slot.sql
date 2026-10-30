@@ -21,7 +21,9 @@ returns text language plpgsql security invoker set search_path = ''
 as $$
 declare v_count bigint; v_today bigint; v_existing boolean;
 begin
- if p_execution_wallet <> '8ndw7DJ6hyZBm1PD3JJMF8G4PD5CJhDCCUK13ECL2pgQ'\n    or p_execution_wallet !~ '^[1-9A-HJ-NP-Za-km-z]{32,44}    or p_mint !~ '^[1-9A-HJ-NP-Za-km-z]{32,44}$'
+ if p_execution_wallet <> '8ndw7DJ6hyZBm1PD3JJMF8G4PD5CJhDCCUK13ECL2pgQ'
+    or p_execution_wallet !~ '^[1-9A-HJ-NP-Za-km-z]{32,44}$'
+    or p_mint !~ '^[1-9A-HJ-NP-Za-km-z]{32,44}$'
     or p_source_signature !~ '^[1-9A-HJ-NP-Za-km-z]{64,88}$'
     or p_caller_wallet not in (
       '5YRgrP3mjGzrzirYYN5HAQH19cTYREYwGxW6XRJQUzij',
