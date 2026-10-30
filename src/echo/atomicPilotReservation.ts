@@ -18,7 +18,7 @@ export async function reserveEchoTenDollarPilot(
  order:PilotOrder, executionWallet:string, signature:string, store:EchoAtomicPositionStore
 ):Promise<AtomicReservationResult|{reserved:false;reason:string}> {
  const check=screenEchoTenDollarPilot(order);
- if(!check.allowed)return {reserved:false,reason:check.reason};
+ if('reason' in check)return {reserved:false,reason:check.reason};
  if(!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(executionWallet)||
    !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(signature))
    return {reserved:false,reason:'INVALID_TRANSACTION_IDENTITY'};
