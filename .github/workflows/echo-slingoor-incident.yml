@@ -1,0 +1,21 @@
+name: Slingoor buy incident verification
+on:
+  push:
+    branches:
+      - diagnostic/slingoor-buy-20261030
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - name: Public-chain Slingoor transaction diagnostic
+        run: npx tsx scripts/echoInspectSlingoorIncident.ts
