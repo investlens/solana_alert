@@ -37,7 +37,7 @@ export class EchoLocalTradeModel {
     killSwitchEngaged:this.stopBuys||order.killSwitchEngaged
    });
    if(!check.allowed||tokenBalanceRaw<=0n){
-    const reason=!check.allowed?check.reason:'INVALID_FIXTURE_BALANCE';
+    const reason='reason' in check?check.reason:'INVALID_FIXTURE_BALANCE';
     this.events.push({kind:'BUY_SKIPPED',mint:order.mint,reason});
     return {modelled:false as const,reason};
    }
@@ -56,7 +56,7 @@ export class EchoLocalTradeModel {
    if(!position||position.status!=='OPEN')
     return {modelled:false as const,reason:'NO_OPEN_POSITION'};
    const gate=screenEchoManualSell(sell);
-   if(!gate.allowed)return {modelled:false as const,reason:gate.reason};
+   if('reason' in gate)return {modelled:false as const,reason:gate.reason};
    if(BigInt(sell.verifiedTokenBalanceRaw)!==position.tokenBalanceRaw)
     return {modelled:false as const,reason:'STALE_TOKEN_BALANCE'};
    // There is no on-chain verification here. These flags are explicit local
