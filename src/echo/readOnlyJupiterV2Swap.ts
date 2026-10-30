@@ -1,0 +1,94 @@
+/** Jupiter Swap API v2 READ-ONLY buy/sell order and RPC simulation.
+ * Builds a real unsigned v0 /order transaction for the chosen side. Never signs,
+ * calls /execute, /submit, sendTransaction or sends an unsigned transaction.
+ * IMPORTANT: simulation success is not economic/route authorization to sign.
+ * v0 transactions with lookup tables or extra signers FAIL CLOSED pending a
+ * complete, signer-side account/fee audit.
+ */
+import {VersionedTransaction,PublicKey,ComputeBudgetProgram,SystemProgram} from '@solana/web3.js';
+import {createHash} from 'node:crypto';
+import {simulateEchoUnsignedTransaction} from './readOnlySimulation.js';
+
+export const ECHO_JUPITER_V2_READ_ONLY=true as const;
+export const ECHO_JUPITER_V2_EXECUTION_ENABLED=false as const;
+const SOL='So11111111111111111111111111111111111111112';
+const BASE='https://api.jup.ag/swap/v2/order';
+const programs=new Set([
+ ComputeBudgetProgram.programId.toBase58(),
+ SystemProgram.programId.toBase58(),
+ 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+ 'TokenzQdBNbLqP5VEhdkAS6EPFCE7uFyV9QnF4jrb',
+ 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
+ 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4'
+]);
+const validMint=(v:string)=>{try{return new PublicKey(v).toBase58()===v}catch{return false}};
+export type EchoJupiterV2PreviewRequest={
+ side:'BUY'|'SELL';rpcUrl:string;publicWallet:string;mint:string;
+ /** BUY: lamports SOL to spend; SELL: raw token units to sell. */
+ amountRaw:string;maxSlippageBps:number;jupiterApiKey:string;
+};
+export type EchoJupiterV2PreviewResult=
+ | {ok:true;reason:'RPC_SIMULATION_SUCCEEDED';side:'BUY'|'SELL';
+    inputMint:string;outputMint:string;inputRaw:string;quotedOutputRaw:string;
+    unsignedTransactionSha256:string;requestId:string;logs:string[]}
+ | {ok:false;reason:string};
+export async function readOnlyEchoJupiterV2Swap(
+ r:EchoJupiterV2PreviewRequest,fetcher:typeof fetch=fetch
+):Promise<EchoJupiterV2PreviewResult>{
+ if(!validMint(r.mint)||r.mint===SOL||!validMint(r.publicWallet)||
+    !/^[1-9][0-9]*$/.test(r.amountRaw)||r.amountRaw.length>18||
+    !Number.isSafeInteger(Number(r.amountRaw))||
+    (r.side==='BUY'&&Number(r.amountRaw)>100_000_000)||
+    !Number.isSafeInteger(r.maxSlippageBps)||r.maxSlippageBps<1||
+    r.maxSlippageBps>300||!r.jupiterApiKey?.trim())
+  return {ok:false,reason:'INVALID_PREVIEW_REQUEST'};
+ const inputMint=r.side==='BUY'?SOL:r.mint;
+ const outputMint=r.side==='BUY'?r.mint:SOL;
+ try{
+  const url=new URL(BASE);
+  url.searchParams.set('inputMint',inputMint);
+  url.searchParams.set('outputMint',outputMint);
+  url.searchParams.set('amount',r.amountRaw);
+  url.searchParams.set('taker',r.publicWallet);
+  url.searchParams.set('slippageBps',String(r.maxSlippageBps));
+  url.searchParams.set('maxSupportedTransactionVersion','0');
+  const response=await fetcher(url.toString(),{
+   method:'GET',headers:{'x-api-key':r.jupiterApiKey,accept:'application/json'},
+   signal:AbortSignal.timeout(5000)
+  });
+  if(!response.ok)return {ok:false,reason:'JUPITER_ORDER_UNAVAILABLE'};
+  const order=await response.json();
+  if(order.inputMint!==inputMint||order.outputMint!==outputMint||
+     order.inAmount!==r.amountRaw||!/^[1-9][0-9]*$/.test(order.outAmount??'')||
+     typeof order.requestId!=='string'||!order.requestId||
+     typeof order.transaction!=='string'||order.transaction.length<100||
+     order.transaction.length>3000||order.transactionVersion!==0&&order.transactionVersion!=='0')
+   return {ok:false,reason:'JUPITER_ORDER_MISMATCH'};
+  // Reject gasless / alternate fee-payer routes in this first safe prototype.
+  if(order.signatureFeePayer!==r.publicWallet)
+   return {ok:false,reason:'UNEXPECTED_FEE_PAYER'};
+  const encoded=order.transaction;
+  const bytes=Buffer.from(encoded,'base64');
+  if(bytes.toString('base64')!==encoded)return {ok:false,reason:'INVALID_ORDER_ENCODING'};
+  const tx=VersionedTransaction.deserialize(bytes);
+  if(tx.message.version!==0||tx.message.addressTableLookups.length>0)
+   return {ok:false,reason:'UNRESOLVED_LOOKUP_TABLES'};
+  if(tx.message.header.numRequiredSignatures!==1||
+     tx.signatures.length!==1||!tx.signatures[0].every(b=>b===0)||
+     tx.message.staticAccountKeys[0]?.toBase58()!==r.publicWallet)
+   return {ok:false,reason:'UNTRUSTED_ORDER_SIGNER'};
+  for(const ix of tx.message.compiledInstructions){
+   const program=tx.message.staticAccountKeys[ix.programIdIndex]?.toBase58();
+   if(!program||!programs.has(program))return {ok:false,reason:'UNREVIEWED_PROGRAM'};
+   if(program===SystemProgram.programId.toBase58()&&
+      ix.data.length>=4&&Buffer.from(ix.data).readUInt32LE(0)===2)
+    return {ok:false,reason:'UNREVIEWED_DIRECT_SOL_TRANSFER'};
+  }
+  const result=await simulateEchoUnsignedTransaction(r.rpcUrl,encoded,fetcher);
+  if(!result.ok)return {ok:false,reason:result.reason};
+  return {ok:true,reason:'RPC_SIMULATION_SUCCEEDED',side:r.side,
+   inputMint,outputMint,inputRaw:r.amountRaw,quotedOutputRaw:order.outAmount,
+   unsignedTransactionSha256:createHash('sha256').update(bytes).digest('hex'),
+   requestId:order.requestId,logs:result.logs??[]};
+ }catch{return {ok:false,reason:'ORDER_OR_SIMULATION_FAILED'};}
+}
