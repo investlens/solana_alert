@@ -1,6 +1,7 @@
 import { parseOwnerPreviewCallback } from './telegramManualPreview.js';
 import { EchoPreviewLedger } from './manualPreviewLedger.js';
 import { readEchoWalletIdentity } from './readOnlySimulation.js';
+import { readOnlyJupiterSwapPreview } from './readOnlyJupiterSwap.js';
 
 /** An adapter for a future authenticated, single-consumer Telegram update
  * router. Does not poll Telegram or install a second webhook.
@@ -25,6 +26,21 @@ export function createEchoPreviewCallbackHandler(args:{
     action:req.action,...(req.action==='BUY'?{amountSol:req.amountSol}:{sellPercent:req.sellPercent})
    });
    if(!record.created)return {accepted:false,callbackId:callback.id,text:'Duplicate preview; no transaction sent'};
+   // Optional read-only BUY preflight. Disabled by default. Never run on SELL:
+   // sell needs a separately verified token balance and swap builder.
+   if(req.action==='BUY' && args.walletEnv.ECHO_PREVIEW_QUOTE_SIMULATION_ENABLED==='true'){
+     const apiKey=args.walletEnv.ECHO_JUPITER_API_KEY?.trim();
+     const rpcUrl=args.walletEnv.ECHO_SOLANA_RPC_URL?.trim();
+     if(!apiKey||!rpcUrl)return {accepted:true,callbackId:callback.id,text:'PREVIEW SAVED · preflight unavailable (missing API/RPC). No trade sent.'};
+     const outcome=await readOnlyJupiterSwapPreview({
+       rpcUrl,publicWallet:wallet.address,outputMint:req.mint,
+       amountLamports:Math.round(req.amountSol!*1e9),maxSlippageBps:100,jupiterApiKey:apiKey
+     });
+     await args.ledger.markSimulation(record.item.id,outcome.ok);
+     return {accepted:true,callbackId:callback.id,text:outcome.ok
+       ? 'PREVIEW SIMULATION PASSED · read-only, no transaction sent'
+       : 'PREVIEW SIMULATION BLOCKED · '+outcome.reason+'. No transaction sent'};
+   }
    return {accepted:true,callbackId:callback.id,text:'PREVIEW ONLY · '+req.action+
     ' · '+(req.action==='BUY'?req.amountSol+' SOL':req.sellPercent+'%')+
     ' · saved locally. No quote, simulation, signature or trade submitted.'};
