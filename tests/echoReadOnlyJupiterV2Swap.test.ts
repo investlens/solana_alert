@@ -1,14 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Keypair,TransactionMessage,VersionedTransaction,ComputeBudgetProgram} from '@solana/web3.js';
+import {Keypair,TransactionMessage,VersionedTransaction,ComputeBudgetProgram,TransactionInstruction,PublicKey} from '@solana/web3.js';
 import {readOnlyEchoJupiterV2Swap,ECHO_JUPITER_V2_EXECUTION_ENABLED} from '../src/echo/readOnlyJupiterV2Swap.js';
 const wallet=Keypair.generate().publicKey.toBase58();
 const mint=Keypair.generate().publicKey.toBase58();
 const SOL='So11111111111111111111111111111111111111112';
 const message=new TransactionMessage({
- payerKey:new (await import('@solana/web3.js')).PublicKey(wallet),
+ payerKey:new PublicKey(wallet),
  recentBlockhash:Keypair.generate().publicKey.toBase58(),
- instructions:[ComputeBudgetProgram.setComputeUnitLimit({units:100000})]
+ instructions:[ComputeBudgetProgram.setComputeUnitLimit({units:100000}),
+ new TransactionInstruction({programId:new PublicKey('JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4'),keys:[],data:Buffer.from([1])})]
 }).compileToV0Message();
 const tx=new VersionedTransaction(message);
 const encoded=Buffer.from(tx.serialize()).toString('base64');
