@@ -422,6 +422,7 @@ async function reconcile() {
         console.log('[Echo] COVERAGE_PROGRESS', {
           caller: ECHO_WALLETS[wallet], freshComplete: false, historyComplete: false,
           freshPagesScanned, historyPagesScanned: 0, freshOldestBlockTime,
+          freshWindowLagSeconds: freshOldestBlockTime == null ? null : Math.max(0, Math.ceil(freshOldestBlockTime - cutoff)), coverageGuaranteed: false,
           historyOldestBlockTime: null, freshCursorAdvanced: freshCursorBeforePass !== fresh.before,
           historyCursorAdvanced: false, freshPending: fresh.before !== null,
           historyPending: historyCursors.has(wallet), archiveDeferredForFresh: true
