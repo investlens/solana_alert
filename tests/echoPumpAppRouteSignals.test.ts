@@ -10,7 +10,7 @@ const token='3m8Zk2sgj9nZYmK8zgUnXZ7UijRtKbsuiWdDYPd6pump';
 const signature='468XdziMPaFGnTZxC5tq66bRRxfVbNo5DuhEWaFMskiGexo4fkn8M2zg4KRZvn6E5rsAQYCtCYSMWsvgAUCb4P6U';
 const tag=bs58.encode(Buffer.concat([Buffer.from(PUMP_APP_USDC_BUY_TAG,'hex'),Buffer.alloc(60)]));
 const balance=(mint:string,amount:string)=>({accountIndex:mint===usdc?1:2,mint,owner:chairman,
- uiTokenAmount:{amount,decimals:6}});
+ uiTokenAmount:{amount,decimals:6,uiAmount:Number(amount)/1e6,uiAmountString:String(Number(amount)/1e6)}});
 function fixture(): ParsedTransactionWithMeta {
  // Ledger deltas and router instruction tag reproduced from verified public
  // chain transaction; other unneeded account fields are synthetic.
