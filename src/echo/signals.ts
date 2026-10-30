@@ -65,7 +65,9 @@ const ECHO_SOCIAL_X: Readonly<Record<string, string>> = Object.freeze({
   Croakie: 'croakie_',
   Chairman: 'Chairman_DN',
 });
-export type EchoCardMarket = { name: string; symbol: string; marketCap: number | null; liquidity: number | null };
+export type EchoCardMarket = { name: string; symbol: string; marketCap: number | null; liquidity: number | null;
+  volume24h?: number | null; buys24h?: number | null; dex?: string | null;
+  pairAddress?: string | null; priceUsd?: number | null };
 function escapeEchoHtml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -86,6 +88,15 @@ export function echoCard(s: EchoSignal, nowSeconds: number, market?: EchoCardMar
     `${label}\n` +
     `💰 <b>MC:</b> ${formatUsd(market?.marketCap)} · <b>LP:</b> ${formatUsd(market?.liquidity)}\n` +
     `💱 <b>Trade:</b> ${quote}\n` +
+    (market?.volume24h != null && Number.isFinite(market.volume24h) && market.volume24h >= 0
+      ? `📊 <b>24h volume:</b> ${formatUsd(market.volume24h)}\n` : '') +
+    (market?.buys24h != null && Number.isSafeInteger(market.buys24h) && market.buys24h >= 0
+      ? `🟢 <b>24h buys:</b> ${market.buys24h.toLocaleString('en-US')}\n` : '') +
+    (market?.dex ? `🏦 <b>DEX:</b> ${escapeEchoHtml(market.dex)}\n` : '') +
+    (market?.pairAddress ? `🔗 <b>Pair:</b> <code>${escapeEchoHtml(market.pairAddress)}</code>\n` : '') +
+    (market?.priceUsd != null && Number.isFinite(market.priceUsd) && market.priceUsd > 0
+      ? `💵 <b>Price:</b> ${market.priceUsd.toPrecision(5)}\n` : '') +
+
     (s.quoteMint ? `🔁 <b>Input mint:</b> <code>${escapeEchoHtml(s.quoteMint)}</code>\n` : '') +
     `🪙 <b>Tokens:</b> ${s.tokenAmount.toLocaleString('en-US', { maximumFractionDigits: 4 })}\n` +
     `⏱ <b>Age:</b> ${age}s${social}\n` +
