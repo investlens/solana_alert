@@ -6,7 +6,7 @@ import { extractRpcEchoSignals } from '../src/echo/rpcSignals.js';
 
 const fixture = async () => JSON.parse(await readFile(new URL('./fixtures/echo-croakie-v1.json', import.meta.url), 'utf8'));
 
-test('real Croakie v1 PumpSwap buy is fetched without -32015 and identified by the existing parser', async () => {
+test('historical Croakie v1 transaction remains fetchable but excluded from new caller alerts', async () => {
   const tx = await fixture(), signature = tx.transaction.signatures[0];
   assert.equal(tx.version, 1);
   const fetched = await readEchoTransaction(signature, async (method, params) => {
@@ -18,14 +18,13 @@ test('real Croakie v1 PumpSwap buy is fetched without -32015 and identified by t
   });
   // Evaluate at historical observation time; this is not a current trading signal.
   const signals = extractRpcEchoSignals(fetched, signature, tx.blockTime + 1);
-  assert.equal(signals.length, 1); assert.equal(signals[0].caller, 'Croakie'); assert.equal(signals[0].side, 'BUY');
-  assert.equal(signals[0].mint, '29odnuih5B7Bo6KNNJ6VWe3VCQgEN1mvbzDWDLxbpump');
-  assert.equal(signals[0].tokenAmount, 3_142_611.649012);
-  assert.equal(signals[0].quoteBasis, 'wallet SOL net change; includes fees/rent');
+  // Croakie is explicitly no longer in the active caller list. Do not
+  // accidentally resurrect Croakie alerts when enabling v1 transactions.
+  assert.deepEqual(signals, []);
 });
 test('v1 support preserves failure and freshness filters; historical buy cannot become a new alert', async () => {
   const tx = await fixture(), signature = tx.transaction.signatures[0];
-  assert.deepEqual(extractRpcEchoSignals(tx, signature, tx.blockTime + 121), []);
+  assert.deepEqual(extractRpcEchoSignals(tx, signature, tx.blockTime + 1801), []);
   tx.meta.err = { InstructionError: [0, 'Custom'] };
   assert.deepEqual(extractRpcEchoSignals(tx, signature, tx.blockTime + 1), []);
 });
