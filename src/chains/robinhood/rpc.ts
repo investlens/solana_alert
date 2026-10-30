@@ -21,7 +21,7 @@ export function robinhoodRpcFailureCooldown(error:unknown, normalMs:number):numb
 export function robinhoodRpcFailurePolicy(error: unknown): 'ACCESS' | 'METHOD' | 'HISTORY' | 'PARAMETERS' | 'CONTRACT' | 'PROVIDER' {
  const message = conciseRpcError(error);
  if (/(?:Status:|status(?:Code)?[=: ]+|HTTP[ :]+)\s*(?:403|429)\b/i.test(message)) return 'ACCESS';
- if (/archive requests require (?:a )?personal token/i.test(message)) return 'HISTORY';
+ if (/archive requests require (?:a )?personal token|historical state\b[^\n]*\bis not available/i.test(message)) return 'HISTORY';
  if (/method[^\n]*(?:does not exist|not available|not supported|not found)|(?:code[=: ]+)?-32601\b/i.test(message)) return 'METHOD';
  if (/execution reverted|contract function[^\n]*reverted/i.test(message)) return 'CONTRACT';
  if (/invalid parameters|invalid params|(?:code[=: ]+)?-32602\b/i.test(message)) return 'PARAMETERS';
@@ -57,7 +57,8 @@ function providerHealth(url:string){const e=rpcProviderHealth.get(url);if(e)retu
 function markProviderSuccess(url:string){const h=providerHealth(url);if(h.failures||h.cooldownUntil)console.info('[RobinhoodRpc] provider recovered',{provider:url});h.failures=0;h.cooldownUntil=0;}
 function markProviderFailure(url:string,error:unknown,operation:string){const h=providerHealth(url);const scope=robinhoodRpcFailurePolicy(error);
  if(scope==='METHOD'){const method=robinhoodRpcOperationMethod(operation);if(h.unsupported.size<32||h.unsupported.has(method))h.unsupported.set(method,Date.now()+300_000);return;}
- if(scope==='PARAMETERS'||scope==='CONTRACT'||scope==='HISTORY')return;
+ if(scope==='HISTORY'){const method=robinhoodRpcOperationMethod(operation);if(h.unsupported.size<32||h.unsupported.has(method))h.unsupported.set(method,Date.now()+300_000);return;}
+ if(scope==='PARAMETERS'||scope==='CONTRACT')return;
  h.failures+=1;const cooldownMs=robinhoodRpcFailureCooldown(error,RPC_COOLDOWN_MS);if(h.failures>=RPC_FAILURE_THRESHOLD||cooldownMs>RPC_COOLDOWN_MS){h.cooldownUntil=Math.max(h.cooldownUntil,Date.now()+cooldownMs);console.warn('[RobinhoodRpc] provider circuit opened',{provider:url,failures:h.failures,cooldownMs});}}
 async function runProvider<T>(url:string,operation:string,client:(typeof robinhoodRpcClients)[number]['client'],run:(client:(typeof robinhoodRpcClients)[number]['client'])=>Promise<T>):Promise<T>{throwIfRequestAborted();const h=providerHealth(url);h.inFlight+=1;try{const signal=currentRequestSignal();const work=run(client);const r=await (signal?abortable(work,signal):work);markProviderSuccess(url);return r;}catch(e){if(!currentRequestSignal()?.aborted)markProviderFailure(url,e,operation);throw e;}finally{h.inFlight=Math.max(0,h.inFlight-1);}}
 function sleep(ms:number){return new Promise<void>(resolve=>setTimeout(resolve,ms));}
