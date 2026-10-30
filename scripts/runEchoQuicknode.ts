@@ -495,7 +495,12 @@ const heartbeat = setInterval(() => console.log('[Echo] HEALTH', { subscriptions
   websocketReady: subscription.state.ready, reconnects: subscription.state.reconnects,
   lastDisconnectReason: subscription.state.lastDisconnectReason, lastConnectedAt: subscription.state.lastConnectedAt,
   activeWebSocketProvider: subscription.state.activeProvider,
-  skippedNonSwapLogs: subscription.state.skippedNonSwapLogs, observedTradeSignatures: subscription.state.observedTradeSignatures, queued: queue.size, dropped: queue.dropped,
+  skippedNonSwapLogs: subscription.state.skippedNonSwapLogs, observedTradeSignatures: subscription.state.observedTradeSignatures,
+  walletWebSocketCounts: Object.fromEntries(Object.keys(ECHO_WALLETS).map(wallet => [ECHO_WALLETS[wallet], {
+    notifications: subscription.state.walletNotifications[wallet] ?? 0,
+    prefilterSkipped: subscription.state.walletPrefilterSkipped[wallet] ?? 0,
+    admitted: subscription.state.walletQueued[wallet] ?? 0
+  }])), queued: queue.size, dropped: queue.dropped,
   lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt, ...diagnostics, promotions: promotionsReady ? promotions.summary() : {enabled:false}, research: researchReady ? JSON.stringify(research.summary()) : {enabled:false},tiers:tiers.summary(), audit:echoAuditOutbox?.summary()??{enabled:false}, rejectionCounts }), 60_000);
 const server = createServer((req, res) => {
   if (req.method !== 'GET' || req.url !== '/health') { res.writeHead(404); res.end(); return; }
