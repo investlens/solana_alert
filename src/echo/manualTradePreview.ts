@@ -12,7 +12,7 @@ export function previewEchoManualBuy(input:SecureEchoBuy, adminAuthorized:boolea
   if(tokenPreviouslyReserved)return {...base,admissibleForSimulation:false,reason:'TOKEN_ALREADY_RESERVED',
     reservationKey:null,plannedTotalLamports:null};
   const decision=validateSecureEchoBuy(input);
-  if(!decision.allowed)return {...base,admissibleForSimulation:false,reason:decision.reason,
+  if(decision.allowed === false)return {...base,admissibleForSimulation:false,reason:decision.reason,
     reservationKey:null,plannedTotalLamports:null};
   return {...base,admissibleForSimulation:true,reason:'SIMULATION_ONLY_LIVE_DISABLED',
     reservationKey:decision.reservationKey,plannedTotalLamports:decision.totalReservedLamports};
