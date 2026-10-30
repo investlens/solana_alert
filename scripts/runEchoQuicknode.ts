@@ -365,6 +365,9 @@ function persistFreshCursors() {
 }
 const historyWindowSeconds = 1800;
 const historyPagesPerPass = 3;
+// Spend a limited extra read budget on fresh catch-up only when a cursor is
+// already pending. Archive reads remain strictly bounded and secondary.
+const maxFreshPagesOnPending = 6;
 async function reconcile() {
   if (reconciling || stopping || !historyRpcAvailable() || queue.size > 64) return;
   reconciling = true;
@@ -394,7 +397,7 @@ async function reconcile() {
           /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') &&
           !store.has(`tx:${row.signature}`)) { if (!queue.add(row.signature)) throw Error('Echo queue full: cursor not advanced'); }
       }
-      for (let page = 0; page < historyPagesPerPass && !freshComplete; page++) {
+      for (let page = 0; page < (fresh.before && queue.size <= 32 ? maxFreshPagesOnPending : historyPagesPerPass) && !freshComplete; page++) {
         if (stopping || !historyRpcAvailable() || queue.size > 64) break;
         const rows = await rpc('getSignaturesForAddress', [wallet,
           { limit: 100, commitment: 'confirmed', ...(fresh.before ? { before: fresh.before } : {}) }]);
@@ -413,7 +416,9 @@ async function reconcile() {
         persistFreshCursors();
       }
       if (!freshComplete) console.warn('[Echo] FRESH_COVERAGE_INCOMPLETE', {
-        caller: ECHO_WALLETS[wallet], reason: 'fresh-pagination-pending'
+        caller: ECHO_WALLETS[wallet], reason: 'fresh-pagination-pending',
+        pagesScanned: freshPagesScanned, pendingCursor: Boolean(fresh.before),
+        activeQueue: queue.size, cutoffSeconds: historyWindowSeconds
       });
       // Fresh BUY coverage must take precedence over archive traversal.
       // Preserve the durable archive cursor and resume it only after fresh catch-up.
