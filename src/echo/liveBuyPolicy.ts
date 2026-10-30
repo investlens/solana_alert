@@ -3,9 +3,11 @@
  * The execution-layer guard in src/core/adminTrading.ts remains unchanged.
  * This module can be used in shadow/paper mode until explicitly approved.
  */
+import { ECHO_SHADOW_CALLER_WALLETS } from './callerRegistry.js';
+
 export const SLINGOOR_WALLET = '5YRgrP3mjGzrzirYYN5HAQH19cTYREYwGxW6XRJQUzij';
 export const CHAIRMAN_WALLET = 'Be24Gbf5KisDk1LcWWZsBn8dvB816By7YzYF5zWZnRR6';
-export const ELIGIBLE_CALLER_WALLETS: ReadonlySet<string> = new Set([SLINGOOR_WALLET, CHAIRMAN_WALLET]);
+export const ELIGIBLE_CALLER_WALLETS: ReadonlySet<string> = ECHO_SHADOW_CALLER_WALLETS;
 export const MAX_SOL_PER_BUY = 0.1;
 export const LIVE_EXECUTION_ENABLED = false as const;
 export const AUTO_SELL_ENABLED = false as const;
