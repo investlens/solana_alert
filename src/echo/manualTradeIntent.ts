@@ -22,7 +22,7 @@ export function validateManualEchoIntent(input: ManualEchoIntent): ManualEchoDec
   if (!input.confirmationTokenVerified) return { allowed: false, reason: 'CONFIRMATION_REQUIRED' };
   if (!verifyEchoExecutionWallet(input.executionWallet, ECHO_EXPECTED_EXECUTION_WALLET))
     return { allowed: false, reason: 'EXECUTION_WALLET_MISMATCH' };
-  try { if (!PublicKey.isOnCurve(new PublicKey(input.mint).toBytes())) return { allowed: false, reason: 'INVALID_MINT' }; }
+  try { new PublicKey(input.mint); }
   catch { return { allowed: false, reason: 'INVALID_MINT' }; }
   if (input.action === 'BUY') {
     if (input.sellPercent !== undefined || !ECHO_MANUAL_BUY_AMOUNTS_SOL.includes(input.amountSol as 0.05 | 0.1))
