@@ -27,7 +27,8 @@ test('signed bytes match expected signer, but live submissions are hard disabled
  assert.equal(networkCalls,0);
 });
 test('confirmation adapter identifies final, pending, rejected and unknown states',async()=>{
- const response=(value:unknown)=> (async()=>({ok:true,json:async()=>value}) as Response) as typeof fetch;
+ const response=(value:unknown):typeof fetch =>
+  (async()=>({ok:true,json:async()=>value} as Response)) as typeof fetch;
  const inspect=(value:unknown)=>inspectEchoTransactionConfirmation({rpcUrl,signature},response(value));
  assert.deepEqual(await inspect({result:{value:[{err:null,confirmationStatus:'finalized'}]}}),
   {kind:'CONFIRMED'});
