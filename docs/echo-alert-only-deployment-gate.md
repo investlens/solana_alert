@@ -69,3 +69,14 @@ Recovery logic:
 6. No real manual or automated execution approval is implied by alert-only approval.
 
 **Status:** REVIEWED CANDIDATE, NOT DEPLOYMENT-READY. No production changes made by this review.
+
+
+## Final pre-approval runbook — 2026-10-30
+- Release SHA must be pinned to the reviewed #267 head, stacked on #266; do not switch the production Git branch until specifically approved.
+- Pre-deploy gate rejects `ADMIN_TRADING_ENABLED` other than literal `false`, `AUTO_TRADE_MODE` outside `off/disabled/false/none`, and state paths outside `/data/`. Log categories only, not values.
+- This gate has NOT yet run against production's redacted environment; if it fails, leave the existing deployment active. No secrets should be printed to troubleshoot.
+- One Railway service `alphaos-echo-admin` only; no second Telegram consumer and no changes to `solana-alert-bot`.
+- Before cutover: preserve existing volume journal and pending signature queue with a verified restorable snapshot. Existing cursor file `.fresh-cursors-v1.json` is schema-compatible between deployed and candidate versions; that does not prove a snapshot exists.
+- Observe `/health` 200, acknowledged wallet subscriptions, no reconnect storm, stable API usage, queue backlog, and actual Slingoor signature→classifier→Telegram accepted audit. Any missing piece means NOT VERIFIED.
+- Roll back to prior deployed SHA `931412713c5718a21ff4880ad3400f44dd6ee16d` and original service source branch if the new watcher fails health or causes repeated alerts; preserve the persistent volume and do not reset cursors.
+- Current authorization: code review only. Production rollout, sending live Telegram messages, or signing/broadcasting transactions have **not** been approved.
