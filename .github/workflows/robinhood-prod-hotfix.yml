@@ -1,0 +1,32 @@
+name: Robinhood production-base hotfix checks
+on:
+  push:
+    branches:
+      - fix/robinhood-prod-historical-20261030
+permissions:
+  contents: read
+jobs:
+  validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TELEGRAM_BOT_TOKEN: test-token
+      OWNER_CHAT_ID: '1'
+      ADMIN_TELEGRAM_ID: '1'
+      SUPABASE_URL: http://127.0.0.1:54321
+      SUPABASE_SERVICE_ROLE_KEY: test-service-role-key
+      ADMIN_TRADING_ENABLED: 'false'
+      AUTO_TRADE_MODE: paper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Robinhood history classification regressions
+        run: npx tsx --test tests/robinhoodHistoricalRpcFailure.test.ts
+      - name: Full tests
+        run: npm test
