@@ -1,0 +1,44 @@
+name: Echo reliability checks
+
+on:
+  push:
+    branches:
+      - feat/echo-slingoor-livebuy-safety-20261027
+      - feat/echo-verified-market-card-20261030
+      - fix/echo-fresh-window-boundary-20261030
+      - fix/echo-alert-only-fresh-coverage-20261030
+  pull_request:
+    branches:
+      - feat/echo-admin-pilot-20261021
+
+permissions:
+  contents: read
+
+jobs:
+  echo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TELEGRAM_BOT_TOKEN: test-token
+      OWNER_CHAT_ID: '1'
+      ADMIN_TELEGRAM_ID: '1'
+      SUPABASE_URL: http://127.0.0.1:54321
+      SUPABASE_SERVICE_ROLE_KEY: test-service-role-key
+      ADMIN_TRADING_ENABLED: 'false'
+      AUTO_TRADE_MODE: paper
+      PONS_SHADOW_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Echo-focused tests
+        run: npx tsx --test tests/echoPipelineIntegration.test.ts tests/echoResearchIntegration.test.ts tests/echoExecutionWallet.test.ts tests/echoPaperTradeEngine.test.ts tests/echoQueueCapacity.test.ts tests/echoFreshScan.test.ts tests/echoReservationPostgres.test.ts tests/echoSupabaseReservation.test.ts tests/echoPaperReservation.test.ts tests/echoSecureBuyGuard.test.ts tests/echoLandingBudget.test.ts tests/echoSlingoorReliability.test.ts tests/echoSubscriptionReliability.test.ts tests/echoBuyOnlyTransferRejection.test.ts tests/echoLogPrefilter.test.ts tests/echoJupiterRouteSignals.test.ts tests/echoPriorityQueue.test.ts tests/echoFallbackReliability.test.ts
+      - name: Public on-chain sample diagnostic (availability may vary)
+        run: npx tsx scripts/echoInspectSampleTx.ts
+      - name: All repository tests
+        run: npm test
