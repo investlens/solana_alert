@@ -65,7 +65,7 @@ export async function readOnlyJupiterSwapPreview(request:EchoSwapSimulationReque
       'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
       'TokenzQdBNbLqP5VEhdkAS6EPFCE7uFyV9QnF4jrb',
       'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
-      'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5KBWH9r',
+      'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4',
     ]);
     for (const instruction of tx.message.compiledInstructions) {
       const program = keys[instruction.programIdIndex]?.toBase58();
