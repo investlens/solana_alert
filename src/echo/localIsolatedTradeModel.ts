@@ -57,6 +57,8 @@ export class EchoLocalTradeModel {
     return {modelled:false as const,reason:'NO_OPEN_POSITION'};
    const gate=screenEchoManualSell(sell);
    if(!gate.allowed)return {modelled:false as const,reason:gate.reason};
+   if(BigInt(sell.verifiedTokenBalanceRaw)!==position.tokenBalanceRaw)
+    return {modelled:false as const,reason:'STALE_TOKEN_BALANCE'};
    // There is no on-chain verification here. These flags are explicit local
    // fixture assertions, never evidence acceptable to a live signer.
    if(!proof.chainConfirmed||!proof.proceedsVerified||!proof.sellSignaturePersisted)
