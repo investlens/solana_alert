@@ -7,7 +7,7 @@ export type ManualBuyReservation = ManualEchoIntent & {
 };
 export async function reserveManualEchoBuy(input: ManualBuyReservation, store: EchoReservationStore) {
   const decision = validateManualEchoIntent(input);
-  if (!decision.allowed) return { reserved: false as const, reason: decision.reason };
+  if (decision.allowed === false) return { reserved: false as const, reason: decision.reason };
   // The approval flag gates execution, not dry-run reservation testing.
   if (ECHO_MANUAL_TRADING_ENABLED !== false) return { reserved: false as const, reason: 'UNEXPECTED_EXECUTION_MODE' };
   if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(input.callerWallet) ||
