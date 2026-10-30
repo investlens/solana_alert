@@ -21,8 +21,7 @@ returns text language plpgsql security invoker set search_path = ''
 as $$
 declare v_count bigint; v_today bigint; v_existing boolean;
 begin
- if p_execution_wallet <> '8ndw7DJ6hyZBm1PD3JJMF8G4PD5CJhDCCUK13ECL2pgQ'\n    or p_execution_wallet !~ '^[1-9A-HJ-NP-Za-km-z]{32,44}
-    or p_mint !~ '^[1-9A-HJ-NP-Za-km-z]{32,44}$'
+ if p_execution_wallet <> '8ndw7DJ6hyZBm1PD3JJMF8G4PD5CJhDCCUK13ECL2pgQ'\n    or p_execution_wallet !~ '^[1-9A-HJ-NP-Za-km-z]{32,44}    or p_mint !~ '^[1-9A-HJ-NP-Za-km-z]{32,44}$'
     or p_source_signature !~ '^[1-9A-HJ-NP-Za-km-z]{64,88}$'
     or p_caller_wallet not in (
       '5YRgrP3mjGzrzirYYN5HAQH19cTYREYwGxW6XRJQUzij',
@@ -58,9 +57,7 @@ revoke all on function public.echo_pilot_reserve_atomic(text,text,text,text,bigi
 grant execute on function public.echo_pilot_reserve_atomic(text,text,text,text,bigint)
   to service_role;
 commit;
--- Fail closed on any RPC error. Never release slots for unknown submission.
--- Daily cap is UTC; max active cost is two $10 PRINCIPAL positions (excludes network fees).
--- Manual SELL settlement must require verified on-chain token debit and proceeds.
+-- REVIEW ONLY: requires chain-verified full exit before slot release.
 
     or p_mint !~ '^[1-9A-HJ-NP-Za-km-z]{32,44}$'
     or p_source_signature !~ '^[1-9A-HJ-NP-Za-km-z]{64,88}$'
@@ -98,6 +95,4 @@ revoke all on function public.echo_pilot_reserve_atomic(text,text,text,text,bigi
 grant execute on function public.echo_pilot_reserve_atomic(text,text,text,text,bigint)
   to service_role;
 commit;
--- Fail closed on any RPC error. Never release slots for unknown submission.
--- Daily cap is UTC; max active cost is two $10 PRINCIPAL positions (excludes network fees).
--- Manual SELL settlement must require verified on-chain token debit and proceeds.
+-- REVIEW ONLY: requires chain-verified full exit before slot release.
