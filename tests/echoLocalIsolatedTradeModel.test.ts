@@ -34,7 +34,8 @@ test('two parallel $10 local BUYs, third rejected, duplicate never repurchased',
  assert.equal(model.snapshot.principalUsd,20);
  assert.equal((await model.modelManualSell(sell(mints[0],50),proof)).modelled,true);
  assert.equal(model.snapshot.openPositions,2);
- assert.equal((await model.modelManualSell(sell(mints[0],100),proof)).modelled,true);
+ assert.equal((await model.modelManualSell(sell(mints[0],100),proof)).modelled,false);
+ assert.equal((await model.modelManualSell({...sell(mints[0],100),verifiedTokenBalanceRaw:'500'},proof)).modelled,true);
  assert.equal(model.snapshot.openPositions,1);
  assert.equal((await model.modelBuy(build(mints[0]),1000n)).modelled,false);
  assert.equal((await model.modelBuy(build(mints[2]),1000n)).modelled,true);
