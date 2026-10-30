@@ -152,7 +152,9 @@ if (validationSignature) {
 }
 
 
-type EchoMarket = { name: string; symbol: string; marketCap: number | null; liquidity: number | null };
+type EchoMarket = { name: string; symbol: string; marketCap: number | null; liquidity: number | null;
+  volume24h: number | null; buys24h: number | null; dex: string | null;
+  pairAddress: string | null; priceUsd: number | null };
 const echoMarketCache = new Map<string, { expiry: number; data: EchoMarket | null }>();
 async function echoMarket(mint: string): Promise<EchoMarket | null> {
   const previous = echoMarketCache.get(mint);
@@ -175,7 +177,15 @@ async function echoMarket(mint: string): Promise<EchoMarket | null> {
       const marketCap=Number(pair.marketCap),liquidity=Number(pair?.liquidity?.usd);
       data={name:String(pair.baseToken?.name||'').slice(0,64),symbol:String(pair.baseToken?.symbol||'').slice(0,24),
         marketCap:Number.isFinite(marketCap)&&marketCap>0?marketCap:null,
-        liquidity:Number.isFinite(liquidity)&&liquidity>0?liquidity:null};
+        liquidity:Number.isFinite(liquidity)&&liquidity>0?liquidity:null,
+        volume24h:Number.isFinite(Number(pair?.volume?.h24)) && Number(pair?.volume?.h24)>=0 && pair?.volume?.h24 != null
+          ? Number(pair.volume.h24) : null,
+        buys24h:Number.isSafeInteger(Number(pair?.txns?.h24?.buys)) && Number(pair?.txns?.h24?.buys)>=0 && pair?.txns?.h24?.buys != null
+          ? Number(pair.txns.h24.buys) : null,
+        dex:typeof pair?.dexId==='string' && /^[a-zA-Z0-9 _.-]{1,40}$/.test(pair.dexId) ? pair.dexId : null,
+        pairAddress:typeof pair?.pairAddress==='string' && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(pair.pairAddress) ? pair.pairAddress : null,
+        priceUsd:Number.isFinite(Number(pair?.priceUsd)) && Number(pair?.priceUsd)>0 && pair?.priceUsd != null
+          ? Number(pair.priceUsd) : null};
       if(data.name&&data.marketCap&&data.liquidity)break;
     } catch {console.warn('[EchoMarket] LOOKUP_FAILED',{mint});}
   }
@@ -193,7 +203,10 @@ async function enrichEchoCard(signal: ReturnType<typeof extractRpcEchoSignals>[n
       name:market?.name || curve?.name || '',
       symbol:market?.symbol || curve?.symbol || '',
       marketCap:market?.marketCap ?? curve?.marketCap ?? null,
-      liquidity:market?.liquidity ?? null
+      liquidity:market?.liquidity ?? null,
+      volume24h:market?.volume24h ?? null, buys24h:market?.buys24h ?? null,
+      dex:market?.dex ?? null, pairAddress:market?.pairAddress ?? null,
+      priceUsd:market?.priceUsd ?? null
     };
     if(!enriched.name&&!enriched.symbol&&enriched.marketCap===null&&enriched.liquidity===null)continue;
     // A partial early response should not permanently stop enrichment while fields are missing.
@@ -211,7 +224,7 @@ async function enrichEchoCard(signal: ReturnType<typeof extractRpcEchoSignals>[n
       });
       const result = await response.json();
       if(result?.ok || result?.description==='Bad Request: message is not modified'){
-        console.log('[Echo] ENRICHED',JSON.stringify({mint:signal.mint,signature:signal.signature,hasMarketCap:enriched.marketCap!==null,hasLiquidity:enriched.liquidity!==null,hasName:!!enriched.name}));
+        console.log('[Echo] ENRICHED',JSON.stringify({mint:signal.mint,signature:signal.signature,hasMarketCap:enriched.marketCap!==null,hasLiquidity:enriched.liquidity!==null,hasName:!!enriched.name,hasVolume24h:enriched.volume24h!==null,hasBuys24h:enriched.buys24h!==null,hasPair:!!enriched.pairAddress}));
         if(enriched.name && enriched.marketCap!==null && enriched.liquidity!==null)return;
         continue;
       }
