@@ -44,3 +44,28 @@ Recovery logic:
 - Preserve existing production branch and deployment ID for immediate rollback, with no change to volumes or historical state. Keep the old service available until the new one demonstrates healthy subscriptions.
 - If unexpected 429 storms, malformed notifications or queue persistence failures occur, halt rollout/rollback and leave auto-buy OFF.
 - Do not promise 'instant' latency; record actual transaction-to-Telegram delay and show age explicitly.
+
+
+## Release candidate review — 2026-10-30
+
+**Candidate:** stacked drafts #266 then #267, head `c566080e4ef5aa0c6d0b9fd797872afad9c31865` at review.
+**CI:** latest head reported green by owner; historical Slingoor replay confirmed BUY via Jupiter, without live delivery proof.
+**Do not deploy/merge automatically.** Production `alphaos-echo-admin` remains on `931412713c5718a21ff4880ad3400f44dd6ee16d` from `fix/echo-fresh-adaptive-budget-20261030`; main bot must remain unchanged.
+
+### Verified static configuration (no secret values read or changed)
+- Railway service deploy command: `node --import tsx scripts/runEchoQuicknode.ts`.
+- Pre-deploy command: `node --import tsx scripts/echoPreDeployProbe.ts`; HTTP health endpoint `/health`.
+- One replica, persistent volume at `/data`. Check actual `ECHO_STATE_PATH` value is under this mount before release.
+- Service variable names include `ECHO_ENABLED`, `ECHO_MODE`, `OWNER_CHAT_ID`, `ECHO_ADMIN_CHAT_ID`, `AUTO_TRADE_MODE`, `ADMIN_TRADING_ENABLED`, `TELEGRAM_BOT_TOKEN`. **Presence is not proof of safe values.** Confirm alert-only settings with a zero-secrets check before release. Avoid logging values.
+- Draft preview callback is a non-broadcast adapter and must attach only to existing single-consumer Telegram update handler. No second poller.
+- There is no verified real signing / sell execution path in this candidate. Manual trading remains preview-only; do not describe it as deploy-ready.
+
+### Blocking verification before alert-only production approval
+1. At the candidate head, pass all typecheck, Echo, complete-repository and historical replay checks, including rejection/queue-callback tests.
+2. Verify `ECHO_MODE=alerts`, execution disabled, `ECHO_STATE_PATH` on /data, expected owner-only ID matching, no Telegram consumer duplication; do not expose credential values.
+3. Review compatibility of stacked #266 and #267 changes with the current deployed branch, including volume cursor journal migration, rollback and queue restart.
+4. Address or explicitly document Slingoor `FRESH_COVERAGE_INCOMPLETE` and bound API requests; never state complete coverage while pending.
+5. Post-approval canary: one watcher replica, no live trading, no unsigned transaction broadcasts, compare a verified genuine Slingoor BUY signature with WebSocket notification, queue, classifier, and Telegram acceptance/delivery. Reject gifts. Observe costs and rollback if reliability degrades.
+6. No real manual or automated execution approval is implied by alert-only approval.
+
+**Status:** REVIEWED CANDIDATE, NOT DEPLOYMENT-READY. No production changes made by this review.
