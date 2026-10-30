@@ -32,6 +32,9 @@ test('atomic SQL migration enforces two open slots, lifetime duplicate lock and 
     where execution_wallet=$2 and mint=$3`,[sig,wallet,mint(4)]);
   assert.equal(await reserve(mint(6)),'RESERVED');
   assert.equal(await reserve(mint(4)),'DUPLICATE_TOKEN');
+  await db.query(`update public.echo_live_buy_intents
+    set state='confirmed',sell_signature=$1,position_closed_at=now()
+    where execution_wallet=$2 and mint=$3`,[sig,wallet,mint(5)]);
   assert.equal(await reserve(mint(7)),'DAILY_LIMIT');
  } finally{await db.close();}
 });
