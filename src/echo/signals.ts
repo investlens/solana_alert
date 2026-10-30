@@ -1,12 +1,14 @@
 import { PublicKey } from '@solana/web3.js';
+import { ECHO_MONITORED_CALLERS } from './callerRegistry.js';
 
 // Active caller BUY alerts: Slingoor premium + previously monitored Chairman wallet.
 // Never substitute social handles or partial addresses for actual wallet keys.
 // Historical Croakie, Cupsey, and Thedetective records stay persisted but are not monitored.
-export const ECHO_WALLETS: Readonly<Record<string, string>> = Object.freeze({
-  '5YRgrP3mjGzrzirYYN5HAQH19cTYREYwGxW6XRJQUzij': 'WHALE · slingoor',
-  'Be24Gbf5KisDk1LcWWZsBn8dvB816By7YzYF5zWZnRR6': 'Chairman',
-});
+export const ECHO_WALLETS: Readonly<Record<string, string>> = Object.freeze(
+  Object.fromEntries(ECHO_MONITORED_CALLERS.filter(c => c.alert).map(c => [
+    c.wallet, c.id === 'slingoor' ? 'WHALE · slingoor' : c.displayName,
+  ])),
+);
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const QUOTES = new Map([[SOL_MINT, 'SOL'], ['EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'USDC']]);
 type Leg = { userAccount?: string; mint?: string; amount?: number | string; rawTokenAmount?: { tokenAmount?: string; decimals?: number } };
