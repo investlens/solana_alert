@@ -1,3 +1,4 @@
+import bs58 from 'bs58';
 import { extractRpcEchoSignals, classifyEchoRejection } from '../src/echo/rpcSignals.js';
 import { extractJupiterRoutedEchoBuys } from '../src/echo/jupiterRouteSignals.js';
 
@@ -99,8 +100,18 @@ for (const endpoint of endpoints) {
     -(tx.meta.preTokenBalances??[]).filter((x:any)=>x.owner===wallet&&x.mint===mint)
      .reduce((sum:bigint,x:any)=>sum+BigInt(x.uiTokenAmount.amount),0n);
    found++;
+   const app = '6Vo3245eszAb5wuqEMw8mGdbfRUdKbHhDHP5LcaGuTAB';
+   const instructionList=[...(tx.transaction?.message?.instructions??[]),
+    ...(tx.meta.innerInstructions??[]).flatMap((x:any)=>x.instructions??[])];
+   const appInstructions=instructionList.filter((ix:any)=>ix.programId===app)
+    .map((ix:any)=>({tag:typeof ix.data==='string'
+      ?Buffer.from(bs58.decode(ix.data).subarray(0,8)).toString('hex'):null,
+     length:typeof ix.data==='string'?bs58.decode(ix.data).length:null}));
+   const signerIndex=accounts.findIndex((a:any)=>a.pubkey===wallet&&a.signer===true);
+   const solDeltaLamports=signerIndex<0?null:
+    tx.meta.postBalances[signerIndex]-tx.meta.preBalances[signerIndex];
    console.log('CHAIRMAN_MINT_MATCH',JSON.stringify({signature:row.signature,blockTime:tx.blockTime,
-    success:tx.meta.err===null,signer,netTokenRaw:ownDelta.toString(),
+    success:tx.meta.err===null,signer,netTokenRaw:ownDelta.toString(),solDeltaLamports,appInstructions,
     direct:direct.map(s=>({side:s.side,mint:s.mint,quote:s.quoteAmount})),
     routed:routed.map(s=>({side:s.side,mint:s.mint,quote:s.quoteAmount})),
     reject:direct.length||routed.length?null:classifyEchoRejection(tx,row.signature,(tx.blockTime??0)+1),
