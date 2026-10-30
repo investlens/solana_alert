@@ -37,11 +37,53 @@ for (const endpoint of endpoints) {
   console.log('CHAIRMAN_DISCOVERY',JSON.stringify({provider:new URL(endpoint).hostname,
    signaturesScanned:signatures.length,windowCandidates:matching.length,
    transactionReadsCappedAt:40,oldestBlockTime:signatures.at(-1)?.blockTime??null}));
-  let reads=0;
-  for(const row of matching.slice(0,40)){
+  // A mint-address history lookup narrows potentially dozens of wallet
+  // transactions to only signatures that also reference this exact token.
+  // This is read-only and avoids flooding public RPC with getTransaction calls.
+  const tokenSignatures = new Set<string>();
+  let tokenBefore: string | undefined;
+  let tokenPages = 0;
+  try {
+   for(let page=0;page<6;page++){
+    const rows = await rpc(endpoint,'getSignaturesForAddress',[mint,
+     {limit:1000,...(tokenBefore?{before:tokenBefore}:{})}]);
+    if(!Array.isArray(rows))throw Error('INVALID_MINT_SIGNATURE_PAGE');
+    tokenPages++;
+    for(const row of rows) if(typeof row.signature === 'string') tokenSignatures.add(row.signature);
+    if(!rows.length || (rows.at(-1)?.blockTime??0)<from)break;
+    tokenBefore=rows.at(-1)?.signature;
+    if(!tokenBefore)break;
+   }
+  } catch(error) {
+   console.warn('CHAIRMAN_MINT_INDEX_UNAVAILABLE',JSON.stringify({provider:new URL(endpoint).hostname,
+    error:String(error).slice(0,80)}));
+  }
+  const candidates=matching.filter(row=>tokenSignatures.has(row.signature));
+  console.log('CHAIRMAN_TOKEN_INTERSECTION',JSON.stringify({provider:new URL(endpoint).hostname,
+   walletWindow:matching.length,tokenHistoryChecked:tokenSignatures.size,tokenPages,
+   intersection:candidates.length,candidateSignatures:candidates.slice(0,18).map(x=>x.signature)}));
+  if(!tokenPages || candidates.length===0) {
+   // Zero intersection may mean the provider's token history is incomplete,
+   // not that no BUY occurred. Do not incorrectly mark this investigation done.
+   console.warn('CHAIRMAN_MATCH_UNVERIFIED',JSON.stringify({reason:'NO_TOKEN_INTERSECTION_OR_INCOMPLETE_INDEX'}));
+   continue;
+  }
+  let reads=0, found=0;
+  for(const row of candidates.slice(0,18)){
    let tx:any;
-   try{tx=await rpc(endpoint,'getTransaction',[row.signature,{encoding:'jsonParsed',maxSupportedTransactionVersion:1,commitment:'confirmed'}]);}
-   catch(e){console.log('CHAIRMAN_TX_UNAVAILABLE',JSON.stringify({signature:row.signature,reason:String(e).slice(0,70)}));continue;}
+   try{
+    let lastError: unknown;
+    for(const url of [endpoint,...endpoints.filter(u=>u!==endpoint)]) {
+     for(let attempt=0;attempt<3;attempt++){
+      try{
+       tx=await rpc(url,'getTransaction',[row.signature,{encoding:'jsonParsed',maxSupportedTransactionVersion:1,commitment:'confirmed'}]);
+       break;
+      }catch(e){lastError=e;await new Promise(resolve=>setTimeout(resolve,800*(attempt+1)));}
+     }
+     if(tx)break;
+    }
+    if(!tx)throw lastError??Error('TRANSACTION_UNAVAILABLE');
+   }catch(e){console.log('CHAIRMAN_TX_UNAVAILABLE',JSON.stringify({signature:row.signature,reason:String(e).slice(0,70)}));continue;}
    reads++;
    if(!tx?.meta)continue;
    const balances=[...(tx.meta.preTokenBalances??[]),...(tx.meta.postTokenBalances??[])];
@@ -56,6 +98,7 @@ for (const endpoint of endpoints) {
      .reduce((sum:bigint,x:any)=>sum+BigInt(x.uiTokenAmount.amount),0n)
     -(tx.meta.preTokenBalances??[]).filter((x:any)=>x.owner===wallet&&x.mint===mint)
      .reduce((sum:bigint,x:any)=>sum+BigInt(x.uiTokenAmount.amount),0n);
+   found++;
    console.log('CHAIRMAN_MINT_MATCH',JSON.stringify({signature:row.signature,blockTime:tx.blockTime,
     success:tx.meta.err===null,signer,netTokenRaw:ownDelta.toString(),
     direct:direct.map(s=>({side:s.side,mint:s.mint,quote:s.quoteAmount})),
@@ -63,8 +106,9 @@ for (const endpoint of endpoints) {
     reject:direct.length||routed.length?null:classifyEchoRejection(tx,row.signature,(tx.blockTime??0)+1),
     programs:[...new Set((tx.transaction?.message?.instructions??[]).map((ix:any)=>ix.programId))]}));
   }
-  console.log('CHAIRMAN_DISCOVERY_COMPLETE',JSON.stringify({provider:new URL(endpoint).hostname,transactionReads:reads}));
-  process.exit(0);
+  console.log('CHAIRMAN_DISCOVERY_COMPLETE',JSON.stringify({provider:new URL(endpoint).hostname,transactionReads:reads,mintMatches:found}));
+  if(found>0)process.exit(0);
+  console.warn('CHAIRMAN_MATCH_UNVERIFIED',JSON.stringify({reason:'NO_FETCHABLE_MINT_TRANSACTION'}));
  } catch(e) {
   console.warn('CHAIRMAN_PROVIDER_UNAVAILABLE',JSON.stringify({provider:new URL(endpoint).hostname,error:String(e).slice(0,90)}));
  }
