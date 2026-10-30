@@ -15,8 +15,8 @@ test('compare-and-swap accepts one matching transition', async () => {
  assert.deepEqual(result, { advanced: true, state: 'signed' });
 });
 test('missing row, conflicting update and storage errors fail closed', async () => {
- assert.deepEqual((await advanceEchoTradeState(fakeStore([]), 'wallet', 'mint', 'reserved', 'SIGNED_DURABLY')), { advanced: false, reason: 'STATE_CONFLICT');
- assert.deepEqual((await advanceEchoTradeState(fakeStore([{ state: 'signed' }, { state: 'signed' }]), 'wallet', 'mint', 'reserved', 'SIGNED_DURABLY')), { advanced: false, reason: 'STATE_CONFLICT');
- assert.deepEqual((await advanceEchoTradeState(fakeStore([], { code: '42501' }), 'wallet', 'mint', 'reserved', 'SIGNED_DURABLY')), { advanced: false, reason: 'STORAGE_UNAVAILABLE');
+ assert.deepEqual((await advanceEchoTradeState(fakeStore([]), 'wallet', 'mint', 'reserved', 'SIGNED_DURABLY')), { advanced: false, reason: 'STATE_CONFLICT' });
+ assert.deepEqual((await advanceEchoTradeState(fakeStore([{ state: 'signed' }, { state: 'signed' }]), 'wallet', 'mint', 'reserved', 'SIGNED_DURABLY')), { advanced: false, reason: 'STATE_CONFLICT' });
+ assert.deepEqual((await advanceEchoTradeState(fakeStore([], { code: '42501' }), 'wallet', 'mint', 'reserved', 'SIGNED_DURABLY')), { advanced: false, reason: 'STORAGE_UNAVAILABLE' });
  assert.deepEqual((await advanceEchoTradeState(fakeStore([]), 'wallet', 'mint', 'confirmed', 'SIGNED_DURABLY')), { advanced: false, reason: 'INVALID_OR_UNSAFE_TRANSITION' });
 });
