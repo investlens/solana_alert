@@ -107,11 +107,20 @@ for (const endpoint of endpoints) {
     .map((ix:any)=>({tag:typeof ix.data==='string'
       ?Buffer.from(bs58.decode(ix.data).subarray(0,8)).toString('hex'):null,
      length:typeof ix.data==='string'?bs58.decode(ix.data).length:null}));
+   const ownerChanges=new Map<string,{decimals:number,raw:bigint}>();
+   for(const [direction,rows] of [[-1n,tx.meta.preTokenBalances??[]],[1n,tx.meta.postTokenBalances??[]]] as const)
+    for(const b of rows)if(b.owner===wallet){
+     const old=ownerChanges.get(b.mint);
+     ownerChanges.set(b.mint,{decimals:b.uiTokenAmount.decimals,
+      raw:(old?.raw??0n)+direction*BigInt(b.uiTokenAmount.amount)});
+    }
+   const ownerDeltas=[...ownerChanges].filter(([,v])=>v.raw!==0n)
+    .map(([mint,v])=>({mint,raw:v.raw.toString(),decimals:v.decimals}));
    const signerIndex=accounts.findIndex((a:any)=>a.pubkey===wallet&&a.signer===true);
    const solDeltaLamports=signerIndex<0?null:
     tx.meta.postBalances[signerIndex]-tx.meta.preBalances[signerIndex];
    console.log('CHAIRMAN_MINT_MATCH',JSON.stringify({signature:row.signature,blockTime:tx.blockTime,
-    success:tx.meta.err===null,signer,netTokenRaw:ownDelta.toString(),solDeltaLamports,appInstructions,
+    success:tx.meta.err===null,signer,netTokenRaw:ownDelta.toString(),ownerDeltas,solDeltaLamports,appInstructions,
     direct:direct.map(s=>({side:s.side,mint:s.mint,quote:s.quoteAmount})),
     routed:routed.map(s=>({side:s.side,mint:s.mint,quote:s.quoteAmount})),
     reject:direct.length||routed.length?null:classifyEchoRejection(tx,row.signature,(tx.blockTime??0)+1),
