@@ -81,3 +81,19 @@ test('queue handoff counter requires successful callback', () => {
  assert.equal(sub.state.walletQueued[wallet]??0,0);
  sub.stop();
 });
+
+test('queue rejection does not increase admitted handoff count', () => {
+ const listeners = new Map<string, Listener>(), requests:any[]=[];
+ const socket={addEventListener:(type:string,fn:Listener)=>{listeners.set(type,fn);},send:(v:string)=>{requests.push(JSON.parse(v));},close:()=>{}};
+ const sub=startEchoSubscription({url:'wss://example.invalid',socket:()=>socket,onReady:()=>{},
+   onSignature:()=>false,later:()=>1,cancel:()=>{}});
+ listeners.get('open')!({});
+ for(const [i,request] of requests.entries())listeners.get('message')!({data:JSON.stringify({id:request.id,result:i+100})});
+ listeners.get('message')!({data:JSON.stringify({method:'logsNotification',
+  params:{subscription:100,result:{value:{err:null,signature:'3'.repeat(88),
+   logs:['Program JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4 invoke [1]']}}}})});
+ const wallet=Object.keys(ECHO_WALLETS)[0];
+ assert.equal(sub.state.walletNotifications[wallet],1);
+ assert.equal(sub.state.walletQueued[wallet]??0,0);
+ sub.stop();
+});
