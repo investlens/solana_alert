@@ -25,11 +25,11 @@ export async function echoReadOnlySignerAdmission(args:{
   authorizedCoordinatorPublicKey:args.coordinatorPublicKey,nowMs:args.nowMs,
   unsignedTransactionBytes:args.unsignedTransactionBytes,nonceStore:args.nonceStore
  });
- if(!authorized.ok)return {ok:false,reason:authorized.reason};
+ if('reason' in authorized)return {ok:false,reason:authorized.reason};
  const admission=await verifyEchoPreviewAgainstLedger({
   side:args.request.action,wallet:args.request.executionWallet,
   mint:args.request.mint,preview:args.preview,reader:args.reservationReader
  });
- if(!admission.ok)return {ok:false,reason:admission.reason};
+ if('reason' in admission)return {ok:false,reason:admission.reason};
  return {ok:true,mode:'PREVIEW_ONLY_NO_SIGNING',fingerprint:admission.transactionSha256};
 }
