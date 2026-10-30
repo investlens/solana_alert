@@ -5,6 +5,7 @@ import { dirname } from 'node:path';
 import { readQuicknodeEchoConfig } from '../src/echo/quicknodeConfig.js';
 import { EchoStore } from '../src/echo/store.js';
 import { createEchoAuditWriter } from '../src/echo/auditWriter.js';
+import { EchoAuditOutbox } from '../src/echo/auditOutbox.js';
 import { EchoResearch } from '../src/echo/research.js';
 import { EchoSolanaPromotions } from '../src/echo/solanaPromotions.js';
 import { EchoTierDispatcher } from '../src/echo/tierDispatch.js';
@@ -24,6 +25,8 @@ const config = readQuicknodeEchoConfig(process.env);
 const store = new EchoStore(config.statePath); await store.load();
 const echoAudit = createEchoAuditWriter(process.env);
 console.log('[EchoAudit] STATUS', { enabled: echoAudit.enabled });
+const echoAuditOutbox = echoAudit.enabled ? new EchoAuditOutbox(config.statePath+'.audit-outbox-v1.json',echoAudit.write) : null;
+if(echoAuditOutbox) await echoAuditOutbox.load();
 const tiers = new EchoTierDispatcher(config.statePath+'.solana-tiers-v1.json',config.botToken,config.admin,
  process.env.ECHO_PUBLIC_TIERS_ENABLED==='true'?process.env.ECHO_SUBSCRIBER_SUPABASE_URL:undefined,
  process.env.ECHO_PUBLIC_TIERS_ENABLED==='true'?process.env.ECHO_SUBSCRIBER_SUPABASE_SERVICE_KEY:undefined);
@@ -301,14 +304,14 @@ const queue = new EchoQueue(async signature => {
       telegramMessageId: result.result.message_id, quoteAmount: signal.quoteAmount, quoteSymbol: signal.quoteSymbol,
       quoteBasis: signal.quoteBasis || 'unavailable', inputMint: signal.quoteMint || null }));
     await store.delivered(signal.id, Date.now() / 1000); lastDeliveryAt = Date.now(); diagnostics.delivered++;
-    if (echoAudit.enabled) {
-      void echoAudit.write({
+    if (echoAuditOutbox) {
+      void echoAuditOutbox.enqueue({
         signature:signal.signature,callerWallet:signal.wallet,mint:signal.mint,caller:signal.caller,
         tradeAt:signal.timestamp,deliveredAt:Date.now()/1000,
         telegramMessageId:result.result.message_id,quoteAmount:signal.quoteAmount,
         quoteSymbol:signal.quoteSymbol,quoteBasis:signal.quoteBasis,tokenAmount:signal.tokenAmount
-      }).then(ok => { if(!ok) console.warn('[EchoAudit] ASYNC_WRITE_UNAVAILABLE',{signature:signal.signature}); })
-        .catch(()=>console.warn('[EchoAudit] ASYNC_WRITE_UNAVAILABLE',{signature:signal.signature}));
+      }).then(ok => { if(ok) void echoAuditOutbox.flush(); else console.warn('[EchoAudit] QUEUE_PERSIST_FAILED'); })
+        .catch(()=>console.warn('[EchoAudit] QUEUE_PERSIST_FAILED'));
     }
     await tiers.enqueue({id:signal.id,mint:signal.mint,text:baseCard,acceptedAt:Date.now(),buttons:{inline_keyboard:[
       [{text:'🔎 Transaction',url:'https://solscan.io/tx/'+signal.signature},{text:'📈 Chart',url:'https://dexscreener.com/solana/'+signal.mint}]]}}).catch(()=>console.warn('[EchoTiers] CALLER_QUEUE_WRITE_FAILED'));
@@ -484,13 +487,14 @@ const promotionTick=setInterval(()=>{if(promotionsReady)void promotions.tick();}
 if(promotionsReady)void promotions.tick();
 const researchTick = setInterval(() => { if (researchReady) void research.tick().catch(() => console.warn('[EchoResearch] TICK_FAILED')); }, 60_000);
 if (researchReady) void research.tick().catch(() => console.warn('[EchoResearch] INITIAL_TICK_FAILED'));
+const auditTick=setInterval(()=>{if(echoAuditOutbox)void echoAuditOutbox.flush();},30_000);
 const tierTick=setInterval(()=>{void tiers.tick().catch(()=>console.warn('[EchoTiers] TICK_FAILED'));},1000);
 const heartbeat = setInterval(() => console.log('[Echo] HEALTH', { subscriptions: subscription.state.acknowledgedWallets,
   websocketReady: subscription.state.ready, reconnects: subscription.state.reconnects,
   lastDisconnectReason: subscription.state.lastDisconnectReason, lastConnectedAt: subscription.state.lastConnectedAt,
   activeWebSocketProvider: subscription.state.activeProvider,
   skippedNonSwapLogs: subscription.state.skippedNonSwapLogs, observedTradeSignatures: subscription.state.observedTradeSignatures, queued: queue.size, dropped: queue.dropped,
-  lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt, ...diagnostics, promotions: promotionsReady ? promotions.summary() : {enabled:false}, research: researchReady ? JSON.stringify(research.summary()) : {enabled:false},tiers:tiers.summary(), rejectionCounts }), 60_000);
+  lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt, ...diagnostics, promotions: promotionsReady ? promotions.summary() : {enabled:false}, research: researchReady ? JSON.stringify(research.summary()) : {enabled:false},tiers:tiers.summary(), audit:echoAuditOutbox?.summary()??{enabled:false}, rejectionCounts }), 60_000);
 const server = createServer((req, res) => {
   if (req.method !== 'GET' || req.url !== '/health') { res.writeHead(404); res.end(); return; }
   // A healthy WebSocket must not be marked down merely because history reconciliation is rate-limited.
@@ -504,5 +508,5 @@ const server = createServer((req, res) => {
 });
 server.listen(config.port, '0.0.0.0', () => console.log('[Echo] Alert-only watcher started; Pump/PumpSwap/Jupiter BUY routes; live buying OFF.'));
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => {
-  stopping = true; clearInterval(tick); clearInterval(sweep); clearInterval(researchTick); clearInterval(promotionTick); clearInterval(tierTick); clearInterval(heartbeat); subscription.stop(); server.close();
+  stopping = true; clearInterval(tick); clearInterval(sweep); clearInterval(researchTick); clearInterval(promotionTick); clearInterval(tierTick); clearInterval(auditTick); clearInterval(heartbeat); subscription.stop(); server.close();
 });
