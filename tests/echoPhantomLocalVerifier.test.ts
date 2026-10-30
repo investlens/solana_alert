@@ -11,7 +11,7 @@ test('local Phantom verifier serves UI but rejects wrong origin, wallets and sig
   assert.equal(ui.status,200);
   const html=await ui.text();
   assert.equal(html.includes('signMessage'),true);
-  assert.equal(html.includes(address),false); // address is rendered from client code
+  assert.equal(html.includes(address),true); // expected wallet is pinned in browser script
   const post=async(path:string,value:unknown,originHeader=origin)=>fetch(origin+path,{
     method:'POST',headers:{origin:originHeader,'content-type':'application/json'},
     body:JSON.stringify(value)
