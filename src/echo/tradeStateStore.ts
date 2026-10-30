@@ -12,7 +12,7 @@ export async function advanceEchoTradeState(
   event: EchoTradeEvent,
 ): Promise<{ advanced: true; state: EchoTradeState } | { advanced: false; reason: string }> {
   const transition = transitionEchoTrade(expectedState, event);
-  if (!transition.allowed) return { advanced: false, reason: transition.reason };
+  if (transition.allowed === false) return { advanced: false, reason: transition.reason };
   if (!executionWallet || !mint) return { advanced: false, reason: 'INVALID_RESERVATION_KEY' };
   try {
     const { data, error } = await client.from('echo_live_buy_intents')
