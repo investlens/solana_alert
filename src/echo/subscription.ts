@@ -4,7 +4,7 @@ import { setTimeout, clearTimeout } from 'node:timers';
 type Socket = { addEventListener(type: string, listener: (event: any) => void): void; send(data: string): void; close(): void };
 type Timer = number | NodeJS.Timeout;
 type Options = {
-  url: string; fallbackUrl?: string | null; onSignature(signature: string, wallet: string): void; onReady(): void;
+  url: string; fallbackUrl?: string | null; onSignature(signature: string, wallet: string): void | boolean; onReady(): void;
   socket?: (url: string) => Socket;
   later?: (callback: () => void, milliseconds: number) => Timer;
   cancel?: (timer: Timer) => void;
@@ -79,8 +79,8 @@ export function startEchoSubscription(options: Options) {
       state.observedTradeSignatures++;
       // Count callback handoffs only after the admission callback returns.
       // A throwing callback must not be reported as successfully forwarded.
-      options.onSignature(value.signature, wallet);
-      state.walletQueued[wallet] = (state.walletQueued[wallet] ?? 0) + 1;
+      const admitted = options.onSignature(value.signature, wallet);
+      if (admitted !== false) state.walletQueued[wallet] = (state.walletQueued[wallet] ?? 0) + 1;
     });
     current.addEventListener('close', (event: any) => lost('closed_' + String(Number.isInteger(event?.code) ? event.code : 'unknown')));
     current.addEventListener('error', () => lost('socket_error'));
