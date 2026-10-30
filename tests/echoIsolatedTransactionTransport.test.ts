@@ -13,7 +13,9 @@ const signedBase64=Buffer.from(tx.serialize()).toString('base64');
 const signature=bs58.encode(tx.signatures[0]);
 const rpcUrl='https://rpc.example.org/';
 test('signed bytes match expected signer, but live submissions are hard disabled',async()=>{
- assert.deepEqual(readSignedEchoTransaction(signedBase64,signer.publicKey.toBase58()).signature,signature);
+ const parsed=readSignedEchoTransaction(signedBase64,signer.publicKey.toBase58());
+ assert.equal(parsed.ok,true);
+ if(parsed.ok)assert.equal(parsed.signature,signature);
  assert.equal(readSignedEchoTransaction(signedBase64,Keypair.generate().publicKey.toBase58()).ok,false);
  assert.equal(ECHO_LIVE_SUBMISSION_COMPILED_ENABLED,false);
  let networkCalls=0;
