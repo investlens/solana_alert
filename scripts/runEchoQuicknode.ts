@@ -56,7 +56,7 @@ let fallbackBackoffUntil = 0, fallbackReconcileBackoffUntil = 0;
 let deliveryBackoffUntil = 0;
 let historyLimitStreak = 0, fallbackHistoryLimitStreak = 0;
 let lastErrorAt: number | null = null, lastReconcileAt: number | null = null, stopping = false;
-const diagnostics = { fetched: 0, signals: 0, delivered: 0, noSignal: 0, rpcFailures: 0,
+const diagnostics = { fetched: 0, signals: 0, delivered: 0, noSignal: 0, newBuySignals: 0, duplicateSignals: 0, rejectedNonBuy: 0, rpcFailures: 0,
   fallbackRpcUses: 0, deliveryFailures: 0 };
 const rejectionCounts: Partial<Record<EchoRejectReason, number>> = {};
 function historyRateLimited(retryHeader: string | null, fallback = false) {
@@ -260,6 +260,12 @@ const queue = new EchoQueue(async signature => {
   const directSignals = extractRpcEchoSignals(tx, signature, Date.now() / 1000);
   const signals = directSignals.length ? directSignals : extractJupiterRoutedEchoBuys(tx, signature, Date.now() / 1000);
   diagnostics.signals += signals.length;
+  // Classification includes replays from reconciliation; count duplicates separately.
+  for (const signal of signals) {
+    if (signal.side !== 'BUY') diagnostics.rejectedNonBuy++;
+    else if (store.has(signal.id)) diagnostics.duplicateSignals++;
+    else diagnostics.newBuySignals++;
+  }
   if (!signals.length) { diagnostics.noSignal++; const reason = classifyEchoRejection(tx, signature, Date.now() / 1000); rejectionCounts[reason] = (rejectionCounts[reason] ?? 0) + 1; }
   for (const signal of signals) {
     // User requested only confirmed BUY notifications, never incoming transfers or SELLs.
