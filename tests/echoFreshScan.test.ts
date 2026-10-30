@@ -28,3 +28,34 @@ test('empty page completes scan without inventing a checkpoint',()=>{
 test('stalled pagination fails closed',()=>{
  assert.throws(()=>advanceFreshScan({checkpoint:'1',before:'151',candidate:'250'},rows(250,100).map((r,i)=>i===99?{signature:'151'}:r)),/stalled/);
 });
+
+test('completes the 30 minute fresh alert window on a time-ordered full page', () => {
+ const state: FreshScanState={checkpoint:null,before:null,candidate:null};
+ const rows=Array.from({length:100},(_,i)=>({signature:String(200-i),blockTime:2000-i*10}));
+ const result=advanceFreshScan(state,rows,100,1200);
+ assert.equal(result.complete,true);
+ assert.equal(result.state.checkpoint,'200');
+ assert.equal(result.state.before,null);
+ assert.ok(result.scanned.every(row=>row.blockTime!>=1200));
+ assert.equal(result.scanned.length,81);
+});
+test('incomplete timestamp evidence never advances the fresh checkpoint', () => {
+ const initial:FreshScanState={checkpoint:'old',before:null,candidate:null};
+ const page=Array.from({length:100},(_,i)=>({signature:String(200-i),blockTime:2000-i*10}));
+ const missing=page.map((r,i)=>i===99?{...r,blockTime:null}:r);
+ const result=advanceFreshScan(initial,missing,100,1200);
+ assert.equal(result.complete,false);
+ assert.equal(result.state.checkpoint,'old');
+ const unsorted=page.map((r,i)=>i===98?{...r,blockTime:1900}:r);
+ assert.equal(advanceFreshScan(initial,unsorted,100,1200).complete,false);
+});
+test('fresh checkpoint stays pinned across pages until an old boundary is proven', () => {
+ const state:FreshScanState={checkpoint:null,before:null,candidate:null};
+ const recent=Array.from({length:100},(_,i)=>({signature:String(200-i),blockTime:2000-i*3}));
+ const first=advanceFreshScan(state,recent,100,1200);
+ assert.equal(first.complete,false);
+ const older=Array.from({length:100},(_,i)=>({signature:String(100-i),blockTime:1697-i*6}));
+ const second=advanceFreshScan(first.state,older,100,1200);
+ assert.equal(second.complete,true);
+ assert.equal(second.state.checkpoint,'200');
+});
