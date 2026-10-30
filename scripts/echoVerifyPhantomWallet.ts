@@ -14,7 +14,6 @@ import {makeEchoWalletOwnershipMessage,verifyEchoWalletOwnershipProof,
 const HOST='127.0.0.1', PORT=43891, AUDIENCE='echo-local-ownership';
 const ORIGIN='http://127.0.0.1:'+PORT;
 let outstanding:EchoWalletChallenge|null=null;
-let attempts=0;
 const respond=(res:ServerResponse,code:number,data:unknown)=>{
  res.writeHead(code,{'content-type':'application/json; charset=utf-8',
   'cache-control':'no-store','x-content-type-options':'nosniff'});
@@ -58,7 +57,6 @@ export function startEchoLocalOwnershipVerifier() {
     outstanding={wallet:ECHO_EXPECTED_EXECUTION_WALLET,
       nonceHex:randomBytes(32).toString('hex'),issuedAtMs:now,
       expiresAtMs:now+120000,audience:AUDIENCE};
-    attempts=0;
     respond(res,200,{nonceHex:outstanding.nonceHex,
       message:makeEchoWalletOwnershipMessage(outstanding)});
     return;
@@ -68,7 +66,6 @@ export function startEchoLocalOwnershipVerifier() {
       typeof input.signatureBase58!=='string'||input.signatureBase58.length>100){
     respond(res,403,{reason:'NO_VALID_CHALLENGE'});return;
    }
-   attempts++;
    // Consume challenge on the first attempt, including failed signatures;
    // a new challenge must be freshly generated to try again.
    outstanding=null;
