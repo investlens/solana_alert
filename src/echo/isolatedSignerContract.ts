@@ -57,7 +57,7 @@ export function inspectEchoUnsignedEnvelope(request:EchoIsolatedSignerRequest):
  */
 export function reviewEchoSignerRequest(request:EchoIsolatedSignerRequest):EchoSignerApproval {
  const inspected=inspectEchoUnsignedEnvelope(request);
- if(!inspected.ok)return inspected;
+ if('reason' in inspected)return {ok:false,reason:inspected.reason};
  return {ok:false,reason:'INDEPENDENT_VERIFICATION_AND_SIGNER_NOT_INTEGRATED'};
 }
 export const ECHO_SIGNER_ENABLED=false as const;
