@@ -12,7 +12,7 @@ export async function createEchoTradeCallback(
  store: EchoCallbackStore, intent: ManualEchoIntent, nowMs: number,
 ): Promise<{created:true; token:string}|{created:false;reason:string}> {
  const check=validateManualEchoIntent(intent);
- if (!check.allowed) return {created:false,reason:check.reason};
+ if (check.allowed === false) return {created:false,reason:check.reason};
  if (!Number.isSafeInteger(nowMs)) return {created:false,reason:'INVALID_CLOCK'};
  const token=newEchoCallbackToken();
  try {
@@ -35,5 +35,5 @@ export async function authorizeEchoTelegramCallback(
  if (saved.intent.telegramUserId!==verifiedTelegramUserId)
   return {allowed:false,reason:'UNAUTHORIZED_ADMIN'};
  const check=validateManualEchoIntent(saved.intent);
- return check.allowed ? {allowed:true,intent:saved.intent} : {allowed:false,reason:check.reason};
+ return check.allowed === true ? {allowed:true,intent:saved.intent} : {allowed:false,reason:check.reason};
 }
