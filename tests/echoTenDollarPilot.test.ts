@@ -7,6 +7,7 @@ const now=1800000000000;
 const good={callerWallet:SLINGOOR_WALLET,mint,verifiedBuyerSigner:true,
  originalSwapSucceeded:true,verifiedSpend:true,verifiedTokenCredit:true,
  priceSolUsd:200,priceObservedAtMs:now,nowMs:now,spentOrdersToday:0,
+ openOrPendingPositions:0,openOrPendingPrincipalUsd:0,
  alreadyReservedOrPurchased:false,killSwitchEngaged:false,maxFeeLamports:500000};
 test('$10 pilot calculates SOL equivalent within 0.1 SOL',()=>{
  const result=screenEchoTenDollarPilot(good);
@@ -18,7 +19,16 @@ test('two-caller pilot fails closed on gifts, repeat buys and kill switch',()=>{
   {callerWallet:'1'.repeat(44)}, {verifiedBuyerSigner:false},
   {originalSwapSucceeded:false},{verifiedSpend:false},{verifiedTokenCredit:false},
   {alreadyReservedOrPurchased:true},{killSwitchEngaged:true},{spentOrdersToday:3},
+  {openOrPendingPositions:2},{openOrPendingPositions:-1},
+  {openOrPendingPrincipalUsd:20},{openOrPendingPrincipalUsd:11},
   {priceObservedAtMs:now-3001},{priceSolUsd:0},{priceSolUsd:50},
   {maxFeeLamports:1_000_001},{mint:'not-a-mint'}
  ]) assert.equal(screenEchoTenDollarPilot({...good,...bad}).allowed,false);
+});
+
+test('only one additional $10 order is eligible with one occupied slot',()=>{
+ assert.equal(screenEchoTenDollarPilot({...good,openOrPendingPositions:1,openOrPendingPrincipalUsd:10}).allowed,true);
+ assert.deepEqual(screenEchoTenDollarPilot({...good,openOrPendingPositions:2,openOrPendingPrincipalUsd:20}),
+   {allowed:false,reason:'MAX_TWO_OPEN_TRADES'});
+ assert.equal(screenEchoTenDollarPilot({...good,openOrPendingPositions:1,openOrPendingPrincipalUsd:15}).allowed,false);
 });
