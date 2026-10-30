@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/echo-slingoor-livebuy-safety-20261027
+      - feat/echo-supabase-audit-20261030
       - feat/echo-verified-market-card-20261030
       - fix/echo-fresh-window-boundary-20261030
       - fix/echo-alert-only-fresh-coverage-20261030
