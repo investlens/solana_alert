@@ -11,7 +11,7 @@ type Options = {
 };
 export function startEchoSubscription(options: Options) {
   const later = options.later ?? setTimeout, cancel = options.cancel ?? clearTimeout;
-  const state = { ready: false, acknowledgedWallets: 0, reconnects: 0, lastMessageAt: null as number | null, lastDisconnectReason: 'none' as string, lastConnectedAt: null as number | null, activeProvider: 'primary' as 'primary' | 'fallback', skippedNonSwapLogs: 0, observedTradeSignatures: 0 };
+  const state = { ready: false, acknowledgedWallets: 0, reconnects: 0, lastMessageAt: null as number | null, lastDisconnectReason: 'none' as string, lastConnectedAt: null as number | null, activeProvider: 'primary' as 'primary' | 'fallback', skippedNonSwapLogs: 0, observedTradeSignatures: 0, walletNotifications: {} as Record<string,number>, walletPrefilterSkipped: {} as Record<string,number>, walletQueued: {} as Record<string,number> };
   let socket: Socket | null = null, stopped = false, reconnect: Timer | undefined;
   let timeout: Timer | undefined, delay = 1000, consecutiveFailures = 0, useFallback = false;
   function failedAttempt() {
@@ -68,10 +68,17 @@ export function startEchoSubscription(options: Options) {
       if (message.method !== 'logsNotification' || !ids.has(message.params?.subscription)) return;
       const value = message.params?.result?.value;
       if (value?.err != null || !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(value?.signature ?? '')) return;
-      if (!mayContainWalletSwap(value.logs)) { state.skippedNonSwapLogs++; return; }
-      state.observedTradeSignatures++;
       const wallet = walletForSubscription.get(message.params.subscription);
-      if (wallet) options.onSignature(value.signature, wallet);
+      if (!wallet) return;
+      state.walletNotifications[wallet] = (state.walletNotifications[wallet] ?? 0) + 1;
+      if (!mayContainWalletSwap(value.logs)) {
+        state.skippedNonSwapLogs++;
+        state.walletPrefilterSkipped[wallet] = (state.walletPrefilterSkipped[wallet] ?? 0) + 1;
+        return;
+      }
+      state.observedTradeSignatures++;
+      state.walletQueued[wallet] = (state.walletQueued[wallet] ?? 0) + 1;
+      options.onSignature(value.signature, wallet);
     });
     current.addEventListener('close', (event: any) => lost('closed_' + String(Number.isInteger(event?.code) ? event.code : 'unknown')));
     current.addEventListener('error', () => lost('socket_error'));
