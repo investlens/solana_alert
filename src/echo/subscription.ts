@@ -4,7 +4,7 @@ import { setTimeout, clearTimeout } from 'node:timers';
 type Socket = { addEventListener(type: string, listener: (event: any) => void): void; send(data: string): void; close(): void };
 type Timer = number | NodeJS.Timeout;
 type Options = {
-  url: string; fallbackUrl?: string | null; onSignature(signature: string, wallet: string): void | boolean; onReady(): void;
+  url: string; fallbackUrl?: string | null; onSignature(signature: string, wallet: string): unknown; onReady(): void;
   socket?: (url: string) => Socket;
   later?: (callback: () => void, milliseconds: number) => Timer;
   cancel?: (timer: Timer) => void;
