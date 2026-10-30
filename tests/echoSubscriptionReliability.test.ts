@@ -35,3 +35,33 @@ test('websocket must acknowledge every tracked wallet before becoming ready', ()
   assert.deepEqual(received, [signature]);
   client.stop();
 });
+
+test('Pump App caller log enters queue; unsolicited transfers never do', () => {
+ const listeners = new Map<string, Listener>();
+ const subscriptions: any[] = [];
+ const received: Array<{signature:string;wallet:string}> = [];
+ const socket = {
+  addEventListener(type:string,fn:Listener){listeners.set(type,fn);},
+  send(data:string){subscriptions.push(JSON.parse(data));},
+  close(){}
+ };
+ const client=startEchoSubscription({
+  url:'wss://example.invalid',socket:()=>socket,onReady:()=>{},
+  onSignature:(signature,wallet)=>received.push({signature,wallet}),
+  later:()=>1,cancel:()=>{}
+ });
+ listeners.get('open')!({});
+ for(let i=0;i<subscriptions.length;i++)
+  listeners.get('message')!({data:JSON.stringify({id:subscriptions[i].id,result:100+i})});
+ const notify=(signature:string,logs:string[])=>listeners.get('message')!({data:JSON.stringify({
+  method:'logsNotification',params:{subscription:100,result:{value:{signature,err:null,logs}}}
+ })});
+ notify('3'.repeat(88),['Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]',
+  'Program log: Instruction: TransferChecked']);
+ notify('4'.repeat(88),['Program 6Vo3245eszAb5wuqEMw8mGdbfRUdKbHhDHP5LcaGuTAB invoke [1]']);
+ assert.deepEqual(received,[{signature:'4'.repeat(88),wallet:Object.keys(ECHO_WALLETS)[0]}]);
+ assert.equal(client.state.walletNotifications[Object.keys(ECHO_WALLETS)[0]],2);
+ assert.equal(client.state.walletPrefilterSkipped[Object.keys(ECHO_WALLETS)[0]],1);
+ assert.equal(client.state.walletQueued[Object.keys(ECHO_WALLETS)[0]],1);
+ client.stop();
+});
