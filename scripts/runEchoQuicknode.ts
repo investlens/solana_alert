@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { readQuicknodeEchoConfig } from '../src/echo/quicknodeConfig.js';
 import { EchoStore } from '../src/echo/store.js';
+import { createEchoAuditWriter } from '../src/echo/auditWriter.js';
 import { EchoResearch } from '../src/echo/research.js';
 import { EchoSolanaPromotions } from '../src/echo/solanaPromotions.js';
 import { EchoTierDispatcher } from '../src/echo/tierDispatch.js';
@@ -21,6 +22,8 @@ import { advanceFreshScan, type FreshScanState } from '../src/echo/freshScan.js'
 // Helius requests, private keys or trade execution imports.
 const config = readQuicknodeEchoConfig(process.env);
 const store = new EchoStore(config.statePath); await store.load();
+const echoAudit = createEchoAuditWriter(process.env);
+console.log('[EchoAudit] STATUS', { enabled: echoAudit.enabled });
 const tiers = new EchoTierDispatcher(config.statePath+'.solana-tiers-v1.json',config.botToken,config.admin,
  process.env.ECHO_PUBLIC_TIERS_ENABLED==='true'?process.env.ECHO_SUBSCRIBER_SUPABASE_URL:undefined,
  process.env.ECHO_PUBLIC_TIERS_ENABLED==='true'?process.env.ECHO_SUBSCRIBER_SUPABASE_SERVICE_KEY:undefined);
@@ -298,6 +301,15 @@ const queue = new EchoQueue(async signature => {
       telegramMessageId: result.result.message_id, quoteAmount: signal.quoteAmount, quoteSymbol: signal.quoteSymbol,
       quoteBasis: signal.quoteBasis || 'unavailable', inputMint: signal.quoteMint || null }));
     await store.delivered(signal.id, Date.now() / 1000); lastDeliveryAt = Date.now(); diagnostics.delivered++;
+    if (echoAudit.enabled) {
+      void echoAudit.write({
+        signature:signal.signature,callerWallet:signal.wallet,mint:signal.mint,caller:signal.caller,
+        tradeAt:signal.timestamp,deliveredAt:Date.now()/1000,
+        telegramMessageId:result.result.message_id,quoteAmount:signal.quoteAmount,
+        quoteSymbol:signal.quoteSymbol,quoteBasis:signal.quoteBasis,tokenAmount:signal.tokenAmount
+      }).then(ok => { if(!ok) console.warn('[EchoAudit] ASYNC_WRITE_UNAVAILABLE',{signature:signal.signature}); })
+        .catch(()=>console.warn('[EchoAudit] ASYNC_WRITE_UNAVAILABLE',{signature:signal.signature}));
+    }
     await tiers.enqueue({id:signal.id,mint:signal.mint,text:baseCard,acceptedAt:Date.now(),buttons:{inline_keyboard:[
       [{text:'🔎 Transaction',url:'https://solscan.io/tx/'+signal.signature},{text:'📈 Chart',url:'https://dexscreener.com/solana/'+signal.mint}]]}}).catch(()=>console.warn('[EchoTiers] CALLER_QUEUE_WRITE_FAILED'));
     if (researchReady && signal.side === 'BUY') void research.addBuy({caller:signal.caller,mint:signal.mint,signature:signal.signature,deliveryAt:Date.now()/1000}).then(() => { if (signal.caller === 'WHALE · slingoor') void research.tick(true).catch(() => console.warn('[EchoResearch] PRIORITY_TICK_FAILED')); }).catch(() => console.warn('[EchoResearch] PERSIST_FAILED'));
