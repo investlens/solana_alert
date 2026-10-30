@@ -18,7 +18,7 @@ test('PumpPortal read-only BUY request only builds and RPC simulates',async()=>{
    assert.equal(body.action,'buy');assert.equal(body.amount,0.05);
    assert.equal(body.priorityFee,0);
    methods.push('BUILDER');
-   return {ok:true,arrayBuffer:async()=>bytes} as Response;
+   return new Response(new Uint8Array(bytes),{status:200});
   }
   const body=JSON.parse(String(options.body));
   assert.equal(body.method,'simulateTransaction');methods.push('SIMULATE');
@@ -36,13 +36,13 @@ test('read-only SELL builds token side, rejects wallet mismatch and failed simul
    const body=JSON.parse(String(options.body));
    assert.equal(body.action,'sell');assert.equal(body.denominatedInSol,'false');
    methods.push('BUILDER');
-   return {ok:true,arrayBuffer:async()=>bytes} as Response;
+   return new Response(new Uint8Array(bytes),{status:200});
   }
   methods.push('SIMULATE');
   return {ok:true,json:async()=>({result:{value:{err:{InstructionError:[0,'Custom']}}}})} as Response;
  }) as typeof fetch;
  assert.equal((await readOnlyPumpLocalPreview({...base,side:'SELL',amount:10},fetcher)).ok,false);
  assert.deepEqual(methods,['BUILDER','SIMULATE']);
- const evil=async()=>({ok:true,arrayBuffer:async()=>bytes}) as Response;
+ const evil=async()=>new Response(new Uint8Array(bytes),{status:200});
  assert.equal((await readOnlyPumpLocalPreview({...base,wallet:Keypair.generate().publicKey.toBase58()},evil as typeof fetch)).ok,false);
 });
