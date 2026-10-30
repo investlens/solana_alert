@@ -62,10 +62,14 @@ test('gifts, non-signers, unsupported venues, mismatched owners, failed and stal
   ];
   for (const mutate of mutations) { const tx = transaction(); mutate(tx); assert.deepEqual(extractRpcEchoSignals(tx, signature, now), []); }
 });
-test('new and closed token accounts are supported; unknown quote remains explicit', () => {
+test('new and closed token accounts require verified BUY payment; unknown quote is rejected', () => {
   const tx = transaction(); tx.meta.preTokenBalances = []; tx.meta.preBalances = [];
-  const signal = extractRpcEchoSignals(tx, signature, now)[0]; assert.equal(signal.quoteAmount, null);
-  assert.match(echoCard(signal, now), /Trade:<\/b> Unavailable/);
+  // A token credit without spending evidence could be a promotional gift.
+  assert.deepEqual(extractRpcEchoSignals(tx, signature, now), []);
+  // Creating an account is allowed when the wallet really spends SOL.
+  tx.meta.preBalances = [2e9];
+  const buy = extractRpcEchoSignals(tx, signature, now);
+  assert.equal(buy.length, 1); assert.equal(buy[0].quoteAmount, 1);
   const sell = transaction('SELL'); sell.meta.postTokenBalances = [];
   assert.equal(extractRpcEchoSignals(sell, signature, now)[0].side, 'SELL');
 });
