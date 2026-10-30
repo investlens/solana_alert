@@ -77,13 +77,16 @@ export async function readOnlyEchoJupiterV2Swap(
      tx.signatures.length!==1||!tx.signatures[0].every(b=>b===0)||
      tx.message.staticAccountKeys[0]?.toBase58()!==r.publicWallet)
    return {ok:false,reason:'UNTRUSTED_ORDER_SIGNER'};
+  let swapInstructions=0;
   for(const ix of tx.message.compiledInstructions){
    const program=tx.message.staticAccountKeys[ix.programIdIndex]?.toBase58();
    if(!program||!programs.has(program))return {ok:false,reason:'UNREVIEWED_PROGRAM'};
+   if(program==='JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4')swapInstructions++;
    if(program===SystemProgram.programId.toBase58()&&
       ix.data.length>=4&&Buffer.from(ix.data).readUInt32LE(0)===2)
     return {ok:false,reason:'UNREVIEWED_DIRECT_SOL_TRANSFER'};
   }
+  if(swapInstructions!==1)return {ok:false,reason:'NO_UNIQUE_JUPITER_SWAP_INSTRUCTION'};
   const result=await simulateEchoUnsignedTransaction(r.rpcUrl,encoded,fetcher);
   if(!result.ok)return {ok:false,reason:result.reason};
   return {ok:true,reason:'RPC_SIMULATION_SUCCEEDED',side:r.side,
