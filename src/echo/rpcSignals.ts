@@ -28,7 +28,7 @@ export type EchoRejectReason = 'invalid_or_stale' | 'unsupported_program_or_inst
 // Pure, bounded diagnostics: no RPC calls, token data, wallet identifiers, or signatures in logs.
 export function classifyEchoRejection(tx: ParsedTransactionWithMeta | null, signature: string, now: number): EchoRejectReason {
   if (!tx?.meta || tx.meta.err != null || tx.transaction.signatures[0] !== signature ||
-      !Number.isFinite(tx.blockTime) || tx.blockTime! <= 0 || tx.blockTime! > now + 15 || now - tx.blockTime! > 120)
+      !Number.isFinite(tx.blockTime) || tx.blockTime! <= 0 || tx.blockTime! > now + 15 || now - tx.blockTime! > 1800)
     return 'invalid_or_stale';
   const keys = tx.transaction.message.accountKeys;
   const instructions = [...tx.transaction.message.instructions, ...(tx.meta.innerInstructions ?? []).flatMap(x => x.instructions)];
@@ -59,7 +59,7 @@ export function classifyEchoRejection(tx: ParsedTransactionWithMeta | null, sign
 }
 export function extractRpcEchoSignals(tx: ParsedTransactionWithMeta | null, signature: string, now: number): EchoSignal[] {
   if (!tx?.meta || tx.meta.err != null || tx.transaction.signatures[0] !== signature || !Number.isFinite(tx.blockTime) ||
-      tx.blockTime! <= 0 || tx.blockTime! > now + 15 || now - tx.blockTime! > 120) return [];
+      tx.blockTime! <= 0 || tx.blockTime! > now + 15 || now - tx.blockTime! > 1800) return [];
   const keys = tx.transaction.message.accountKeys;
   const instructions = [...tx.transaction.message.instructions, ...(tx.meta.innerInstructions ?? []).flatMap(x => x.instructions)];
   const candidates: Array<{ wallet: string; mint: string; quote: string; side: 'BUY' | 'SELL'; tokenIndex: number; quoteIndex: number }> = [];
