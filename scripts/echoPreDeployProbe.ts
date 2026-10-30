@@ -13,6 +13,19 @@ import type { ParsedTransactionWithMeta } from '@solana/web3.js';
 
 const MAINNET_GENESIS = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d';
 const TEST_SIGNATURE = '5W5d2xZT8K2QTmpixHviNrt5E38esAhqmjNVfqxmfm4Jz8RoEfwsW6efsEJ6ptxT1tj5sxeGFj8UicopFP5TT3Ed';
+
+// Fail closed: a green CI result cannot certify production environment values.
+// Report only stable failure categories; never print any configuration values.
+const deploySafetyFailures = [
+  ...(process.env.ADMIN_TRADING_ENABLED === 'false' ? [] : ['ADMIN_TRADING_NOT_DISABLED']),
+  ...(['off','disabled','false','none'].includes((process.env.AUTO_TRADE_MODE ?? '').toLowerCase()) ? [] : ['AUTO_TRADE_NOT_DISABLED']),
+  ...((process.env.ECHO_STATE_PATH ?? '').startsWith('/data/') ? [] : ['STATE_NOT_ON_PERSISTENT_VOLUME']),
+];
+if (deploySafetyFailures.length) {
+  console.error('[EchoPreDeploy] ALERT_ONLY_SAFETY_BLOCKED', deploySafetyFailures.join(','));
+  process.exit(1);
+}
+
 const config = readQuicknodeEchoConfig(process.env);
 const wallets = Object.keys(ECHO_WALLETS);
 const assert = (ok: unknown, message: string): void => { if (!ok) throw new Error(message); };
