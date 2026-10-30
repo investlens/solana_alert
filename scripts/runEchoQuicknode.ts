@@ -384,6 +384,18 @@ async function reconcile() {
       if (!freshComplete) console.warn('[Echo] FRESH_COVERAGE_INCOMPLETE', {
         caller: ECHO_WALLETS[wallet], reason: 'fresh-pagination-pending'
       });
+      // Fresh BUY coverage must take precedence over archive traversal.
+      // Preserve the durable archive cursor and resume it only after fresh catch-up.
+      if (!freshComplete) {
+        console.log('[Echo] COVERAGE_PROGRESS', {
+          caller: ECHO_WALLETS[wallet], freshComplete: false, historyComplete: false,
+          freshPagesScanned, historyPagesScanned: 0, freshOldestBlockTime,
+          historyOldestBlockTime: null, freshCursorAdvanced: freshCursorBeforePass !== fresh.before,
+          historyCursorAdvanced: false, freshPending: fresh.before !== null,
+          historyPending: historyCursors.has(wallet), archiveDeferredForFresh: true
+        });
+        continue;
+      }
       let before = historyCursors.get(wallet);
       let complete = !before && (headRows.length < 100 ||
         (Number.isFinite(headRows[headRows.length - 1]?.blockTime) && headRows[headRows.length - 1].blockTime < cutoff));
