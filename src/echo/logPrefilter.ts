@@ -10,6 +10,8 @@ const TRADING_PROGRAM_IDS = new Set([
   // Pump.fun curve and PumpSwap.
   '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P',
   'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA',
+  // Pump.fun mobile-app router; must reach the strict Pump App classifier.
+  '6Vo3245eszAb5wuqEMw8mGdbfRUdKbHhDHP5LcaGuTAB',
   // Jupiter v6 route and common direct DEX routes.
   'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4',
   '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8',
