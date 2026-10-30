@@ -38,7 +38,7 @@ test('fresh coverage only commits candidate when prior frontier is proven',()=>{
  }
  assert.equal(s.checkpoint,all[0].signature);
 });
-test('durable pending queue survives restart and blocks same signature duplicates',()=>{
+test('durable pending queue survives restart and blocks same signature duplicates',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'echo-fresh-'));
  try{
   const p=join(dir,'queue.json');let delivered=0;let now=1000;
