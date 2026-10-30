@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/echo-slingoor-livebuy-safety-20261027
+      - fix/echo-alert-only-fresh-coverage-20261030
   pull_request:
     branches:
       - feat/echo-admin-pilot-20261021
