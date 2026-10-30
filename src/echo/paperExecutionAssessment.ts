@@ -28,7 +28,7 @@ export function assessPaperExecution(input:{
 }):PaperExecutionEstimate{
   const fee=input.assumedFeeBpsPerSide??FEE_BPS;
   if(!Number.isFinite(fee)||fee<0||fee>1000)throw Error('INVALID_ASSUMED_FEE');
-  const base={stakeUsd:STAKE as const,executableVerified:false as const,
+  const base={stakeUsd:10 as const,executableVerified:false as const,
     priceUsd:input.entryUsd,liquidityUsd:input.liquidityUsd,assumedFeesBpsPerSide:fee};
   if(input.entryUsd===null||!Number.isFinite(input.entryUsd)||input.entryUsd<=0 ||
     input.liquidityUsd===null||!Number.isFinite(input.liquidityUsd)||input.liquidityUsd<=0)
