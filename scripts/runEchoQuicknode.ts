@@ -1,21 +1,29 @@
 import 'dotenv/config';
 import { createServer } from 'node:http';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { readQuicknodeEchoConfig } from '../src/echo/quicknodeConfig.js';
 import { EchoStore } from '../src/echo/store.js';
+import { createEchoAuditWriter } from '../src/echo/auditWriter.js';
 import { EchoResearch } from '../src/echo/research.js';
 import { EchoSolanaPromotions } from '../src/echo/solanaPromotions.js';
 import { EchoTierDispatcher } from '../src/echo/tierDispatch.js';
 import { pumpCurveSnapshot } from '../src/echo/curveSnapshot.js';
 import { ECHO_WALLETS, echoCard } from '../src/echo/signals.js';
 import { extractRpcEchoSignals, classifyEchoRejection, type EchoRejectReason } from '../src/echo/rpcSignals.js';
+import { extractJupiterRoutedEchoBuys } from '../src/echo/jupiterRouteSignals.js';
+import { extractPumpAppRoutedEchoBuys } from '../src/echo/pumpAppRouteSignals.js';
 import { EchoQueue } from '../src/echo/queue.js';
 import { startEchoSubscription } from '../src/echo/subscription.js';
 import { readEchoTransaction } from '../src/echo/readTransaction.js';
+import { advanceFreshScan, type FreshScanState } from '../src/echo/freshScan.js';
 
 // Independent executable: no shared startup/config, database, bot polling,
 // Helius requests, private keys or trade execution imports.
 const config = readQuicknodeEchoConfig(process.env);
 const store = new EchoStore(config.statePath); await store.load();
+const echoAudit = createEchoAuditWriter(process.env);
+console.log('[EchoAudit] STATUS', { enabled: echoAudit.enabled });
 const tiers = new EchoTierDispatcher(config.statePath+'.solana-tiers-v1.json',config.botToken,config.admin,
  process.env.ECHO_PUBLIC_TIERS_ENABLED==='true'?process.env.ECHO_SUBSCRIBER_SUPABASE_URL:undefined,
  process.env.ECHO_PUBLIC_TIERS_ENABLED==='true'?process.env.ECHO_SUBSCRIBER_SUPABASE_SERVICE_KEY:undefined);
@@ -47,29 +55,86 @@ const research = new EchoResearch(config.statePath+'.research-v1.json',async eve
 let researchReady = false;
 try { await research.load(); researchReady = true; }
 catch { console.warn('[EchoResearch] STARTUP_DISABLED: research state unavailable, alerts unaffected'); }
-let backoffUntil = 0, lastRpcAt: number | null = null, lastDeliveryAt: number | null = null;
+let backoffUntil = 0, reconcileBackoffUntil = 0, lastRpcAt: number | null = null, lastDeliveryAt: number | null = null;
+let fallbackBackoffUntil = 0, fallbackReconcileBackoffUntil = 0;
 let deliveryBackoffUntil = 0;
+let historyLimitStreak = 0, fallbackHistoryLimitStreak = 0;
 let lastErrorAt: number | null = null, lastReconcileAt: number | null = null, stopping = false;
-const diagnostics = { fetched: 0, signals: 0, delivered: 0, noSignal: 0, rpcFailures: 0, deliveryFailures: 0 };
+const diagnostics = { fetched: 0, signals: 0, delivered: 0, noSignal: 0, rpcFailures: 0,
+  fallbackRpcUses: 0, deliveryFailures: 0 };
 const rejectionCounts: Partial<Record<EchoRejectReason, number>> = {};
-async function rpc(method: string, params: unknown[] = []) {
-  if (Date.now() < backoffUntil) throw new Error('RPC backing off');
+function historyRateLimited(retryHeader: string | null, fallback = false) {
+  if (fallback) fallbackHistoryLimitStreak++; else historyLimitStreak++;
+  const streak = fallback ? fallbackHistoryLimitStreak : historyLimitStreak;
+  const retry = retryHeader == null ? 0 : Number(retryHeader);
+  const exponential = Math.min(900_000, 60_000 * 2 ** Math.min(4, streak - 1));
+  const until = Date.now() + Math.min(900_000, Math.max(exponential, Number.isFinite(retry) ? retry * 1000 : 0));
+  if (fallback) fallbackReconcileBackoffUntil = until;
+  else reconcileBackoffUntil = until;
+}
+const rpcBackoff = (method: string, fallback: boolean) => method === 'getSignaturesForAddress'
+  ? (fallback ? fallbackReconcileBackoffUntil : reconcileBackoffUntil)
+  : (fallback ? fallbackBackoffUntil : backoffUntil);
+const liveRpcAvailable = () => Date.now() >= backoffUntil ||
+  (Boolean(config.fallbackRpcUrl) && Date.now() >= fallbackBackoffUntil);
+const historyRpcAvailable = () => Date.now() >= reconcileBackoffUntil ||
+  (Boolean(config.fallbackRpcUrl) && Date.now() >= fallbackReconcileBackoffUntil);
+
+/** Transaction reads are always read-only. Independent fallback is optional,
+ * does not double-send successful requests, and never attempts signing/trades.
+ */
+async function rpc(method: string, params: unknown[] = [], forceFallback = false): Promise<any> {
+  const primaryReady = Date.now() >= rpcBackoff(method, false);
+  const backupReady = Boolean(config.fallbackRpcUrl) && Date.now() >= rpcBackoff(method, true);
+  const useBackup = forceFallback || (!primaryReady && backupReady);
+  if (useBackup ? !backupReady : !primaryReady) throw new Error('Echo RPC backing off');
+  const endpoint = useBackup ? config.fallbackRpcUrl! : config.rpcUrl;
   try {
-    const response = await fetch(config.rpcUrl, { method: 'POST', headers: { 'content-type': 'application/json' },
+    const response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: AbortSignal.timeout(8_000) });
     if (response.status === 429) {
-      const retry = Number(response.headers.get('retry-after'));
-      backoffUntil = Date.now() + Math.min(300_000, Math.max(30_000, Number.isFinite(retry) ? retry * 1000 : 60_000));
+      if (method === 'getSignaturesForAddress') historyRateLimited(response.headers.get('retry-after'), useBackup);
+      else {
+        const header = response.headers.get('retry-after');
+        const seconds = header === null ? 60 : Number(header);
+        const retryMs = Math.min(300_000, Math.max(30_000, Number.isFinite(seconds) ? seconds * 1000 : 60_000));
+        if (useBackup) fallbackBackoffUntil = Date.now() + retryMs;
+        else backoffUntil = Date.now() + retryMs;
+      }
     }
-    if (!response.ok) { console.warn('[Echo] RPC_HTTP_FAILURE', { method, status: response.status }); throw new Error('RPC HTTP failure'); }
+    if (!response.ok) {
+      console.warn('[Echo] RPC_HTTP_FAILURE', { method, status: response.status,
+        provider: useBackup ? 'fallback' : 'primary' });
+      throw new Error('RPC HTTP failure');
+    }
     const data = await response.json();
-    if (data.error && (data.error.code === 429 || data.error.code === -32005 || /rate.?limit|credits.*exceed/i.test(String(data.error.message)))) backoffUntil = Date.now() + 60_000;
+    if (data.error && (data.error.code === 429 || data.error.code === -32005 ||
+        /rate.?limit|credits.*exceed/i.test(String(data.error.message)))) {
+      if (method === 'getSignaturesForAddress') historyRateLimited(null, useBackup);
+      else if (useBackup) fallbackBackoffUntil = Date.now() + 60_000;
+      else backoffUntil = Date.now() + 60_000;
+    }
     if (data.error || !Object.prototype.hasOwnProperty.call(data, 'result')) {
-      console.warn('[Echo] RPC_RESPONSE_FAILURE', { method, code: Number.isFinite(data.error?.code) ? data.error.code : null });
+      console.warn('[Echo] RPC_RESPONSE_FAILURE', { method,
+        provider: useBackup ? 'fallback' : 'primary',
+        code: Number.isFinite(data.error?.code) ? data.error.code : null });
       throw new Error('RPC response failure');
     }
-    lastRpcAt = Date.now(); return data.result;
-  } catch { diagnostics.rpcFailures++; lastErrorAt = Date.now(); throw new Error(`Echo RPC ${method} unavailable`); }
+    if (method === 'getSignaturesForAddress') {
+      if (useBackup) { fallbackHistoryLimitStreak = 0; fallbackReconcileBackoffUntil = 0; }
+      else { historyLimitStreak = 0; reconcileBackoffUntil = 0; }
+    }
+    if (useBackup) diagnostics.fallbackRpcUses++;
+    lastRpcAt = Date.now();
+    return data.result;
+  } catch {
+    if (!useBackup && backupReady) {
+      // Primary is unavailable; try the independently configured read-only endpoint.
+      try { return await rpc(method, params, true); } catch { /* report an unavailable read */ }
+    }
+    diagnostics.rpcFailures++; lastErrorAt = Date.now();
+    throw new Error(`Echo RPC ${method} unavailable`);
+  }
 }
 if (await rpc('getGenesisHash') !== '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d') throw new Error('Echo RPC is not Solana mainnet');
 // Read-only Telegram validation. Never sends a dummy alert or starts getUpdates.
@@ -90,7 +155,9 @@ if (validationSignature) {
 }
 
 
-type EchoMarket = { name: string; symbol: string; marketCap: number | null; liquidity: number | null };
+type EchoMarket = { name: string; symbol: string; marketCap: number | null; liquidity: number | null;
+  volume24h: number | null; buys24h: number | null; dex: string | null;
+  pairAddress: string | null; priceUsd: number | null };
 const echoMarketCache = new Map<string, { expiry: number; data: EchoMarket | null }>();
 async function echoMarket(mint: string): Promise<EchoMarket | null> {
   const previous = echoMarketCache.get(mint);
@@ -113,7 +180,15 @@ async function echoMarket(mint: string): Promise<EchoMarket | null> {
       const marketCap=Number(pair.marketCap),liquidity=Number(pair?.liquidity?.usd);
       data={name:String(pair.baseToken?.name||'').slice(0,64),symbol:String(pair.baseToken?.symbol||'').slice(0,24),
         marketCap:Number.isFinite(marketCap)&&marketCap>0?marketCap:null,
-        liquidity:Number.isFinite(liquidity)&&liquidity>0?liquidity:null};
+        liquidity:Number.isFinite(liquidity)&&liquidity>0?liquidity:null,
+        volume24h:Number.isFinite(Number(pair?.volume?.h24)) && Number(pair?.volume?.h24)>=0 && pair?.volume?.h24 != null
+          ? Number(pair.volume.h24) : null,
+        buys24h:Number.isSafeInteger(Number(pair?.txns?.h24?.buys)) && Number(pair?.txns?.h24?.buys)>=0 && pair?.txns?.h24?.buys != null
+          ? Number(pair.txns.h24.buys) : null,
+        dex:typeof pair?.dexId==='string' && /^[a-zA-Z0-9 _.-]{1,40}$/.test(pair.dexId) ? pair.dexId : null,
+        pairAddress:typeof pair?.pairAddress==='string' && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(pair.pairAddress) ? pair.pairAddress : null,
+        priceUsd:Number.isFinite(Number(pair?.priceUsd)) && Number(pair?.priceUsd)>0 && pair?.priceUsd != null
+          ? Number(pair.priceUsd) : null};
       if(data.name&&data.marketCap&&data.liquidity)break;
     } catch {console.warn('[EchoMarket] LOOKUP_FAILED',{mint});}
   }
@@ -131,7 +206,10 @@ async function enrichEchoCard(signal: ReturnType<typeof extractRpcEchoSignals>[n
       name:market?.name || curve?.name || '',
       symbol:market?.symbol || curve?.symbol || '',
       marketCap:market?.marketCap ?? curve?.marketCap ?? null,
-      liquidity:market?.liquidity ?? null
+      liquidity:market?.liquidity ?? null,
+      volume24h:market?.volume24h ?? null, buys24h:market?.buys24h ?? null,
+      dex:market?.dex ?? null, pairAddress:market?.pairAddress ?? null,
+      priceUsd:market?.priceUsd ?? null
     };
     if(!enriched.name&&!enriched.symbol&&enriched.marketCap===null&&enriched.liquidity===null)continue;
     // A partial early response should not permanently stop enrichment while fields are missing.
@@ -149,7 +227,7 @@ async function enrichEchoCard(signal: ReturnType<typeof extractRpcEchoSignals>[n
       });
       const result = await response.json();
       if(result?.ok || result?.description==='Bad Request: message is not modified'){
-        console.log('[Echo] ENRICHED',JSON.stringify({mint:signal.mint,signature:signal.signature,hasMarketCap:enriched.marketCap!==null,hasLiquidity:enriched.liquidity!==null,hasName:!!enriched.name}));
+        console.log('[Echo] ENRICHED',JSON.stringify({mint:signal.mint,signature:signal.signature,hasMarketCap:enriched.marketCap!==null,hasLiquidity:enriched.liquidity!==null,hasName:!!enriched.name,hasVolume24h:enriched.volume24h!==null,hasBuys24h:enriched.buys24h!==null,hasPair:!!enriched.pairAddress}));
         if(enriched.name && enriched.marketCap!==null && enriched.liquidity!==null)return;
         continue;
       }
@@ -196,11 +274,15 @@ const queue = new EchoQueue(async signature => {
   const tx = await readEchoTransaction(signature, rpc);
   if (tx == null) throw new Error('Confirmed transaction pending');
   diagnostics.fetched++;
-  const signals = extractRpcEchoSignals(tx, signature, Date.now() / 1000);
+  const directSignals = extractRpcEchoSignals(tx, signature, Date.now() / 1000);
+  const jupiterSignals = directSignals.length ? [] : extractJupiterRoutedEchoBuys(tx, signature, Date.now() / 1000);
+  const signals = directSignals.length ? directSignals : jupiterSignals.length ? jupiterSignals
+    : extractPumpAppRoutedEchoBuys(tx, signature, Date.now() / 1000);
   diagnostics.signals += signals.length;
   if (!signals.length) { diagnostics.noSignal++; const reason = classifyEchoRejection(tx, signature, Date.now() / 1000); rejectionCounts[reason] = (rejectionCounts[reason] ?? 0) + 1; }
   for (const signal of signals) {
-    if (store.has(signal.id)) continue;
+    // User requested only confirmed BUY notifications, never incoming transfers or SELLs.
+    if (signal.side !== 'BUY' || store.has(signal.id)) continue;
     const baseCard = echoCard(signal, Date.now() / 1000);
     const result = await fetch(`https://api.telegram.org/bot${config.botToken}/sendMessage`, { method: 'POST',
       headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(8_000),
@@ -217,53 +299,210 @@ const queue = new EchoQueue(async signature => {
     console.log('[Echo] RESEARCH_EVENT', JSON.stringify({ caller: signal.caller, wallet: signal.wallet, mint: signal.mint,
       signature: signal.signature, side: signal.side, tradeAt: signal.timestamp, deliveryAt: Date.now() / 1000,
       telegramMessageId: result.result.message_id, quoteAmount: signal.quoteAmount, quoteSymbol: signal.quoteSymbol,
-      quoteBasis: signal.quoteBasis || 'unavailable' }));
+      quoteBasis: signal.quoteBasis || 'unavailable', inputMint: signal.quoteMint || null }));
     await store.delivered(signal.id, Date.now() / 1000); lastDeliveryAt = Date.now(); diagnostics.delivered++;
+    if (echoAudit.enabled) {
+      void echoAudit.write({
+        signature:signal.signature,callerWallet:signal.wallet,mint:signal.mint,caller:signal.caller,
+        tradeAt:signal.timestamp,deliveredAt:Date.now()/1000,
+        telegramMessageId:result.result.message_id,quoteAmount:signal.quoteAmount,
+        quoteSymbol:signal.quoteSymbol,quoteBasis:signal.quoteBasis,tokenAmount:signal.tokenAmount
+      }).then(ok => { if(!ok) console.warn('[EchoAudit] ASYNC_WRITE_UNAVAILABLE',{signature:signal.signature}); })
+        .catch(()=>console.warn('[EchoAudit] ASYNC_WRITE_UNAVAILABLE',{signature:signal.signature}));
+    }
     await tiers.enqueue({id:signal.id,mint:signal.mint,text:baseCard,acceptedAt:Date.now(),buttons:{inline_keyboard:[
       [{text:'🔎 Transaction',url:'https://solscan.io/tx/'+signal.signature},{text:'📈 Chart',url:'https://dexscreener.com/solana/'+signal.mint}]]}}).catch(()=>console.warn('[EchoTiers] CALLER_QUEUE_WRITE_FAILED'));
-    if (researchReady && signal.side === 'BUY') void research.addBuy({caller:signal.caller,mint:signal.mint,signature:signal.signature,deliveryAt:Date.now()/1000}).catch(() => console.warn('[EchoResearch] PERSIST_FAILED'));
+    if (researchReady && signal.side === 'BUY') void research.addBuy({caller:signal.caller,mint:signal.mint,signature:signal.signature,deliveryAt:Date.now()/1000}).then(() => { if (signal.caller === 'WHALE · slingoor') void research.tick(true).catch(() => console.warn('[EchoResearch] PRIORITY_TICK_FAILED')); }).catch(() => console.warn('[EchoResearch] PERSIST_FAILED'));
 
     console.log('[Echo] ADMIN_DELIVERY_ACCEPTED', { caller: signal.caller, signature, side: signal.side, messageId: result.result.message_id });
   }
   await store.delivered(`tx:${signature}`, Date.now() / 1000);
-});
+}, Date.now, config.statePath + '.pending-v1.json');
 let reconciling = false;
+// Limit historical RPC consumption per pass; continue from the last cursor on the next pass.
+// Persist pagination cursors on the same private volume as the durable alert queue.
+const historyCursorPath = config.statePath + '.history-cursors-v1.json';
+const historyCursors = new Map<string, string>();
+try {
+  const saved = JSON.parse(readFileSync(historyCursorPath, 'utf8'));
+  if (saved.version !== 1 || !Array.isArray(saved.cursors)) throw Error('Invalid history cursor journal');
+  for (const entry of saved.cursors) {
+    if (!Array.isArray(entry) || entry.length !== 2 || !(entry[0] in ECHO_WALLETS) ||
+      !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(entry[1])) throw Error('Invalid history cursor');
+    historyCursors.set(entry[0], entry[1]);
+  }
+} catch (error) {
+  if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+}
+function persistHistoryCursors() {
+  mkdirSync(dirname(historyCursorPath), { recursive: true, mode: 0o700 });
+  const temp = historyCursorPath + '.tmp';
+  writeFileSync(temp, JSON.stringify({ version: 1, cursors: [...historyCursors] }), { mode: 0o600 });
+  renameSync(temp, historyCursorPath);
+}
+// Fresh frontier is independent from the bounded historical archive cursor.
+const freshCursorPath = config.statePath + '.fresh-cursors-v1.json';
+const freshCursors = new Map<string, FreshScanState>();
+try {
+  const saved = JSON.parse(readFileSync(freshCursorPath, 'utf8'));
+  if (saved.version !== 1 || !Array.isArray(saved.cursors)) throw Error('Invalid fresh cursor journal');
+  for (const [wallet, state] of saved.cursors) {
+    if (!(wallet in ECHO_WALLETS) || !state || typeof state !== 'object' ||
+      !['checkpoint','before','candidate'].every(k => state[k] === null ||
+        (typeof state[k] === 'string' && /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(state[k]))))
+      throw Error('Invalid fresh cursor');
+    freshCursors.set(wallet, state);
+  }
+} catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+function persistFreshCursors() {
+  mkdirSync(dirname(freshCursorPath), { recursive: true, mode: 0o700 });
+  const temp = freshCursorPath + '.tmp';
+  writeFileSync(temp, JSON.stringify({ version: 1, cursors: [...freshCursors] }), { mode: 0o600 });
+  renameSync(temp, freshCursorPath);
+}
+const historyWindowSeconds = 1800;
+const historyPagesPerPass = 3;
 async function reconcile() {
-  if (reconciling || stopping || Date.now() < backoffUntil) return;
+  if (reconciling || stopping || !historyRpcAvailable() || queue.size > 64) return;
   reconciling = true;
   try {
-    // 4 address reads/minute; at most 20 recent signatures each. No deep history.
+    const cutoff = Date.now() / 1000 - historyWindowSeconds;
     for (const wallet of Object.keys(ECHO_WALLETS)) {
-      const rows = await rpc('getSignaturesForAddress', [wallet, { limit: 20, commitment: 'confirmed' }]);
-      if (!Array.isArray(rows)) throw new Error('Echo signature list unavailable');
-      for (const row of rows.reverse()) if (row.err == null && Number.isFinite(row.blockTime) && Date.now() / 1000 - row.blockTime <= 120 &&
-        /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') && !store.has(`tx:${row.signature}`)) queue.add(row.signature);
+      if (stopping || !historyRpcAvailable() || queue.size > 64) break;
+      // Page the fresh frontier independently; never advance its checkpoint until
+      // reaching the previous checkpoint (or exhausting the available signatures).
+      let fresh = freshCursors.get(wallet) ?? { checkpoint: null, before: null, candidate: null };
+      let headRows: Array<{ signature: string; err: unknown; blockTime: number | null }> = [];
+      let freshComplete = false;
+      let freshPagesScanned = 0;
+      let historyPagesScanned = 0;
+      let freshOldestBlockTime: number | null = null;
+      let historyOldestBlockTime: number | null = null;
+      const freshCursorBeforePass = fresh.before;
+      const historyCursorBeforePass = historyCursors.get(wallet) ?? null;
+      // An unfinished scan must not hide newer live activity. Probe the head on
+      // each pass without changing the saved pagination position.
+      if (fresh.before) {
+        const newest = await rpc('getSignaturesForAddress', [wallet, { limit: 100, commitment: 'confirmed' }]);
+        if (!Array.isArray(newest)) throw Error('Echo newest signature probe unavailable');
+        headRows = newest;
+        for (const row of [...newest].reverse()) if (row.err == null &&
+          Number.isFinite(row.blockTime) && row.blockTime >= cutoff &&
+          /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') &&
+          !store.has(`tx:${row.signature}`)) { if (!queue.add(row.signature)) throw Error('Echo queue full: cursor not advanced'); }
+      }
+      for (let page = 0; page < historyPagesPerPass && !freshComplete; page++) {
+        if (stopping || !historyRpcAvailable() || queue.size > 64) break;
+        const rows = await rpc('getSignaturesForAddress', [wallet,
+          { limit: 100, commitment: 'confirmed', ...(fresh.before ? { before: fresh.before } : {}) }]);
+        if (!Array.isArray(rows)) throw Error('Echo fresh signature page unavailable');
+        freshPagesScanned++;
+        if (rows.length && Number.isFinite(rows[rows.length - 1]?.blockTime)) freshOldestBlockTime = rows[rows.length - 1].blockTime;
+        if (page === 0 && !headRows.length) headRows = rows;
+        const progress = advanceFreshScan(fresh, rows, 100, cutoff);
+        for (const row of [...progress.scanned].reverse()) if (row.err == null &&
+          Number.isFinite(row.blockTime) && row.blockTime! >= cutoff &&
+          /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') &&
+          !store.has(`tx:${row.signature}`)) { if (!queue.add(row.signature!)) throw Error('Echo queue full: fresh cursor not advanced'); }
+        fresh = progress.state;
+        freshComplete = progress.complete;
+        freshCursors.set(wallet, fresh);
+        persistFreshCursors();
+      }
+      if (!freshComplete) console.warn('[Echo] FRESH_COVERAGE_INCOMPLETE', {
+        caller: ECHO_WALLETS[wallet], reason: 'fresh-pagination-pending'
+      });
+      // Fresh BUY coverage must take precedence over archive traversal.
+      // Preserve the durable archive cursor and resume it only after fresh catch-up.
+      if (!freshComplete) {
+        console.log('[Echo] COVERAGE_PROGRESS', {
+          caller: ECHO_WALLETS[wallet], freshComplete: false, historyComplete: false,
+          freshPagesScanned, historyPagesScanned: 0, freshOldestBlockTime,
+          historyOldestBlockTime: null, freshCursorAdvanced: freshCursorBeforePass !== fresh.before,
+          historyCursorAdvanced: false, freshPending: fresh.before !== null,
+          historyPending: historyCursors.has(wallet), archiveDeferredForFresh: true
+        });
+        continue;
+      }
+      let before = historyCursors.get(wallet);
+      let complete = !before && (headRows.length < 100 ||
+        (Number.isFinite(headRows[headRows.length - 1]?.blockTime) && headRows[headRows.length - 1].blockTime < cutoff));
+      if (!before && !complete && headRows[headRows.length - 1]?.signature) {
+        before = headRows[headRows.length - 1].signature;
+        historyCursors.set(wallet, before);
+        persistHistoryCursors();
+      }
+      // Reserve the first RPC request for fresh signals; use the remaining
+      // bounded budget to catch up from the durable backlog cursor.
+      for (let page = 1; page < historyPagesPerPass && !complete && before; page++) {
+        if (stopping || !historyRpcAvailable() || queue.size > 64) break;
+        const rows = await rpc('getSignaturesForAddress', [wallet, { limit: 100, commitment: 'confirmed', ...(before ? { before } : {}) }]);
+        if (!Array.isArray(rows)) throw new Error('Echo signature list unavailable');
+        historyPagesScanned++;
+        if (rows.length && Number.isFinite(rows[rows.length - 1]?.blockTime)) historyOldestBlockTime = rows[rows.length - 1].blockTime;
+        for (const row of [...rows].reverse()) if (row.err == null && Number.isFinite(row.blockTime) && row.blockTime >= cutoff &&
+          /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') && !store.has(`tx:${row.signature}`)) { if (!queue.add(row.signature)) throw Error('Echo history queue full: cursor not advanced'); }
+        const oldest = rows[rows.length - 1];
+        if (rows.length < 100 || (Number.isFinite(oldest?.blockTime) && oldest.blockTime < cutoff)) {
+          complete = true;
+          historyCursors.delete(wallet);
+          persistHistoryCursors();
+          break;
+        }
+        if (!oldest?.signature || oldest.signature === before) break;
+        before = oldest.signature;
+        historyCursors.set(wallet, before);
+        persistHistoryCursors();
+      }
+      console.log('[Echo] COVERAGE_PROGRESS', {
+        caller: ECHO_WALLETS[wallet], freshComplete, historyComplete: complete,
+        freshPagesScanned, historyPagesScanned, freshOldestBlockTime, historyOldestBlockTime,
+        freshCursorAdvanced: freshCursorBeforePass !== fresh.before,
+        historyCursorAdvanced: historyCursorBeforePass !== (historyCursors.get(wallet) ?? null),
+        freshPending: fresh.before !== null, historyPending: historyCursors.has(wallet)
+      });
+      if (!complete) console.warn('[Echo] HISTORY_COVERAGE_INCOMPLETE', {
+        caller: ECHO_WALLETS[wallet], reason: 'pagination-pending',
+        notice: 'Catch-up cursor retained for a bounded follow-up pass'
+      });
     }
     lastReconcileAt = Date.now();
   } catch { lastErrorAt = Date.now(); console.warn('[Echo] Reconciliation unavailable; bounded retry scheduled.'); }
   finally { reconciling = false; }
 }
-const subscription = startEchoSubscription({ url: config.wsUrl, onSignature: signature => { if (!store.has(`tx:${signature}`)) queue.add(signature); }, onReady: () => { void reconcile(); } });
-const tick = setInterval(() => { if (!stopping && Date.now() >= Math.max(backoffUntil, deliveryBackoffUntil)) void queue.tick(); }, 250);
-const sweep = setInterval(() => { void reconcile(); }, 60_000);
+const subscription = startEchoSubscription({ url: config.wsUrl, fallbackUrl: config.fallbackWsUrl, onSignature: (signature, wallet) => { if (!store.has(`tx:${signature}`)) { const accepted=queue.add(signature, ECHO_WALLETS[wallet] === 'WHALE · slingoor'); if (!accepted) { lastErrorAt=Date.now(); console.error('[Echo] WS_QUEUE_REJECTED', { caller: ECHO_WALLETS[wallet], queued: queue.size, dropped: queue.dropped }); void reconcile(); } } }, onReady: () => { void reconcile(); } });
+const tick = setInterval(() => { if (!stopping && liveRpcAvailable() && Date.now() >= deliveryBackoffUntil) void queue.tick(); }, 250);
+// Reduce history polling (especially on an active WebSocket) so live BUY processing
+// gets priority over expensive archive scans. After 429, adaptive backoff applies.
+// When connected, verify history periodically without spending archive credits every
+// three minutes. During a disconnect, request bounded catch-up with provider backoff.
+const sweep = setInterval(() => {
+  if (!subscription.state.ready || historyCursors.size > 0 || [...freshCursors.values()].some(cursor => cursor.before !== null) || lastReconcileAt == null || Date.now() - lastReconcileAt >= 15 * 60_000)
+    void reconcile();
+}, 60_000);
 const promotionTick=setInterval(()=>{if(promotionsReady)void promotions.tick();},30_000);
 if(promotionsReady)void promotions.tick();
 const researchTick = setInterval(() => { if (researchReady) void research.tick().catch(() => console.warn('[EchoResearch] TICK_FAILED')); }, 60_000);
 if (researchReady) void research.tick().catch(() => console.warn('[EchoResearch] INITIAL_TICK_FAILED'));
 const tierTick=setInterval(()=>{void tiers.tick().catch(()=>console.warn('[EchoTiers] TICK_FAILED'));},1000);
 const heartbeat = setInterval(() => console.log('[Echo] HEALTH', { subscriptions: subscription.state.acknowledgedWallets,
-  websocketReady: subscription.state.ready, reconnects: subscription.state.reconnects, queued: queue.size, dropped: queue.dropped,
+  websocketReady: subscription.state.ready, reconnects: subscription.state.reconnects,
+  lastDisconnectReason: subscription.state.lastDisconnectReason, lastConnectedAt: subscription.state.lastConnectedAt,
+  activeWebSocketProvider: subscription.state.activeProvider,
+  skippedNonSwapLogs: subscription.state.skippedNonSwapLogs, observedTradeSignatures: subscription.state.observedTradeSignatures, queued: queue.size, dropped: queue.dropped,
   lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt, ...diagnostics, promotions: promotionsReady ? promotions.summary() : {enabled:false}, research: researchReady ? JSON.stringify(research.summary()) : {enabled:false},tiers:tiers.summary(), rejectionCounts }), 60_000);
 const server = createServer((req, res) => {
   if (req.method !== 'GET' || req.url !== '/health') { res.writeHead(404); res.end(); return; }
-  const ready = !stopping && subscription.state.ready && Date.now() >= Math.max(backoffUntil, deliveryBackoffUntil) &&
-    lastReconcileAt != null && Date.now() - lastReconcileAt < 90_000 && queue.size < 48;
+  // A healthy WebSocket must not be marked down merely because history reconciliation is rate-limited.
+  const ready = !stopping && subscription.state.ready && liveRpcAvailable() && Date.now() >= deliveryBackoffUntil && queue.size < 2048;
   res.writeHead(ready ? 200 : 503, { 'content-type': 'application/json' });
   res.end(JSON.stringify({ service: 'alphaos-echo', source: 'standard-solana-rpc', mode: 'alerts', ready, liveBuying: false,
     subscriptions: subscription.state.acknowledgedWallets, reconnects: subscription.state.reconnects,
+    lastDisconnectReason: subscription.state.lastDisconnectReason, lastConnectedAt: subscription.state.lastConnectedAt,
+    skippedNonSwapLogs: subscription.state.skippedNonSwapLogs, observedTradeSignatures: subscription.state.observedTradeSignatures,
     queued: queue.size, dropped: queue.dropped, lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt }));
 });
-server.listen(config.port, '0.0.0.0', () => console.log('[Echo] RPC pilot started; only supported Pump/PumpSwap trades; live buying OFF.'));
+server.listen(config.port, '0.0.0.0', () => console.log('[Echo] Alert-only watcher started; Pump/PumpSwap/Jupiter BUY routes; live buying OFF.'));
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => {
   stopping = true; clearInterval(tick); clearInterval(sweep); clearInterval(researchTick); clearInterval(promotionTick); clearInterval(tierTick); clearInterval(heartbeat); subscription.stop(); server.close();
 });
