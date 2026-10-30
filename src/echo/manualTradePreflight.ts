@@ -14,7 +14,7 @@ export function reviewManualBuyPreview(input:ManualPreview,nowMs:number):{eligib
  const deny=(reason:string)=>({eligible:false,reason,executionEnabled:false as const});
  if(!input.ownerChatId||input.requestChatId!==input.ownerChatId)return deny('NOT_ADMIN');
  const admission=validateBuyAdmission(input.trade,input.ownerWallet);
- if(!admission.allowed)return deny(admission.reason);
+ if('reason' in admission)return deny(admission.reason);
  if(input.quoteMint!==input.trade.mint)return deny('QUOTE_MINT_MISMATCH');
  if(!Number.isFinite(nowMs)||!Number.isFinite(input.quoteAtMs)||!Number.isFinite(input.quoteExpiresAtMs)||
     input.quoteAtMs>nowMs||nowMs-input.quoteAtMs>10_000||input.quoteExpiresAtMs<=nowMs)
