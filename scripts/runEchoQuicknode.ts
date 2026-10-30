@@ -511,6 +511,11 @@ const server = createServer((req, res) => {
     subscriptions: subscription.state.acknowledgedWallets, reconnects: subscription.state.reconnects,
     lastDisconnectReason: subscription.state.lastDisconnectReason, lastConnectedAt: subscription.state.lastConnectedAt,
     skippedNonSwapLogs: subscription.state.skippedNonSwapLogs, observedTradeSignatures: subscription.state.observedTradeSignatures,
+    callerWebSocket: Object.fromEntries(Object.keys(ECHO_WALLETS).map(wallet => [ECHO_WALLETS[wallet], {
+      notifications: subscription.state.walletNotifications[wallet] ?? 0,
+      prefilterSkipped: subscription.state.walletPrefilterSkipped[wallet] ?? 0,
+      forwardedToQueueCallback: subscription.state.walletQueued[wallet] ?? 0
+    }])),
     queued: queue.size, dropped: queue.dropped, lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt }));
 });
 server.listen(config.port, '0.0.0.0', () => console.log('[Echo] Alert-only watcher started; Pump/PumpSwap/Jupiter BUY routes; live buying OFF.'));
