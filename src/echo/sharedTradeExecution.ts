@@ -25,12 +25,12 @@ export function screenEchoExecutionEvidence(input:EchoExecutionEvidence):EchoExe
     input.unsigned.reservationKey!==input.reservationKey)
    return {allowed:false,reason:'EXECUTION_IDENTITY_MISMATCH'};
  const checked=inspectEchoUnsignedEnvelope(input.unsigned);
- if(!checked.ok)return {allowed:false,reason:checked.reason};
+ if('reason' in checked)return {allowed:false,reason:checked.reason};
  if(input.side==='SELL'){
    if(!input.sell)return {allowed:false,reason:'MANUAL_SELL_AUTH_REQUIRED'};
    if(input.sell.mint!==input.mint)return {allowed:false,reason:'SELL_MINT_MISMATCH'};
    const approved=screenEchoManualSell(input.sell);
-   if(!approved.allowed)return {allowed:false,reason:approved.reason};
+   if('reason' in approved)return {allowed:false,reason:approved.reason};
  }
  // The current signer contract is not able to independently prove the amounts,
  // destination account, route, and fee from a Jupiter/Pump transaction.
