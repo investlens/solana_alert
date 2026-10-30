@@ -7,8 +7,8 @@ import { ECHO_PUMP, ECHO_PUMP_SWAP, extractRpcEchoSignals } from '../src/echo/rp
 import { readQuicknodeEchoConfig } from '../src/echo/quicknodeConfig.js';
 import { EchoQueue } from '../src/echo/queue.js';
 import { startEchoSubscription } from '../src/echo/subscription.js';
-const wallet = Object.keys(ECHO_WALLETS)[0], mint = Object.keys(ECHO_WALLETS)[1];
-const token = Object.keys(ECHO_WALLETS)[2], quoteAccount = Object.keys(ECHO_WALLETS)[3];
+const wallet = Object.keys(ECHO_WALLETS)[0], mint = '4'.repeat(44);
+const token = '5'.repeat(44), quoteAccount = '6'.repeat(44);
 const signature = '5'.repeat(88), now = 1_800_000_000;
 function instruction(side = 'BUY', program = ECHO_PUMP) {
   const accounts = Array(16).fill('11111111111111111111111111111111');
@@ -55,7 +55,7 @@ test('gifts, non-signers, unsupported venues, mismatched owners, failed and stal
     (t: any) => { t.meta.postTokenBalances[0].mint = token; },
     (t: any) => { t.meta.postTokenBalances[0].uiTokenAmount.amount = '0'; },
     (t: any) => { t.meta.err = { InstructionError: [0, 'error'] }; },
-    (t: any) => { t.blockTime = now - 121; },
+    (t: any) => { t.blockTime = now - 1801; },
     (t: any) => { t.blockTime = now + 16; },
     (t: any) => { t.transaction.signatures[0] = '6'.repeat(88); },
     (t: any) => { t.transaction.message.instructions[0].data = bs58.encode(Buffer.alloc(24)); },
@@ -65,7 +65,7 @@ test('gifts, non-signers, unsupported venues, mismatched owners, failed and stal
 test('new and closed token accounts are supported; unknown quote remains explicit', () => {
   const tx = transaction(); tx.meta.preTokenBalances = []; tx.meta.preBalances = [];
   const signal = extractRpcEchoSignals(tx, signature, now)[0]; assert.equal(signal.quoteAmount, null);
-  assert.match(echoCard(signal, now), /Quote amount unavailable/);
+  assert.match(echoCard(signal, now), /Trade:<\/b> Unavailable/);
   const sell = transaction('SELL'); sell.meta.postTokenBalances = [];
   assert.equal(extractRpcEchoSignals(sell, signature, now)[0].side, 'SELL');
 });
@@ -85,16 +85,16 @@ class FakeSocket {
   emit(type: string, value: any = {}) { for (const fn of this.handlers.get(type) ?? []) fn(value); }
   message(value: any) { this.emit('message', { data: JSON.stringify(value) }); }
 }
-test('four confirmed subscriptions must acknowledge; events from unknown subscriptions and failed transactions are rejected', () => {
+test('configured wallet subscriptions must acknowledge; unknown subscriptions and failed transactions are rejected', () => {
   const socket = new FakeSocket(), received: string[] = []; let ready = 0;
   const timers: Array<() => void> = [];
   const sub = startEchoSubscription({ url: 'wss://test.invalid', socket: () => socket, onSignature: s => received.push(s), onReady: () => { ready++; },
     later: fn => { timers.push(fn); return timers.length as any; }, cancel: () => {} });
-  socket.emit('open'); assert.equal(socket.sent.length, 4);
+  socket.emit('open'); assert.equal(socket.sent.length, Object.keys(ECHO_WALLETS).length);
   for (const request of socket.sent) { assert.equal(request.params[0].mentions.length, 1); assert.equal(request.params[1].commitment, 'confirmed'); }
   socket.message({ id: 1, result: 101 }); socket.message({ id: 1, result: 999 });
   assert.equal(sub.state.acknowledgedWallets, 1);
-  for (let id = 2; id <= 4; id++) socket.message({ id, result: 100 + id });
+  for (let id = 2; id <= Object.keys(ECHO_WALLETS).length; id++) socket.message({ id, result: 100 + id });
   assert.equal(ready, 1); assert.equal(sub.state.ready, true);
   const notification = (subscription: number, err: any = null) => ({ method: 'logsNotification', params: { subscription, result: { value: { signature, err } } } });
   socket.message(notification(999)); socket.message(notification(101, {})); assert.deepEqual(received, []);
@@ -108,21 +108,25 @@ test('disconnects and API subscription errors reconnect with bounded backoff and
   sockets[0].emit('open'); sockets[0].message({ id: 1, error: { code: -32601 } });
   assert.equal(sub.state.ready, false); assert.equal(sub.state.reconnects, 1); assert.equal(sockets[0].closed, true);
   const reconnect = [...timers.values()].find(x => x.ms === 1000)!; reconnect.fn();
-  assert.equal(sockets.length, 2); sockets[1].emit('open'); assert.equal(sockets[1].sent.length, 4);
+  assert.equal(sockets.length, 2); sockets[1].emit('open'); assert.equal(sockets[1].sent.length, Object.keys(ECHO_WALLETS).length);
   sub.stop();
 });
-test('queue deduplicates bursts, caps memory, retries failures and discards old observations', async () => {
+test('queue deduplicates signatures and retries transient errors without dropping work', async () => {
   let calls = 0, time = 0;
-  const queue = new EchoQueue(async () => { calls++; if (calls < 2) throw new Error('pending'); }, () => time);
-  queue.add('a'); queue.add('a'); assert.equal(queue.size, 1);
-  await queue.tick(); assert.equal(queue.size, 1); await queue.tick(); assert.equal(queue.size, 0);
-  for (let i = 0; i < 65; i++) queue.add(String(i)); assert.equal(queue.size, 64); assert.equal(queue.dropped, 1);
-  time = 120_001; await queue.tick(); assert.equal(queue.size, 63); assert.equal(queue.dropped, 2);
+  const queue = new EchoQueue(async () => { calls++; if (calls === 1) throw new Error('pending'); }, () => time);
+  const signature = '3'.repeat(88);
+  queue.add(signature); queue.add(signature); assert.equal(queue.size, 1);
+  await queue.tick(); assert.equal(queue.size, 1);
+  time += 1200; await queue.tick(); assert.equal(queue.size, 0);
+  assert.equal(queue.dropped, 0);
 });
-test('queue serializes overlapping ticks and bounds retry attempts', async () => {
-  let release!: () => void, calls = 0;
+test('queue serializes overlapping ticks and holds failures for later recovery', async () => {
+  let release!: () => void, calls = 0, time = 0;
   const queue = new EchoQueue(async () => { calls++; await new Promise<void>(resolve => { release = resolve; }); });
-  queue.add('a'); const work = queue.tick(); await queue.tick(); assert.equal(calls, 1); release(); await work;
-  const failing = new EchoQueue(async () => { throw new Error('outage'); }); failing.add('b');
-  for (let i = 0; i < 4; i++) await failing.tick(); assert.equal(failing.size, 0); assert.equal(failing.dropped, 1);
+  queue.add('3'.repeat(88));
+  const work = queue.tick(); await queue.tick(); assert.equal(calls, 1); release(); await work;
+  const failing = new EchoQueue(async () => { throw new Error('outage'); }, () => time);
+  failing.add('4'.repeat(88));
+  for (let i = 0; i < 4; i++) { time += 120_000; await failing.tick(); }
+  assert.equal(failing.size, 1); assert.equal(failing.dropped, 0);
 });

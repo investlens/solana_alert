@@ -1,11 +1,11 @@
 import { PublicKey } from '@solana/web3.js';
 
+// Active caller BUY alerts: Slingoor premium + previously monitored Chairman wallet.
+// Never substitute social handles or partial addresses for actual wallet keys.
+// Historical Croakie, Cupsey, and Thedetective records stay persisted but are not monitored.
 export const ECHO_WALLETS: Readonly<Record<string, string>> = Object.freeze({
-  '6DQAGJT7VZPVBsuG4kn3AvpyHCEi7B2RFFvMZdbqQqqP': 'Cupsey',
-  '6qudAN2kV8mtCcYJxb5QQ6Vr15itdHHdeVbYm99NKMhy': 'Thedetective',
-  '7fEXteaTtmX1uR8fpChEXsevM4icH5vq8LNL9dzDupX2': 'Croakie',
-  'Be24Gbf5KisDk1LcWWZsBn8dvB816By7YzYF5zWZnRR6': 'Chairman',
   '5YRgrP3mjGzrzirYYN5HAQH19cTYREYwGxW6XRJQUzij': 'WHALE · slingoor',
+  'Be24Gbf5KisDk1LcWWZsBn8dvB816By7YzYF5zWZnRR6': 'Chairman',
 });
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const QUOTES = new Map([[SOL_MINT, 'SOL'], ['EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 'USDC']]);
@@ -18,6 +18,7 @@ export type EchoSignal = {
   id: string; wallet: string; caller: string; signature: string; timestamp: number;
   mint: string; side: 'BUY' | 'SELL'; tokenAmount: number; quoteAmount: number | null; quoteSymbol: string;
   quoteBasis?: 'token-account net change' | 'wallet SOL net change; includes fees/rent' | 'unavailable';
+  quoteMint?: string;
 };
 function address(value: unknown): value is string {
   try { return typeof value === 'string' && new PublicKey(value).toBase58() === value; } catch { return false; }
@@ -79,16 +80,17 @@ export function echoCard(s: EchoSignal, nowSeconds: number, market?: EchoCardMar
     ? '$' + v.toLocaleString('en-US', { maximumFractionDigits: 0 }) : 'Unavailable';
   const quote = s.quoteAmount == null ? 'Unavailable' :
     s.quoteBasis === 'wallet SOL net change; includes fees/rent'
-      ? `~${s.quoteAmount.toFixed(4)} ${escapeEchoHtml(s.quoteSymbol)} wallet change (not exact trade size)`
+      ? `~${s.quoteAmount.toFixed(4)} ${escapeEchoHtml(s.quoteSymbol)} wallet change (includes fees/rent; not exact trade size)`
       : `${s.quoteAmount.toFixed(4)} ${escapeEchoHtml(s.quoteSymbol)}`;
-  return `<b>📡 ECHO · ${s.side === 'BUY' ? '🟢 BUY' : '🔴 SELL'} · ${escapeEchoHtml(s.caller)}</b>\n` +
+  return `<b>${s.caller === 'WHALE · slingoor' && s.side === 'BUY' ? '⚡ ALPHAOS ECHO · PREMIUM · SLINGOOR BUY' : '📡 ECHO · ' + (s.side === 'BUY' ? '🟢 BUY' : '🔴 SELL') + ' · ' + escapeEchoHtml(s.caller)}</b>\n` +
     `${label}\n` +
     `💰 <b>MC:</b> ${formatUsd(market?.marketCap)} · <b>LP:</b> ${formatUsd(market?.liquidity)}\n` +
     `💱 <b>Trade:</b> ${quote}\n` +
+    (s.quoteMint ? `🔁 <b>Input mint:</b> <code>${escapeEchoHtml(s.quoteMint)}</code>\n` : '') +
     `🪙 <b>Tokens:</b> ${s.tokenAmount.toLocaleString('en-US', { maximumFractionDigits: 4 })}\n` +
     `⏱ <b>Age:</b> ${age}s${social}\n` +
     `\n<b>CA:</b> <code>${escapeEchoHtml(s.mint)}</code>\n` +
-    `<i>Verified swap · Research only · Auto-buy OFF</i>`;
+    `<i>Verified swap · Security not assessed · Research only · Auto-buy OFF</i>`;
 }
 
 export type PaperStop = { entry: number; peak: number; stop: number; closed: boolean };
