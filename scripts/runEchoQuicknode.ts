@@ -11,6 +11,7 @@ import { pumpCurveSnapshot } from '../src/echo/curveSnapshot.js';
 import { ECHO_WALLETS, echoCard } from '../src/echo/signals.js';
 import { extractRpcEchoSignals, classifyEchoRejection, type EchoRejectReason } from '../src/echo/rpcSignals.js';
 import { extractJupiterRoutedEchoBuys } from '../src/echo/jupiterRouteSignals.js';
+import { extractPumpAppRoutedEchoBuys } from '../src/echo/pumpAppRouteSignals.js';
 import { EchoQueue } from '../src/echo/queue.js';
 import { startEchoSubscription } from '../src/echo/subscription.js';
 import { readEchoTransaction } from '../src/echo/readTransaction.js';
@@ -258,7 +259,9 @@ const queue = new EchoQueue(async signature => {
   if (tx == null) throw new Error('Confirmed transaction pending');
   diagnostics.fetched++;
   const directSignals = extractRpcEchoSignals(tx, signature, Date.now() / 1000);
-  const signals = directSignals.length ? directSignals : extractJupiterRoutedEchoBuys(tx, signature, Date.now() / 1000);
+  const jupiterSignals = directSignals.length ? [] : extractJupiterRoutedEchoBuys(tx, signature, Date.now() / 1000);
+  const signals = directSignals.length ? directSignals : jupiterSignals.length ? jupiterSignals
+    : extractPumpAppRoutedEchoBuys(tx, signature, Date.now() / 1000);
   diagnostics.signals += signals.length;
   if (!signals.length) { diagnostics.noSignal++; const reason = classifyEchoRejection(tx, signature, Date.now() / 1000); rejectionCounts[reason] = (rejectionCounts[reason] ?? 0) + 1; }
   for (const signal of signals) {
