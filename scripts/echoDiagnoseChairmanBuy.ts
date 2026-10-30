@@ -23,6 +23,17 @@ try{
  rows=await request('getSignaturesForAddress',[wallet,{limit:150,commitment:'confirmed'}]);
  console.log('CHAIRMAN_SCAN',JSON.stringify({wallet,mint,signaturesAvailable:rows.length,latestTime:rows[0]?.blockTime??null,oldestTime:rows.at(-1)?.blockTime??null}));
 }catch(err){console.error('CHAIRMAN_SCAN_UNAVAILABLE',String(err));process.exit(0);}
+// Cross-check both address indexes without assuming the profile wallet signed.
+try {
+ const mintRows:Row[]=await request('getSignaturesForAddress',[mint,{limit:500,commitment:'confirmed'}]);
+ const walletMap=new Map(rows.map(row=>[row.signature,row]));
+ const common=mintRows.filter(row=>walletMap.has(row.signature));
+ console.log('CHAIRMAN_MINT_WALLET_INTERSECTION',JSON.stringify({
+  mintSignaturesAvailable:mintRows.length,mintNewest:mintRows[0]?.blockTime??null,
+  mintOldest:mintRows.at(-1)?.blockTime??null,matchingSignatures:common.length,
+  matches:common.slice(0,15).map(row=>({signature:row.signature,blockTime:row.blockTime}))
+ }));
+}catch(error){console.log('CHAIRMAN_MINT_INDEX_UNAVAILABLE',String(error));}
 let checked=0,found=0,unavailable=0;
 for(const row of rows.filter(r=>r.err===null && r.blockTime!==null && r.blockTime>=earliest).slice(0,65)){
  try {
