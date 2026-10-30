@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { openPaperStop, updatePaperStop, type PaperStop } from './signals.js';
+import { assessPaperExecution } from './paperExecutionAssessment.js';
 
 type Sample = { at: number; usd: number; liquidityUsd: number | null; pool: string };
 type Trial = {
@@ -183,7 +184,28 @@ export class EchoResearch {
       for(const n of multiples)if(t.milestones?.[String(n)])group.milestones[String(n)]++;
     }
     for(const group of Object.values(bySource))group.netPnlUsd=Math.round(group.netPnlUsd*100)/100;
-    return {bySource,paperUsd:PAPER_USD,uniqueTokensReserved:this.onceMints.size,suppressedRepeatBuys:this.suppressedRepeatBuys,estimatedCostBpsPerSide:SIMULATED_COST_BPS_PER_SIDE,closedExits:exits.length,
+    // Parallel research-only sensitivity view, never an actual fill or realized P/L.
+    // Preserve historical mark-price results above unchanged for apples-to-apples comparison.
+    const executionRisk:Record<string,{qualified:number;illiquid:number;unpriced:number;
+      simulatedExits:number;hypotheticalNetPnlUsd:number}>={};
+    for(const t of this.trials){
+      const source=t.caller==='SOLANA_BOOST'?'BOOST':t.caller==='SOLANA_DEX_PAID'?'DEX_PAID':t.caller;
+      const group=executionRisk[source]??={qualified:0,illiquid:0,unpriced:0,
+        simulatedExits:0,hypotheticalNetPnlUsd:0};
+      const entryPoint=t.points.find(p=>t.entryAt!==null&&Math.abs(p.at-t.entryAt)<2);
+      const estimate=assessPaperExecution({entryUsd:t.entry,
+        liquidityUsd:entryPoint?.liquidityUsd??null,exitUsd:t.exitPrice});
+      if(estimate.status==='ESTIMATE_ONLY'){
+        group.qualified++;
+        if(t.exitAt!==null&&estimate.hypotheticalNetPnlUsd!==null){
+          group.simulatedExits++;group.hypotheticalNetPnlUsd+=estimate.hypotheticalNetPnlUsd;
+        }
+      } else if(estimate.status==='INSUFFICIENT_LIQUIDITY')group.illiquid++;
+      else group.unpriced++;
+    }
+    for(const group of Object.values(executionRisk))
+      group.hypotheticalNetPnlUsd=Math.round(group.hypotheticalNetPnlUsd*100)/100;
+    return {executionRisk,bySource,paperUsd:PAPER_USD,uniqueTokensReserved:this.onceMints.size,suppressedRepeatBuys:this.suppressedRepeatBuys,estimatedCostBpsPerSide:SIMULATED_COST_BPS_PER_SIDE,closedExits:exits.length,
       closedNetPnlUsd:Math.round(totalPnl*100)/100,total:this.trials.length,counts,active:this.trials.filter(t=>(t.status==='TRACKING'||t.status==='AWAITING_PRICE'||t.status==='EXIT_OBSERVED') && Date.now()/1000-t.deliveryAt<horizon).length,
       lastError:this.lastError,pendingNotifications:this.pending.length,lastNotified:this.lastNotified,notificationErrors:this.notificationErrors,milestones:Object.fromEntries(multiples.map(n=>[String(n),this.trials.filter(t=>!!t.milestones?.[String(n)]).length])),liveTrading:false,markPriceOnly:true};
   }
