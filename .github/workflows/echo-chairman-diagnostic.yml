@@ -1,0 +1,19 @@
+name: Echo Chairman public-chain investigation
+on:
+  push:
+    branches:
+      - diagnostic/echo-chairman-buy-20261030
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npx tsx scripts/echoDiagnoseChairmanBuy.ts
