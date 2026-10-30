@@ -6,6 +6,7 @@ on:
       - feat/echo-slingoor-livebuy-safety-20261027
       - feat/echo-paper-execution-safety-20261030
       - fix/echo-fresh-adaptive-budget-20261030
+      - feat/echo-trade-readiness-guards-20261030
       - fix/echo-durable-audit-outbox-20261030
       - feat/echo-supabase-audit-20261030
       - feat/echo-verified-market-card-20261030
