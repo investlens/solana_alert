@@ -59,3 +59,12 @@ test('fresh checkpoint stays pinned across pages until an old boundary is proven
  assert.equal(second.complete,true);
  assert.equal(second.state.checkpoint,'200');
 });
+
+test('time cutoff reports unverified historical checkpoint without claiming overlap', () => {
+ const page=Array.from({length:100},(_,i)=>({signature:String(500-i),blockTime:2000-i*12}));
+ const result=advanceFreshScan({checkpoint:'older-checkpoint',before:null,candidate:null},page,100,1200);
+ assert.equal(result.complete,true);
+ assert.equal(result.cutoffWithoutCheckpoint,true);
+ const overlap=advanceFreshScan({checkpoint:'499',before:null,candidate:null},page,100,1200);
+ assert.equal(overlap.cutoffWithoutCheckpoint,false);
+});
