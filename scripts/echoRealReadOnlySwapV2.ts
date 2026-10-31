@@ -12,10 +12,10 @@ const amount=e.ECHO_PREVIEW_AMOUNT_RAW?.trim();
 const rpcUrl=e.ECHO_PREVIEW_RPC_URL?.trim();
 const apiKey=e.JUPITER_API_KEY?.trim();
 if(side!=='BUY'&&side!=='SELL')throw Error('ECHO_PREVIEW_SIDE must be BUY or SELL');
-if(!wallet||!mint||!amount||!rpcUrl||!apiKey)
- throw Error('Set ECHO_PREVIEW_WALLET, ECHO_PREVIEW_MINT, ECHO_PREVIEW_AMOUNT_RAW, ECHO_PREVIEW_RPC_URL and JUPITER_API_KEY');
+if(!wallet||!mint||!amount||!rpcUrl)
+ throw Error('Set ECHO_PREVIEW_WALLET, ECHO_PREVIEW_MINT, ECHO_PREVIEW_AMOUNT_RAW and ECHO_PREVIEW_RPC_URL');
 const result=await readOnlyEchoJupiterV2Swap({
- side,publicWallet:wallet,mint,amountRaw:amount,rpcUrl,jupiterApiKey:apiKey,
+ side,publicWallet:wallet,mint,amountRaw:amount,rpcUrl,jupiterApiKey:apiKey??'',
  maxSlippageBps:300
 });
 const output=result.ok?{
