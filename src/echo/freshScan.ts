@@ -4,7 +4,7 @@
 export type FreshScanState = { checkpoint: string | null; before: string | null; candidate: string | null };
 export type SignatureRow = { signature?: string; blockTime?: number | null; err?: unknown };
 export function advanceFreshScan(state: FreshScanState, rows: SignatureRow[], pageLimit = 100, cutoffSeconds?: number):
- { state: FreshScanState; complete: boolean; scanned: SignatureRow[] } {
+ { state: FreshScanState; complete: boolean; scanned: SignatureRow[]; cutoffWithoutCheckpoint: boolean } {
   if (pageLimit < 1) throw new Error('Invalid page limit');
   if (!Array.isArray(rows)) throw new Error('Signature page unavailable');
   const candidate = state.candidate ?? rows[0]?.signature ?? null;
@@ -25,6 +25,6 @@ export function advanceFreshScan(state: FreshScanState, rows: SignatureRow[], pa
   return {
    state: complete ? { checkpoint: candidate, before: null, candidate: null } :
     { checkpoint: state.checkpoint, before: last!, candidate },
-   complete, scanned
+   complete, scanned, cutoffWithoutCheckpoint: crossedCutoff && boundary < 0 && state.checkpoint !== null
   };
 }
