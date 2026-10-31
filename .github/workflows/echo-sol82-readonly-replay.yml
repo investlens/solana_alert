@@ -1,0 +1,20 @@
+name: Echo verified Slingoor SOL82 live read-only replay
+on:
+  push:
+    branches:
+      - fix/echo-pump-app-sol-82-20261031
+permissions:
+  contents: read
+jobs:
+  read-only-mainnet-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Verify user's confirmed SOL-funded Pump App BUY against exact classifier
+        run: npx tsx scripts/echoVerifySol82PublicTx.ts
