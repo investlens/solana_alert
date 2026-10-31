@@ -5,6 +5,7 @@ import {screenEchoFastFollower,ECHO_FAST_FOLLOWER_SIGNING_ENABLED}
 const start=1762000000000;
 const candidate={
  callerBuySignature:'3'.repeat(64),callerVerified:true,
+ callerMint:'2'.repeat(44),quoteMint:'2'.repeat(44),
  callerBoughtAtMs:start,detectionAtMs:start+200,nowMs:start+600,
  quoteObservedAtMs:start+500,callerSpentLamports:'100000000',
  callerTokensReceivedRaw:'1000000000',
@@ -35,6 +36,7 @@ test('slow observation and old quote never chase stale caller buys',()=>{
 test('duplicate, unverified signer, excessive slippage and 0.1 SOL cap deny',()=>{
  for(const [change,reason] of [
   [{alreadyReserved:true},'DUPLICATE_TOKEN'],
+  [{quoteMint:'4'.repeat(44)},'MINT_MISMATCH'],
   [{callerVerified:false},'UNVERIFIED_CALLER_SWAP'],
   [{quoteSlippageBps:301},'EXCESSIVE_QUOTE_SLIPPAGE'],
   [{ourInputLamports:'100000001'},'EXCEEDS_0_1_SOL_CAP'],
