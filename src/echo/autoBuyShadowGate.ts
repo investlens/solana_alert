@@ -12,7 +12,7 @@ export const ECHO_AUTO_BUY_DAILY_LOSS_BREAKER_SOL=0.15;
 export const ECHO_AUTO_BUY_MAX_SIGNAL_AGE_MS=3_000;
 export type EchoAutoBuyShadowInput={
  signal:BuyAdmission; executionWallet:string;
- nowMs:number; verifiedAtMs:number; quoteAtMs:number;
+ nowMs:number; callerTradeAtMs:number; verifiedAtMs:number; quoteAtMs:number;
  callerEntryPriceSolPerToken:number; currentQuotePriceSolPerToken:number;
  quoteValid:boolean; unsignedSimulationPassed:boolean; accountsFullyResolved:boolean;
  sellRouteVerified:boolean; slippageBps:number;
@@ -27,7 +27,9 @@ export function screenEchoAutoBuyShadow(i:EchoAutoBuyShadowInput):EchoAutoBuySha
  if(i.killSwitch)return deny('KILL_SWITCH');
  const event=validateBuyAdmission(i.signal,i.executionWallet);
  if('reason' in event)return deny(event.reason);
- if(![i.nowMs,i.verifiedAtMs,i.quoteAtMs].every(Number.isSafeInteger)||
+ if(![i.nowMs,i.callerTradeAtMs,i.verifiedAtMs,i.quoteAtMs].every(Number.isSafeInteger)||
+    i.callerTradeAtMs>i.verifiedAtMs||i.callerTradeAtMs>i.nowMs||
+    i.nowMs-i.callerTradeAtMs>ECHO_AUTO_BUY_MAX_SIGNAL_AGE_MS||
     i.verifiedAtMs>i.nowMs||i.nowMs-i.verifiedAtMs>ECHO_AUTO_BUY_MAX_SIGNAL_AGE_MS)
   return deny('STALE_OR_UNVERIFIED_SIGNAL');
  if(i.quoteAtMs>i.nowMs||i.quoteAtMs<i.verifiedAtMs||i.nowMs-i.quoteAtMs>2_000)
