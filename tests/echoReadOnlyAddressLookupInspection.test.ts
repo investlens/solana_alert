@@ -6,17 +6,19 @@ import {inspectEchoV0LookupTables,ECHO_LOOKUP_INSPECTION_GRANTS_SIGNING} from
  '../src/echo/readOnlyAddressLookupInspection.js';
 const payer=Keypair.generate().publicKey;
 const program=Keypair.generate().publicKey;
+const poolAccount=Keypair.generate().publicKey;
 const lookupKey=Keypair.generate().publicKey;
 const table=new AddressLookupTableAccount({
  key:lookupKey,state:{
   deactivationSlot:BigInt('18446744073709551615'),
   lastExtendedSlot:0,lastExtendedSlotStartIndex:0,
-  authority:undefined,addresses:[program]
+  authority:undefined,addresses:[poolAccount]
  }
 });
 const message=new TransactionMessage({
  payerKey:payer,recentBlockhash:Keypair.generate().publicKey.toBase58(),
- instructions:[new TransactionInstruction({programId:program,keys:[],data:Buffer.from([1])})]
+ instructions:[new TransactionInstruction({programId:program,
+ keys:[{pubkey:poolAccount,isSigner:false,isWritable:true}],data:Buffer.from([1])})]
 }).compileToV0Message([table]);
 const raw=Buffer.from(new VersionedTransaction(message).serialize()).toString('base64');
 test('ALT-backed v0 instruction can be independently resolved for read-only diagnostics',async()=>{
