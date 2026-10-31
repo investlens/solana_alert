@@ -36,6 +36,16 @@ for (const endpoint of ['https://api.mainnet-beta.solana.com','https://solana-rp
     });
     const signerPre=signerIndex<0?null:tx.meta?.preBalances?.[signerIndex];
     const signerPost=signerIndex<0?null:tx.meta?.postBalances?.[signerIndex];
+    const transfers=(tx.meta?.innerInstructions??[])
+      .flatMap((group:any)=>(group.instructions??[]).map((ix:any)=>({
+        program:ix.programId,type:ix.parsed?.type??null,
+        source:ix.parsed?.info?.source??null,destination:ix.parsed?.info?.destination??null,
+        lamports:ix.parsed?.info?.lamports??null,
+        amount:ix.parsed?.info?.amount??null
+      })))
+      .filter((ix:any)=>ix.program==='11111111111111111111111111111111'||ix.program==='TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
+      .slice(0,30);
+    console.log('PUMP_APP_INNER_TRANSFERS',JSON.stringify({requestedSignature:signature,transfers}));
     console.log('PUMP_APP_DIAGNOSTIC',JSON.stringify({
       requestedSignature:signature,returnedSignature:tx.transaction.signatures[0],
       slot:tx.slot,blockTime:tx.blockTime,signerIndex,routeDetails,
