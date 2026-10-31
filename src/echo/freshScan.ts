@@ -11,7 +11,8 @@ export function advanceFreshScan(state: FreshScanState, rows: SignatureRow[], pa
   const boundary = state.checkpoint ? rows.findIndex(row => row.signature === state.checkpoint) : -1;
   const boundaryRows = boundary >= 0 ? rows.slice(0, boundary) : rows;
   const scanned = cutoffSeconds === undefined ? boundaryRows :
-    boundaryRows.filter(row => Number.isFinite(row.blockTime) && row.blockTime! >= cutoffSeconds);
+    boundaryRows.filter(row => !Number.isFinite(row.blockTime) || row.blockTime! >= cutoffSeconds);
+  // Rows without blockTime must be fetched and checked, never silently dropped.
   // For live alerts the scan may finish at a verified time boundary even
   // when older archive history has thousands of additional signatures.
   // Never trust missing or out-of-order block times to complete coverage.
