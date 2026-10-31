@@ -19,6 +19,7 @@ import { startEchoSubscription } from '../src/echo/subscription.js';
 import { readEchoTransaction } from '../src/echo/readTransaction.js';
 import { advanceFreshScan, type FreshScanState } from '../src/echo/freshScan.js';
 import { echoFreshPageBudget } from '../src/echo/freshBudget.js';
+import { echoRpc429CooldownMs } from '../src/echo/rpc429Policy.js';
 import { EchoVerifiedBuyLatencyTracker } from '../src/echo/verifiedBuyLatencyTracker.js';
 
 // Independent executable: no shared startup/config, database, bot polling,
@@ -64,6 +65,7 @@ let backoffUntil = 0, reconcileBackoffUntil = 0, lastRpcAt: number | null = null
 let fallbackBackoffUntil = 0, fallbackReconcileBackoffUntil = 0;
 let deliveryBackoffUntil = 0;
 let historyLimitStreak = 0, fallbackHistoryLimitStreak = 0;
+let readLimitStreak = 0, fallbackReadLimitStreak = 0;
 let lastErrorAt: number | null = null, lastReconcileAt: number | null = null, stopping = false;
 const diagnostics = { fetched: 0, signals: 0, delivered: 0, noSignal: 0, rpcFailures: 0,
   fallbackRpcUses: 0, deliveryFailures: 0 };
@@ -73,9 +75,7 @@ const echoShadowLatency = new EchoVerifiedBuyLatencyTracker();
 function historyRateLimited(retryHeader: string | null, fallback = false) {
   if (fallback) fallbackHistoryLimitStreak++; else historyLimitStreak++;
   const streak = fallback ? fallbackHistoryLimitStreak : historyLimitStreak;
-  const retry = retryHeader == null ? 0 : Number(retryHeader);
-  const exponential = Math.min(900_000, 60_000 * 2 ** Math.min(4, streak - 1));
-  const until = Date.now() + Math.min(900_000, Math.max(exponential, Number.isFinite(retry) ? retry * 1000 : 0));
+  const until = Date.now() + echoRpc429CooldownMs(streak, retryHeader);
   if (fallback) fallbackReconcileBackoffUntil = until;
   else reconcileBackoffUntil = until;
 }
@@ -102,11 +102,11 @@ async function rpc(method: string, params: unknown[] = [], forceFallback = false
     if (response.status === 429) {
       if (method === 'getSignaturesForAddress') historyRateLimited(response.headers.get('retry-after'), useBackup);
       else {
-        const header = response.headers.get('retry-after');
-        const seconds = header === null ? 60 : Number(header);
-        const retryMs = Math.min(300_000, Math.max(30_000, Number.isFinite(seconds) ? seconds * 1000 : 60_000));
-        if (useBackup) fallbackBackoffUntil = Date.now() + retryMs;
-        else backoffUntil = Date.now() + retryMs;
+        if (useBackup) fallbackReadLimitStreak++; else readLimitStreak++;
+        const streak = useBackup ? fallbackReadLimitStreak : readLimitStreak;
+        const until = Date.now() + echoRpc429CooldownMs(streak, response.headers.get('retry-after'));
+        if (useBackup) fallbackBackoffUntil = until;
+        else backoffUntil = until;
       }
     }
     if (!response.ok) {
@@ -118,8 +118,12 @@ async function rpc(method: string, params: unknown[] = [], forceFallback = false
     if (data.error && (data.error.code === 429 || data.error.code === -32005 ||
         /rate.?limit|credits.*exceed/i.test(String(data.error.message)))) {
       if (method === 'getSignaturesForAddress') historyRateLimited(null, useBackup);
-      else if (useBackup) fallbackBackoffUntil = Date.now() + 60_000;
-      else backoffUntil = Date.now() + 60_000;
+      else {
+        if (useBackup) fallbackReadLimitStreak++; else readLimitStreak++;
+        const until = Date.now() + echoRpc429CooldownMs(useBackup ? fallbackReadLimitStreak : readLimitStreak, null);
+        if (useBackup) fallbackBackoffUntil = until;
+        else backoffUntil = until;
+      }
     }
     if (data.error || !Object.prototype.hasOwnProperty.call(data, 'result')) {
       console.warn('[Echo] RPC_RESPONSE_FAILURE', { method,
@@ -130,6 +134,10 @@ async function rpc(method: string, params: unknown[] = [], forceFallback = false
     if (method === 'getSignaturesForAddress') {
       if (useBackup) { fallbackHistoryLimitStreak = 0; fallbackReconcileBackoffUntil = 0; }
       else { historyLimitStreak = 0; reconcileBackoffUntil = 0; }
+    }
+    if (method !== 'getSignaturesForAddress') {
+      if (useBackup) { fallbackReadLimitStreak = 0; fallbackBackoffUntil = 0; }
+      else { readLimitStreak = 0; backoffUntil = 0; }
     }
     if (useBackup) diagnostics.fallbackRpcUses++;
     lastRpcAt = Date.now();
