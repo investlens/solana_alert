@@ -1,4 +1,4 @@
-import { VersionedTransaction, PublicKey } from '@solana/web3.js';
+import { VersionedTransaction, PublicKey, SystemProgram, ComputeBudgetProgram } from '@solana/web3.js';
 import { simulateEchoUnsignedTransaction } from './readOnlySimulation.js';
 /** Fetch a Jupiter quote and unsigned transaction for read-only validation.
  * This NEVER signs, transmits, or broadcasts transactions.
@@ -51,6 +51,32 @@ export async function readOnlyJupiterSwapPreview(request:EchoSwapSimulationReque
        tx.signatures.length!==1||
        !tx.signatures.every(s=>s.every(b=>b===0)))
       return {ok:false,reason:'UNTRUSTED_TRANSACTION_SIGNERS'};
+    // Reject lookup tables until addresses can be resolved and independently
+    // classified. Compiled indexes alone cannot establish the programs invoked.
+    if (tx.message.version !== 0 || tx.message.addressTableLookups.length !== 0)
+      return {ok:false,reason:'UNRESOLVED_LOOKUP_TABLES'};
+    if (tx.message.header.numRequiredSignatures !== 1)
+      return {ok:false,reason:'UNTRUSTED_TRANSACTION_SIGNERS'};
+    // Conservative read-only preview policy. This is NOT authorization to sign.
+    // Future swap paths require full account-level and instruction-level audit.
+    const permittedPrograms = new Set([
+      ComputeBudgetProgram.programId.toBase58(),
+      SystemProgram.programId.toBase58(),
+      'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+      'TokenzQdBNbLqP5VEhdkAS6EPFCE7uFyV9QnF4jrb',
+      'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
+      'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4',
+    ]);
+    for (const instruction of tx.message.compiledInstructions) {
+      const program = keys[instruction.programIdIndex]?.toBase58();
+      if (!program || !permittedPrograms.has(program))
+        return {ok:false,reason:'UNREVIEWED_SWAP_PROGRAM'};
+      // SystemProgram::Transfer is discriminator 2 (little endian u32).
+      // It must not be accepted as a purported swap.
+      if (program === SystemProgram.programId.toBase58() &&
+          instruction.data.length >= 4 && Buffer.from(instruction.data).readUInt32LE(0) === 2)
+        return {ok:false,reason:'UNEXPECTED_SOL_TRANSFER'};
+    }
     // Preflight transaction bytes only. Never invoke any signing or send RPC.
     const result=await simulateEchoUnsignedTransaction(request.rpcUrl,swap.swapTransaction,fetcher);
     return {ok:result.ok,reason:result.reason,simulationLogs:result.logs};

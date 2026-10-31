@@ -4,14 +4,14 @@ import { setTimeout, clearTimeout } from 'node:timers';
 type Socket = { addEventListener(type: string, listener: (event: any) => void): void; send(data: string): void; close(): void };
 type Timer = number | NodeJS.Timeout;
 type Options = {
-  url: string; fallbackUrl?: string | null; onSignature(signature: string, wallet: string): void; onReady(): void;
+  url: string; fallbackUrl?: string | null; onSignature(signature: string, wallet: string): unknown; onReady(): void;
   socket?: (url: string) => Socket;
   later?: (callback: () => void, milliseconds: number) => Timer;
   cancel?: (timer: Timer) => void;
 };
 export function startEchoSubscription(options: Options) {
   const later = options.later ?? setTimeout, cancel = options.cancel ?? clearTimeout;
-  const state = { ready: false, acknowledgedWallets: 0, reconnects: 0, lastMessageAt: null as number | null, lastDisconnectReason: 'none' as string, lastConnectedAt: null as number | null, activeProvider: 'primary' as 'primary' | 'fallback', skippedNonSwapLogs: 0, observedTradeSignatures: 0 };
+  const state = { ready: false, acknowledgedWallets: 0, reconnects: 0, lastMessageAt: null as number | null, lastDisconnectReason: 'none' as string, lastConnectedAt: null as number | null, activeProvider: 'primary' as 'primary' | 'fallback', skippedNonSwapLogs: 0, observedTradeSignatures: 0, walletNotifications: {} as Record<string,number>, walletPrefilterSkipped: {} as Record<string,number>, walletQueued: {} as Record<string,number> };
   let socket: Socket | null = null, stopped = false, reconnect: Timer | undefined;
   let timeout: Timer | undefined, delay = 1000, consecutiveFailures = 0, useFallback = false;
   function failedAttempt() {
@@ -68,10 +68,19 @@ export function startEchoSubscription(options: Options) {
       if (message.method !== 'logsNotification' || !ids.has(message.params?.subscription)) return;
       const value = message.params?.result?.value;
       if (value?.err != null || !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(value?.signature ?? '')) return;
-      if (!mayContainWalletSwap(value.logs)) { state.skippedNonSwapLogs++; return; }
-      state.observedTradeSignatures++;
       const wallet = walletForSubscription.get(message.params.subscription);
-      if (wallet) options.onSignature(value.signature, wallet);
+      if (!wallet) return;
+      state.walletNotifications[wallet] = (state.walletNotifications[wallet] ?? 0) + 1;
+      if (!mayContainWalletSwap(value.logs)) {
+        state.skippedNonSwapLogs++;
+        state.walletPrefilterSkipped[wallet] = (state.walletPrefilterSkipped[wallet] ?? 0) + 1;
+        return;
+      }
+      state.observedTradeSignatures++;
+      // Count callback handoffs only after the admission callback returns.
+      // A throwing callback must not be reported as successfully forwarded.
+      const admitted = options.onSignature(value.signature, wallet);
+      if (admitted !== false) state.walletQueued[wallet] = (state.walletQueued[wallet] ?? 0) + 1;
     });
     current.addEventListener('close', (event: any) => lost('closed_' + String(Number.isInteger(event?.code) ? event.code : 'unknown')));
     current.addEventListener('error', () => lost('socket_error'));

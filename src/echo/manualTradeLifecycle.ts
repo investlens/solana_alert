@@ -19,7 +19,7 @@ export type TradeEvidence = {
 export type TradeTransition =
   | {kind:'QUOTE_OK';nowMs:number}
   | {kind:'SIMULATION_OK';nowMs:number}
-  | {kind:'SUBMISSION_RESULT_UNKNOWN';fingerprint:string}
+  | {kind:'SUBMISSION_RESULT_UNKNOWN';fingerprint:string;signature?:string}
   | {kind:'SUBMITTED';signature:string;fingerprint:string}
   | {kind:'CHAIN_CONFIRMED';signature:string}
   | {kind:'CHAIN_FAILED_FINAL';signature:string}
@@ -33,6 +33,8 @@ export function nextEchoTradeState(previous:TradeEvidence,event:TradeTransition)
   if(current==='RECONCILIATION_REQUIRED'||current==='SUBMISSION_UNKNOWN')
     return event.kind==='CHAIN_CONFIRMED' && !!previous.signature && event.signature===previous.signature
       ? {ok:true as const,value:{...previous,state:'CONFIRMED' as const}}
+      : event.kind==='CHAIN_FAILED_FINAL' && !!previous.signature && event.signature===previous.signature
+      ? {ok:true as const,value:{...previous,state:'FAILED_FINAL' as const}}
       : deny('RECONCILE_OR_HALT_NO_RETRY');
   if(current==='CONFIRMED'||current==='FAILED_FINAL')return deny('TERMINAL_INTENT');
   if(event.kind==='QUOTE_OK'){
@@ -48,8 +50,10 @@ export function nextEchoTradeState(previous:TradeEvidence,event:TradeTransition)
   if(event.kind==='SUBMITTED'||event.kind==='SUBMISSION_RESULT_UNKNOWN'){
     if(current!=='SIMULATED'||!fingerprint.test(event.fingerprint))return deny('SIMULATION_OR_FINGERPRINT_REQUIRED');
     if(event.kind==='SUBMITTED'&&!sig.test(event.signature))return deny('INVALID_SIGNATURE');
+    if(event.kind==='SUBMISSION_RESULT_UNKNOWN'&&event.signature!==undefined&&!sig.test(event.signature))
+      return deny('INVALID_SIGNATURE');
     return {ok:true as const,value:{...previous,state:event.kind==='SUBMITTED'?'SUBMITTED' as const:'SUBMISSION_UNKNOWN' as const,
-      transactionFingerprint:event.fingerprint,...(event.kind==='SUBMITTED'?{signature:event.signature}:{})}};
+      transactionFingerprint:event.fingerprint,...(event.signature?{signature:event.signature}:{})}};
   }
   if(event.kind==='CHAIN_CONFIRMED'||event.kind==='CHAIN_FAILED_FINAL'){
     if(current!=='SUBMITTED'||previous.signature!==event.signature||!sig.test(event.signature))

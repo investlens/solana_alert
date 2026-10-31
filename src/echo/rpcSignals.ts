@@ -104,6 +104,11 @@ export function extractRpcEchoSignals(tx: ParsedTransactionWithMeta | null, sign
         }
       }
     }
+    // A token credit alone is not proof of a purchase. Require a verified
+    // quote debit for BUY; ordinary wallet SOL fees/rent are not sufficient.
+    if (c.side === 'BUY' && (quoteAmount == null || quoteAmount <= 0)) continue;
+    if (c.side === 'BUY' && quoteBasis === 'wallet SOL net change; includes fees/rent' &&
+        quoteAmount <= (Number(tx.meta.fee ?? 0) / 1e9)) continue;
     results.push({ id: `${signature}:${c.wallet}:${c.mint}:${c.side}`, wallet: c.wallet, caller: ECHO_WALLETS[c.wallet], signature,
       timestamp: tx.blockTime!, mint: c.mint, side: c.side, tokenAmount: Math.abs(delta), quoteAmount,
       quoteSymbol: c.quote === SOL_MINT ? 'SOL' : 'USDC', quoteBasis });

@@ -19,6 +19,7 @@ import { startEchoSubscription } from '../src/echo/subscription.js';
 import { readEchoTransaction } from '../src/echo/readTransaction.js';
 import { advanceFreshScan, type FreshScanState } from '../src/echo/freshScan.js';
 import { echoFreshPageBudget } from '../src/echo/freshBudget.js';
+import { EchoVerifiedBuyLatencyTracker } from '../src/echo/verifiedBuyLatencyTracker.js';
 
 // Independent executable: no shared startup/config, database, bot polling,
 // Helius requests, private keys or trade execution imports.
@@ -67,6 +68,8 @@ let lastErrorAt: number | null = null, lastReconcileAt: number | null = null, st
 const diagnostics = { fetched: 0, signals: 0, delivered: 0, noSignal: 0, rpcFailures: 0,
   fallbackRpcUses: 0, deliveryFailures: 0 };
 const rejectionCounts: Partial<Record<EchoRejectReason, number>> = {};
+// Read-only counters; no network calls, signing, or Telegram blocking.
+const echoShadowLatency = new EchoVerifiedBuyLatencyTracker();
 function historyRateLimited(retryHeader: string | null, fallback = false) {
   if (fallback) fallbackHistoryLimitStreak++; else historyLimitStreak++;
   const streak = fallback ? fallbackHistoryLimitStreak : historyLimitStreak;
@@ -275,6 +278,7 @@ let promotionsReady=false;
 try{await promotions.load();promotionsReady=true;}catch{console.warn('[EchoPromotions] DISABLED: invalid state');}
 const queue = new EchoQueue(async signature => {
   if (store.has(`tx:${signature}`)) return;
+  const echoFetchStartedAtMs=Date.now();
   const tx = await readEchoTransaction(signature, rpc);
   if (tx == null) throw new Error('Confirmed transaction pending');
   diagnostics.fetched++;
@@ -287,6 +291,14 @@ const queue = new EchoQueue(async signature => {
   for (const signal of signals) {
     // User requested only confirmed BUY notifications, never incoming transfers or SELLs.
     if (signal.side !== 'BUY' || store.has(signal.id)) continue;
+    // Actual independent swap classification has completed. Record shadow
+    // latency BEFORE waiting for Telegram, enrichment, or paper research.
+    // There is no provider-backed trade quote here, so quote/decision remain null.
+    echoShadowLatency.verifiedBuy({
+      signature:signal.signature,wallet:signal.wallet,
+      chainTimestampSec:signal.timestamp,
+      fetchStartedAtMs:echoFetchStartedAtMs,verifiedAtMs:Date.now()
+    });
     const baseCard = echoCard(signal, Date.now() / 1000);
     const result = await fetch(`https://api.telegram.org/bot${config.botToken}/sendMessage`, { method: 'POST',
       headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(8_000),
@@ -422,6 +434,7 @@ async function reconcile() {
         console.log('[Echo] COVERAGE_PROGRESS', {
           caller: ECHO_WALLETS[wallet], freshComplete: false, historyComplete: false,
           freshPagesScanned, historyPagesScanned: 0, freshOldestBlockTime,
+          freshWindowLagSeconds: freshOldestBlockTime == null ? null : Math.max(0, Math.ceil(freshOldestBlockTime - cutoff)), coverageGuaranteed: false,
           historyOldestBlockTime: null, freshCursorAdvanced: freshCursorBeforePass !== fresh.before,
           historyCursorAdvanced: false, freshPending: fresh.before !== null,
           historyPending: historyCursors.has(wallet), archiveDeferredForFresh: true
@@ -474,7 +487,7 @@ async function reconcile() {
   } catch { lastErrorAt = Date.now(); console.warn('[Echo] Reconciliation unavailable; bounded retry scheduled.'); }
   finally { reconciling = false; }
 }
-const subscription = startEchoSubscription({ url: config.wsUrl, fallbackUrl: config.fallbackWsUrl, onSignature: (signature, wallet) => { if (!store.has(`tx:${signature}`)) { const accepted=queue.add(signature, ECHO_WALLETS[wallet] === 'WHALE · slingoor'); if (!accepted) { lastErrorAt=Date.now(); console.error('[Echo] WS_QUEUE_REJECTED', { caller: ECHO_WALLETS[wallet], queued: queue.size, dropped: queue.dropped }); void reconcile(); } } }, onReady: () => { void reconcile(); } });
+const subscription = startEchoSubscription({ url: config.wsUrl, fallbackUrl: config.fallbackWsUrl, onSignature: (signature, wallet) => { if (store.has(`tx:${signature}`)) return true; const accepted=queue.add(signature, ECHO_WALLETS[wallet] === 'WHALE · slingoor'); if (accepted) echoShadowLatency.websocketObserved(signature,wallet); if (!accepted) { lastErrorAt=Date.now(); console.error('[Echo] WS_QUEUE_REJECTED', { caller: ECHO_WALLETS[wallet], queued: queue.size, dropped: queue.dropped }); void reconcile(); return false; } return true; }, onReady: () => { void reconcile(); } });
 const tick = setInterval(() => { if (!stopping && liveRpcAvailable() && Date.now() >= deliveryBackoffUntil) void queue.tick(); }, 250);
 // Reduce history polling (especially on an active WebSocket) so live BUY processing
 // gets priority over expensive archive scans. After 429, adaptive backoff applies.
@@ -494,8 +507,13 @@ const heartbeat = setInterval(() => console.log('[Echo] HEALTH', { subscriptions
   websocketReady: subscription.state.ready, reconnects: subscription.state.reconnects,
   lastDisconnectReason: subscription.state.lastDisconnectReason, lastConnectedAt: subscription.state.lastConnectedAt,
   activeWebSocketProvider: subscription.state.activeProvider,
-  skippedNonSwapLogs: subscription.state.skippedNonSwapLogs, observedTradeSignatures: subscription.state.observedTradeSignatures, queued: queue.size, dropped: queue.dropped,
-  lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt, ...diagnostics, promotions: promotionsReady ? promotions.summary() : {enabled:false}, research: researchReady ? JSON.stringify(research.summary()) : {enabled:false},tiers:tiers.summary(), audit:echoAuditOutbox?.summary()??{enabled:false}, rejectionCounts }), 60_000);
+  skippedNonSwapLogs: subscription.state.skippedNonSwapLogs, observedTradeSignatures: subscription.state.observedTradeSignatures,
+  walletWebSocketCounts: Object.fromEntries(Object.keys(ECHO_WALLETS).map(wallet => [ECHO_WALLETS[wallet], {
+    notifications: subscription.state.walletNotifications[wallet] ?? 0,
+    prefilterSkipped: subscription.state.walletPrefilterSkipped[wallet] ?? 0,
+    admitted: subscription.state.walletQueued[wallet] ?? 0
+  }])), queued: queue.size, dropped: queue.dropped,
+  lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt, ...diagnostics, promotions: promotionsReady ? promotions.summary() : {enabled:false}, research: researchReady ? JSON.stringify(research.summary()) : {enabled:false},tiers:tiers.summary(), audit:echoAuditOutbox?.summary()??{enabled:false}, shadowLatency:echoShadowLatency.summary(), rejectionCounts }), 60_000);
 const server = createServer((req, res) => {
   if (req.method !== 'GET' || req.url !== '/health') { res.writeHead(404); res.end(); return; }
   // A healthy WebSocket must not be marked down merely because history reconciliation is rate-limited.
@@ -505,7 +523,13 @@ const server = createServer((req, res) => {
     subscriptions: subscription.state.acknowledgedWallets, reconnects: subscription.state.reconnects,
     lastDisconnectReason: subscription.state.lastDisconnectReason, lastConnectedAt: subscription.state.lastConnectedAt,
     skippedNonSwapLogs: subscription.state.skippedNonSwapLogs, observedTradeSignatures: subscription.state.observedTradeSignatures,
-    queued: queue.size, dropped: queue.dropped, lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt }));
+    callerWebSocket: Object.fromEntries(Object.keys(ECHO_WALLETS).map(wallet => [ECHO_WALLETS[wallet], {
+      notifications: subscription.state.walletNotifications[wallet] ?? 0,
+      prefilterSkipped: subscription.state.walletPrefilterSkipped[wallet] ?? 0,
+      forwardedToQueueCallback: subscription.state.walletQueued[wallet] ?? 0
+    }])),
+    queued: queue.size, dropped: queue.dropped, lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt,
+     shadowLatency:echoShadowLatency.summary() }));
 });
 server.listen(config.port, '0.0.0.0', () => console.log('[Echo] Alert-only watcher started; Pump/PumpSwap/Jupiter BUY routes; live buying OFF.'));
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => {

@@ -1,4 +1,6 @@
 import { extractJupiterRoutedEchoBuys } from '../src/echo/jupiterRouteSignals.js';
+import { extractRpcEchoSignals, classifyEchoRejection } from '../src/echo/rpcSignals.js';
+import { extractPumpAppRoutedEchoBuys } from '../src/echo/pumpAppRouteSignals.js';
 import bs58 from 'bs58';
 
 /**
@@ -6,7 +8,8 @@ import bs58 from 'bs58';
  * Never uses a private key, signs, submits, or changes subscriptions.
  * A public RPC may rate limit this call; absence of data means UNAVAILABLE.
  */
-const signature = '5W5d2xZT8K2QTmpixHviNrt5E38esAhqmjNVfqxmfm4Jz8RoEfwsW6efsEJ6ptxT1tj5sxeGFj8UicopFP5TT3Ed';
+const signature = process.env.ECHO_REPLAY_SIGNATURE?.trim() || '5W5d2xZT8K2QTmpixHviNrt5E38esAhqmjNVfqxmfm4Jz8RoEfwsW6efsEJ6ptxT1tj5sxeGFj8UicopFP5TT3Ed';
+if (!/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(signature)) throw Error('INVALID_REPLAY_SIGNATURE');
 const slingoor = '5YRgrP3mjGzrzirYYN5HAQH19cTYREYwGxW6XRJQUzij';
 for (const endpoint of ['https://api.mainnet-beta.solana.com','https://solana-rpc.publicnode.com']) {
   try {
@@ -34,10 +37,15 @@ for (const endpoint of ['https://api.mainnet-beta.solana.com','https://solana-rp
       }
     }
     const walletDeltas=[...deltas].map(([mint,v])=>({mint,change:Number(v.delta)/10**v.decimals}));
-    const recognizedBuys = extractJupiterRoutedEchoBuys(tx,signature,tx.blockTime + 1);
+    const direct = extractRpcEchoSignals(tx,signature,tx.blockTime + 1);
+    const jupiter = extractJupiterRoutedEchoBuys(tx,signature,tx.blockTime + 1);
+    const pumpApp = extractPumpAppRoutedEchoBuys(tx,signature,tx.blockTime + 1);
+    const recognizedBuys = direct.length ? direct : jupiter.length ? jupiter : pumpApp;
+    const rejection = recognizedBuys.length ? null : classifyEchoRejection(tx,signature,tx.blockTime+1);
     const classifications = recognizedBuys.map(s=>({side:s.side,mint:s.mint,inputMint:s.quoteMint,tokenAmount:s.tokenAmount,quoteAmount:s.quoteAmount,caller:s.caller}));
     console.log('SAMPLE_TX_PROBE',JSON.stringify({outcome:'FOUND',success:tx.meta?.err===null,
-      slot:tx.slot,blockTime:tx.blockTime,signers,programs,jupiterTags,walletDeltas,classifications}));
+      slot:tx.slot,blockTime:tx.blockTime,signers,programs,jupiterTags,walletDeltas,classifications,
+      classifierCounts:{direct:direct.length,jupiter:jupiter.length,pumpApp:pumpApp.length},rejection}));
     if (tx.meta?.err !== null || signers.indexOf(slingoor) === -1 || recognizedBuys.length !== 1 || recognizedBuys[0].side !== 'BUY' || recognizedBuys[0].caller !== 'WHALE · slingoor') {
       console.error('SAMPLE_TX_VALIDATION_FAILED');
       process.exit(1);
@@ -47,4 +55,10 @@ for (const endpoint of ['https://api.mainnet-beta.solana.com','https://solana-rp
 }
 
 console.error('SAMPLE_TX_UNAVAILABLE: no RPC endpoint returned the historical transaction');
+if(process.env.ECHO_REPLAY_UNAVAILABLE_NONBLOCKING==='true'){
+  // ONLY transient provider unavailability can be non-blocking. Any fetched
+  // transaction with an invalid classification exited with code 1 above.
+  console.warn('SAMPLE_TX_UNAVAILABLE_NONBLOCKING: no on-chain replay evidence from this CI run');
+  process.exit(0);
+}
 process.exit(1);

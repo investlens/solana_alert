@@ -27,3 +27,8 @@ test('unknown provider log formats fail open for audit', () => {
   assert.equal(mayContainWalletSwap([]), true);
   assert.equal(mayContainWalletSwap(['unexpected log format']), false);
 });
+
+test('Pump App routing enters full verification while gift transfers are filtered', () => {
+  assert.equal(mayContainWalletSwap(['Program 6Vo3245eszAb5wuqEMw8mGdbfRUdKbHhDHP5LcaGuTAB invoke [1]']), true);
+  assert.equal(mayContainWalletSwap(['Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]', 'Program log: Instruction: Transfer']), false);
+});
