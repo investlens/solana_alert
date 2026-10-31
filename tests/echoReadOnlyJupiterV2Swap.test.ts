@@ -73,6 +73,18 @@ test('wrong wallet payer, tampered quote and rejected RPC simulation fail closed
   assert.deepEqual(f.calls,['GET_ORDER']);
  }
  const f=fake({side:'BUY',simulationError:{InstructionError:[0,'Custom']}});
- assert.equal((await readOnlyEchoJupiterV2Swap(request('BUY'),f.fetcher)).ok,false);
+ const failed=await readOnlyEchoJupiterV2Swap(request('BUY'),f.fetcher);
+ assert.equal(failed.ok,false);
  assert.deepEqual(f.calls,['GET_ORDER','RPC_SIMULATE']);
+});
+test('insufficient funds preserves validated unsigned-order fingerprint without approving trade',async()=>{
+ const f=fake({side:'BUY',simulationError:{InstructionError:[0,'InsufficientFunds']}});
+ const result=await readOnlyEchoJupiterV2Swap(request('BUY'),f.fetcher);
+ assert.deepEqual(f.calls,['GET_ORDER','RPC_SIMULATE']);
+ assert.equal(result.ok,false);
+ if(!result.ok){
+   assert.equal(result.orderBuilt,true);
+   assert.match(result.unsignedTransactionSha256??'',/^[a-f0-9]{64}$/);
+   assert.equal(result.failureClass,'INSUFFICIENT_FUNDS_OR_TOKENS');
+ }
 });
