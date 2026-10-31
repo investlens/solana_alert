@@ -59,3 +59,15 @@ test('unknown wallet, malformed signature and invalid timing are rejected',()=>{
  assert.equal(t.summary().rejectedClock,1);
  assert.equal(t.summary().sampleCount,0);
 });
+
+test('Telegram retries never inflate verified swap latency samples',()=>{
+ const t=new EchoVerifiedBuyLatencyTracker(()=>ms+100);
+ t.websocketObserved(sig,SLINGOOR_WALLET);
+ const e={signature:sig,wallet:SLINGOOR_WALLET,
+  chainTimestampSec:ms/1000,fetchStartedAtMs:ms+200,verifiedAtMs:ms+400};
+ t.verifiedBuy(e);
+ t.verifiedBuy({...e,fetchStartedAtMs:ms+700,verifiedAtMs:ms+900});
+ assert.equal(t.summary().sampleCount,1);
+ assert.equal(t.summary().callers[0].websocketVerifiedBuys,1);
+ assert.equal(t.summary().callers[0].reconciliationVerifiedBuys,0);
+});
