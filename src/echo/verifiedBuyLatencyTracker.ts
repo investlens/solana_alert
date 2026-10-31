@@ -13,7 +13,7 @@ type Sample={caller:Caller;source:'WEBSOCKET'|'RECONCILIATION';
  chainToDetectionMs:number|null;queueWaitMs:number|null;
  verificationMs:number;chainToVerificationMs:number|null;
  staleAtVerification:boolean;quoteMs:null;reservationMs:null;decisionMs:null};
-const allowed=new Map([[SLINGOOR_WALLET,'Slingoor'],[CHAIRMAN_WALLET,'Chairman']] as const);
+const allowed:ReadonlyMap<string,Caller>=new Map<string,Caller>([[SLINGOOR_WALLET,'Slingoor'],[CHAIRMAN_WALLET,'Chairman']]);
 const SIGNATURE=/^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
 const MAX_PENDING=1024,MAX_SAMPLES=500;
 export const ECHO_SHADOW_LATENCY_EXECUTION_ENABLED=false as const;
@@ -23,9 +23,9 @@ export class EchoVerifiedBuyLatencyTracker {
  private rejectedClock=0;
  constructor(private readonly now:()=>number=Date.now){}
  websocketObserved(signature:string, wallet:string):void{
-  const caller=allowed.get(wallet as typeof SLINGOOR_WALLET);
-  if(!caller||!SIGNATURE.test(signature)||this.observations.has(signature))return;
-  this.observations.set(signature,{caller,receivedAtMs:this.now()});
+  const caller=allowed.get(wallet);
+  if(!caller||!SIGNATURE.test(signature)||this.observations.has(wallet+':'+signature))return;
+  this.observations.set(wallet+':'+signature,{caller,receivedAtMs:this.now()});
   if(this.observations.size>MAX_PENDING){
    const first=this.observations.keys().next().value;
    if(first)this.observations.delete(first);
@@ -34,10 +34,10 @@ export class EchoVerifiedBuyLatencyTracker {
  /** Must only be invoked after independent signer + spend/credit validation. */
  verifiedBuy(input:{signature:string;wallet:string;chainTimestampSec:number;
   fetchStartedAtMs:number;verifiedAtMs:number}):void{
-  const caller=allowed.get(input.wallet as typeof SLINGOOR_WALLET);
+  const caller=allowed.get(input.wallet);
   if(!caller||!SIGNATURE.test(input.signature))return;
-  const observation=this.observations.get(input.signature);
-  this.observations.delete(input.signature);
+  const observation=this.observations.get(input.wallet+':'+input.signature);
+  this.observations.delete(input.wallet+':'+input.signature);
   const chainAt=Math.round(input.chainTimestampSec*1000);
   const {fetchStartedAtMs:start,verifiedAtMs:end}=input;
   if(!Number.isSafeInteger(chainAt)||!Number.isSafeInteger(start)||
