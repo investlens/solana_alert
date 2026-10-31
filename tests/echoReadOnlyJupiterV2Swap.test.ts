@@ -26,7 +26,7 @@ function fake(s:Scenario){
    assert.equal(q.searchParams.get('outputMint'),output);
    assert.equal(q.searchParams.get('taker'),wallet);
    const order={inputMint:input,outputMint:output,inAmount:'50000000',outAmount:'1000000',
-    transaction:encoded,transactionVersion:0,signatureFeePayer:wallet,requestId:'request-1',...s.alter};
+    transaction:encoded,transactionVersion:0,signatureFeePayer:wallet,router:'metis',feeBps:30,requestId:'request-1',...s.alter};
    return {ok:true,json:async()=>order} as Response;
   }
   calls.push('RPC_SIMULATE');
@@ -63,6 +63,8 @@ test('wrong wallet payer, tampered quote and rejected RPC simulation fail closed
  for(const alteration of [
   {signatureFeePayer:Keypair.generate().publicKey.toBase58()},
   {inputMint:mint},
+  {router:'jupiterz'},
+  {feeBps:120},
   {inAmount:'1234'},
   {transaction:'junk'}
  ]){
