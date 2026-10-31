@@ -66,11 +66,17 @@ export async function readOnlyEchoJupiterV2Swap(
   const order=await response.json();
   // Jupiter /order may omit optional quote metadata. Do not falsely report
   // a broken route for a missing field, and never turn this into sign approval.
-  if(order.errorCode!==undefined)return {ok:false,
-    reason:'JUPITER_ORDER_BUILD_ERROR',
-    builderErrorCode:Number.isSafeInteger(order.errorCode)?order.errorCode:undefined,
-    builderRouter:['metis','jupiterz','dflow','okx'].includes(order.router)?order.router:undefined
-  };
+  if(order.errorCode!==undefined){
+    const router=['metis','jupiterz','dflow','okx'].includes(order.router)?order.router:undefined;
+    const code=Number.isSafeInteger(order.errorCode)?order.errorCode:undefined;
+    const failureClass=code===1&&router?'INSUFFICIENT_FUNDS_OR_TOKENS':
+      code===2&&router==='jupiterz'?'MISSING_TOKEN_ACCOUNT':
+      code===2&&router?'INSUFFICIENT_SOL_FOR_GAS':
+      code===3&&router==='jupiterz'?'QUOTE_TRANSACTION_BUILD_FAILED':
+      code===3&&router?'BELOW_GASLESS_MINIMUM':'JUPITER_BUILD_ERROR_UNKNOWN';
+    return {ok:false,reason:'JUPITER_ORDER_BUILD_ERROR',failureClass,
+      builderErrorCode:code,builderRouter:router};
+  }
   if(order.inputMint!==undefined&&order.inputMint!==inputMint)
    return {ok:false,reason:'JUPITER_INPUT_MINT_MISMATCH'};
   if(order.outputMint!==undefined&&order.outputMint!==outputMint)
