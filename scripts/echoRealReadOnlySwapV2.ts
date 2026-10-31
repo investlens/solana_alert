@@ -23,7 +23,8 @@ const output=result.ok?{
  quotedOutputRaw:result.quotedOutputRaw,simulationLogCount:result.logs.length,
  broadcast:false
 }:{outcome:'NOT_VERIFIED',side,reason:result.reason,
-  failureClass:result.failureClass??null,orderBuilt:result.orderBuilt??false,
+  failureClass:'failureClass' in result?result.failureClass??null:null,
+  orderBuilt:'orderBuilt' in result?result.orderBuilt??false:false,
   unsignedTransactionSha256:result.unsignedTransactionSha256??null,broadcast:false};
 process.stdout.write(JSON.stringify(output)+'\n');
 if(!result.ok)process.exitCode=1;
