@@ -132,3 +132,11 @@ test('Jupiter reports missing unsigned transaction precisely and does not simula
  assert.deepEqual(result,{ok:false,reason:'JUPITER_UNSIGNED_TRANSACTION_MISSING'});
  assert.deepEqual(f.calls,['GET_ORDER']);
 });
+
+test('Jupiter build errors expose only bounded numeric codes and known router names',async()=>{
+ const f=fake({side:'BUY',alter:{errorCode:42,router:'metis',transaction:''}});
+ const result=await readOnlyEchoJupiterV2Swap(request('BUY'),f.fetcher);
+ assert.deepEqual(result,{ok:false,reason:'JUPITER_ORDER_BUILD_ERROR',
+  builderErrorCode:42,builderRouter:'metis'});
+ assert.deepEqual(f.calls,['GET_ORDER']);
+});
