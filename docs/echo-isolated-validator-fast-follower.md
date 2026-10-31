@@ -66,3 +66,21 @@ Skipping a stale/high-price trade is preferable to blindly chasing it.
 This is a **shadow policy today**, not integrated permission to buy and not
 a measured latency result. Real BUY and manual SELL remain OFF until complete
 provider-backed and signer-side acceptance.
+
+## 3. Existing live-alert pipeline observations (reviewed 2026-10-31)
+
+The current draft `scripts/runEchoQuicknode.ts` uses a confirmed WebSocket
+subscription, persists signatures to `EchoQueue`, and processes one due
+signature per 250 ms interval. The processing callback fetches and classifies
+the transaction and currently awaits Telegram admin delivery before its
+research-event persistence. Slingoor is queue-prioritized.
+
+The future trading fast path **must fork from the independently verified BUY
+before Telegram delivery, Dexscreener enrichment or research polling**.
+Do not use the 60-second mark-price research tick as an executable fill quote.
+A production fast executor must have its own bounded queue, protected
+transaction-state journal, reliable signer and fail-closed price validation.
+
+The `fastFollowerShadowAdmission.ts` proof model is not yet wired to that
+live callback; doing so is a separate controlled integration task. Nothing
+in this branch is permission to place a mainnet BUY.
