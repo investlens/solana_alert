@@ -26,7 +26,7 @@ export function screenEchoAutoBuyShadow(i:EchoAutoBuyShadowInput):EchoAutoBuySha
  const deny=(reason:string):EchoAutoBuyShadowResult=>({candidate:false,executable:false,reason});
  if(i.killSwitch)return deny('KILL_SWITCH');
  const event=validateBuyAdmission(i.signal,i.executionWallet);
- if(!event.allowed)return deny(event.reason);
+ if('reason' in event)return deny(event.reason);
  if(![i.nowMs,i.verifiedAtMs,i.quoteAtMs].every(Number.isSafeInteger)||
     i.verifiedAtMs>i.nowMs||i.nowMs-i.verifiedAtMs>ECHO_AUTO_BUY_MAX_SIGNAL_AGE_MS)
   return deny('STALE_OR_UNVERIFIED_SIGNAL');
