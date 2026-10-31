@@ -59,3 +59,25 @@ test('fresh checkpoint stays pinned across pages until an old boundary is proven
  assert.equal(second.complete,true);
  assert.equal(second.state.checkpoint,'200');
 });
+
+test('time cutoff reports unverified historical checkpoint without claiming overlap', () => {
+ const page=Array.from({length:100},(_,i)=>({signature:String(500-i),blockTime:2000-i*12}));
+ const result=advanceFreshScan({checkpoint:'older-checkpoint',before:null,candidate:null},page,100,1200);
+ assert.equal(result.complete,false);
+ assert.equal(result.cutoffWithoutCheckpoint,true);
+ assert.equal(result.state.checkpoint,'older-checkpoint');
+ assert.equal(result.state.olderGapPending,true);
+ const recovered:FreshScanState=JSON.parse(JSON.stringify(result.state));
+ const nextPage=Array.from({length:100},(_,i)=>({signature:String(400-i),blockTime:800-i}));
+ const continued=advanceFreshScan(recovered,nextPage,100,1200);
+ assert.equal(continued.complete,false);
+ assert.equal(continued.state.checkpoint,'older-checkpoint');
+ assert.equal(continued.state.olderGapPending,true);
+ const finalPage=[{signature:'300',blockTime:700},{signature:'older-checkpoint',blockTime:699}];
+ const overlapCompleted=advanceFreshScan(continued.state,finalPage,100,1200);
+ assert.equal(overlapCompleted.complete,true);
+ assert.equal(overlapCompleted.state.checkpoint,'500');
+ assert.equal(overlapCompleted.state.olderGapPending,false);
+ const overlap=advanceFreshScan({checkpoint:'499',before:null,candidate:null},page,100,1200);
+ assert.equal(overlap.cutoffWithoutCheckpoint,false);
+});

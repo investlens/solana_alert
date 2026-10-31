@@ -18,7 +18,8 @@ import { EchoQueue } from '../src/echo/queue.js';
 import { startEchoSubscription } from '../src/echo/subscription.js';
 import { readEchoTransaction } from '../src/echo/readTransaction.js';
 import { advanceFreshScan, type FreshScanState } from '../src/echo/freshScan.js';
-import { echoFreshPageBudget } from '../src/echo/freshBudget.js';
+import { echoFreshScanPlan } from '../src/echo/freshBudget.js';
+import { echoRpc429CooldownMs } from '../src/echo/rpc429Policy.js';
 import { EchoVerifiedBuyLatencyTracker } from '../src/echo/verifiedBuyLatencyTracker.js';
 
 // Independent executable: no shared startup/config, database, bot polling,
@@ -64,18 +65,42 @@ let backoffUntil = 0, reconcileBackoffUntil = 0, lastRpcAt: number | null = null
 let fallbackBackoffUntil = 0, fallbackReconcileBackoffUntil = 0;
 let deliveryBackoffUntil = 0;
 let historyLimitStreak = 0, fallbackHistoryLimitStreak = 0;
+let readLimitStreak = 0, fallbackReadLimitStreak = 0;
 let lastErrorAt: number | null = null, lastReconcileAt: number | null = null, stopping = false;
 const diagnostics = { fetched: 0, signals: 0, delivered: 0, noSignal: 0, rpcFailures: 0,
   fallbackRpcUses: 0, deliveryFailures: 0 };
 const rejectionCounts: Partial<Record<EchoRejectReason, number>> = {};
+// Per-provider method counts are collected at existing call sites: no additional RPC.
+const rpcUsage = { primarySignatureReads:0, fallbackSignatureReads:0,
+  primaryTransactionReads:0, fallbackTransactionReads:0,
+  primaryHttp429s:0, fallbackHttp429s:0,
+  primaryJsonRateLimits:0, fallbackJsonRateLimits:0 };
+// Bounded read-only classification samples for independent on-chain audit.
+// No RPC requests, wallet secrets, signing or transaction broadcasts.
+const rejectionSampleBuckets = new Map<string, number>();
+function recordEchoRejectionSample(reason: EchoRejectReason, signature: string, tx: NonNullable<Awaited<ReturnType<typeof readEchoTransaction>>>) {
+  const hour = Math.floor(Date.now() / 3_600_000);
+  const bucket = `${hour}:${reason}`;
+  const used = rejectionSampleBuckets.get(bucket) ?? 0;
+  if (used >= 4) return;
+  rejectionSampleBuckets.set(bucket, used + 1);
+  if (rejectionSampleBuckets.size > 32) for (const key of rejectionSampleBuckets.keys()) {
+    if (!key.startsWith(String(hour) + ':')) rejectionSampleBuckets.delete(key);
+  }
+  const programs = [...new Set([
+    ...tx.transaction.message.instructions,
+    ...(tx.meta?.innerInstructions ?? []).flatMap(group => group.instructions)
+  ].map(ix => typeof ix.programId === 'string' ? ix.programId : ix.programId?.toBase58?.() ?? ''))].slice(0, 12);
+  console.log('[Echo] CLASSIFICATION_REJECTION_SAMPLE', JSON.stringify({
+    signature, reason, blockTime: tx.blockTime, programs
+  }));
+}
 // No extra provider calls, signing, or trading; live verified BUY timing only.
 const echoShadowLatency = new EchoVerifiedBuyLatencyTracker();
 function historyRateLimited(retryHeader: string | null, fallback = false) {
   if (fallback) fallbackHistoryLimitStreak++; else historyLimitStreak++;
   const streak = fallback ? fallbackHistoryLimitStreak : historyLimitStreak;
-  const retry = retryHeader == null ? 0 : Number(retryHeader);
-  const exponential = Math.min(900_000, 60_000 * 2 ** Math.min(4, streak - 1));
-  const until = Date.now() + Math.min(900_000, Math.max(exponential, Number.isFinite(retry) ? retry * 1000 : 0));
+  const until = Date.now() + echoRpc429CooldownMs(streak, retryHeader);
   if (fallback) fallbackReconcileBackoffUntil = until;
   else reconcileBackoffUntil = until;
 }
@@ -96,17 +121,23 @@ async function rpc(method: string, params: unknown[] = [], forceFallback = false
   const useBackup = forceFallback || (!primaryReady && backupReady);
   if (useBackup ? !backupReady : !primaryReady) throw new Error('Echo RPC backing off');
   const endpoint = useBackup ? config.fallbackRpcUrl! : config.rpcUrl;
+  if (method === 'getSignaturesForAddress') {
+    if (useBackup) rpcUsage.fallbackSignatureReads++; else rpcUsage.primarySignatureReads++;
+  } else if (method === 'getTransaction') {
+    if (useBackup) rpcUsage.fallbackTransactionReads++; else rpcUsage.primaryTransactionReads++;
+  }
   try {
     const response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: AbortSignal.timeout(8_000) });
     if (response.status === 429) {
+      if (useBackup) rpcUsage.fallbackHttp429s++; else rpcUsage.primaryHttp429s++;
       if (method === 'getSignaturesForAddress') historyRateLimited(response.headers.get('retry-after'), useBackup);
       else {
-        const header = response.headers.get('retry-after');
-        const seconds = header === null ? 60 : Number(header);
-        const retryMs = Math.min(300_000, Math.max(30_000, Number.isFinite(seconds) ? seconds * 1000 : 60_000));
-        if (useBackup) fallbackBackoffUntil = Date.now() + retryMs;
-        else backoffUntil = Date.now() + retryMs;
+        if (useBackup) fallbackReadLimitStreak++; else readLimitStreak++;
+        const streak = useBackup ? fallbackReadLimitStreak : readLimitStreak;
+        const until = Date.now() + echoRpc429CooldownMs(streak, response.headers.get('retry-after'));
+        if (useBackup) fallbackBackoffUntil = until;
+        else backoffUntil = until;
       }
     }
     if (!response.ok) {
@@ -117,9 +148,14 @@ async function rpc(method: string, params: unknown[] = [], forceFallback = false
     const data = await response.json();
     if (data.error && (data.error.code === 429 || data.error.code === -32005 ||
         /rate.?limit|credits.*exceed/i.test(String(data.error.message)))) {
+      if (useBackup) rpcUsage.fallbackJsonRateLimits++; else rpcUsage.primaryJsonRateLimits++;
       if (method === 'getSignaturesForAddress') historyRateLimited(null, useBackup);
-      else if (useBackup) fallbackBackoffUntil = Date.now() + 60_000;
-      else backoffUntil = Date.now() + 60_000;
+      else {
+        if (useBackup) fallbackReadLimitStreak++; else readLimitStreak++;
+        const until = Date.now() + echoRpc429CooldownMs(useBackup ? fallbackReadLimitStreak : readLimitStreak, null);
+        if (useBackup) fallbackBackoffUntil = until;
+        else backoffUntil = until;
+      }
     }
     if (data.error || !Object.prototype.hasOwnProperty.call(data, 'result')) {
       console.warn('[Echo] RPC_RESPONSE_FAILURE', { method,
@@ -130,6 +166,10 @@ async function rpc(method: string, params: unknown[] = [], forceFallback = false
     if (method === 'getSignaturesForAddress') {
       if (useBackup) { fallbackHistoryLimitStreak = 0; fallbackReconcileBackoffUntil = 0; }
       else { historyLimitStreak = 0; reconcileBackoffUntil = 0; }
+    }
+    if (method !== 'getSignaturesForAddress') {
+      if (useBackup) { fallbackReadLimitStreak = 0; fallbackBackoffUntil = 0; }
+      else { readLimitStreak = 0; backoffUntil = 0; }
     }
     if (useBackup) diagnostics.fallbackRpcUses++;
     lastRpcAt = Date.now();
@@ -287,7 +327,7 @@ const queue = new EchoQueue(async signature => {
   const signals = directSignals.length ? directSignals : jupiterSignals.length ? jupiterSignals
     : extractPumpAppRoutedEchoBuys(tx, signature, Date.now() / 1000);
   diagnostics.signals += signals.length;
-  if (!signals.length) { diagnostics.noSignal++; const reason = classifyEchoRejection(tx, signature, Date.now() / 1000); rejectionCounts[reason] = (rejectionCounts[reason] ?? 0) + 1; }
+  if (!signals.length) { diagnostics.noSignal++; const reason = classifyEchoRejection(tx, signature, Date.now() / 1000); rejectionCounts[reason] = (rejectionCounts[reason] ?? 0) + 1; recordEchoRejectionSample(reason, signature, tx); }
   for (const signal of signals) {
     // User requested only confirmed BUY notifications, never incoming transfers or SELLs.
     if (signal.side !== 'BUY' || store.has(signal.id)) continue;
@@ -363,7 +403,8 @@ try {
   for (const [wallet, state] of saved.cursors) {
     if (!(wallet in ECHO_WALLETS) || !state || typeof state !== 'object' ||
       !['checkpoint','before','candidate'].every(k => state[k] === null ||
-        (typeof state[k] === 'string' && /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(state[k]))))
+        (typeof state[k] === 'string' && /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(state[k]))) ||
+      (state.olderGapPending !== undefined && typeof state.olderGapPending !== 'boolean'))
       throw Error('Invalid fresh cursor');
     freshCursors.set(wallet, state);
   }
@@ -401,21 +442,26 @@ async function reconcile() {
         if (!Array.isArray(newest)) throw Error('Echo newest signature probe unavailable');
         headRows = newest;
         for (const row of [...newest].reverse()) if (row.err == null &&
-          Number.isFinite(row.blockTime) && row.blockTime >= cutoff &&
+          (!Number.isFinite(row.blockTime) || row.blockTime >= cutoff) &&
           /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') &&
           !store.has(`tx:${row.signature}`)) { if (!queue.add(row.signature)) throw Error('Echo queue full: cursor not advanced'); }
       }
-      for (let page = 0; page < echoFreshPageBudget(Boolean(fresh.before), queue.size) && !freshComplete; page++) {
+      const freshPlan = echoFreshScanPlan(ECHO_WALLETS[wallet] === 'WHALE · slingoor',Boolean(fresh.before),queue.size,Boolean(fresh.olderGapPending));
+      for (let page = 0; page < freshPlan.maxPages && !freshComplete; page++) {
         if (stopping || !historyRpcAvailable() || queue.size > 64) break;
         const rows = await rpc('getSignaturesForAddress', [wallet,
-          { limit: 100, commitment: 'confirmed', ...(fresh.before ? { before: fresh.before } : {}) }]);
+          { limit: freshPlan.pageLimit, commitment: 'confirmed', ...(fresh.before ? { before: fresh.before } : {}) }]);
         if (!Array.isArray(rows)) throw Error('Echo fresh signature page unavailable');
         freshPagesScanned++;
         if (rows.length && Number.isFinite(rows[rows.length - 1]?.blockTime)) freshOldestBlockTime = rows[rows.length - 1].blockTime;
         if (page === 0 && !headRows.length) headRows = rows;
-        const progress = advanceFreshScan(fresh, rows, 100, cutoff);
+        const progress = advanceFreshScan(fresh, rows, freshPlan.pageLimit, cutoff);
+        if (progress.cutoffWithoutCheckpoint && !fresh.olderGapPending) console.warn('[Echo] FRESH_CHECKPOINT_NOT_REACHED', {
+          caller: ECHO_WALLETS[wallet], scannedWithinLiveWindow: true,
+          olderCoverageUnverified: true, reason: 'cutoff-before-previous-checkpoint'
+        });
         for (const row of [...progress.scanned].reverse()) if (row.err == null &&
-          Number.isFinite(row.blockTime) && row.blockTime! >= cutoff &&
+          (!Number.isFinite(row.blockTime) || row.blockTime! >= cutoff) &&
           /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') &&
           !store.has(`tx:${row.signature}`)) { if (!queue.add(row.signature!)) throw Error('Echo queue full: fresh cursor not advanced'); }
         fresh = progress.state;
@@ -431,7 +477,8 @@ async function reconcile() {
       if (!freshComplete) {
         console.log('[Echo] COVERAGE_PROGRESS', {
           caller: ECHO_WALLETS[wallet], freshComplete: false, historyComplete: false,
-          freshPagesScanned, historyPagesScanned: 0, freshOldestBlockTime,
+          freshPagesScanned, freshPageLimit: freshPlan.pageLimit, olderGapPending: Boolean(fresh.olderGapPending),
+          historyPagesScanned: 0, freshOldestBlockTime,
           historyOldestBlockTime: null, freshCursorAdvanced: freshCursorBeforePass !== fresh.before,
           historyCursorAdvanced: false, freshPending: fresh.before !== null,
           historyPending: historyCursors.has(wallet), archiveDeferredForFresh: true
@@ -454,7 +501,7 @@ async function reconcile() {
         if (!Array.isArray(rows)) throw new Error('Echo signature list unavailable');
         historyPagesScanned++;
         if (rows.length && Number.isFinite(rows[rows.length - 1]?.blockTime)) historyOldestBlockTime = rows[rows.length - 1].blockTime;
-        for (const row of [...rows].reverse()) if (row.err == null && Number.isFinite(row.blockTime) && row.blockTime >= cutoff &&
+        for (const row of [...rows].reverse()) if (row.err == null && (!Number.isFinite(row.blockTime) || row.blockTime >= cutoff) &&
           /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') && !store.has(`tx:${row.signature}`)) { if (!queue.add(row.signature)) throw Error('Echo history queue full: cursor not advanced'); }
         const oldest = rows[rows.length - 1];
         if (rows.length < 100 || (Number.isFinite(oldest?.blockTime) && oldest.blockTime < cutoff)) {
@@ -470,7 +517,8 @@ async function reconcile() {
       }
       console.log('[Echo] COVERAGE_PROGRESS', {
         caller: ECHO_WALLETS[wallet], freshComplete, historyComplete: complete,
-        freshPagesScanned, historyPagesScanned, freshOldestBlockTime, historyOldestBlockTime,
+        freshPagesScanned, freshPageLimit: freshPlan.pageLimit, olderGapPending: Boolean(fresh.olderGapPending),
+        historyPagesScanned, freshOldestBlockTime, historyOldestBlockTime,
         freshCursorAdvanced: freshCursorBeforePass !== fresh.before,
         historyCursorAdvanced: historyCursorBeforePass !== (historyCursors.get(wallet) ?? null),
         freshPending: fresh.before !== null, historyPending: historyCursors.has(wallet)
@@ -505,7 +553,7 @@ const heartbeat = setInterval(() => console.log('[Echo] HEALTH', { subscriptions
   lastDisconnectReason: subscription.state.lastDisconnectReason, lastConnectedAt: subscription.state.lastConnectedAt,
   activeWebSocketProvider: subscription.state.activeProvider,
   skippedNonSwapLogs: subscription.state.skippedNonSwapLogs, observedTradeSignatures: subscription.state.observedTradeSignatures, queued: queue.size, dropped: queue.dropped,
-  lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt, ...diagnostics, promotions: promotionsReady ? promotions.summary() : {enabled:false}, research: researchReady ? JSON.stringify(research.summary()) : {enabled:false},tiers:tiers.summary(), audit:echoAuditOutbox?.summary()??{enabled:false}, shadowLatency:echoShadowLatency.summary(), rejectionCounts }), 60_000);
+  lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt, ...diagnostics, rpcUsage, promotions: promotionsReady ? promotions.summary() : {enabled:false}, research: researchReady ? JSON.stringify(research.summary()) : {enabled:false},tiers:tiers.summary(), audit:echoAuditOutbox?.summary()??{enabled:false}, shadowLatency:echoShadowLatency.summary(), rejectionCounts }), 60_000);
 const server = createServer((req, res) => {
   if (req.method !== 'GET' || req.url !== '/health') { res.writeHead(404); res.end(); return; }
   // A healthy WebSocket must not be marked down merely because history reconciliation is rate-limited.

@@ -1,0 +1,24 @@
+name: Echo public RPC pagination shadow benchmark
+on:
+  push:
+    branches:
+      - fix/echo-coverage-rpc-acceptance-20261031
+    paths:
+      - scripts/echoPublicSlingoorPaginationBench.ts
+      - .github/workflows/echo-public-pagination-bench.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pagination:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Compare bounded 100 vs 1000 real Slingoor signature pages (max four public reads)
+        run: npx tsx scripts/echoPublicSlingoorPaginationBench.ts
