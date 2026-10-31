@@ -25,6 +25,9 @@ const output=result.ok?{
 }:{outcome:'NOT_VERIFIED',side,reason:result.reason,
   failureClass:'failureClass' in result?result.failureClass??null:null,
   orderBuilt:'orderBuilt' in result?result.orderBuilt??false:false,
-  unsignedTransactionSha256:result.unsignedTransactionSha256??null,broadcast:false};
+  unsignedTransactionSha256:result.unsignedTransactionSha256??null,
+  builderErrorCode:'builderErrorCode' in result?result.builderErrorCode??null:null,
+  builderRouter:'builderRouter' in result?result.builderRouter??null:null,
+  broadcast:false};
 process.stdout.write(JSON.stringify(output)+'\n');
 if(!result.ok)process.exitCode=1;
