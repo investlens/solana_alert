@@ -44,7 +44,7 @@ export async function readOnlyEchoJupiterV2Swap(
     !Number.isSafeInteger(Number(r.amountRaw))||
     (r.side==='BUY'&&Number(r.amountRaw)>MAX_PREVIEW_INPUT_LAMPORTS)||
     !Number.isSafeInteger(r.maxSlippageBps)||r.maxSlippageBps<1||
-    r.maxSlippageBps>300||!r.jupiterApiKey?.trim())
+    r.maxSlippageBps>300)
   return {ok:false,reason:'INVALID_PREVIEW_REQUEST'};
  const inputMint=r.side==='BUY'?SOL:r.mint;
  const outputMint=r.side==='BUY'?r.mint:SOL;
@@ -57,7 +57,7 @@ export async function readOnlyEchoJupiterV2Swap(
   url.searchParams.set('slippageBps',String(r.maxSlippageBps));
   url.searchParams.set('maxSupportedTransactionVersion','0');
   const response=await fetcher(url.toString(),{
-   method:'GET',headers:{'x-api-key':r.jupiterApiKey,accept:'application/json'},
+   method:'GET',headers:r.jupiterApiKey?.trim()?{'x-api-key':r.jupiterApiKey.trim(),accept:'application/json'}:{accept:'application/json'},
    signal:AbortSignal.timeout(5000)
   });
   if(!response.ok)return {ok:false,reason:
