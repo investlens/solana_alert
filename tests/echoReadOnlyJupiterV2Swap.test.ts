@@ -137,6 +137,27 @@ test('Jupiter build errors expose only bounded numeric codes and known router na
  const f=fake({side:'BUY',alter:{errorCode:42,router:'metis',transaction:''}});
  const result=await readOnlyEchoJupiterV2Swap(request('BUY'),f.fetcher);
  assert.deepEqual(result,{ok:false,reason:'JUPITER_ORDER_BUILD_ERROR',
-  builderErrorCode:42,builderRouter:'metis'});
+  failureClass:'JUPITER_BUILD_ERROR_UNKNOWN',builderErrorCode:42,builderRouter:'metis'});
  assert.deepEqual(f.calls,['GET_ORDER']);
+});
+
+test('live Jupiter OKX and Dflow error 1 means input-token balance unavailable',async()=>{
+ for(const router of ['okx','dflow'] as const){
+  const f=fake({side:'BUY',alter:{router,errorCode:1,transaction:''}});
+  const result=await readOnlyEchoJupiterV2Swap(request('BUY'),f.fetcher);
+  assert.deepEqual(result,{ok:false,reason:'JUPITER_ORDER_BUILD_ERROR',
+   failureClass:'INSUFFICIENT_FUNDS_OR_TOKENS',builderErrorCode:1,builderRouter:router});
+  assert.deepEqual(f.calls,['GET_ORDER']);
+ }
+});
+test('Jupiter router-specific code 2 distinguishes gas and token account failures',async()=>{
+ for(const [router,expected] of [
+  ['metis','INSUFFICIENT_SOL_FOR_GAS'],['jupiterz','MISSING_TOKEN_ACCOUNT']
+ ] as const){
+  const f=fake({side:'BUY',alter:{router,errorCode:2,transaction:''}});
+  const result=await readOnlyEchoJupiterV2Swap(request('BUY'),f.fetcher);
+  assert.equal(result.ok,false);
+  if(!result.ok)assert.equal(result.failureClass,expected);
+  assert.deepEqual(f.calls,['GET_ORDER']);
+ }
 });
