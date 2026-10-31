@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {simulateEchoUnsignedTransaction,ECHO_SEND_TRANSACTION_ENABLED} from '../src/echo/readOnlySimulation.js';
 
 const input='A'.repeat(200);
-const rpc='https://example-rpc.invalid';
+const rpc='https://example-rpc.invalid/';
 async function check(value:unknown){
  const calls:string[]=[];
  const post=(async(url:string,options:RequestInit)=>{
