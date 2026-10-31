@@ -106,3 +106,16 @@ test('Jupiter API authentication and rate limiting are diagnosed without RPC bro
   assert.equal(calls,1);
  }
 });
+
+test('keyless read-only Jupiter preview omits x-api-key and fails clearly if unauthorized',async()=>{
+ let called=0;
+ const fetcher=(async(_url:string,options?:RequestInit)=>{
+  called++;
+  assert.equal((options?.headers as Record<string,string>)['x-api-key'],undefined);
+  return new Response('',{status:401});
+ }) as typeof fetch;
+ const result=await readOnlyEchoJupiterV2Swap({...request('BUY'),jupiterApiKey:''},fetcher);
+ assert.equal(result.ok,false);
+ assert.equal(result.reason,'JUPITER_API_AUTH_REJECTED');
+ assert.equal(called,1);
+});
