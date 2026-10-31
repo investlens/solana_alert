@@ -16,5 +16,7 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci --ignore-scripts
-      - name: Bounded read-only latest Slingoor signature head from public RPC
-        run: npx tsx scripts/echoOneShotRecentSlingoorSignatures.ts
+      - name: Verify user-supplied Slingoor transaction via read-only public RPC
+        env:
+          ECHO_REPLAY_SIGNATURE: 5BW5sKmZRmYtrDPp4aGmgCR566TGxyL7NMzdAJQQ3E1nAs5KGVWpv9P9hfmNmQa6dJKNqLVMsfUMAi3ge7tGn1UL
+        run: npx tsx scripts/echoInspectSampleTx.ts
