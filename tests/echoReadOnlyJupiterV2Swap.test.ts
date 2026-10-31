@@ -88,3 +88,21 @@ test('insufficient funds preserves validated unsigned-order fingerprint without 
    assert.equal(result.failureClass,'INSUFFICIENT_FUNDS_OR_TOKENS');
  }
 });
+
+test('Jupiter API authentication and rate limiting are diagnosed without RPC broadcast',async()=>{
+ for(const [status,expected] of [
+  [401,'JUPITER_API_AUTH_REJECTED'],
+  [403,'JUPITER_API_AUTH_REJECTED'],
+  [429,'JUPITER_RATE_LIMITED']
+ ] as const){
+  let calls=0;
+  const fetcher=(async()=>{
+    calls++;
+    return new Response('',{status});
+  }) as typeof fetch;
+  const result=await readOnlyEchoJupiterV2Swap(request('BUY'),fetcher);
+  assert.equal(result.ok,false);
+  assert.equal(result.reason,expected);
+  assert.equal(calls,1);
+ }
+});
