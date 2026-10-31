@@ -22,6 +22,7 @@ const output=result.ok?{
  outcome:'SIMULATED',side,transactionSha256:result.unsignedTransactionSha256,
  quotedOutputRaw:result.quotedOutputRaw,simulationLogCount:result.logs.length,
  broadcast:false
-}:{outcome:'NOT_VERIFIED',side,reason:result.reason,broadcast:false};
+}:{outcome:'NOT_VERIFIED',side,reason:result.reason,
+  failureClass:result.failureClass??null,broadcast:false};
 process.stdout.write(JSON.stringify(output)+'\n');
 if(!result.ok)process.exitCode=1;
