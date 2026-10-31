@@ -23,6 +23,27 @@ for (const endpoint of ['https://api.mainnet-beta.solana.com','https://solana-rp
     const data=await response.json();
     const tx=data.result;
     if(!tx){console.log('SAMPLE_TX_PROBE',JSON.stringify({rpcHost:new URL(endpoint).hostname,code:data.error?.code??null,outcome:'UNAVAILABLE'}));continue;}
+    if(tx.transaction?.signatures?.[0]!==signature){
+      console.error('SAMPLE_TX_SIGNATURE_MISMATCH');process.exit(1);
+    }
+    const walletKey='5YRgrP3mjGzrzirYYN5HAQH19cTYREYwGxW6XRJQUzij';
+    const signerIndex=(tx.transaction.message.accountKeys??[]).findIndex((x:any)=>x.pubkey===walletKey);
+    const routeInstructions=(tx.transaction.message.instructions??[]).filter((ix:any)=>ix.programId==='6Vo3245eszAb5wuqEMw8mGdbfRUdKbHhDHP5LcaGuTAB');
+    const routeDetails=routeInstructions.map((ix:any)=>{
+      const bytes=typeof ix.data==='string'?bs58.decode(ix.data):new Uint8Array();
+      return {length:bytes.length,tag:Buffer.from(bytes.subarray(0,8)).toString('hex'),
+        accounts:ix.accounts?.length??0};
+    });
+    const signerPre=signerIndex<0?null:tx.meta?.preBalances?.[signerIndex];
+    const signerPost=signerIndex<0?null:tx.meta?.postBalances?.[signerIndex];
+    console.log('PUMP_APP_DIAGNOSTIC',JSON.stringify({
+      requestedSignature:signature,returnedSignature:tx.transaction.signatures[0],
+      slot:tx.slot,blockTime:tx.blockTime,signerIndex,routeDetails,
+      lamportChange:signerPre==null||signerPost==null?null:signerPost-signerPre,
+      fee:tx.meta?.fee??null,innerPrograms:[...new Set((tx.meta?.innerInstructions??[])
+        .flatMap((group:any)=>group.instructions??[]).map((ix:any)=>ix.programId))],
+      innerInstructionCount:(tx.meta?.innerInstructions??[]).reduce((sum:number,group:any)=>sum+(group.instructions?.length??0),0)
+    }));
     const accounts=tx.transaction?.message?.accountKeys??[];
     const signers=accounts.filter((a:any)=>a.signer).map((a:any)=>a.pubkey);
     const instructions = tx.transaction?.message?.instructions ?? [];
