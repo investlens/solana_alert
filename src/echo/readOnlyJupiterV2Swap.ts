@@ -8,6 +8,7 @@
 import {VersionedTransaction,PublicKey,ComputeBudgetProgram,SystemProgram} from '@solana/web3.js';
 import {createHash} from 'node:crypto';
 import {simulateEchoUnsignedTransaction} from './readOnlySimulation.js';
+import {auditEchoUnsignedSwap,type EchoUnsignedAudit} from './unsignedSwapAudit.js';
 
 export const ECHO_JUPITER_V2_READ_ONLY=true as const;
 export const ECHO_JUPITER_V2_EXECUTION_ENABLED=false as const;
@@ -34,7 +35,7 @@ export type EchoJupiterV2PreviewRequest={
 export type EchoJupiterV2PreviewResult=
  | {ok:true;reason:'RPC_SIMULATION_SUCCEEDED';side:'BUY'|'SELL';
     inputMint:string;outputMint:string;inputRaw:string;quotedOutputRaw:string;
-    unsignedTransactionSha256:string;requestId:string;logs:string[]}
+    unsignedTransactionSha256:string;requestId:string;logs:string[];unsignedAudit:EchoUnsignedAudit}
  | {ok:false;reason:string;failureClass?:string;orderBuilt?:boolean;unsignedTransactionSha256?:string;builderErrorCode?:number;builderRouter?:string};
 export async function readOnlyEchoJupiterV2Swap(
  r:EchoJupiterV2PreviewRequest,fetcher:typeof fetch=fetch
@@ -119,6 +120,8 @@ export async function readOnlyEchoJupiterV2Swap(
     return {ok:false,reason:'UNREVIEWED_DIRECT_SOL_TRANSFER'};
   }
   if(swapInstructions!==1)return {ok:false,reason:'NO_UNIQUE_JUPITER_SWAP_INSTRUCTION'};
+  const accountAudit=auditEchoUnsignedSwap(encoded,r.publicWallet);
+  if(!accountAudit.ok)return {ok:false,reason:accountAudit.reason};
   const orderSha256=createHash('sha256').update(bytes).digest('hex');
   const result=await simulateEchoUnsignedTransaction(r.rpcUrl,encoded,fetcher);
   if(!result.ok)return {ok:false,reason:result.reason,
@@ -126,6 +129,6 @@ export async function readOnlyEchoJupiterV2Swap(
   return {ok:true,reason:'RPC_SIMULATION_SUCCEEDED',side:r.side,
    inputMint,outputMint,inputRaw:r.amountRaw,quotedOutputRaw:order.outAmount,
    unsignedTransactionSha256:orderSha256,
-   requestId:order.requestId,logs:result.logs??[]};
+   requestId:order.requestId,logs:result.logs??[],unsignedAudit:accountAudit.audit};
  }catch{return {ok:false,reason:'ORDER_OR_SIMULATION_FAILED'};}
 }
