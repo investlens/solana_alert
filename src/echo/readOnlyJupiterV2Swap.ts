@@ -35,7 +35,7 @@ export type EchoJupiterV2PreviewResult=
  | {ok:true;reason:'RPC_SIMULATION_SUCCEEDED';side:'BUY'|'SELL';
     inputMint:string;outputMint:string;inputRaw:string;quotedOutputRaw:string;
     unsignedTransactionSha256:string;requestId:string;logs:string[]}
- | {ok:false;reason:string};
+ | {ok:false;reason:string;failureClass?:string};
 export async function readOnlyEchoJupiterV2Swap(
  r:EchoJupiterV2PreviewRequest,fetcher:typeof fetch=fetch
 ):Promise<EchoJupiterV2PreviewResult>{
@@ -60,7 +60,9 @@ export async function readOnlyEchoJupiterV2Swap(
    method:'GET',headers:{'x-api-key':r.jupiterApiKey,accept:'application/json'},
    signal:AbortSignal.timeout(5000)
   });
-  if(!response.ok)return {ok:false,reason:'JUPITER_ORDER_UNAVAILABLE'};
+  if(!response.ok)return {ok:false,reason:
+   response.status===401||response.status===403?'JUPITER_API_AUTH_REJECTED':
+   response.status===429?'JUPITER_RATE_LIMITED':'JUPITER_ORDER_UNAVAILABLE'};
   const order=await response.json();
   if(order.inputMint!==inputMint||order.outputMint!==outputMint||
      order.inAmount!==r.amountRaw||!/^[1-9][0-9]*$/.test(order.outAmount??'')||
@@ -96,7 +98,7 @@ export async function readOnlyEchoJupiterV2Swap(
   }
   if(swapInstructions!==1)return {ok:false,reason:'NO_UNIQUE_JUPITER_SWAP_INSTRUCTION'};
   const result=await simulateEchoUnsignedTransaction(r.rpcUrl,encoded,fetcher);
-  if(!result.ok)return {ok:false,reason:result.reason};
+  if(!result.ok)return {ok:false,reason:result.reason,failureClass:result.failureClass};
   return {ok:true,reason:'RPC_SIMULATION_SUCCEEDED',side:r.side,
    inputMint,outputMint,inputRaw:r.amountRaw,quotedOutputRaw:order.outAmount,
    unsignedTransactionSha256:createHash('sha256').update(bytes).digest('hex'),
