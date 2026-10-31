@@ -34,6 +34,9 @@ export function screenEchoFastFollower(c:EchoFastFollowerCandidate):EchoFastFoll
   return reject('UNVERIFIED_CALLER_SWAP');
  if(!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(c.callerMint)||
     c.callerMint!==c.quoteMint)return reject('MINT_MISMATCH');
+ const wrappedSol='So11111111111111111111111111111111111111112';
+ if(c.callerInputMint!==wrappedSol||c.ourInputMint!==wrappedSol)
+  return reject('NON_SOL_PRICE_BASIS');
  if(c.alreadyReserved)return reject('DUPLICATE_TOKEN');
  if(!Number.isSafeInteger(c.nowMs)||!Number.isSafeInteger(c.callerBoughtAtMs)||
     !Number.isSafeInteger(c.detectionAtMs)||!Number.isSafeInteger(c.quoteObservedAtMs)||
