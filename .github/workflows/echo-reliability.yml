@@ -52,3 +52,44 @@ jobs:
         run: npx tsx scripts/echoInspectSampleTx.ts
       - name: All repository tests
         run: npm test
+
+  echo-real-read-only-probe:
+    # One explicitly marked commit only. Never runs on ordinary pushes/PRs.
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[echo-mainnet-probe]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      ECHO_PREVIEW_WALLET: '8ndw7DJ6hyZBm1PD3JJMF8G4PD5CJhDCCUK13ECL2pgQ'
+      ECHO_PREVIEW_MINT: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
+      ECHO_PREVIEW_RPC_URL: 'https://api.mainnet-beta.solana.com'
+      ADMIN_TRADING_ENABLED: 'false'
+      AUTO_TRADE_MODE: paper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Mainnet Jupiter read-only BUY diagnostics
+        env:
+          ECHO_PREVIEW_SIDE: BUY
+          ECHO_PREVIEW_AMOUNT_RAW: '10000000'
+        shell: bash
+        run: |
+          set +e
+          npx tsx scripts/echoRealReadOnlySwapV2.ts
+          echo "BUY read-only diagnostic completed (failure means NOT VERIFIED, never a broadcast)"
+          exit 0
+      - name: Mainnet Jupiter read-only SELL diagnostics
+        env:
+          ECHO_PREVIEW_SIDE: SELL
+          ECHO_PREVIEW_AMOUNT_RAW: '10000'
+        shell: bash
+        run: |
+          set +e
+          npx tsx scripts/echoRealReadOnlySwapV2.ts
+          echo "SELL read-only diagnostic completed (failure means NOT VERIFIED, never a broadcast)"
+          exit 0
