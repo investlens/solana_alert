@@ -19,6 +19,7 @@ const MAX_PENDING=1024,MAX_SAMPLES=500;
 export const ECHO_SHADOW_LATENCY_EXECUTION_ENABLED=false as const;
 export class EchoVerifiedBuyLatencyTracker {
  private observations=new Map<string,Observation>();
+ private measuredKeys=new Set<string>();
  private samples:Sample[]=[];
  private rejectedClock=0;
  constructor(private readonly now:()=>number=Date.now){}
@@ -36,8 +37,15 @@ export class EchoVerifiedBuyLatencyTracker {
   fetchStartedAtMs:number;verifiedAtMs:number}):void{
   const caller=allowed.get(input.wallet);
   if(!caller||!SIGNATURE.test(input.signature))return;
-  const observation=this.observations.get(input.wallet+':'+input.signature);
-  this.observations.delete(input.wallet+':'+input.signature);
+  const key=input.wallet+':'+input.signature;
+  const observation=this.observations.get(key);
+  this.observations.delete(key);
+  if(this.measuredKeys.has(key))return;
+  this.measuredKeys.add(key);
+  if(this.measuredKeys.size>4096){
+   const first=this.measuredKeys.values().next().value;
+   if(first)this.measuredKeys.delete(first);
+  }
   const chainAt=Math.round(input.chainTimestampSec*1000);
   const {fetchStartedAtMs:start,verifiedAtMs:end}=input;
   if(!Number.isSafeInteger(chainAt)||!Number.isSafeInteger(start)||
