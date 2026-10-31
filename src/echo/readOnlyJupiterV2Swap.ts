@@ -35,7 +35,7 @@ export type EchoJupiterV2PreviewRequest={
 export type EchoJupiterV2PreviewResult=
  | {ok:true;reason:'RPC_SIMULATION_SUCCEEDED';side:'BUY'|'SELL';
     inputMint:string;outputMint:string;inputRaw:string;quotedOutputRaw:string;
-    unsignedTransactionSha256:string;requestId:string;logs:string[];unsignedAudit:EchoUnsignedAudit}
+    unsignedTransactionSha256:string;requestId:string;logs:string[];unsignedAudit?:EchoUnsignedAudit}
  | {ok:false;reason:string;failureClass?:string;orderBuilt?:boolean;unsignedTransactionSha256?:string;builderErrorCode?:number;builderRouter?:string};
 export async function readOnlyEchoJupiterV2Swap(
  r:EchoJupiterV2PreviewRequest,fetcher:typeof fetch=fetch
@@ -121,7 +121,7 @@ export async function readOnlyEchoJupiterV2Swap(
   }
   if(swapInstructions!==1)return {ok:false,reason:'NO_UNIQUE_JUPITER_SWAP_INSTRUCTION'};
   const accountAudit=auditEchoUnsignedSwap(encoded,r.publicWallet);
-  if(!accountAudit.ok)return {ok:false,reason:accountAudit.reason};
+  if('reason' in accountAudit)return {ok:false,reason:accountAudit.reason};
   const orderSha256=createHash('sha256').update(bytes).digest('hex');
   const result=await simulateEchoUnsignedTransaction(r.rpcUrl,encoded,fetcher);
   if(!result.ok)return {ok:false,reason:result.reason,
