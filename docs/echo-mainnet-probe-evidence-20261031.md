@@ -28,3 +28,17 @@ without a successful RPC simulation is NOT a pass.
 4. Dedicated signer design audit. No secrets or broadcasts in this phase.
 
 NO LIVE TRADING. No production database or Railway changes.
+
+## Run 2 — GitHub Actions #41192075761
+
+- BUY: `NOT_VERIFIED / JUPITER_ORDER_BUILD_ERROR`
+- SELL: `NOT_VERIFIED / JUPITER_ORDER_BUILD_ERROR`
+- Both requests returned a Jupiter /order error code, but previous diagnostics
+  did not retain numeric error metadata. No Solana simulation was attempted.
+- One final low-volume diagnostic reports only bounded numeric error code and
+  a whitelisted router identifier, never transaction or credential payloads.
+
+## Run 3
+
+Record the final result from the one-time CI probe before deciding whether
+additional Jupiter calls are justified. Keep live trading OFF.
