@@ -85,7 +85,7 @@ function recordEchoRejectionSample(reason: EchoRejectReason, signature: string, 
   const programs = [...new Set([
     ...tx.transaction.message.instructions,
     ...(tx.meta?.innerInstructions ?? []).flatMap(group => group.instructions)
-  ].map(ix => ix.programId.toBase58()))].slice(0, 12);
+  ].map(ix => typeof ix.programId === 'string' ? ix.programId : ix.programId?.toBase58?.() ?? ''))].slice(0, 12);
   console.log('[Echo] CLASSIFICATION_REJECTION_SAMPLE', JSON.stringify({
     signature, reason, blockTime: tx.blockTime, programs
   }));
