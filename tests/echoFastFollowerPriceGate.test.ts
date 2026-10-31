@@ -10,7 +10,7 @@ const candidate={
  quoteObservedAtMs:start+500,callerSpentLamports:'100000000',
  callerTokensReceivedRaw:'1000000000',
  ourInputLamports:'50000000',ourQuotedTokensOutRaw:'495000000',
- quoteSlippageBps:300,alreadyReserved:false
+ quoteSlippageBps:100,alreadyReserved:false
 };
 test('fresh verified caller BUY and not-chased $10 quote are shadow eligible',()=>{
  const result=screenEchoFastFollower(candidate);
@@ -20,12 +20,17 @@ test('fresh verified caller BUY and not-chased $10 quote are shadow eligible',()
   assert.equal(result.quoteAgeMs,100);
   assert.equal(result.signingApproved,false);
   assert.ok(result.priceMarkupBps>0&&result.priceMarkupBps<300);
+  assert.ok(result.worstCaseMarkupBps>result.priceMarkupBps&&result.worstCaseMarkupBps<=300);
  }
  assert.equal(ECHO_FAST_FOLLOWER_SIGNING_ENABLED,false);
 });
 test('price pump exceeding 3% is rejected, even when quote reports low slippage',()=>{
  const result=screenEchoFastFollower({...candidate,ourQuotedTokensOutRaw:'450000000',quoteSlippageBps:50});
- assert.deepEqual(result,{eligible:false,reason:'PRICE_ALREADY_RAN',signingApproved:false});
+ assert.deepEqual(result,{eligible:false,reason:'WORST_CASE_PRICE_ALREADY_RAN',signingApproved:false});
+});
+test('3% slippage plus 1% quote markup must fail total entry cap',()=>{
+ const result=screenEchoFastFollower({...candidate,quoteSlippageBps:300});
+ assert.deepEqual(result,{eligible:false,reason:'WORST_CASE_PRICE_ALREADY_RAN',signingApproved:false});
 });
 test('slow observation and old quote never chase stale caller buys',()=>{
  const old=screenEchoFastFollower({...candidate,nowMs:start+6000,quoteObservedAtMs:start+5900});
