@@ -41,17 +41,17 @@ export class EchoVerifiedBuyLatencyTracker {
   const observation=this.observations.get(key);
   this.observations.delete(key);
   if(this.measuredKeys.has(key))return;
-  this.measuredKeys.add(key);
-  if(this.measuredKeys.size>4096){
-   const first=this.measuredKeys.values().next().value;
-   if(first)this.measuredKeys.delete(first);
-  }
   const chainAt=Math.round(input.chainTimestampSec*1000);
   const {fetchStartedAtMs:start,verifiedAtMs:end}=input;
   if(!Number.isSafeInteger(chainAt)||!Number.isSafeInteger(start)||
     !Number.isSafeInteger(end)||chainAt<=0||start<0||end<start||
     (observation&&observation.receivedAtMs>end)){
    this.rejectedClock++;return;
+  }
+  this.measuredKeys.add(key);
+  if(this.measuredKeys.size>4096){
+   const first=this.measuredKeys.values().next().value;
+   if(first)this.measuredKeys.delete(first);
   }
   const received=observation?.receivedAtMs??null;
   // BlockTime has one-second precision and can be later than a websocket
