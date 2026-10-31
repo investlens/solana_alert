@@ -70,6 +70,11 @@ let lastErrorAt: number | null = null, lastReconcileAt: number | null = null, st
 const diagnostics = { fetched: 0, signals: 0, delivered: 0, noSignal: 0, rpcFailures: 0,
   fallbackRpcUses: 0, deliveryFailures: 0 };
 const rejectionCounts: Partial<Record<EchoRejectReason, number>> = {};
+// Per-provider method counts are collected at existing call sites: no additional RPC.
+const rpcUsage = { primarySignatureReads:0, fallbackSignatureReads:0,
+  primaryTransactionReads:0, fallbackTransactionReads:0,
+  primaryHttp429s:0, fallbackHttp429s:0,
+  primaryJsonRateLimits:0, fallbackJsonRateLimits:0 };
 // Bounded read-only classification samples for independent on-chain audit.
 // No RPC requests, wallet secrets, signing or transaction broadcasts.
 const rejectionSampleBuckets = new Map<string, number>();
@@ -116,10 +121,16 @@ async function rpc(method: string, params: unknown[] = [], forceFallback = false
   const useBackup = forceFallback || (!primaryReady && backupReady);
   if (useBackup ? !backupReady : !primaryReady) throw new Error('Echo RPC backing off');
   const endpoint = useBackup ? config.fallbackRpcUrl! : config.rpcUrl;
+  if (method === 'getSignaturesForAddress') {
+    if (useBackup) rpcUsage.fallbackSignatureReads++; else rpcUsage.primarySignatureReads++;
+  } else if (method === 'getTransaction') {
+    if (useBackup) rpcUsage.fallbackTransactionReads++; else rpcUsage.primaryTransactionReads++;
+  }
   try {
     const response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: AbortSignal.timeout(8_000) });
     if (response.status === 429) {
+      if (useBackup) rpcUsage.fallbackHttp429s++; else rpcUsage.primaryHttp429s++;
       if (method === 'getSignaturesForAddress') historyRateLimited(response.headers.get('retry-after'), useBackup);
       else {
         if (useBackup) fallbackReadLimitStreak++; else readLimitStreak++;
@@ -137,6 +148,7 @@ async function rpc(method: string, params: unknown[] = [], forceFallback = false
     const data = await response.json();
     if (data.error && (data.error.code === 429 || data.error.code === -32005 ||
         /rate.?limit|credits.*exceed/i.test(String(data.error.message)))) {
+      if (useBackup) rpcUsage.fallbackJsonRateLimits++; else rpcUsage.primaryJsonRateLimits++;
       if (method === 'getSignaturesForAddress') historyRateLimited(null, useBackup);
       else {
         if (useBackup) fallbackReadLimitStreak++; else readLimitStreak++;
@@ -538,7 +550,7 @@ const heartbeat = setInterval(() => console.log('[Echo] HEALTH', { subscriptions
   lastDisconnectReason: subscription.state.lastDisconnectReason, lastConnectedAt: subscription.state.lastConnectedAt,
   activeWebSocketProvider: subscription.state.activeProvider,
   skippedNonSwapLogs: subscription.state.skippedNonSwapLogs, observedTradeSignatures: subscription.state.observedTradeSignatures, queued: queue.size, dropped: queue.dropped,
-  lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt, ...diagnostics, promotions: promotionsReady ? promotions.summary() : {enabled:false}, research: researchReady ? JSON.stringify(research.summary()) : {enabled:false},tiers:tiers.summary(), audit:echoAuditOutbox?.summary()??{enabled:false}, shadowLatency:echoShadowLatency.summary(), rejectionCounts }), 60_000);
+  lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt, ...diagnostics, rpcUsage, promotions: promotionsReady ? promotions.summary() : {enabled:false}, research: researchReady ? JSON.stringify(research.summary()) : {enabled:false},tiers:tiers.summary(), audit:echoAuditOutbox?.summary()??{enabled:false}, shadowLatency:echoShadowLatency.summary(), rejectionCounts }), 60_000);
 const server = createServer((req, res) => {
   if (req.method !== 'GET' || req.url !== '/health') { res.writeHead(404); res.end(); return; }
   // A healthy WebSocket must not be marked down merely because history reconciliation is rate-limited.
