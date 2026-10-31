@@ -21,6 +21,7 @@ test('eligible case is only shadow, never executable',()=>{
 });
 test('late verification or quote and inflated entry are refused',()=>{
  assert.equal(reason({verifiedAtMs:now-3001}),'STALE_OR_UNVERIFIED_SIGNAL');
+ assert.equal(reason({callerTradeAtMs:now-60000}),'STALE_OR_UNVERIFIED_SIGNAL');
  assert.equal(reason({quoteAtMs:now-2100}),'STALE_OR_UNVERIFIED_QUOTE');
  assert.equal(reason({currentQuotePriceSolPerToken:0.00000104}),'PRICE_ALREADY_INFLATED');
  assert.equal(reason({currentQuotePriceSolPerToken:NaN}),'PRICE_UNVERIFIED');
