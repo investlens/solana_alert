@@ -64,12 +64,24 @@ export async function readOnlyEchoJupiterV2Swap(
    response.status===401||response.status===403?'JUPITER_API_AUTH_REJECTED':
    response.status===429?'JUPITER_RATE_LIMITED':'JUPITER_ORDER_UNAVAILABLE'};
   const order=await response.json();
-  if(order.inputMint!==inputMint||order.outputMint!==outputMint||
-     order.inAmount!==r.amountRaw||!/^[1-9][0-9]*$/.test(order.outAmount??'')||
-     typeof order.requestId!=='string'||!order.requestId||
-     typeof order.transaction!=='string'||order.transaction.length<100||
-     order.transaction.length>3000||order.transactionVersion!==0&&order.transactionVersion!=='0')
-   return {ok:false,reason:'JUPITER_ORDER_MISMATCH'};
+  // Jupiter /order may omit optional quote metadata. Do not falsely report
+  // a broken route for a missing field, and never turn this into sign approval.
+  if(order.errorCode!==undefined)return {ok:false,reason:'JUPITER_ORDER_BUILD_ERROR'};
+  if(order.inputMint!==undefined&&order.inputMint!==inputMint)
+   return {ok:false,reason:'JUPITER_INPUT_MINT_MISMATCH'};
+  if(order.outputMint!==undefined&&order.outputMint!==outputMint)
+   return {ok:false,reason:'JUPITER_OUTPUT_MINT_MISMATCH'};
+  if(order.inAmount!==undefined&&order.inAmount!==r.amountRaw)
+   return {ok:false,reason:'JUPITER_INPUT_AMOUNT_MISMATCH'};
+  if(!/^[1-9][0-9]*$/.test(order.outAmount??''))
+   return {ok:false,reason:'JUPITER_OUTPUT_AMOUNT_MISSING'};
+  if(typeof order.requestId!=='string'||!order.requestId)
+   return {ok:false,reason:'JUPITER_REQUEST_ID_MISSING'};
+  if(typeof order.transaction!=='string'||order.transaction.length<100||
+     order.transaction.length>3000)
+   return {ok:false,reason:'JUPITER_UNSIGNED_TRANSACTION_MISSING'};
+  if(order.transactionVersion!==0&&order.transactionVersion!=='0')
+   return {ok:false,reason:'JUPITER_UNSUPPORTED_TRANSACTION_VERSION'};
   if(typeof order.router!=='string'||order.router!=='metis'||
      typeof order.feeBps!=='number'||!Number.isSafeInteger(order.feeBps)||
      order.feeBps<0||order.feeBps>MAX_PREVIEW_PLATFORM_FEE_BPS)
