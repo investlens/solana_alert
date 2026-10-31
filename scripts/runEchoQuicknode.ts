@@ -442,6 +442,10 @@ async function reconcile() {
         if (rows.length && Number.isFinite(rows[rows.length - 1]?.blockTime)) freshOldestBlockTime = rows[rows.length - 1].blockTime;
         if (page === 0 && !headRows.length) headRows = rows;
         const progress = advanceFreshScan(fresh, rows, 100, cutoff);
+        if (progress.cutoffWithoutCheckpoint) console.warn('[Echo] FRESH_CHECKPOINT_NOT_REACHED', {
+          caller: ECHO_WALLETS[wallet], scannedWithinLiveWindow: true,
+          olderCoverageUnverified: true, reason: 'cutoff-before-previous-checkpoint'
+        });
         for (const row of [...progress.scanned].reverse()) if (row.err == null &&
           Number.isFinite(row.blockTime) && row.blockTime! >= cutoff &&
           /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') &&
