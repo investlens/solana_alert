@@ -13,7 +13,7 @@ export function readEchoWalletIdentity(env:NodeJS.ProcessEnv) {
 export async function simulateEchoUnsignedTransaction(
  rpcUrl:string,transactionBase64:string,
  post:typeof fetch=fetch
-):Promise<{ok:boolean;reason:string;logs?:string[]}>{
+):Promise<{ok:boolean;reason:string;logs?:string[];failureClass?:string}>{
  let host:URL;
  try{host=new URL(rpcUrl);}catch{return {ok:false,reason:'INVALID_RPC_URL'};}
  if(host.protocol!=='https:'||host.username||host.password||!/^[-_A-Za-z0-9+/=]+$/.test(transactionBase64)||
@@ -29,7 +29,18 @@ export async function simulateEchoUnsignedTransaction(
   if(!response.ok)return {ok:false,reason:'RPC_UNAVAILABLE'};
   const result=await response.json();
   if(result?.error||!result?.result?.value)return {ok:false,reason:'SIMULATION_UNAVAILABLE'};
-  if(result.result.value.err)return {ok:false,reason:'SIMULATION_REJECTED'};
+  if(result.result.value.err){
+    const evidence=JSON.stringify(result.result.value.err).slice(0,2000)+' '+
+      (Array.isArray(result.result.value.logs)?
+       result.result.value.logs.slice(-12).map(String).join(' ').slice(0,2000):'');
+    const failureClass=/InsufficientFunds|insufficient funds|insufficient lamports|insufficient token/i.test(evidence)?
+      'INSUFFICIENT_FUNDS_OR_TOKENS':
+      /AccountNotFound|account not found|InvalidAccountForFee/i.test(evidence)?
+      'ACCOUNT_NOT_PRESENT':
+      /BlockhashNotFound|blockhash not found/i.test(evidence)?
+      'BLOCKHASH_EXPIRED':'ONCHAIN_INSTRUCTION_REJECTED';
+    return {ok:false,reason:'SIMULATION_REJECTED',failureClass};
+  }
   return {ok:true,reason:'READ_ONLY_SIMULATION_OK',logs:Array.isArray(result.result.value.logs)?
     result.result.value.logs.slice(0,10).map(String):[]};
  }catch{return {ok:false,reason:'SIMULATION_NETWORK_ERROR'};}
