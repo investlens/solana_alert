@@ -18,7 +18,7 @@ import { EchoQueue } from '../src/echo/queue.js';
 import { startEchoSubscription } from '../src/echo/subscription.js';
 import { readEchoTransaction } from '../src/echo/readTransaction.js';
 import { advanceFreshScan, type FreshScanState } from '../src/echo/freshScan.js';
-import { echoFreshPageBudget } from '../src/echo/freshBudget.js';
+import { echoFreshScanPlan } from '../src/echo/freshBudget.js';
 import { echoRpc429CooldownMs } from '../src/echo/rpc429Policy.js';
 import { EchoVerifiedBuyLatencyTracker } from '../src/echo/verifiedBuyLatencyTracker.js';
 
@@ -433,21 +433,22 @@ async function reconcile() {
           /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') &&
           !store.has(`tx:${row.signature}`)) { if (!queue.add(row.signature)) throw Error('Echo queue full: cursor not advanced'); }
       }
-      for (let page = 0; page < echoFreshPageBudget(Boolean(fresh.before), queue.size) && !freshComplete; page++) {
+      const freshPlan = echoFreshScanPlan(ECHO_WALLETS[wallet] === 'WHALE · slingoor',Boolean(fresh.before),queue.size);
+      for (let page = 0; page < freshPlan.maxPages && !freshComplete; page++) {
         if (stopping || !historyRpcAvailable() || queue.size > 64) break;
         const rows = await rpc('getSignaturesForAddress', [wallet,
-          { limit: 100, commitment: 'confirmed', ...(fresh.before ? { before: fresh.before } : {}) }]);
+          { limit: freshPlan.pageLimit, commitment: 'confirmed', ...(fresh.before ? { before: fresh.before } : {}) }]);
         if (!Array.isArray(rows)) throw Error('Echo fresh signature page unavailable');
         freshPagesScanned++;
         if (rows.length && Number.isFinite(rows[rows.length - 1]?.blockTime)) freshOldestBlockTime = rows[rows.length - 1].blockTime;
         if (page === 0 && !headRows.length) headRows = rows;
-        const progress = advanceFreshScan(fresh, rows, 100, cutoff);
+        const progress = advanceFreshScan(fresh, rows, freshPlan.pageLimit, cutoff);
         if (progress.cutoffWithoutCheckpoint) console.warn('[Echo] FRESH_CHECKPOINT_NOT_REACHED', {
           caller: ECHO_WALLETS[wallet], scannedWithinLiveWindow: true,
           olderCoverageUnverified: true, reason: 'cutoff-before-previous-checkpoint'
         });
         for (const row of [...progress.scanned].reverse()) if (row.err == null &&
-          Number.isFinite(row.blockTime) && row.blockTime! >= cutoff &&
+          (!Number.isFinite(row.blockTime) || row.blockTime! >= cutoff) &&
           /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') &&
           !store.has(`tx:${row.signature}`)) { if (!queue.add(row.signature!)) throw Error('Echo queue full: fresh cursor not advanced'); }
         fresh = progress.state;
@@ -463,7 +464,7 @@ async function reconcile() {
       if (!freshComplete) {
         console.log('[Echo] COVERAGE_PROGRESS', {
           caller: ECHO_WALLETS[wallet], freshComplete: false, historyComplete: false,
-          freshPagesScanned, historyPagesScanned: 0, freshOldestBlockTime,
+          freshPagesScanned, freshPageLimit: freshPlan.pageLimit, historyPagesScanned: 0, freshOldestBlockTime,
           historyOldestBlockTime: null, freshCursorAdvanced: freshCursorBeforePass !== fresh.before,
           historyCursorAdvanced: false, freshPending: fresh.before !== null,
           historyPending: historyCursors.has(wallet), archiveDeferredForFresh: true
@@ -502,7 +503,7 @@ async function reconcile() {
       }
       console.log('[Echo] COVERAGE_PROGRESS', {
         caller: ECHO_WALLETS[wallet], freshComplete, historyComplete: complete,
-        freshPagesScanned, historyPagesScanned, freshOldestBlockTime, historyOldestBlockTime,
+        freshPagesScanned, freshPageLimit: freshPlan.pageLimit, historyPagesScanned, freshOldestBlockTime, historyOldestBlockTime,
         freshCursorAdvanced: freshCursorBeforePass !== fresh.before,
         historyCursorAdvanced: historyCursorBeforePass !== (historyCursors.get(wallet) ?? null),
         freshPending: fresh.before !== null, historyPending: historyCursors.has(wallet)
