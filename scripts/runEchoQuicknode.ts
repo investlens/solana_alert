@@ -441,7 +441,7 @@ async function reconcile() {
         if (!Array.isArray(newest)) throw Error('Echo newest signature probe unavailable');
         headRows = newest;
         for (const row of [...newest].reverse()) if (row.err == null &&
-          Number.isFinite(row.blockTime) && row.blockTime >= cutoff &&
+          (!Number.isFinite(row.blockTime) || row.blockTime >= cutoff) &&
           /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') &&
           !store.has(`tx:${row.signature}`)) { if (!queue.add(row.signature)) throw Error('Echo queue full: cursor not advanced'); }
       }
@@ -499,7 +499,7 @@ async function reconcile() {
         if (!Array.isArray(rows)) throw new Error('Echo signature list unavailable');
         historyPagesScanned++;
         if (rows.length && Number.isFinite(rows[rows.length - 1]?.blockTime)) historyOldestBlockTime = rows[rows.length - 1].blockTime;
-        for (const row of [...rows].reverse()) if (row.err == null && Number.isFinite(row.blockTime) && row.blockTime >= cutoff &&
+        for (const row of [...rows].reverse()) if (row.err == null && (!Number.isFinite(row.blockTime) || row.blockTime >= cutoff) &&
           /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') && !store.has(`tx:${row.signature}`)) { if (!queue.add(row.signature)) throw Error('Echo history queue full: cursor not advanced'); }
         const oldest = rows[rows.length - 1];
         if (rows.length < 100 || (Number.isFinite(oldest?.blockTime) && oldest.blockTime < cutoff)) {
