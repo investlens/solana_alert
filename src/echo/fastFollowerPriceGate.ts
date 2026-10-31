@@ -25,7 +25,7 @@ export type EchoFastFollowerCandidate={
 };
 export type EchoFastFollowerResult=
  | {eligible:true;mode:'SHADOW_ONLY';callerBuyAgeMs:number;
-     quoteAgeMs:number;priceMarkupBps:number;signingApproved:false}
+     quoteAgeMs:number;priceMarkupBps:number;worstCaseMarkupBps:number;signingApproved:false}
  | {eligible:false;reason:string;signingApproved:false};
 const reject=(reason:string):EchoFastFollowerResult=>({eligible:false,reason,signingApproved:false});
 const positive=(v:string)=>typeof v==='string'&&/^[1-9][0-9]*$/.test(v)&&v.length<=32;
@@ -56,9 +56,14 @@ export function screenEchoFastFollower(c:EchoFastFollowerCandidate):EchoFastFoll
  const ourGot=BigInt(c.ourQuotedTokensOutRaw);
  if(ourSpent>100_000_000n)return reject('EXCEEDS_0_1_SOL_CAP');
  // (ours / quotedOut) / (callerSpent / callerOut), in integer basis points.
+ const minimumOutput=(ourGot*BigInt(10_000-c.quoteSlippageBps))/10_000n;
+ if(minimumOutput<=0n)return reject('SLIPPAGE_MINIMUM_OUTPUT_ZERO');
  const priceMarkupBps=Number((ourSpent*got*10_000n)/(spent*ourGot)-10_000n);
- if(!Number.isSafeInteger(priceMarkupBps))return reject('PRICE_RATIO_OVERFLOW');
- if(priceMarkupBps>ECHO_MAX_ENTRY_MARKUP_BPS)return reject('PRICE_ALREADY_RAN');
+ const worstCaseMarkupBps=Number((ourSpent*got*10_000n)/(spent*minimumOutput)-10_000n);
+ if(!Number.isSafeInteger(priceMarkupBps)||!Number.isSafeInteger(worstCaseMarkupBps))
+  return reject('PRICE_RATIO_OVERFLOW');
+ if(worstCaseMarkupBps>ECHO_MAX_ENTRY_MARKUP_BPS)
+  return reject('WORST_CASE_PRICE_ALREADY_RAN');
  return {eligible:true,mode:'SHADOW_ONLY',callerBuyAgeMs,quoteAgeMs,
-  priceMarkupBps,signingApproved:false};
+  priceMarkupBps,worstCaseMarkupBps,signingApproved:false};
 }
