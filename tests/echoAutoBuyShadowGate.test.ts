@@ -8,7 +8,7 @@ const now=1793468000000;
 const good={
  signal:{callerWallet:caller,mint,amountSol:0.1,side:'BUY' as const,isVerifiedSwap:true,
  transactionSignature:'3tsw3jLK5fDZoeUZkHmLmRbPrUtxu3M4AymDV8638MgEgkjKq4KX4vfaDc8rquzcBXTqKDQS1RoiCofXojdnxKK1'},
- executionWallet:wallet,nowMs:now,verifiedAtMs:now-800,quoteAtMs:now-200,
+ executionWallet:wallet,nowMs:now,callerTradeAtMs:now-1000,verifiedAtMs:now-800,quoteAtMs:now-200,
  callerEntryPriceSolPerToken:0.000001,currentQuotePriceSolPerToken:0.00000102,
  quoteValid:true,unsignedSimulationPassed:true,accountsFullyResolved:true,
  sellRouteVerified:true,slippageBps:300,purchasedOrReservedMint:false,
