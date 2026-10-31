@@ -6,8 +6,10 @@ the configured Solana RPC simulateTransaction.
 
 ## Prerequisites
 - Checkout `fix/echo-unsigned-instruction-guard-20261030`, Node 22+, `npm ci`
-- A Jupiter API key (from https://portal.jup.ag/); do not paste it into ChatGPT,
-  an issue, screenshot, or a GitHub commit
+- Optional Jupiter API key (from https://portal.jup.ag/). The current Jupiter
+  developer index documents limited keyless access for prototypes, but some
+  endpoints may still require authentication or return 429. Do not paste a key
+  into ChatGPT, an issue, screenshot, or a GitHub commit
 - A Solana mainnet HTTPS RPC URL; a public URL may be rate limited
 - A chosen PUBLIC wallet address (default below: the user's already verified
   Phantom *public* address). It never signs and may be unfunded.
@@ -21,7 +23,8 @@ npm ci --ignore-scripts
 export ECHO_PREVIEW_WALLET='8ndw7DJ6hyZBm1PD3JJMF8G4PD5CJhDCCUK13ECL2pgQ'
 export ECHO_PREVIEW_MINT='EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
 export ECHO_PREVIEW_RPC_URL='https://api.mainnet-beta.solana.com'
-read -rs 'JUPITER_API_KEY?Jupiter API key (hidden): '; echo; export JUPITER_API_KEY
+## Optional: only if the keyless request is rejected by Jupiter:
+## read -rs 'JUPITER_API_KEY?Jupiter API key (hidden): '; echo; export JUPITER_API_KEY
 ECHO_PREVIEW_SIDE=BUY ECHO_PREVIEW_AMOUNT_RAW=10000000 npx tsx scripts/echoRealReadOnlySwapV2.ts
 ```
 
