@@ -35,7 +35,7 @@ export type EchoJupiterV2PreviewResult=
  | {ok:true;reason:'RPC_SIMULATION_SUCCEEDED';side:'BUY'|'SELL';
     inputMint:string;outputMint:string;inputRaw:string;quotedOutputRaw:string;
     unsignedTransactionSha256:string;requestId:string;logs:string[]}
- | {ok:false;reason:string;failureClass?:string;orderBuilt?:boolean;unsignedTransactionSha256?:string};
+ | {ok:false;reason:string;failureClass?:string;orderBuilt?:boolean;unsignedTransactionSha256?:string;builderErrorCode?:number;builderRouter?:string};
 export async function readOnlyEchoJupiterV2Swap(
  r:EchoJupiterV2PreviewRequest,fetcher:typeof fetch=fetch
 ):Promise<EchoJupiterV2PreviewResult>{
@@ -66,7 +66,11 @@ export async function readOnlyEchoJupiterV2Swap(
   const order=await response.json();
   // Jupiter /order may omit optional quote metadata. Do not falsely report
   // a broken route for a missing field, and never turn this into sign approval.
-  if(order.errorCode!==undefined)return {ok:false,reason:'JUPITER_ORDER_BUILD_ERROR'};
+  if(order.errorCode!==undefined)return {ok:false,
+    reason:'JUPITER_ORDER_BUILD_ERROR',
+    builderErrorCode:Number.isSafeInteger(order.errorCode)?order.errorCode:undefined,
+    builderRouter:['metis','jupiterz','dflow','okx'].includes(order.router)?order.router:undefined
+  };
   if(order.inputMint!==undefined&&order.inputMint!==inputMint)
    return {ok:false,reason:'JUPITER_INPUT_MINT_MISMATCH'};
   if(order.outputMint!==undefined&&order.outputMint!==outputMint)
