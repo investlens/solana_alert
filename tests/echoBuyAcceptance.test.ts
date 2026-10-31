@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reconcileEchoBuys, type VerifiedBuy, type TelegramBuy } from '../src/echo/buyAcceptance.ts';
+import { reconcileEchoBuys, type VerifiedBuy, type TelegramBuy } from '../src/echo/buyAcceptance.js';
 const expected:VerifiedBuy[]=[
  {caller:'Slingoor',signature:'sig1',mint:'mint1',tradeAt:100},
  {caller:'Chairman',signature:'sig2',mint:'mint2',tradeAt:110}
