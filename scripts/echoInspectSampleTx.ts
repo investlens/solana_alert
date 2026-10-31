@@ -55,4 +55,10 @@ for (const endpoint of ['https://api.mainnet-beta.solana.com','https://solana-rp
 }
 
 console.error('SAMPLE_TX_UNAVAILABLE: no RPC endpoint returned the historical transaction');
+if(process.env.ECHO_REPLAY_UNAVAILABLE_NONBLOCKING==='true'){
+  // ONLY transient provider unavailability can be non-blocking. Any fetched
+  // transaction with an invalid classification exited with code 1 above.
+  console.warn('SAMPLE_TX_UNAVAILABLE_NONBLOCKING: no on-chain replay evidence from this CI run');
+  process.exit(0);
+}
 process.exit(1);
