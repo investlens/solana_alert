@@ -17,7 +17,7 @@ export const ECHO_MAX_VERIFIED_BUY_AGE_MS=5000;
 export const ECHO_MAX_QUOTE_AGE_MS=1200;
 
 export type EchoFastFollowerCandidate={
- callerBuySignature:string;callerVerified:boolean;callerMint:string;quoteMint:string;callerBoughtAtMs:number;
+ callerBuySignature:string;callerVerified:boolean;callerMint:string;quoteMint:string;callerInputMint:string;ourInputMint:string;callerBoughtAtMs:number;
  detectionAtMs:number;nowMs:number;quoteObservedAtMs:number;
  callerSpentLamports:string;callerTokensReceivedRaw:string;
  ourInputLamports:string;ourQuotedTokensOutRaw:string;
