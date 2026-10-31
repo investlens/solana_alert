@@ -35,6 +35,9 @@ test('pending Slingoor uses fewer but wider pages at low queue pressure',()=>{
  assert.deepEqual(echoFreshScanPlan(true,false,0),{pageLimit:100,maxPages:3});
  assert.deepEqual(echoFreshScanPlan(true,true,16),{pageLimit:100,maxPages:1});
  assert.deepEqual(echoFreshScanPlan(false,true,0),{pageLimit:100,maxPages:6});
+ assert.deepEqual(echoFreshScanPlan(true,true,0,true),{pageLimit:1000,maxPages:1});
+ assert.deepEqual(echoFreshScanPlan(true,true,16,true),{pageLimit:100,maxPages:1});
+ assert.deepEqual(echoFreshScanPlan(false,true,0,true),{pageLimit:100,maxPages:1});
  assert.throws(()=>echoFreshScanPlan(true,true,-1),/INVALID_QUEUE_SIZE/);
 });
 test('1000 signature pages resume after restart and reach persisted checkpoint without skipping',()=>{
