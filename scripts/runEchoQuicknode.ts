@@ -403,7 +403,8 @@ try {
   for (const [wallet, state] of saved.cursors) {
     if (!(wallet in ECHO_WALLETS) || !state || typeof state !== 'object' ||
       !['checkpoint','before','candidate'].every(k => state[k] === null ||
-        (typeof state[k] === 'string' && /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(state[k]))))
+        (typeof state[k] === 'string' && /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(state[k]))) ||
+      (state.olderGapPending !== undefined && typeof state.olderGapPending !== 'boolean'))
       throw Error('Invalid fresh cursor');
     freshCursors.set(wallet, state);
   }
@@ -445,7 +446,7 @@ async function reconcile() {
           /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') &&
           !store.has(`tx:${row.signature}`)) { if (!queue.add(row.signature)) throw Error('Echo queue full: cursor not advanced'); }
       }
-      const freshPlan = echoFreshScanPlan(ECHO_WALLETS[wallet] === 'WHALE · slingoor',Boolean(fresh.before),queue.size);
+      const freshPlan = echoFreshScanPlan(ECHO_WALLETS[wallet] === 'WHALE · slingoor',Boolean(fresh.before),queue.size,Boolean(fresh.olderGapPending));
       for (let page = 0; page < freshPlan.maxPages && !freshComplete; page++) {
         if (stopping || !historyRpcAvailable() || queue.size > 64) break;
         const rows = await rpc('getSignaturesForAddress', [wallet,
@@ -455,7 +456,7 @@ async function reconcile() {
         if (rows.length && Number.isFinite(rows[rows.length - 1]?.blockTime)) freshOldestBlockTime = rows[rows.length - 1].blockTime;
         if (page === 0 && !headRows.length) headRows = rows;
         const progress = advanceFreshScan(fresh, rows, freshPlan.pageLimit, cutoff);
-        if (progress.cutoffWithoutCheckpoint) console.warn('[Echo] FRESH_CHECKPOINT_NOT_REACHED', {
+        if (progress.cutoffWithoutCheckpoint && !fresh.olderGapPending) console.warn('[Echo] FRESH_CHECKPOINT_NOT_REACHED', {
           caller: ECHO_WALLETS[wallet], scannedWithinLiveWindow: true,
           olderCoverageUnverified: true, reason: 'cutoff-before-previous-checkpoint'
         });
@@ -476,7 +477,8 @@ async function reconcile() {
       if (!freshComplete) {
         console.log('[Echo] COVERAGE_PROGRESS', {
           caller: ECHO_WALLETS[wallet], freshComplete: false, historyComplete: false,
-          freshPagesScanned, freshPageLimit: freshPlan.pageLimit, historyPagesScanned: 0, freshOldestBlockTime,
+          freshPagesScanned, freshPageLimit: freshPlan.pageLimit, olderGapPending: Boolean(fresh.olderGapPending),
+          historyPagesScanned: 0, freshOldestBlockTime,
           historyOldestBlockTime: null, freshCursorAdvanced: freshCursorBeforePass !== fresh.before,
           historyCursorAdvanced: false, freshPending: fresh.before !== null,
           historyPending: historyCursors.has(wallet), archiveDeferredForFresh: true
@@ -515,7 +517,8 @@ async function reconcile() {
       }
       console.log('[Echo] COVERAGE_PROGRESS', {
         caller: ECHO_WALLETS[wallet], freshComplete, historyComplete: complete,
-        freshPagesScanned, freshPageLimit: freshPlan.pageLimit, historyPagesScanned, freshOldestBlockTime, historyOldestBlockTime,
+        freshPagesScanned, freshPageLimit: freshPlan.pageLimit, olderGapPending: Boolean(fresh.olderGapPending),
+        historyPagesScanned, freshOldestBlockTime, historyOldestBlockTime,
         freshCursorAdvanced: freshCursorBeforePass !== fresh.before,
         historyCursorAdvanced: historyCursorBeforePass !== (historyCursors.get(wallet) ?? null),
         freshPending: fresh.before !== null, historyPending: historyCursors.has(wallet)
