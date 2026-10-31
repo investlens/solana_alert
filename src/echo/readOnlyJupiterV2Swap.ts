@@ -21,6 +21,10 @@ const programs=new Set([
  'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
  'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4'
 ]);
+// A read-only quote can never authorize a spend; these are conservative
+// screening ceilings, NOT sufficient for production route economics.
+const MAX_PREVIEW_PLATFORM_FEE_BPS=100;
+const MAX_PREVIEW_INPUT_LAMPORTS=100_000_000;
 const validMint=(v:string)=>{try{return new PublicKey(v).toBase58()===v}catch{return false}};
 export type EchoJupiterV2PreviewRequest={
  side:'BUY'|'SELL';rpcUrl:string;publicWallet:string;mint:string;
@@ -38,7 +42,7 @@ export async function readOnlyEchoJupiterV2Swap(
  if(!validMint(r.mint)||r.mint===SOL||!validMint(r.publicWallet)||
     !/^[1-9][0-9]*$/.test(r.amountRaw)||r.amountRaw.length>18||
     !Number.isSafeInteger(Number(r.amountRaw))||
-    (r.side==='BUY'&&Number(r.amountRaw)>100_000_000)||
+    (r.side==='BUY'&&Number(r.amountRaw)>MAX_PREVIEW_INPUT_LAMPORTS)||
     !Number.isSafeInteger(r.maxSlippageBps)||r.maxSlippageBps<1||
     r.maxSlippageBps>300||!r.jupiterApiKey?.trim())
   return {ok:false,reason:'INVALID_PREVIEW_REQUEST'};
@@ -64,6 +68,10 @@ export async function readOnlyEchoJupiterV2Swap(
      typeof order.transaction!=='string'||order.transaction.length<100||
      order.transaction.length>3000||order.transactionVersion!==0&&order.transactionVersion!=='0')
    return {ok:false,reason:'JUPITER_ORDER_MISMATCH'};
+  if(typeof order.router!=='string'||order.router!=='metis'||
+     typeof order.feeBps!=='number'||!Number.isSafeInteger(order.feeBps)||
+     order.feeBps<0||order.feeBps>MAX_PREVIEW_PLATFORM_FEE_BPS)
+   return {ok:false,reason:'UNVERIFIED_ROUTER_OR_PLATFORM_FEE'};
   // Reject gasless / alternate fee-payer routes in this first safe prototype.
   if(order.signatureFeePayer!==r.publicWallet)
    return {ok:false,reason:'UNEXPECTED_FEE_PAYER'};
