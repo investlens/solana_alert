@@ -119,3 +119,16 @@ test('keyless read-only Jupiter preview omits x-api-key and fails clearly if una
  assert.equal(result.reason,'JUPITER_API_AUTH_REJECTED');
  assert.equal(called,1);
 });
+
+test('optional Jupiter echoed quote fields are not mistaken for route failure',async()=>{
+ const f=fake({side:'BUY',alter:{inputMint:undefined,outputMint:undefined,inAmount:undefined}});
+ const result=await readOnlyEchoJupiterV2Swap(request('BUY'),f.fetcher);
+ assert.equal(result.ok,true);
+ assert.deepEqual(f.calls,['GET_ORDER','RPC_SIMULATE']);
+});
+test('Jupiter reports missing unsigned transaction precisely and does not simulate',async()=>{
+ const f=fake({side:'BUY',alter:{transaction:null}});
+ const result=await readOnlyEchoJupiterV2Swap(request('BUY'),f.fetcher);
+ assert.deepEqual(result,{ok:false,reason:'JUPITER_UNSIGNED_TRANSACTION_MISSING'});
+ assert.deepEqual(f.calls,['GET_ORDER']);
+});
