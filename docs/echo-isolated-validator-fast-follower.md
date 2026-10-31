@@ -45,8 +45,8 @@ further controlled account-fixture testing, not swap acceptance.
 - Gate the same mint against the caller's **effective on-chain price**
   (actual swapped SOL input / raw tokens obtained) using integer ratios.
 - Requote or **skip** if the caller BUY is older than 5 seconds, the quote is
-  older than 1.2 seconds, expected price is over 3% above caller entry, or
-  quoted slippage exceeds 3%. These are initial safety thresholds and must be
+  older than 1.2 seconds, worst-case entry price (including allowed slippage) is over 3% above
+  caller entry, or quoted slippage exceeds 3%. These are initial safety thresholds and must be
   measured against real end-to-end websocket latency.
 - Independently size the order at $10 from fresh SOL/USD price, never exceeding
   0.1 SOL. Separately account for priority/network fees and rent.
