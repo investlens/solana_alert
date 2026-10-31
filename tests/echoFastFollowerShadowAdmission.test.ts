@@ -8,7 +8,9 @@ const now=1762000000900,mint='2'.repeat(44);
 const wallet='8ndw7DJ6hyZBm1PD3JJMF8G4PD5CJhDCCUK13ECL2pgQ';
 const candidate={
  callerBuySignature:'3'.repeat(64),callerVerified:true,
- callerMint:mint,quoteMint:mint,callerBoughtAtMs:now-500,
+ callerMint:mint,quoteMint:mint,
+ callerInputMint:'So11111111111111111111111111111111111111112',
+ ourInputMint:'So11111111111111111111111111111111111111112',callerBoughtAtMs:now-500,
  detectionAtMs:now-300,nowMs:now,quoteObservedAtMs:now-100,
  callerSpentLamports:'100000000',callerTokensReceivedRaw:'1000000000',
  ourInputLamports:'50000000',ourQuotedTokensOutRaw:'495000000',
@@ -48,6 +50,7 @@ test('price chase, stale quote, inaccurate amount and wrong mint never reserve',
   {candidate:{...candidate,quoteObservedAtMs:now-2000},pilot},
   {candidate:{...candidate,ourInputLamports:'60000000'},pilot},
   {candidate:{...candidate,quoteMint:'4'.repeat(44)},pilot},
+  {candidate:{...candidate,callerInputMint:'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'},pilot},
   {candidate,pilot:{...pilot,verifiedSpend:false}}
  ]){
   const result=await reserveEchoFastFollowerShadow({...change,executionWallet:wallet,store});
