@@ -1,0 +1,22 @@
+name: Echo one-shot Slingoor public transaction diagnostic
+on:
+  push:
+    branches:
+      - diag/echo-slingoor-mfw3a-20261031
+permissions:
+  contents: read
+jobs:
+  inspect-public-tx:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Read-only verify specified Slingoor transaction from public Solana RPC
+        env:
+          ECHO_REPLAY_SIGNATURE: mFw3aKTWTCuhUcVhzoiaBMuv2Ng2ZVBEUbiC9qbnVD6zSk4hj2fnnW2q2YhXsq7zp94jwPjjkfCms8LaTVEeUAV
+        run: npx tsx scripts/echoInspectSampleTx.ts
