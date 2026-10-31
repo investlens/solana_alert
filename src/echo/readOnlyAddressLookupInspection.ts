@@ -23,7 +23,7 @@ export interface EchoLookupTableProvider {
 }
 export function makeEchoRpcLookupProvider(connection:Connection):EchoLookupTableProvider{
  return {async lookup(address){
-  const result=await connection.getAddressLookupTable(address,'confirmed');
+  const result=await connection.getAddressLookupTable(address,{commitment:'confirmed'});
   return result.value;
  }};
 }
