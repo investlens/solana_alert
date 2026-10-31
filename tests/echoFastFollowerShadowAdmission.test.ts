@@ -12,7 +12,7 @@ const candidate={
  detectionAtMs:now-300,nowMs:now,quoteObservedAtMs:now-100,
  callerSpentLamports:'100000000',callerTokensReceivedRaw:'1000000000',
  ourInputLamports:'50000000',ourQuotedTokensOutRaw:'495000000',
- quoteSlippageBps:300,alreadyReserved:false
+ quoteSlippageBps:100,alreadyReserved:false
 };
 const pilot={
  callerWallet:SLINGOOR_WALLET,mint,verifiedBuyerSigner:true,
