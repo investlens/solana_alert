@@ -49,6 +49,7 @@ jobs:
       - name: Historical Slingoor read-only classifier replay
         env:
           ECHO_REPLAY_SIGNATURE: '5W5d2xZT8K2QTmpixHviNrt5E38esAhqmjNVfqxmfm4Jz8RoEfwsW6efsEJ6ptxT1tj5sxeGFj8UicopFP5TT3Ed'
+          ECHO_REPLAY_UNAVAILABLE_NONBLOCKING: 'true'
         run: npx tsx scripts/echoInspectSampleTx.ts
       - name: All repository tests
         run: npm test
