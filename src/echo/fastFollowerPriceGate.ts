@@ -17,7 +17,7 @@ export const ECHO_MAX_VERIFIED_BUY_AGE_MS=5000;
 export const ECHO_MAX_QUOTE_AGE_MS=1200;
 
 export type EchoFastFollowerCandidate={
- callerBuySignature:string;callerVerified:boolean;callerBoughtAtMs:number;
+ callerBuySignature:string;callerVerified:boolean;callerMint:string;quoteMint:string;callerBoughtAtMs:number;
  detectionAtMs:number;nowMs:number;quoteObservedAtMs:number;
  callerSpentLamports:string;callerTokensReceivedRaw:string;
  ourInputLamports:string;ourQuotedTokensOutRaw:string;
@@ -32,6 +32,8 @@ const positive=(v:string)=>typeof v==='string'&&/^[1-9][0-9]*$/.test(v)&&v.lengt
 export function screenEchoFastFollower(c:EchoFastFollowerCandidate):EchoFastFollowerResult{
  if(!c.callerVerified||!/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(c.callerBuySignature))
   return reject('UNVERIFIED_CALLER_SWAP');
+ if(!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(c.callerMint)||
+    c.callerMint!==c.quoteMint)return reject('MINT_MISMATCH');
  if(c.alreadyReserved)return reject('DUPLICATE_TOKEN');
  if(!Number.isSafeInteger(c.nowMs)||!Number.isSafeInteger(c.callerBoughtAtMs)||
     !Number.isSafeInteger(c.detectionAtMs)||!Number.isSafeInteger(c.quoteObservedAtMs)||
