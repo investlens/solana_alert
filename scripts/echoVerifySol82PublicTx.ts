@@ -1,5 +1,6 @@
 import {extractPumpAppRoutedEchoBuys} from '../src/echo/pumpAppRouteSignals.js';
 const signature='5BW5sKmZRmYtrDPp4aGmgCR566TGxyL7NMzdAJQQ3E1nAs5KGVWpv9P9hfmNmQa6dJKNqLVMsfUMAi3ge7tGn1UL';
+let found=false;
 for(const endpoint of ['https://api.mainnet-beta.solana.com','https://solana-rpc.publicnode.com']){
  try{
   const response=await fetch(endpoint,{method:'POST',headers:{'content-type':'application/json'},
@@ -22,10 +23,11 @@ for(const endpoint of ['https://api.mainnet-beta.solana.com','https://solana-rpc
    shape:'PUMP_APP_NATIVE_SOL_82',validated:verified,
    buyCount:buy.length,inputSol:buy[0]?.quoteAmount??null,
    outputTokens:buy[0]?.tokenAmount??null,liveTrading:false}));
+  found=true;
   if(!verified)process.exitCode=1;
   break;
  }catch(e){
   console.warn('ECHO_SOL82_RPC_UNAVAILABLE',new URL(endpoint).hostname);
  }
 }
-if(process.exitCode===undefined&&!process.env.ECHO_SOL82_RESULT){} // no mutating actions
+if(!found){console.error('ECHO_SOL82_UNAVAILABLE: No provider returned a transaction');process.exitCode=1;}
