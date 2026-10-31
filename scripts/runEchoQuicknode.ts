@@ -70,6 +70,26 @@ let lastErrorAt: number | null = null, lastReconcileAt: number | null = null, st
 const diagnostics = { fetched: 0, signals: 0, delivered: 0, noSignal: 0, rpcFailures: 0,
   fallbackRpcUses: 0, deliveryFailures: 0 };
 const rejectionCounts: Partial<Record<EchoRejectReason, number>> = {};
+// Bounded read-only classification samples for independent on-chain audit.
+// No RPC requests, wallet secrets, signing or transaction broadcasts.
+const rejectionSampleBuckets = new Map<string, number>();
+function recordEchoRejectionSample(reason: EchoRejectReason, signature: string, tx: NonNullable<Awaited<ReturnType<typeof readEchoTransaction>>>) {
+  const hour = Math.floor(Date.now() / 3_600_000);
+  const bucket = `${hour}:${reason}`;
+  const used = rejectionSampleBuckets.get(bucket) ?? 0;
+  if (used >= 4) return;
+  rejectionSampleBuckets.set(bucket, used + 1);
+  if (rejectionSampleBuckets.size > 32) for (const key of rejectionSampleBuckets.keys()) {
+    if (!key.startsWith(String(hour) + ':')) rejectionSampleBuckets.delete(key);
+  }
+  const programs = [...new Set([
+    ...tx.transaction.message.instructions,
+    ...(tx.meta?.innerInstructions ?? []).flatMap(group => group.instructions)
+  ].map(ix => ix.programId.toBase58()))].slice(0, 12);
+  console.log('[Echo] CLASSIFICATION_REJECTION_SAMPLE', JSON.stringify({
+    signature, reason, blockTime: tx.blockTime, programs
+  }));
+}
 // No extra provider calls, signing, or trading; live verified BUY timing only.
 const echoShadowLatency = new EchoVerifiedBuyLatencyTracker();
 function historyRateLimited(retryHeader: string | null, fallback = false) {
@@ -295,7 +315,7 @@ const queue = new EchoQueue(async signature => {
   const signals = directSignals.length ? directSignals : jupiterSignals.length ? jupiterSignals
     : extractPumpAppRoutedEchoBuys(tx, signature, Date.now() / 1000);
   diagnostics.signals += signals.length;
-  if (!signals.length) { diagnostics.noSignal++; const reason = classifyEchoRejection(tx, signature, Date.now() / 1000); rejectionCounts[reason] = (rejectionCounts[reason] ?? 0) + 1; }
+  if (!signals.length) { diagnostics.noSignal++; const reason = classifyEchoRejection(tx, signature, Date.now() / 1000); rejectionCounts[reason] = (rejectionCounts[reason] ?? 0) + 1; recordEchoRejectionSample(reason, signature, tx); }
   for (const signal of signals) {
     // User requested only confirmed BUY notifications, never incoming transfers or SELLs.
     if (signal.side !== 'BUY' || store.has(signal.id)) continue;
