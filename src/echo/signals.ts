@@ -17,7 +17,7 @@ export type EchoTransaction = {
 export type EchoSignal = {
   id: string; wallet: string; caller: string; signature: string; timestamp: number;
   mint: string; side: 'BUY' | 'SELL'; tokenAmount: number; quoteAmount: number | null; quoteSymbol: string;
-  quoteBasis?: 'token-account net change' | 'wallet SOL net change; includes fees/rent' | 'unavailable';
+  quoteBasis?: 'token-account net change' | 'verified native SOL route transfer' | 'wallet SOL net change; includes fees/rent' | 'unavailable';
   quoteMint?: string;
 };
 function address(value: unknown): value is string {
