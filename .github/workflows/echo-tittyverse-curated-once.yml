@@ -1,0 +1,25 @@
+name: Echo Tittyverse curated TAO snapshot (one-shot)
+on:
+  push:
+    branches:
+      - feat/echo-tittyverse-research-20261101
+    paths:
+      - research/echo-tittyverse-curated-tao.json
+      - scripts/echoTittyverseCuratedSnapshot.ts
+      - .github/workflows/echo-tittyverse-curated-once.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: One bounded DEX read, offline signer-BUY correlation, no execution
+        run: npx tsx scripts/echoTittyverseCuratedSnapshot.ts research/echo-tittyverse-curated-tao.json
