@@ -48,8 +48,9 @@ export async function simulateEchoUnsignedTransaction(
       instruction[1].Custom as number:undefined;
     const spent=result.result.value.unitsConsumed;
     return {ok:false,reason:'SIMULATION_REJECTED',failureClass,
-      failingInstructionIndex:ix,customErrorCode:custom,
-      unitsConsumed:Number.isSafeInteger(spent)&&spent>=0?spent:undefined};
+      ...(ix!==undefined?{failingInstructionIndex:ix}:{}),
+      ...(custom!==undefined?{customErrorCode:custom}:{}),
+      ...(Number.isSafeInteger(spent)&&spent>=0?{unitsConsumed:spent as number}:{})};
   }
   const units=result.result.value.unitsConsumed;
   if(!Number.isSafeInteger(units)||units<1||units>1_400_000)
