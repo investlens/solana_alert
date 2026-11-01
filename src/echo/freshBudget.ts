@@ -12,9 +12,13 @@ export function echoFreshPageBudget(pending:boolean,queueSize:number):number{
  * RPC round trips; they do not increase transaction-fetch concurrency.
  * At elevated queue pressure revert to 100 signatures and one page.
  */
-export function echoFreshScanPlan(isSlingoor:boolean,pending:boolean,queueSize:number,olderGapPending=false):
+export function echoFreshScanPlan(isSlingoor:boolean,pending:boolean,queueSize:number,olderGapPending=false,backgroundAuditOnly=false):
   {pageLimit:number,maxPages:number}{
   if(!Number.isSafeInteger(queueSize)||queueSize<0)throw Error('INVALID_QUEUE_SIZE');
+  // Healthy WS traffic owns the live path. An archive audit on this process
+  // must not enqueue an entire 1,000-signature page and saturate getTransaction.
+  // The persisted checkpoint remains open for an independent backfill worker.
+  if(backgroundAuditOnly)return {pageLimit:100,maxPages:1};
   // Once an unverified old gap is past the live window, crawl at <=1 page/pass
   // while the WebSocket priority queue retains the live BUY fast path.
   if(olderGapPending)return {pageLimit:isSlingoor&&queueSize<16?1000:100,maxPages:1};
