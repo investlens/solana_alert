@@ -33,6 +33,12 @@ test('websocket must acknowledge every tracked wallet before becoming ready', ()
     subscription: 100, result: { value: { err: null, signature } }
   } }) });
   assert.deepEqual(received, [signature]);
+  // A malformed provider notification must not be mistaken for wallet activity.
+  const timestampBeforeInvalid=client.state.lastNotificationAt;
+  listeners.get('message')!({data:JSON.stringify({method:'logsNotification',params:{
+    subscription:100,result:{value:{err:null,signature:'invalid'}}
+  }})});
+  assert.equal(client.state.lastNotificationAt,timestampBeforeInvalid);
   const firstWallet=Object.keys(ECHO_WALLETS)[0];
   assert.equal(Number.isSafeInteger(client.state.lastNotificationAtByWallet[firstWallet]),true);
   if(Object.keys(ECHO_WALLETS).length>1){
