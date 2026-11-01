@@ -35,7 +35,7 @@ export type EchoJupiterV2PreviewRequest={
 export type EchoJupiterV2PreviewResult=
  | {ok:true;reason:'RPC_SIMULATION_SUCCEEDED';side:'BUY'|'SELL';
     inputMint:string;outputMint:string;inputRaw:string;quotedOutputRaw:string;
-    unsignedTransactionSha256:string;requestId:string;logs:string[];unsignedAudit?:EchoUnsignedAudit}
+    unsignedTransactionSha256:string;requestId:string;logs:string[];unitsConsumed?:number;unsignedAudit?:EchoUnsignedAudit}
  | {ok:false;reason:string;failureClass?:string;orderBuilt?:boolean;unsignedTransactionSha256?:string;builderErrorCode?:number;builderRouter?:string};
 export async function readOnlyEchoJupiterV2Swap(
  r:EchoJupiterV2PreviewRequest,fetcher:typeof fetch=fetch
@@ -129,6 +129,6 @@ export async function readOnlyEchoJupiterV2Swap(
   return {ok:true,reason:'RPC_SIMULATION_SUCCEEDED',side:r.side,
    inputMint,outputMint,inputRaw:r.amountRaw,quotedOutputRaw:order.outAmount,
    unsignedTransactionSha256:orderSha256,
-   requestId:order.requestId,logs:result.logs??[],unsignedAudit:accountAudit.audit};
+   requestId:order.requestId,logs:result.logs??[],unitsConsumed:result.unitsConsumed!,unsignedAudit:accountAudit.audit};
  }catch{return {ok:false,reason:'ORDER_OR_SIMULATION_FAILED'};}
 }

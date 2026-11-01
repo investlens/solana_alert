@@ -22,7 +22,7 @@ async function check(value:unknown){
 }
 test('simulation recognizes insufficient funds as a balance blocker, never a route success',async()=>{
  const {result,calls}=await check({err:{InstructionError:[0,'InsufficientFunds']},logs:[]});
- assert.deepEqual(result,{ok:false,reason:'SIMULATION_REJECTED',failureClass:'INSUFFICIENT_FUNDS_OR_TOKENS'});
+ assert.deepEqual(result,{ok:false,reason:'SIMULATION_REJECTED',failureClass:'INSUFFICIENT_FUNDS_OR_TOKENS',failingInstructionIndex:0});
  assert.deepEqual(calls,['simulateTransaction']);
  assert.equal(ECHO_SEND_TRANSACTION_ENABLED,false);
 });
@@ -33,7 +33,7 @@ test('simulation classifies missing accounts and onchain failures without exposi
  assert.equal(failure.result.failureClass,'ONCHAIN_INSTRUCTION_REJECTED');
 });
 test('only err:null is a successful RPC simulation',async()=>{
- const success=await check({err:null,logs:['Program log: done']});
+ const success=await check({err:null,logs:['Program log: done'],unitsConsumed:85000});
  assert.equal(success.result.ok,true);
  assert.equal(success.result.logs?.length,1);
 });

@@ -42,7 +42,7 @@ test('read-only simulation never submits and rejects invalid or failed results',
  const post=(async (_url:string,opts:RequestInit)=>{
   const payload=JSON.parse(String(opts.body));
   calls.push(payload.method);
-  return {ok:true,json:async()=>({result:{value:{err:null,logs:['simulation only']}}})} as Response;
+  return {ok:true,json:async()=>({result:{value:{err:null,unitsConsumed:85000,logs:['simulation only']}}})} as Response;
  }) as typeof fetch;
  const r=await simulateEchoUnsignedTransaction('https://example-rpc.invalid','A'.repeat(128),post);
  assert.equal(r.ok,true);
