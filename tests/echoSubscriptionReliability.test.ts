@@ -33,5 +33,17 @@ test('websocket must acknowledge every tracked wallet before becoming ready', ()
     subscription: 100, result: { value: { err: null, signature } }
   } }) });
   assert.deepEqual(received, [signature]);
+  const firstWallet=Object.keys(ECHO_WALLETS)[0];
+  assert.equal(Number.isSafeInteger(client.state.lastNotificationAtByWallet[firstWallet]),true);
+  if(Object.keys(ECHO_WALLETS).length>1){
+    const otherWallet=Object.keys(ECHO_WALLETS)[1];
+    assert.equal(client.state.lastNotificationAtByWallet[otherWallet],undefined);
+    listeners.get('message')!({data:JSON.stringify({method:'logsNotification',params:{
+      subscription:101,result:{value:{err:null,signature:'4'.repeat(88),
+        logs:['Program 11111111111111111111111111111111 invoke [1]']}}
+    }})});
+    assert.equal(Number.isSafeInteger(client.state.lastNotificationAtByWallet[otherWallet]),true);
+    assert.deepEqual(received,[signature]);
+  }
   client.stop();
 });
