@@ -11,7 +11,7 @@ const MINT=/^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 export type UserTittyverseLead={mint:string;symbol:string;
  observedAtMs:number;url:string;provenance:'USER_SHARED_LINK'};
 export type CuratedResearchSnapshot={
- collectedAtMs:number;siteApiStatus:'UNAUTHORIZED_401';readOnly:true;
+ collectedAtMs:number;siteApiStatus:'NOT_QUERIED';readOnly:true;
  listingIndependentlyVerified:false;
  seeds:number;verifiedDexPairs:number;dexUnverifiedRows:number;
  pairEvidence:DexPairResult['evidence'];findings:ResearchFinding[];
@@ -57,7 +57,7 @@ export async function collectCuratedTittyverseResearch(input:{
  const findings=evaluateTittyverseSnapshot({
   tokens,pairs:observed.pairs,buys:input.verifiedBuys
  });
- return {collectedAtMs:nowMs,siteApiStatus:'UNAUTHORIZED_401',readOnly:true,
+ return {collectedAtMs:nowMs,siteApiStatus:'NOT_QUERIED',readOnly:true,
   listingIndependentlyVerified:false,
   seeds:input.leads.length,verifiedDexPairs:observed.pairs.length,
   dexUnverifiedRows:observed.unverifiedRows,
