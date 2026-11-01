@@ -376,6 +376,7 @@ const queue = new EchoQueue(async signature => {
 let reconciling = false;
 let lastHeadAuditAtMs: number | null = null;
 let lastArchiveAuditAtMs: number | null = null;
+let pendingReconnectRecovery = false;
 const recoveryStats={headSpotchecks:0,archiveAudits:0,headCandidates:0};
 // Limit historical RPC consumption per pass; continue from the last cursor on the next pass.
 // Persist pagination cursors on the same private volume as the durable alert queue.
@@ -574,14 +575,22 @@ async function reconcile(mode:'head'|'archive'='archive',isReconnect=false) {
       });
     }
     lastReconcileAt = Date.now();
-  } catch { lastErrorAt = Date.now(); console.warn('[Echo] Reconciliation unavailable; bounded retry scheduled.'); }
+  } catch {
+    if(isReconnect)pendingReconnectRecovery=true;
+    lastErrorAt = Date.now();
+    console.warn('[Echo] Reconciliation unavailable; bounded retry scheduled.');
+  }
   finally { reconciling = false; }
 }
 const subscription = startEchoSubscription({ url: config.wsUrl, fallbackUrl: config.fallbackWsUrl, onSignature: (signature, wallet) => { if (!store.has(`tx:${signature}`)) { const accepted=queue.add(signature, ECHO_WALLETS[wallet] === 'WHALE · slingoor'); if (accepted) echoShadowLatency.websocketObserved(signature,wallet); if (!accepted) { lastErrorAt=Date.now(); console.error('[Echo] WS_QUEUE_REJECTED', { caller: ECHO_WALLETS[wallet], queued: queue.size, dropped: queue.dropped }); /* queue recovery is driven by the bounded timer */ } } }, onReady: () => {
+  pendingReconnectRecovery=true;
   const plan=planEchoRecovery({nowMs:Date.now(),websocketReady:true,queueSize:queue.size,
     historyPending:historyCursors.size>0||[...freshCursors.values()].some(c=>c.before!==null),
     lastHeadAtMs:lastHeadAuditAtMs,lastArchiveAtMs:lastArchiveAuditAtMs,lastStreamNotificationAtMs:subscription.state.lastNotificationAt,reconnectEvent:true});
-  if(plan.mode!=='none')void reconcile(plan.mode,plan.reason==='WS_RECONNECTED');
+  if(plan.mode!=='none'&&!reconciling&&historyRpcAvailable()&&queue.size<=15){
+    pendingReconnectRecovery=false;
+    void reconcile(plan.mode,plan.reason==='WS_RECONNECTED');
+  }
 } });
 const tick = setInterval(() => { if (!stopping && liveRpcAvailable() && Date.now() >= deliveryBackoffUntil) void queue.tick(); }, 250);
 // Reduce history polling (especially on an active WebSocket) so live BUY processing
@@ -592,8 +601,13 @@ const sweep = setInterval(() => {
   const plan=planEchoRecovery({nowMs:Date.now(),websocketReady:subscription.state.ready,
     queueSize:queue.size,
     historyPending:historyCursors.size>0||[...freshCursors.values()].some(c=>c.before!==null),
-    lastHeadAtMs:lastHeadAuditAtMs,lastArchiveAtMs:lastArchiveAuditAtMs,lastStreamNotificationAtMs:subscription.state.lastNotificationAt});
-  if(plan.mode!=='none')void reconcile(plan.mode);
+    lastHeadAtMs:lastHeadAuditAtMs,lastArchiveAtMs:lastArchiveAuditAtMs,lastStreamNotificationAtMs:subscription.state.lastNotificationAt,
+    reconnectEvent:pendingReconnectRecovery&&subscription.state.ready});
+  if(plan.mode!=='none'&&!reconciling&&historyRpcAvailable()&&queue.size<=15){
+    const isReconnect=plan.reason==='WS_RECONNECTED';
+    if(isReconnect)pendingReconnectRecovery=false;
+    void reconcile(plan.mode,isReconnect);
+  }
 },60_000);
 const promotionTick=setInterval(()=>{if(promotionsReady)void promotions.tick();},30_000);
 if(promotionsReady)void promotions.tick();
@@ -607,7 +621,7 @@ const heartbeat = setInterval(() => console.log('[Echo] HEALTH', { subscriptions
   activeWebSocketProvider: subscription.state.activeProvider,
   skippedNonSwapLogs: subscription.state.skippedNonSwapLogs, observedTradeSignatures: subscription.state.observedTradeSignatures, queued: queue.size, dropped: queue.dropped,
   lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt, ...diagnostics,
-  recoveryStats, lastHeadAuditAtMs, lastArchiveAuditAtMs, rpcUsage, promotions: promotionsReady ? promotions.summary() : {enabled:false}, research: researchReady ? JSON.stringify(research.summary()) : {enabled:false},tiers:tiers.summary(), audit:echoAuditOutbox?.summary()??{enabled:false}, shadowLatency:echoShadowLatency.summary(), rejectionCounts }), 60_000);
+  recoveryStats, lastHeadAuditAtMs, lastArchiveAuditAtMs, pendingReconnectRecovery, rpcUsage, promotions: promotionsReady ? promotions.summary() : {enabled:false}, research: researchReady ? JSON.stringify(research.summary()) : {enabled:false},tiers:tiers.summary(), audit:echoAuditOutbox?.summary()??{enabled:false}, shadowLatency:echoShadowLatency.summary(), rejectionCounts }), 60_000);
 const server = createServer((req, res) => {
   if (req.method !== 'GET' || req.url !== '/health') { res.writeHead(404); res.end(); return; }
   // A healthy WebSocket must not be marked down merely because history reconciliation is rate-limited.
