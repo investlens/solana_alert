@@ -1,0 +1,33 @@
+{
+  "observedFromUtc": "2026-11-01T00:00:00Z",
+  "observedThroughUtc": "2026-11-01T15:18:10.377Z",
+  "service": "alphaos-echo-admin",
+  "deployedSha": "105c47834eaa4653b9e41dc02679c6fab90e24d8",
+  "sampleSources": "Railway RESEARCH_EVENT (message IDs not Telegram API independently verified)",
+  "total": {
+    "n": 66,
+    "p50seconds": 1.5280001163482666,
+    "p95seconds": 2.194000005722046,
+    "maxSeconds": 2.496000051498413,
+    "over5seconds": 0
+  },
+  "slingoor": {
+    "n": 62,
+    "p50seconds": 1.5160000324249268,
+    "p95seconds": 2.187999963760376,
+    "maxSeconds": 2.2950000762939453,
+    "over5seconds": 0
+  },
+  "chairman": {
+    "n": 4,
+    "p50seconds": 2.1410000324249268,
+    "p95seconds": 2.496000051498413,
+    "maxSeconds": 2.496000051498413,
+    "over5seconds": 0
+  },
+  "rpcHttpFailureEntries": 0,
+  "callerIncompleteEntries": 74,
+  "independentCoverageVerified": false,
+  "alertDeliveryLatencyAppliesOnlyToDetectedTrades": true,
+  "tradeExecutionEnabled": false
+}

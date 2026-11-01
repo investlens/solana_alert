@@ -81,3 +81,32 @@ test('time cutoff reports unverified historical checkpoint without claiming over
  const overlap=advanceFreshScan({checkpoint:'499',before:null,candidate:null},page,100,1200);
  assert.equal(overlap.cutoffWithoutCheckpoint,false);
 });
+
+test('RPC pruned-history page does not falsely close the persisted checkpoint gap', () => {
+ const prior:FreshScanState={checkpoint:'unseen-checkpoint',before:'previous-cursor',
+   candidate:'new-head',olderGapPending:true};
+ const page=[{signature:'older-1',blockTime:100},{signature:'older-2',blockTime:90}];
+ const result=advanceFreshScan(prior,page,100,1000);
+ assert.equal(result.complete,false);
+ assert.equal(result.missingCheckpointAtHistoryEnd,true);
+ assert.equal(result.state.checkpoint,prior.checkpoint);
+ assert.equal(result.state.candidate,prior.candidate);
+ assert.equal(result.state.before,prior.before);
+ assert.equal(result.state.olderGapPending,true);
+});
+test('empty RPC history with old checkpoint stays unresolved, without advancing checkpoint', () => {
+ const prior:FreshScanState={checkpoint:'not-found',before:'previous-cursor',
+   candidate:'new-head'};
+ const result=advanceFreshScan(prior,[],100,1000);
+ assert.equal(result.complete,false);
+ assert.equal(result.missingCheckpointAtHistoryEnd,true);
+ assert.equal(result.state.checkpoint,prior.checkpoint);
+ assert.equal(result.state.before,prior.before);
+});
+test('short page that actually includes previous checkpoint completes normally', () => {
+ const result=advanceFreshScan({checkpoint:'old',before:'last',candidate:'new'},
+  [{signature:'mid',blockTime:100},{signature:'old',blockTime:90}],100,1000);
+ assert.equal(result.complete,true);
+ assert.equal(result.missingCheckpointAtHistoryEnd,false);
+ assert.equal(result.state.checkpoint,'new');
+});

@@ -468,6 +468,13 @@ async function reconcile() {
         freshComplete = progress.complete;
         freshCursors.set(wallet, fresh);
         persistFreshCursors();
+        if (progress.missingCheckpointAtHistoryEnd) {
+          console.error('[Echo] FRESH_CHECKPOINT_UNAVAILABLE_IN_RPC_HISTORY', {
+            caller: ECHO_WALLETS[wallet], checkpointPreserved: true,
+            olderCoverageUnverified: true, providerMayHavePrunedHistory: true
+          });
+          break;
+        }
       }
       if (!freshComplete) console.warn('[Echo] FRESH_COVERAGE_INCOMPLETE', {
         caller: ECHO_WALLETS[wallet], reason: 'fresh-pagination-pending'
