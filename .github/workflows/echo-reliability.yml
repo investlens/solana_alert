@@ -14,6 +14,7 @@ on:
       - deploy/echo-alert-only-telemetry-20261031
       - fix/echo-pump-app-sol-82-20261031
       - fix/echo-coverage-rpc-acceptance-20261031
+      - fix/echo-checkpoint-integrity-20261101
   pull_request:
     branches:
       - feat/echo-admin-pilot-20261021
