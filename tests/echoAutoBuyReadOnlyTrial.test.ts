@@ -53,7 +53,7 @@ test('actual measurement plumbing: 3 network calls at most; shadow candidate, ne
  assert.equal(x.candidate,true);
  assert.equal(x.mode,'READ_ONLY_SHADOW');
  assert.equal(x.broadcast,false);assert.equal(x.signed,false);
- assert.equal(x.estimatedPriorityLamports,'2200');
+ assert.equal(x.estimatedPriorityLamports,'1980');
  assert.equal(x.measuredComputeUnits,200000);
  assert.equal(x.verifiedQuotePriceSolPerToken,0.1);
  assert.equal(d.calls.length,1); // mock represents real Jupiter /order; fee mocked
