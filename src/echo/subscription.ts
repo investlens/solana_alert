@@ -68,11 +68,14 @@ export function startEchoSubscription(options: Options) {
       if (message.method !== 'logsNotification' || !ids.has(message.params?.subscription)) return;
       const wallet = walletForSubscription.get(message.params.subscription);
       if(!wallet)return;
+      const value = message.params?.result?.value;
+      // A provider message with a malformed signature is not valid wallet
+      // activity: it cannot suppress an eventual silent-stream spot-check.
+      if (!/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(value?.signature ?? '')) return;
       const receivedAt=Date.now();
       state.lastNotificationAt=receivedAt;
       state.lastNotificationAtByWallet[wallet]=receivedAt;
-      const value = message.params?.result?.value;
-      if (value?.err != null || !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(value?.signature ?? '')) return;
+      if (value.err != null) return;
       if (!mayContainWalletSwap(value.logs)) { state.skippedNonSwapLogs++; return; }
       state.observedTradeSignatures++;
       options.onSignature(value.signature, wallet);
