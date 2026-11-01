@@ -427,7 +427,12 @@ async function reconcile(mode:'head'|'archive'='archive') {
   const auditStartedAt=Date.now();
   // Timestamp every attempt, including provider failures, to avoid retry storms.
   if(mode==='head')lastHeadAuditAtMs=auditStartedAt;
-  else lastArchiveAuditAtMs=auditStartedAt;
+  else {
+    lastArchiveAuditAtMs=auditStartedAt;
+    // An archive pass itself probes the live head. Do not immediately
+    // duplicate that RPC work in the next periodic head-check.
+    lastHeadAuditAtMs=auditStartedAt;
+  }
   try {
     const cutoff = Date.now() / 1000 - historyWindowSeconds;
     if(mode==='head') {
@@ -575,7 +580,7 @@ async function reconcile(mode:'head'|'archive'='archive') {
 const subscription = startEchoSubscription({ url: config.wsUrl, fallbackUrl: config.fallbackWsUrl, onSignature: (signature, wallet) => { if (!store.has(`tx:${signature}`)) { const accepted=queue.add(signature, ECHO_WALLETS[wallet] === 'WHALE · slingoor'); if (accepted) echoShadowLatency.websocketObserved(signature,wallet); if (!accepted) { lastErrorAt=Date.now(); console.error('[Echo] WS_QUEUE_REJECTED', { caller: ECHO_WALLETS[wallet], queued: queue.size, dropped: queue.dropped }); /* queue recovery is driven by the bounded timer */ } } }, onReady: () => {
   const plan=planEchoRecovery({nowMs:Date.now(),websocketReady:true,queueSize:queue.size,
     historyPending:historyCursors.size>0||[...freshCursors.values()].some(c=>c.before!==null),
-    lastHeadAtMs:lastHeadAuditAtMs,lastArchiveAtMs:lastArchiveAuditAtMs,reconnectEvent:true});
+    lastHeadAtMs:lastHeadAuditAtMs,lastArchiveAtMs:lastArchiveAuditAtMs,lastStreamNotificationAtMs:subscription.state.lastNotificationAt,reconnectEvent:true});
   if(plan.mode!=='none')void reconcile(plan.mode);
 } });
 const tick = setInterval(() => { if (!stopping && liveRpcAvailable() && Date.now() >= deliveryBackoffUntil) void queue.tick(); }, 250);
@@ -587,7 +592,7 @@ const sweep = setInterval(() => {
   const plan=planEchoRecovery({nowMs:Date.now(),websocketReady:subscription.state.ready,
     queueSize:queue.size,
     historyPending:historyCursors.size>0||[...freshCursors.values()].some(c=>c.before!==null),
-    lastHeadAtMs:lastHeadAuditAtMs,lastArchiveAtMs:lastArchiveAuditAtMs});
+    lastHeadAtMs:lastHeadAuditAtMs,lastArchiveAtMs:lastArchiveAuditAtMs,lastStreamNotificationAtMs:subscription.state.lastNotificationAt});
   if(plan.mode!=='none')void reconcile(plan.mode);
 },60_000);
 const promotionTick=setInterval(()=>{if(promotionsReady)void promotions.tick();},30_000);
@@ -597,7 +602,7 @@ if (researchReady) void research.tick().catch(() => console.warn('[EchoResearch]
 const auditTick=setInterval(()=>{if(echoAuditOutbox)void echoAuditOutbox.flush();},30_000);
 const tierTick=setInterval(()=>{void tiers.tick().catch(()=>console.warn('[EchoTiers] TICK_FAILED'));},1000);
 const heartbeat = setInterval(() => console.log('[Echo] HEALTH', { subscriptions: subscription.state.acknowledgedWallets,
-  websocketReady: subscription.state.ready, reconnects: subscription.state.reconnects,
+  websocketReady: subscription.state.ready, lastNotificationAt: subscription.state.lastNotificationAt, reconnects: subscription.state.reconnects,
   lastDisconnectReason: subscription.state.lastDisconnectReason, lastConnectedAt: subscription.state.lastConnectedAt,
   activeWebSocketProvider: subscription.state.activeProvider,
   skippedNonSwapLogs: subscription.state.skippedNonSwapLogs, observedTradeSignatures: subscription.state.observedTradeSignatures, queued: queue.size, dropped: queue.dropped,
