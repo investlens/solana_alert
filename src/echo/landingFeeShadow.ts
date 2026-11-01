@@ -58,7 +58,7 @@ export function planEchoLandingFee(i:EchoLandingFeeInput):EchoLandingFeeDecision
   return deny('INVALID_OR_INSUFFICIENT_FEE_SAMPLES');
  // A 10% margin, rounded up, caps at the consensus transaction maximum.
  const units=Math.min(ECHO_MAX_COMPUTE_UNITS,
-    Math.ceil(i.simulationUnitsConsumed*1.1));
+    Math.ceil(i.simulationUnitsConsumed*11/10));
  const prices=[...i.samples].map(s=>s.prioritizationFee).sort((a,b)=>a-b);
  const price=prices[Math.ceil(prices.length*.75)-1];
  const fee=ceilDiv(BigInt(price)*BigInt(units),1_000_000n);
