@@ -15,7 +15,7 @@ export type EchoPumpLocalPreview={
 };
 export async function readOnlyPumpLocalPreview(
  r:EchoPumpLocalPreview,fetcher:typeof fetch=fetch
-):Promise<{ok:boolean;reason:string;transactionHash?:string;programs?:string[];unitsConsumed?:number;worstCasePriorityLamports?:string;builderMs?:number;simulationMs?:number;failureClass?:string}>{
+):Promise<{ok:boolean;reason:string;transactionHash?:string;programs?:string[];unitsConsumed?:number;worstCasePriorityLamports?:string;builderMs?:number;simulationMs?:number;failureClass?:string;unresolvedLookupTables?:number;signingApproved?:false}>{
  try{
   if(!r.wallet||!r.mint||
     new PublicKey(r.wallet).toBase58()!==r.wallet||
@@ -41,8 +41,12 @@ export async function readOnlyPumpLocalPreview(
   if(bytes.length<100||bytes.length>2250)
    return {ok:false,reason:'UNSIGNED_BYTES_INVALID'};
   const tx=VersionedTransaction.deserialize(bytes);
-  if(tx.message.version!==0||tx.message.addressTableLookups.length>0)
-   return {ok:false,reason:'UNRESOLVED_LOOKUP_TABLES'};
+  if(tx.message.version!==0||tx.message.addressTableLookups.length>4)
+   return {ok:false,reason:'UNREVIEWED_VERSION_OR_TOO_MANY_LOOKUP_TABLES'};
+  // Lookup-table addresses remain UNRESOLVED for authorization here.
+  // We may simulate an unsigned v0 envelope read-only; NEVER claim that
+  // its destinations/program accounts have been completely reviewed.
+  const unresolvedLookupTables=tx.message.addressTableLookups.length;
   if(tx.message.header.numRequiredSignatures!==1||
     tx.message.staticAccountKeys[0]?.toBase58()!==r.wallet||
     tx.signatures.length!==1||!tx.signatures[0].every(x=>x===0))
@@ -73,10 +77,12 @@ export async function readOnlyPumpLocalPreview(
   const simulated=await simulateEchoUnsignedTransaction(r.rpcUrl,encoded,fetcher);
   const simulationMs=Date.now()-simulateStarted;
   if(!simulated.ok)return {ok:false,reason:simulated.reason,
-    failureClass:simulated.failureClass,builderMs,simulationMs};
+    failureClass:simulated.failureClass,builderMs,simulationMs,
+    unresolvedLookupTables,signingApproved:false};
   return {ok:true,reason:'READ_ONLY_SIMULATED_NOT_AUTHORIZED',
     transactionHash:createHash('sha256').update(bytes).digest('hex'),
     programs,unitsConsumed:simulated.unitsConsumed,builderMs,simulationMs,
+    unresolvedLookupTables,signingApproved:false,
     worstCasePriorityLamports:worstCase?.toString()};
  }catch{return {ok:false,reason:'BUILDER_OR_SIMULATION_FAILED'};}
 }
