@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {planEchoRecovery,ECHO_ARCHIVE_AUDIT_INTERVAL_MS,ECHO_HEAD_SPOTCHECK_INTERVAL_MS,
+import {planEchoRecovery,oldestEchoWalletStreamSeen,shouldEchoSpotcheckWallet,ECHO_ARCHIVE_AUDIT_INTERVAL_MS,ECHO_HEAD_SPOTCHECK_INTERVAL_MS,
  ECHO_DISCONNECTED_CATCHUP_INTERVAL_MS} from '../src/echo/recoverySchedule.js';
 const now=1800000000000;
 const base={nowMs:now,websocketReady:true,queueSize:0,historyPending:true,
@@ -53,4 +53,30 @@ test('stale WS notification permits bounded spot-check even without archive debt
   nowMs:now+ECHO_HEAD_SPOTCHECK_INTERVAL_MS,
   lastArchiveAtMs:now,lastHeadAtMs:now,lastStreamNotificationAtMs:now});
  assert.deepEqual(result,{mode:'head',reason:'LIVE_HEAD_SPOT_CHECK'});
+});
+
+test('Chairman activity never masks a silent Slingoor websocket',()=>{
+ const slingoor='5YRgrP3mjGzrzirYYN5HAQH19cTYREYwGxW6XRJQUzij';
+ const chairman='Be24Gbf5KisDk1LcWWZsBn8dvB816By7YzYF5zWZnRR6';
+ const last={ [slingoor]:now, [chairman]:now+14*60_000 };
+ const nowMs=now+ECHO_HEAD_SPOTCHECK_INTERVAL_MS;
+ const least=oldestEchoWalletStreamSeen([slingoor,chairman],last,now);
+ assert.equal(least,now);
+ const decision=planEchoRecovery({...base,historyPending:false,nowMs,
+  lastHeadAtMs:now,lastArchiveAtMs:now,lastStreamNotificationAtMs:least});
+ assert.deepEqual(decision,{mode:'head',reason:'LIVE_HEAD_SPOT_CHECK'});
+ assert.equal(shouldEchoSpotcheckWallet({nowMs,wallet:slingoor,notifications:last,connectedAtMs:now}),true);
+ assert.equal(shouldEchoSpotcheckWallet({nowMs,wallet:chairman,notifications:last,connectedAtMs:now}),false);
+});
+test('reconnection resets quiet-wallet clock without treating an ACK as trade',()=>{
+ const wallet='5YRgrP3mjGzrzirYYN5HAQH19cTYREYwGxW6XRJQUzij';
+ const old={[wallet]:now-100_000};
+ const newConnection=now+1000;
+ assert.equal(shouldEchoSpotcheckWallet({
+  nowMs:newConnection+60_000,wallet,notifications:old,connectedAtMs:newConnection
+ }),false);
+ assert.equal(shouldEchoSpotcheckWallet({
+  nowMs:newConnection+ECHO_HEAD_SPOTCHECK_INTERVAL_MS,wallet,
+  notifications:old,connectedAtMs:newConnection
+ }),true);
 });
