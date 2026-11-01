@@ -19,7 +19,7 @@ const cfg=JSON.parse(readFileSync(file,'utf8'));
 if(cfg.wallet!==WALLET||cfg.caller!==CALLER||
  !Number.isSafeInteger(cfg.from)||!Number.isSafeInteger(cfg.to)||
  cfg.from>=cfg.to||cfg.to-cfg.from>180||
- typeof cfg.anchorSignature!=='string'||!^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(cfg.anchorSignature)||
+ typeof cfg.anchorSignature!=='string'||!/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(cfg.anchorSignature)||
  !Array.isArray(cfg.deliveries)||cfg.deliveries.length>50)throw Error('INVALID_REFERENCE_WINDOW');
 let rpcCount=0;
 async function rpc(method:string,params:unknown[]){
