@@ -11,7 +11,7 @@ type Options = {
 };
 export function startEchoSubscription(options: Options) {
   const later = options.later ?? setTimeout, cancel = options.cancel ?? clearTimeout;
-  const state = { ready: false, acknowledgedWallets: 0, reconnects: 0, lastMessageAt: null as number | null, lastNotificationAt: null as number | null, lastDisconnectReason: 'none' as string, lastConnectedAt: null as number | null, activeProvider: 'primary' as 'primary' | 'fallback', skippedNonSwapLogs: 0, observedTradeSignatures: 0 };
+  const state = { ready: false, acknowledgedWallets: 0, reconnects: 0, lastMessageAt: null as number | null, lastNotificationAt: null as number | null, lastNotificationAtByWallet: {} as Record<string,number>, lastDisconnectReason: 'none' as string, lastConnectedAt: null as number | null, activeProvider: 'primary' as 'primary' | 'fallback', skippedNonSwapLogs: 0, observedTradeSignatures: 0 };
   let socket: Socket | null = null, stopped = false, reconnect: Timer | undefined;
   let timeout: Timer | undefined, delay = 1000, consecutiveFailures = 0, useFallback = false;
   function failedAttempt() {
@@ -66,13 +66,16 @@ export function startEchoSubscription(options: Options) {
         return;
       }
       if (message.method !== 'logsNotification' || !ids.has(message.params?.subscription)) return;
-      state.lastNotificationAt=Date.now();
+      const wallet = walletForSubscription.get(message.params.subscription);
+      if(!wallet)return;
+      const receivedAt=Date.now();
+      state.lastNotificationAt=receivedAt;
+      state.lastNotificationAtByWallet[wallet]=receivedAt;
       const value = message.params?.result?.value;
       if (value?.err != null || !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(value?.signature ?? '')) return;
       if (!mayContainWalletSwap(value.logs)) { state.skippedNonSwapLogs++; return; }
       state.observedTradeSignatures++;
-      const wallet = walletForSubscription.get(message.params.subscription);
-      if (wallet) options.onSignature(value.signature, wallet);
+      options.onSignature(value.signature, wallet);
     });
     current.addEventListener('close', (event: any) => lost('closed_' + String(Number.isInteger(event?.code) ? event.code : 'unknown')));
     current.addEventListener('error', () => lost('socket_error'));
