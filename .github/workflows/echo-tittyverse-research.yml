@@ -23,4 +23,4 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
       - name: Tittyverse offline research tests
-        run: npx tsx --test tests/echoTittyverseResearch.test.ts
+        run: npx tsx --test tests/echoTittyverseResearch.test.ts tests/echoTittyverseDexPairs.test.ts
