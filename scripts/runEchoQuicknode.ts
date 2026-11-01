@@ -20,7 +20,7 @@ import { readEchoTransaction } from '../src/echo/readTransaction.js';
 import { advanceFreshScan, type FreshScanState } from '../src/echo/freshScan.js';
 import { echoFreshScanPlan } from '../src/echo/freshBudget.js';
 import { echoRpc429CooldownMs } from '../src/echo/rpc429Policy.js';
-import { planEchoRecovery } from '../src/echo/recoverySchedule.js';
+import { planEchoRecovery, oldestEchoWalletStreamSeen, shouldEchoSpotcheckWallet } from '../src/echo/recoverySchedule.js';
 import { EchoVerifiedBuyLatencyTracker } from '../src/echo/verifiedBuyLatencyTracker.js';
 
 // Independent executable: no shared startup/config, database, bot polling,
@@ -441,6 +441,9 @@ async function reconcile(mode:'head'|'archive'='archive',isReconnect=false) {
       // checkpoints or imply complete coverage of a high-volume wallet.
       for(const wallet of Object.keys(ECHO_WALLETS)) {
         if(stopping||!historyRpcAvailable()||queue.size>15)break;
+        if(subscription.state.ready&&!shouldEchoSpotcheckWallet({nowMs:Date.now(),wallet,
+           notifications:subscription.state.lastNotificationAtByWallet,
+           connectedAtMs:subscription.state.lastConnectedAt}))continue;
         const rows=await rpc('getSignaturesForAddress',[wallet,{limit:100,commitment:'confirmed'}]);
         if(!Array.isArray(rows))throw Error('Echo head spot-check unavailable');
         let accepted=0;
@@ -586,7 +589,7 @@ const subscription = startEchoSubscription({ url: config.wsUrl, fallbackUrl: con
   pendingReconnectRecovery=true;
   const plan=planEchoRecovery({nowMs:Date.now(),websocketReady:true,queueSize:queue.size,
     historyPending:historyCursors.size>0||[...freshCursors.values()].some(c=>c.before!==null),
-    lastHeadAtMs:lastHeadAuditAtMs,lastArchiveAtMs:lastArchiveAuditAtMs,lastStreamNotificationAtMs:subscription.state.lastNotificationAt,reconnectEvent:true});
+    lastHeadAtMs:lastHeadAuditAtMs,lastArchiveAtMs:lastArchiveAuditAtMs,lastStreamNotificationAtMs:oldestEchoWalletStreamSeen(Object.keys(ECHO_WALLETS),subscription.state.lastNotificationAtByWallet,subscription.state.lastConnectedAt),reconnectEvent:true});
   if(plan.mode!=='none'&&!reconciling&&historyRpcAvailable()&&queue.size<=15){
     pendingReconnectRecovery=false;
     void reconcile(plan.mode,plan.reason==='WS_RECONNECTED');
@@ -601,7 +604,7 @@ const sweep = setInterval(() => {
   const plan=planEchoRecovery({nowMs:Date.now(),websocketReady:subscription.state.ready,
     queueSize:queue.size,
     historyPending:historyCursors.size>0||[...freshCursors.values()].some(c=>c.before!==null),
-    lastHeadAtMs:lastHeadAuditAtMs,lastArchiveAtMs:lastArchiveAuditAtMs,lastStreamNotificationAtMs:subscription.state.lastNotificationAt,
+    lastHeadAtMs:lastHeadAuditAtMs,lastArchiveAtMs:lastArchiveAuditAtMs,lastStreamNotificationAtMs:oldestEchoWalletStreamSeen(Object.keys(ECHO_WALLETS),subscription.state.lastNotificationAtByWallet,subscription.state.lastConnectedAt),
     reconnectEvent:pendingReconnectRecovery&&subscription.state.ready});
   if(plan.mode!=='none'&&!reconciling&&historyRpcAvailable()&&queue.size<=15){
     const isReconnect=plan.reason==='WS_RECONNECTED';
@@ -616,7 +619,7 @@ if (researchReady) void research.tick().catch(() => console.warn('[EchoResearch]
 const auditTick=setInterval(()=>{if(echoAuditOutbox)void echoAuditOutbox.flush();},30_000);
 const tierTick=setInterval(()=>{void tiers.tick().catch(()=>console.warn('[EchoTiers] TICK_FAILED'));},1000);
 const heartbeat = setInterval(() => console.log('[Echo] HEALTH', { subscriptions: subscription.state.acknowledgedWallets,
-  websocketReady: subscription.state.ready, lastNotificationAt: subscription.state.lastNotificationAt, reconnects: subscription.state.reconnects,
+  websocketReady: subscription.state.ready, lastNotificationAt: subscription.state.lastNotificationAt, lastNotificationAtByWallet:subscription.state.lastNotificationAtByWallet, reconnects: subscription.state.reconnects,
   lastDisconnectReason: subscription.state.lastDisconnectReason, lastConnectedAt: subscription.state.lastConnectedAt,
   activeWebSocketProvider: subscription.state.activeProvider,
   skippedNonSwapLogs: subscription.state.skippedNonSwapLogs, observedTradeSignatures: subscription.state.observedTradeSignatures, queued: queue.size, dropped: queue.dropped,
