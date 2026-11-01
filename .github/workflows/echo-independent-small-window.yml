@@ -1,0 +1,25 @@
+name: Echo independent Slingoor small-window audit
+on:
+  push:
+    branches:
+      - fix/echo-checkpoint-integrity-20261101
+    paths:
+      - scripts/echoIndependentWindowAudit.ts
+      - research/echo-audit-slingoor-20261101-1413.json
+      - .github/workflows/echo-independent-small-window.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Bound independent verified BUY read and compare Railway Telegram evidence
+        run: npx tsx scripts/echoIndependentWindowAudit.ts research/echo-audit-slingoor-20261101-1413.json
