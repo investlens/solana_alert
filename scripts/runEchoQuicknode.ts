@@ -421,7 +421,7 @@ function persistFreshCursors() {
 }
 const historyWindowSeconds = 1800;
 const historyPagesPerPass = 3;
-async function reconcile(mode:'head'|'archive'='archive') {
+async function reconcile(mode:'head'|'archive'='archive',isReconnect=false) {
   if (reconciling || stopping || !historyRpcAvailable() || queue.size > 15) return;
   reconciling = true;
   const auditStartedAt=Date.now();
@@ -484,7 +484,7 @@ async function reconcile(mode:'head'|'archive'='archive') {
           /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') &&
           !store.has(`tx:${row.signature}`)) { if (!queue.add(row.signature)) throw Error('Echo queue full: cursor not advanced'); }
       }
-      const freshPlan = echoFreshScanPlan(ECHO_WALLETS[wallet] === 'WHALE · slingoor',Boolean(fresh.before),queue.size,Boolean(fresh.olderGapPending),subscription.state.ready);
+      const freshPlan = echoFreshScanPlan(ECHO_WALLETS[wallet] === 'WHALE · slingoor',Boolean(fresh.before),queue.size,Boolean(fresh.olderGapPending),subscription.state.ready&&!isReconnect);
       for (let page = 0; page < freshPlan.maxPages && !freshComplete; page++) {
         if (stopping || !historyRpcAvailable() || queue.size > 64) break;
         const rows = await rpc('getSignaturesForAddress', [wallet,
@@ -522,7 +522,7 @@ async function reconcile(mode:'head'|'archive'='archive') {
       if (!freshComplete) {
         console.log('[Echo] COVERAGE_PROGRESS', {
           caller: ECHO_WALLETS[wallet], freshComplete: false, historyComplete: false,
-          freshPagesScanned, freshPageLimit: freshPlan.pageLimit, backgroundAuditOnly:subscription.state.ready, olderGapPending: Boolean(fresh.olderGapPending),
+          freshPagesScanned, freshPageLimit: freshPlan.pageLimit, backgroundAuditOnly:subscription.state.ready&&!isReconnect, olderGapPending: Boolean(fresh.olderGapPending),
           historyPagesScanned: 0, freshOldestBlockTime,
           historyOldestBlockTime: null, freshCursorAdvanced: freshCursorBeforePass !== fresh.before,
           historyCursorAdvanced: false, freshPending: fresh.before !== null,
@@ -562,7 +562,7 @@ async function reconcile(mode:'head'|'archive'='archive') {
       }
       console.log('[Echo] COVERAGE_PROGRESS', {
         caller: ECHO_WALLETS[wallet], freshComplete, historyComplete: complete,
-        freshPagesScanned, freshPageLimit: freshPlan.pageLimit, backgroundAuditOnly:subscription.state.ready, olderGapPending: Boolean(fresh.olderGapPending),
+        freshPagesScanned, freshPageLimit: freshPlan.pageLimit, backgroundAuditOnly:subscription.state.ready&&!isReconnect, olderGapPending: Boolean(fresh.olderGapPending),
         historyPagesScanned, freshOldestBlockTime, historyOldestBlockTime,
         freshCursorAdvanced: freshCursorBeforePass !== fresh.before,
         historyCursorAdvanced: historyCursorBeforePass !== (historyCursors.get(wallet) ?? null),
@@ -581,7 +581,7 @@ const subscription = startEchoSubscription({ url: config.wsUrl, fallbackUrl: con
   const plan=planEchoRecovery({nowMs:Date.now(),websocketReady:true,queueSize:queue.size,
     historyPending:historyCursors.size>0||[...freshCursors.values()].some(c=>c.before!==null),
     lastHeadAtMs:lastHeadAuditAtMs,lastArchiveAtMs:lastArchiveAuditAtMs,lastStreamNotificationAtMs:subscription.state.lastNotificationAt,reconnectEvent:true});
-  if(plan.mode!=='none')void reconcile(plan.mode);
+  if(plan.mode!=='none')void reconcile(plan.mode,plan.reason==='WS_RECONNECTED');
 } });
 const tick = setInterval(() => { if (!stopping && liveRpcAvailable() && Date.now() >= deliveryBackoffUntil) void queue.tick(); }, 250);
 // Reduce history polling (especially on an active WebSocket) so live BUY processing
