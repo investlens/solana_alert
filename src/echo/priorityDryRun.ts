@@ -13,6 +13,6 @@ export function evaluateEchoPriorityDryRun(input:{
  return {candidate,executable:false as const,signed:false as const,
   broadcast:false as const,guaranteedLanding:false as const,
   reason:!trade.verdict.candidate?trade.verdict.reason:
-   !fees.ok?fees.reason:'SHADOW_CANDIDATE_ONLY',
+   'reason' in fees?fees.reason:'SHADOW_CANDIDATE_ONLY',
   trade,fees};
 }
