@@ -35,7 +35,7 @@ export type EchoJupiterV2PreviewRequest={
 export type EchoJupiterV2PreviewResult=
  | {ok:true;reason:'RPC_SIMULATION_SUCCEEDED';side:'BUY'|'SELL';
     inputMint:string;outputMint:string;inputRaw:string;quotedOutputRaw:string;
-    unsignedTransactionSha256:string;requestId:string;logs:string[];unitsConsumed:number;unsignedAudit?:EchoUnsignedAudit}
+    unsignedTransactionSha256:string;requestId:string;logs:string[];unitsConsumed?:number;unsignedAudit?:EchoUnsignedAudit}
  | {ok:false;reason:string;failureClass?:string;orderBuilt?:boolean;unsignedTransactionSha256?:string;builderErrorCode?:number;builderRouter?:string};
 export async function readOnlyEchoJupiterV2Swap(
  r:EchoJupiterV2PreviewRequest,fetcher:typeof fetch=fetch
