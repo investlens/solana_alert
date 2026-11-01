@@ -96,3 +96,28 @@ jobs:
           npx tsx scripts/echoRealReadOnlySwapV2.ts
           echo "SELL read-only diagnostic completed (failure means NOT VERIFIED, never a broadcast)"
           exit 0
+
+  echo-pump-mainnet-read-only:
+    # Explicit single-use trigger only. No secrets; no broadcaster methods.
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[echo-pump-mainnet-probe]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      ADMIN_TRADING_ENABLED: 'false'
+      AUTO_TRADE_MODE: paper
+      ECHO_PREVIEW_WALLET: '8ndw7DJ6hyZBm1PD3JJMF8G4PD5CJhDCCUK13ECL2pgQ'
+      ECHO_PREVIEW_MINT: 'D4AnTZk3spQgCEMpC4iqtFp8U2qbiDvzrzdaq7Dopump'
+      ECHO_PREVIEW_RPC_URL: 'https://api.mainnet-beta.solana.com'
+      ECHO_PREVIEW_AMOUNT_SOL: '0.01'
+      ECHO_PREVIEW_POOL: pump
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: One unsigned PumpPortal build + one Solana simulate RPC, never submit
+        run: npx tsx scripts/echoPumpMainnetReadOnlyProbe.ts
