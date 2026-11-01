@@ -13,7 +13,7 @@ export function readEchoWalletIdentity(env:NodeJS.ProcessEnv) {
 export async function simulateEchoUnsignedTransaction(
  rpcUrl:string,transactionBase64:string,
  post:typeof fetch=fetch
-):Promise<{ok:boolean;reason:string;logs?:string[];failureClass?:string}>{
+):Promise<{ok:boolean;reason:string;logs?:string[];failureClass?:string;unitsConsumed?:number}>{
  let host:URL;
  try{host=new URL(rpcUrl);}catch{return {ok:false,reason:'INVALID_RPC_URL'};}
  if(host.protocol!=='https:'||host.username||host.password||!/^[-_A-Za-z0-9+/=]+$/.test(transactionBase64)||
@@ -41,7 +41,11 @@ export async function simulateEchoUnsignedTransaction(
       'BLOCKHASH_EXPIRED':'ONCHAIN_INSTRUCTION_REJECTED';
     return {ok:false,reason:'SIMULATION_REJECTED',failureClass};
   }
-  return {ok:true,reason:'READ_ONLY_SIMULATION_OK',logs:Array.isArray(result.result.value.logs)?
+  const units=result.result.value.unitsConsumed;
+  if(!Number.isSafeInteger(units)||units<1||units>1_400_000)
+    return {ok:false,reason:'SIMULATION_COMPUTE_USAGE_MISSING'};
+  return {ok:true,reason:'READ_ONLY_SIMULATION_OK',unitsConsumed:units,
+    logs:Array.isArray(result.result.value.logs)?
     result.result.value.logs.slice(0,10).map(String):[]};
  }catch{return {ok:false,reason:'SIMULATION_NETWORK_ERROR'};}
 }
