@@ -25,3 +25,11 @@
 - QuickNode documentation: Solana Yellowstone-compatible gRPC is included with Scale and Business plans; access requires separate gRPC connection and token. The active Echo Railway variable names currently expose only HTTP RPC and WSS, not gRPC. **Do not infer entitlement or enable/upgrade subscription.**
 - If access is explicitly verified without purchases, run read-only side-by-side capture of identical Slingoor/Chairman signatures, no Telegram sends from shadow, and compare event arrival times, signature coverage, 429s, credits/bytes and recovery after a short disconnect. Switch only on replicated improvement without missed events.
 - Public docs: https://www.quicknode.com/docs/solana/solana-grpc/overview and https://solana.com/docs/rpc/websocket/logssubscribe.
+
+## Code-review hardening of M1 (same isolated branch)
+- Per-wallet subscription activity is recorded separately. A busy Chairman socket cannot mask a silent Slingoor subscription. The scheduler uses the *oldest* caller activity to determine whether a head spot-check is needed; the spot-check itself skips recently active wallets.
+- An ACK, unrelated socket message or malformed signature cannot refresh a wallet's transaction-notification heartbeat. Genuine rejected transactions can still count as observable stream activity.
+- Per-wallet quiet intervals restart at WebSocket connection time; reconnect still schedules bounded backfill and retains a pending recovery flag if RPC, queue pressure or provider errors prevent the attempt.
+- Background scan queue additions are bounded by the 15-item live reserve. If the budget fills, the old checkpoint is NOT advanced, keeping missing coverage explicit.
+- Tests additionally cover Chairman-busy/Slingoor-silent and malformed notification scenarios.
+- M1 deploy sign-off still requires empirical low-RPC and no-missed-eligible-BUY checks; the old historical checkpoint cannot be marked complete from these changes.
