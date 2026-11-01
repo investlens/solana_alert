@@ -15,7 +15,7 @@ export type EchoPumpLocalPreview={
 };
 export async function readOnlyPumpLocalPreview(
  r:EchoPumpLocalPreview,fetcher:typeof fetch=fetch
-):Promise<{ok:boolean;reason:string;transactionHash?:string;programs?:string[];unitsConsumed?:number;worstCasePriorityLamports?:string;builderMs?:number;simulationMs?:number;failureClass?:string;unresolvedLookupTables?:number;signingApproved?:false}>{
+):Promise<{ok:boolean;reason:string;transactionHash?:string;programs?:string[];unitsConsumed?:number;worstCasePriorityLamports?:string;builderMs?:number;simulationMs?:number;failureClass?:string;failingInstructionIndex?:number;customErrorCode?:number;unresolvedLookupTables?:number;signingApproved?:false}>{
  try{
   if(!r.wallet||!r.mint||
     new PublicKey(r.wallet).toBase58()!==r.wallet||
@@ -78,6 +78,8 @@ export async function readOnlyPumpLocalPreview(
   const simulationMs=Date.now()-simulateStarted;
   if(!simulated.ok)return {ok:false,reason:simulated.reason,
     failureClass:simulated.failureClass,builderMs,simulationMs,
+    failingInstructionIndex:simulated.failingInstructionIndex,customErrorCode:simulated.customErrorCode,
+    unitsConsumed:simulated.unitsConsumed,
     unresolvedLookupTables,signingApproved:false};
   return {ok:true,reason:'READ_ONLY_SIMULATED_NOT_AUTHORIZED',
     transactionHash:createHash('sha256').update(bytes).digest('hex'),
