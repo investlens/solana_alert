@@ -16,6 +16,8 @@ export type ResearchToken = {
   marketCapUsd: number | null; liquidityUsd: number | null;
   /** True ONLY when explicit mint appears in an independently saved Tittyverse listing. */
   inTittyverse: boolean;
+  /** Evidence provenance: user-supplied deep links do not verify the site listing. */
+  listingEvidence?: 'USER_SHARED_LINK' | 'SITE_EXPORT_VERIFIED';
 };
 export type VerifiedPair = {
   pairAddress: string; mintA: string; mintB: string;
@@ -30,6 +32,8 @@ export type VerifiedCallerBuy = {
 export type ResearchFinding = {
   mint: string; symbol: string; observedAtMs: number;
   marketCapUsd: number | null; liquidityUsd: number | null;
+  listingEvidence: 'USER_SHARED_LINK' | 'SITE_EXPORT_VERIFIED' | 'UNSPECIFIED';
+  siteListingIndependentlyVerified: boolean;
   directBtcPool: boolean; verifiedPairCount: number; graphDepth: number | null;
   candidate1kTo5k: boolean; thinLiquidity: boolean; noVerifiedPairs: boolean;
   slingoorFirstBuyAtMs: number | null; slingoorFirstBuySignature: string | null;
@@ -55,7 +59,9 @@ export function evaluateTittyverseSnapshot(input: {
   if(!mintPattern.test(t.mint)||tokensByMint.has(t.mint)||
      typeof t.symbol !== 'string' || t.symbol.length > 32 ||
      !finiteTimestamp(t.observedAtMs)||!validUsd(t.marketCapUsd)||
-     !validUsd(t.liquidityUsd)||typeof t.inTittyverse !== 'boolean')
+     !validUsd(t.liquidityUsd)||typeof t.inTittyverse !== 'boolean'||
+     (t.listingEvidence!==undefined&&
+      !['USER_SHARED_LINK','SITE_EXPORT_VERIFIED'].includes(t.listingEvidence)))
    throw Error('INVALID_RESEARCH_TOKEN');
   tokensByMint.set(t.mint,t);
  }
@@ -103,6 +109,8 @@ export function evaluateTittyverseSnapshot(input: {
   return {
    mint:t.mint,symbol:t.symbol,observedAtMs:t.observedAtMs,
    marketCapUsd:t.marketCapUsd,liquidityUsd:t.liquidityUsd,
+   listingEvidence:t.listingEvidence??'UNSPECIFIED',
+   siteListingIndependentlyVerified:t.listingEvidence==='SITE_EXPORT_VERIFIED',
    directBtcPool:adjacency.get(t.mint)?.has(root)??false,
    verifiedPairCount:count,graphDepth:depths.get(t.mint)??null,
    candidate1kTo5k:t.marketCapUsd!==null&&t.marketCapUsd>=1000&&t.marketCapUsd<=5000,
