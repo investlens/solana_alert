@@ -109,7 +109,7 @@ export function evaluateTittyverseSnapshot(input: {
   return {
    mint:t.mint,symbol:t.symbol,observedAtMs:t.observedAtMs,
    marketCapUsd:t.marketCapUsd,liquidityUsd:t.liquidityUsd,
-   listingEvidence:t.listingEvidence??'UNSPECIFIED',
+   listingEvidence:(t.listingEvidence??'UNSPECIFIED') as ResearchFinding['listingEvidence'],
    siteListingIndependentlyVerified:t.listingEvidence==='SITE_EXPORT_VERIFIED',
    directBtcPool:adjacency.get(t.mint)?.has(root)??false,
    verifiedPairCount:count,graphDepth:depths.get(t.mint)??null,
