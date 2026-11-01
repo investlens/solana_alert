@@ -49,3 +49,38 @@ export function planEchoRecovery(input:Input):EchoRecoveryDecision{
   return {mode:'head',reason:'LIVE_HEAD_SPOT_CHECK'};
  return {mode:'none',reason:'NOT_DUE'};
 }
+
+/** Return the least-recently active wallet, not the most recently active
+ * subscription. Another caller's traffic cannot mask a silent wallet.
+ * On a new connection, allow the subscription its normal quiet interval
+ * before checking; an ACK is not itself a transaction notification.
+ */
+export function echoWalletStreamLastSeen(
+  wallet:string,notifications:Readonly<Record<string,number>>,
+  connectedAtMs:number|null
+):number|null {
+ if(!wallet||connectedAtMs!==null&&(!Number.isSafeInteger(connectedAtMs)||connectedAtMs<0))
+  throw Error('INVALID_WALLET_ACTIVITY');
+ const seen=notifications[wallet]??null;
+ if(seen!==null&&(!Number.isSafeInteger(seen)||seen<0))
+  throw Error('INVALID_WALLET_ACTIVITY');
+ return connectedAtMs===null?seen:Math.max(connectedAtMs,seen??0);
+}
+export function oldestEchoWalletStreamSeen(
+  wallets:readonly string[],notifications:Readonly<Record<string,number>>,
+  connectedAtMs:number|null
+):number|null {
+ if(!wallets.length||new Set(wallets).size!==wallets.length)
+  throw Error('INVALID_WALLET_SET');
+ const seen=wallets.map(wallet=>echoWalletStreamLastSeen(wallet,notifications,connectedAtMs));
+ return seen.some(v=>v===null)?null:Math.min(...seen as number[]);
+}
+export function shouldEchoSpotcheckWallet(input:{
+ nowMs:number;wallet:string;notifications:Readonly<Record<string,number>>;
+ connectedAtMs:number|null
+}):boolean {
+ const last=echoWalletStreamLastSeen(input.wallet,input.notifications,input.connectedAtMs);
+ if(!Number.isSafeInteger(input.nowMs)||input.nowMs<=0||
+    last!==null&&input.nowMs<last)throw Error('INVALID_WALLET_ACTIVITY_TIME');
+ return last===null||input.nowMs-last>=ECHO_HEAD_SPOTCHECK_INTERVAL_MS;
+}
