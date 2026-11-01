@@ -20,6 +20,7 @@ import { readEchoTransaction } from '../src/echo/readTransaction.js';
 import { advanceFreshScan, type FreshScanState } from '../src/echo/freshScan.js';
 import { echoFreshScanPlan } from '../src/echo/freshBudget.js';
 import { echoRpc429CooldownMs } from '../src/echo/rpc429Policy.js';
+import { planEchoRecovery } from '../src/echo/recoverySchedule.js';
 import { EchoVerifiedBuyLatencyTracker } from '../src/echo/verifiedBuyLatencyTracker.js';
 
 // Independent executable: no shared startup/config, database, bot polling,
@@ -373,6 +374,9 @@ const queue = new EchoQueue(async signature => {
   await store.delivered(`tx:${signature}`, Date.now() / 1000);
 }, Date.now, config.statePath + '.pending-v1.json');
 let reconciling = false;
+let lastHeadAuditAtMs: number | null = null;
+let lastArchiveAuditAtMs: number | null = null;
+const recoveryStats={headSpotchecks:0,archiveAudits:0,headCandidates:0};
 // Limit historical RPC consumption per pass; continue from the last cursor on the next pass.
 // Persist pagination cursors on the same private volume as the durable alert queue.
 const historyCursorPath = config.statePath + '.history-cursors-v1.json';
@@ -417,11 +421,40 @@ function persistFreshCursors() {
 }
 const historyWindowSeconds = 1800;
 const historyPagesPerPass = 3;
-async function reconcile() {
-  if (reconciling || stopping || !historyRpcAvailable() || queue.size > 64) return;
+async function reconcile(mode:'head'|'archive'='archive') {
+  if (reconciling || stopping || !historyRpcAvailable() || queue.size > 15) return;
   reconciling = true;
+  const auditStartedAt=Date.now();
+  // Timestamp every attempt, including provider failures, to avoid retry storms.
+  if(mode==='head')lastHeadAuditAtMs=auditStartedAt;
+  else lastArchiveAuditAtMs=auditStartedAt;
   try {
     const cutoff = Date.now() / 1000 - historyWindowSeconds;
+    if(mode==='head') {
+      // Bounded live spot-check; deliberately does not touch persisted history
+      // checkpoints or imply complete coverage of a high-volume wallet.
+      for(const wallet of Object.keys(ECHO_WALLETS)) {
+        if(stopping||!historyRpcAvailable()||queue.size>15)break;
+        const rows=await rpc('getSignaturesForAddress',[wallet,{limit:100,commitment:'confirmed'}]);
+        if(!Array.isArray(rows))throw Error('Echo head spot-check unavailable');
+        let accepted=0;
+        for(const row of [...rows].reverse())if(row.err==null&&
+          (!Number.isFinite(row.blockTime)||row.blockTime>=cutoff)&&
+          /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature??'')&&
+          !store.has(`tx:${row.signature}`)){
+          if(!queue.add(row.signature,ECHO_WALLETS[wallet]==='WHALE · slingoor'))
+            throw Error('Echo head spot-check queue full');
+          accepted++;
+        }
+        recoveryStats.headCandidates+=accepted;
+        console.log('[Echo] HEAD_SPOTCHECK',{caller:ECHO_WALLETS[wallet],rows:rows.length,
+          queuedCandidates:accepted,coverageComplete:false,limitedToNewestSignatures:true});
+      }
+      recoveryStats.headSpotchecks++;
+      lastReconcileAt=Date.now();
+      return;
+    }
+    recoveryStats.archiveAudits++;
     for (const wallet of Object.keys(ECHO_WALLETS)) {
       if (stopping || !historyRpcAvailable() || queue.size > 64) break;
       // Page the fresh frontier independently; never advance its checkpoint until
@@ -539,16 +572,24 @@ async function reconcile() {
   } catch { lastErrorAt = Date.now(); console.warn('[Echo] Reconciliation unavailable; bounded retry scheduled.'); }
   finally { reconciling = false; }
 }
-const subscription = startEchoSubscription({ url: config.wsUrl, fallbackUrl: config.fallbackWsUrl, onSignature: (signature, wallet) => { if (!store.has(`tx:${signature}`)) { const accepted=queue.add(signature, ECHO_WALLETS[wallet] === 'WHALE · slingoor'); if (accepted) echoShadowLatency.websocketObserved(signature,wallet); if (!accepted) { lastErrorAt=Date.now(); console.error('[Echo] WS_QUEUE_REJECTED', { caller: ECHO_WALLETS[wallet], queued: queue.size, dropped: queue.dropped }); void reconcile(); } } }, onReady: () => { void reconcile(); } });
+const subscription = startEchoSubscription({ url: config.wsUrl, fallbackUrl: config.fallbackWsUrl, onSignature: (signature, wallet) => { if (!store.has(`tx:${signature}`)) { const accepted=queue.add(signature, ECHO_WALLETS[wallet] === 'WHALE · slingoor'); if (accepted) echoShadowLatency.websocketObserved(signature,wallet); if (!accepted) { lastErrorAt=Date.now(); console.error('[Echo] WS_QUEUE_REJECTED', { caller: ECHO_WALLETS[wallet], queued: queue.size, dropped: queue.dropped }); /* queue recovery is driven by the bounded timer */ } } }, onReady: () => {
+  const plan=planEchoRecovery({nowMs:Date.now(),websocketReady:true,queueSize:queue.size,
+    historyPending:historyCursors.size>0||[...freshCursors.values()].some(c=>c.before!==null),
+    lastHeadAtMs:lastHeadAuditAtMs,lastArchiveAtMs:lastArchiveAuditAtMs,reconnectEvent:true});
+  if(plan.mode!=='none')void reconcile(plan.mode);
+} });
 const tick = setInterval(() => { if (!stopping && liveRpcAvailable() && Date.now() >= deliveryBackoffUntil) void queue.tick(); }, 250);
 // Reduce history polling (especially on an active WebSocket) so live BUY processing
 // gets priority over expensive archive scans. After 429, adaptive backoff applies.
 // When connected, verify history periodically without spending archive credits every
 // three minutes. During a disconnect, request bounded catch-up with provider backoff.
 const sweep = setInterval(() => {
-  if (!subscription.state.ready || historyCursors.size > 0 || [...freshCursors.values()].some(cursor => cursor.before !== null) || lastReconcileAt == null || Date.now() - lastReconcileAt >= 15 * 60_000)
-    void reconcile();
-}, 60_000);
+  const plan=planEchoRecovery({nowMs:Date.now(),websocketReady:subscription.state.ready,
+    queueSize:queue.size,
+    historyPending:historyCursors.size>0||[...freshCursors.values()].some(c=>c.before!==null),
+    lastHeadAtMs:lastHeadAuditAtMs,lastArchiveAtMs:lastArchiveAuditAtMs});
+  if(plan.mode!=='none')void reconcile(plan.mode);
+},60_000);
 const promotionTick=setInterval(()=>{if(promotionsReady)void promotions.tick();},30_000);
 if(promotionsReady)void promotions.tick();
 const researchTick = setInterval(() => { if (researchReady) void research.tick().catch(() => console.warn('[EchoResearch] TICK_FAILED')); }, 60_000);
@@ -560,7 +601,8 @@ const heartbeat = setInterval(() => console.log('[Echo] HEALTH', { subscriptions
   lastDisconnectReason: subscription.state.lastDisconnectReason, lastConnectedAt: subscription.state.lastConnectedAt,
   activeWebSocketProvider: subscription.state.activeProvider,
   skippedNonSwapLogs: subscription.state.skippedNonSwapLogs, observedTradeSignatures: subscription.state.observedTradeSignatures, queued: queue.size, dropped: queue.dropped,
-  lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt, ...diagnostics, rpcUsage, promotions: promotionsReady ? promotions.summary() : {enabled:false}, research: researchReady ? JSON.stringify(research.summary()) : {enabled:false},tiers:tiers.summary(), audit:echoAuditOutbox?.summary()??{enabled:false}, shadowLatency:echoShadowLatency.summary(), rejectionCounts }), 60_000);
+  lastRpcAt, lastDeliveryAt, lastErrorAt, lastReconcileAt, ...diagnostics,
+  recoveryStats, lastHeadAuditAtMs, lastArchiveAuditAtMs, rpcUsage, promotions: promotionsReady ? promotions.summary() : {enabled:false}, research: researchReady ? JSON.stringify(research.summary()) : {enabled:false},tiers:tiers.summary(), audit:echoAuditOutbox?.summary()??{enabled:false}, shadowLatency:echoShadowLatency.summary(), rejectionCounts }), 60_000);
 const server = createServer((req, res) => {
   if (req.method !== 'GET' || req.url !== '/health') { res.writeHead(404); res.end(); return; }
   // A healthy WebSocket must not be marked down merely because history reconciliation is rate-limited.
