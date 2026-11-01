@@ -19,7 +19,7 @@ test('unsigned Jupiter preview performs quote, swap build and simulate only',asy
   if(method==='quote')return {ok:true,json:async()=>quote} as Response;
   if(method==='swap')return {ok:true,json:async()=>({swapTransaction:transaction})} as Response;
   assert.equal(JSON.parse(String(opts?.body)).method,'simulateTransaction');
-  return {ok:true,json:async()=>({result:{value:{err:null,logs:['ok']}}})} as Response;
+  return {ok:true,json:async()=>({result:{value:{err:null,unitsConsumed:85000,logs:['ok']}}})} as Response;
  }) as typeof fetch;
  const result=await readOnlyJupiterSwapPreview({rpcUrl:'https://example.com/rpc',
   publicWallet:wallet.toBase58(),outputMint:output,amountLamports:50000000,
