@@ -1,0 +1,24 @@
+name: Echo Tittyverse galaxy one-shot probe
+on:
+  push:
+    branches:
+      - feat/echo-tittyverse-research-20261101
+    paths:
+      - scripts/echoTittyverseGalaxyProbe.ts
+      - .github/workflows/echo-tittyverse-galaxy-probe.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  read-only-galaxy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Inspect only 3 documented-by-site public endpoints, bounded reads
+        run: npx tsx scripts/echoTittyverseGalaxyProbe.ts
