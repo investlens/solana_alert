@@ -22,7 +22,7 @@ test('PumpPortal read-only BUY request only builds and RPC simulates',async()=>{
   }
   const body=JSON.parse(String(options.body));
   assert.equal(body.method,'simulateTransaction');methods.push('SIMULATE');
-  return {ok:true,json:async()=>({result:{value:{err:null}}})} as Response;
+  return {ok:true,json:async()=>({result:{value:{err:null,unitsConsumed:85000}}})} as Response;
  }) as typeof fetch;
  const result=await readOnlyPumpLocalPreview(base,fetcher);
  assert.equal(result.ok,true);
