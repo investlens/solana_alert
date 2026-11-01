@@ -33,7 +33,7 @@ test('simulation classifies missing accounts and onchain failures without exposi
  assert.equal(failure.result.failureClass,'ONCHAIN_INSTRUCTION_REJECTED');
 });
 test('only err:null is a successful RPC simulation',async()=>{
- const success=await check({err:null,logs:['Program log: done']});
+ const success=await check({err:null,logs:['Program log: done'],unitsConsumed:85000});
  assert.equal(success.result.ok,true);
  assert.equal(success.result.logs?.length,1);
 });
