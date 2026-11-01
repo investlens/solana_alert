@@ -13,7 +13,7 @@ export function readEchoWalletIdentity(env:NodeJS.ProcessEnv) {
 export async function simulateEchoUnsignedTransaction(
  rpcUrl:string,transactionBase64:string,
  post:typeof fetch=fetch
-):Promise<{ok:boolean;reason:string;logs?:string[];failureClass?:string;unitsConsumed?:number}>{
+):Promise<{ok:boolean;reason:string;logs?:string[];failureClass?:string;unitsConsumed?:number;failingInstructionIndex?:number;customErrorCode?:number}>{
  let host:URL;
  try{host=new URL(rpcUrl);}catch{return {ok:false,reason:'INVALID_RPC_URL'};}
  if(host.protocol!=='https:'||host.username||host.password||!/^[-_A-Za-z0-9+/=]+$/.test(transactionBase64)||
@@ -39,7 +39,17 @@ export async function simulateEchoUnsignedTransaction(
       'ACCOUNT_NOT_PRESENT':
       /BlockhashNotFound|blockhash not found/i.test(evidence)?
       'BLOCKHASH_EXPIRED':'ONCHAIN_INSTRUCTION_REJECTED';
-    return {ok:false,reason:'SIMULATION_REJECTED',failureClass};
+    const error=result.result.value.err;
+    const instruction=error&&typeof error==='object'&&Array.isArray(error.InstructionError)?
+      error.InstructionError:null;
+    const ix=Number.isSafeInteger(instruction?.[0])?instruction![0] as number:undefined;
+    const custom=instruction?.[1]&&typeof instruction[1]==='object'&&
+      Number.isSafeInteger(instruction[1].Custom)&&instruction[1].Custom>=0?
+      instruction[1].Custom as number:undefined;
+    const spent=result.result.value.unitsConsumed;
+    return {ok:false,reason:'SIMULATION_REJECTED',failureClass,
+      failingInstructionIndex:ix,customErrorCode:custom,
+      unitsConsumed:Number.isSafeInteger(spent)&&spent>=0?spent:undefined};
   }
   const units=result.result.value.unitsConsumed;
   if(!Number.isSafeInteger(units)||units<1||units>1_400_000)
