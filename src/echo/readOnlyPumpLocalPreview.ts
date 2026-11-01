@@ -3,7 +3,7 @@
  * Does NOT sign, send, broadcast, execute or prove trade economics.
  * A successful simulation NEVER authorizes signer access.
  */
-import {PublicKey,VersionedTransaction} from '@solana/web3.js';
+import {PublicKey,VersionedTransaction,ComputeBudgetProgram,SystemProgram} from '@solana/web3.js';
 import {createHash} from 'node:crypto';
 import {simulateEchoUnsignedTransaction} from './readOnlySimulation.js';
 const API='https://pumpportal.fun/api/trade-local';
@@ -15,7 +15,7 @@ export type EchoPumpLocalPreview={
 };
 export async function readOnlyPumpLocalPreview(
  r:EchoPumpLocalPreview,fetcher:typeof fetch=fetch
-):Promise<{ok:boolean;reason:string;transactionHash?:string;programs?:string[]}>{
+):Promise<{ok:boolean;reason:string;transactionHash?:string;programs?:string[];unitsConsumed?:number;worstCasePriorityLamports?:string;builderMs?:number;simulationMs?:number;failureClass?:string}>{
  try{
   if(!r.wallet||!r.mint||
     new PublicKey(r.wallet).toBase58()!==r.wallet||
@@ -25,6 +25,7 @@ export async function readOnlyPumpLocalPreview(
     !Number.isFinite(r.slippagePercent)||r.slippagePercent<=0||
     r.slippagePercent>3||!['BUY','SELL'].includes(r.side))
     return {ok:false,reason:'INVALID_PREVIEW_REQUEST'};
+  const builderStarted=Date.now();
   const response=await fetcher(API,{
    method:'POST',headers:{'content-type':'application/json'},
    signal:AbortSignal.timeout(5000),
@@ -36,6 +37,7 @@ export async function readOnlyPumpLocalPreview(
   });
   if(!response.ok)return {ok:false,reason:'UNSIGNED_BUILDER_UNAVAILABLE'};
   const bytes=new Uint8Array(await response.arrayBuffer());
+  const builderMs=Date.now()-builderStarted;
   if(bytes.length<100||bytes.length>2250)
    return {ok:false,reason:'UNSIGNED_BYTES_INVALID'};
   const tx=VersionedTransaction.deserialize(bytes);
@@ -48,10 +50,33 @@ export async function readOnlyPumpLocalPreview(
   const programs=tx.message.compiledInstructions.map(ix=>
     tx.message.staticAccountKeys[ix.programIdIndex]?.toBase58()??'');
   if(programs.some(p=>!p))return {ok:false,reason:'UNRESOLVED_PROGRAM'};
+  // A local builder is untrusted. Never infer approval from a successful RPC
+  // simulation or rely on third-party fee descriptions for exact onchain costs.
+  let limit:number|null=null,price:bigint|null=null;
+  for(const ix of tx.message.compiledInstructions){
+    const program=tx.message.staticAccountKeys[ix.programIdIndex]?.toBase58();
+    const data=Buffer.from(ix.data);
+    if(program===SystemProgram.programId.toBase58()&&data.length>=4&&
+      data.readUInt32LE(0)===2)
+      return {ok:false,reason:'UNREVIEWED_DIRECT_SOL_TRANSFER'};
+    if(program===ComputeBudgetProgram.programId.toBase58()){
+      if(data[0]===2&&data.length===5&&!limit)limit=data.readUInt32LE(1);
+      if(data[0]===3&&data.length===9&&price===null)price=data.readBigUInt64LE(1);
+    }
+  }
+  const worstCase=limit!==null&&price!==null?
+    (BigInt(limit)*price+999_999n)/1_000_000n:null;
+  if(worstCase!==null&&worstCase>500_000n)
+    return {ok:false,reason:'PUMP_PRIORITY_FEE_CAP_EXCEEDED'};
   const encoded=Buffer.from(bytes).toString('base64');
+  const simulateStarted=Date.now();
   const simulated=await simulateEchoUnsignedTransaction(r.rpcUrl,encoded,fetcher);
-  if(!simulated.ok)return {ok:false,reason:simulated.reason};
+  const simulationMs=Date.now()-simulateStarted;
+  if(!simulated.ok)return {ok:false,reason:simulated.reason,
+    failureClass:simulated.failureClass,builderMs,simulationMs};
   return {ok:true,reason:'READ_ONLY_SIMULATED_NOT_AUTHORIZED',
-    transactionHash:createHash('sha256').update(bytes).digest('hex'),programs};
+    transactionHash:createHash('sha256').update(bytes).digest('hex'),
+    programs,unitsConsumed:simulated.unitsConsumed,builderMs,simulationMs,
+    worstCasePriorityLamports:worstCase?.toString()};
  }catch{return {ok:false,reason:'BUILDER_OR_SIMULATION_FAILED'};}
 }
