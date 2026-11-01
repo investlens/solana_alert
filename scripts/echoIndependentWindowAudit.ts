@@ -19,6 +19,7 @@ const cfg=JSON.parse(readFileSync(file,'utf8'));
 if(cfg.wallet!==WALLET||cfg.caller!==CALLER||
  !Number.isSafeInteger(cfg.from)||!Number.isSafeInteger(cfg.to)||
  cfg.from>=cfg.to||cfg.to-cfg.from>180||
+ typeof cfg.anchorSignature!=='string'||!^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(cfg.anchorSignature)||
  !Array.isArray(cfg.deliveries)||cfg.deliveries.length>50)throw Error('INVALID_REFERENCE_WINDOW');
 let rpcCount=0;
 async function rpc(method:string,params:unknown[]){
@@ -33,18 +34,27 @@ async function rpc(method:string,params:unknown[]){
  return body.result;
 }
 async function main(){
- const page=await rpc('getSignaturesForAddress',[WALLET,{limit:1000,commitment:'confirmed'}]);
+ // A previously independently logged caller-BUY signature anchors the upper
+ // boundary. We prove only the contiguous segment ending at that signature,
+ // not every transaction with the same second or any later wallet activity.
+ const anchor=await rpc('getTransaction',[cfg.anchorSignature,{
+   encoding:'jsonParsed',maxSupportedTransactionVersion:1,commitment:'confirmed'}]);
+ if(!anchor||anchor.transaction?.signatures?.[0]!==cfg.anchorSignature||
+    anchor.blockTime!==cfg.to)throw Error('REFERENCE_ANCHOR_NOT_VERIFIED');
+ const page=await rpc('getSignaturesForAddress',[WALLET,{
+   before:cfg.anchorSignature,limit:1000,commitment:'confirmed'}]);
  if(!Array.isArray(page)||!page.length)throw Error('REFERENCE_SIGNATURES_UNAVAILABLE');
- const first=page[0]?.blockTime,oldest=page.at(-1)?.blockTime;
- if(!Number.isFinite(first)||!Number.isFinite(oldest)||first<cfg.to||
-    oldest>cfg.from)throw Error('REFERENCE_WINDOW_NOT_FULLY_PAGED');
- const window=page.filter((r:any)=>r.blockTime>=cfg.from&&r.blockTime<=cfg.to);
+ const oldest=page.at(-1)?.blockTime;
+ if(!Number.isFinite(oldest)||oldest>cfg.from)
+  throw Error('REFERENCE_ANCHORED_WINDOW_NOT_FULLY_PAGED');
+ const window=[{signature:cfg.anchorSignature,blockTime:cfg.to,err:null},
+  ...page.filter((r:any)=>r.blockTime>=cfg.from&&r.blockTime<=cfg.to)];
  if(window.length>MAX_TX)throw Error('REFERENCE_TX_BUDGET_EXCEEDED_'+window.length);
  if(window.some((r:any)=>!Number.isFinite(r.blockTime)||r.err!==null))
   throw Error('UNVERIFIED_REFERENCE_TRANSACTION');
  const expected:VerifiedBuy[]=[];
  for(const row of window.reverse()){
-  const tx=await rpc('getTransaction',[row.signature,{
+  const tx=row.signature===cfg.anchorSignature?anchor:await rpc('getTransaction',[row.signature,{
    encoding:'jsonParsed',maxSupportedTransactionVersion:1,commitment:'confirmed'}]);
   if(!tx||tx.transaction?.signatures?.[0]!==row.signature||
      !Number.isFinite(tx.blockTime))throw Error('MISSING_REFERENCE_TX');
@@ -64,7 +74,8 @@ async function main(){
   matched:result.matched,missing:result.missing,unexpected:result.unexpectedDeliveries,
   duplicate:result.duplicateDeliveries,late:result.lateDeliveries,
   independentPublicRpc:true,telegramIdsFromRailwayLogsOnly:true,
-  allDayGapFree:false,liveTrading:false
+  allDayGapFree:false,upperBoundaryAnchoredBySignature:true,
+  laterSameSecondTransactionsNotChecked:true,liveTrading:false
  }));
  if(!result.accepted)process.exitCode=1;
 }
