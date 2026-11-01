@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash,createPrivateKey,sign as signEd25519} from 'node:crypto';
 import bs58 from 'bs58';
-import {Keypair} from '@solana/web3.js';
+import {Keypair,PublicKey,ComputeBudgetProgram,TransactionMessage,TransactionInstruction,VersionedTransaction} from '@solana/web3.js';
 import {echoReadOnlySignerAdmission,ECHO_SIGNER_TRANSACTION_APPROVAL_ENABLED} from '../src/echo/readOnlySignerAdmission.js';
 import {echoSignerCanonicalRequest} from '../src/echo/authenticatedSignerRequest.js';
 const coordinator=Keypair.generate();
@@ -11,7 +11,18 @@ const privateDer=Buffer.concat([Buffer.from('302e020100300506032b657004220420','
 const key=createPrivateKey({key:privateDer,format:'der',type:'pkcs8'});
 const wallet='8ndw7DJ6hyZBm1PD3JJMF8G4PD5CJhDCCUK13ECL2pgQ';
 const mint='2'.repeat(44),sol='So11111111111111111111111111111111111111112';
-const now=1800000000000,raw=new Uint8Array(120).fill(123);
+const now=1800000000000;
+const raw=new VersionedTransaction(new TransactionMessage({
+ payerKey:new PublicKey(wallet),
+ recentBlockhash:Keypair.generate().publicKey.toBase58(),
+ instructions:[
+  ComputeBudgetProgram.setComputeUnitLimit({units:100_000}),
+  ComputeBudgetProgram.setComputeUnitPrice({microLamports:10_000}),
+  new TransactionInstruction({
+   programId:new PublicKey('JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4'),
+   keys:[],data:Buffer.from([1])})
+ ]
+}).compileToV0Message()).serialize();
 const hash=createHash('sha256').update(raw).digest('hex');
 const request={audience:'echo-isolated-signer' as const,action:'BUY' as const,
  executionWallet:wallet,mint,reservationKey:wallet+':'+mint,transactionSha256:hash,
@@ -46,4 +57,7 @@ test('forged price/amount, wallet evidence and unknown DB row reject',async()=>{
   getByWalletAndMint:async()=>null}})).ok,false);
  assert.equal((await echoReadOnlySignerAdmission({...args,preview:{...preview,
   unsignedTransactionSha256:'f'.repeat(64)}})).ok,false);
+ const invalidRaw=new Uint8Array(120).fill(123);
+ assert.deepEqual(await echoReadOnlySignerAdmission({...args,unsignedTransactionBytes:invalidRaw}),
+  {ok:false,reason:'UNSIGNED_AUDIT_INVALID_UNSIGNED_TRANSACTION'});
 });
