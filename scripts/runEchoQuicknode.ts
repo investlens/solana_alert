@@ -446,18 +446,20 @@ async function reconcile(mode:'head'|'archive'='archive',isReconnect=false) {
            connectedAtMs:subscription.state.lastConnectedAt}))continue;
         const rows=await rpc('getSignaturesForAddress',[wallet,{limit:100,commitment:'confirmed'}]);
         if(!Array.isArray(rows))throw Error('Echo head spot-check unavailable');
-        let accepted=0;
+        let accepted=0, queueCapacityReached=false;
         for(const row of [...rows].reverse())if(row.err==null&&
           (!Number.isFinite(row.blockTime)||row.blockTime>=cutoff)&&
           /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature??'')&&
           !store.has(`tx:${row.signature}`)){
+          if(queue.size>=15){queueCapacityReached=true;break;}
           if(!queue.add(row.signature,ECHO_WALLETS[wallet]==='WHALE · slingoor'))
             throw Error('Echo head spot-check queue full');
           accepted++;
         }
         recoveryStats.headCandidates+=accepted;
         console.log('[Echo] HEAD_SPOTCHECK',{caller:ECHO_WALLETS[wallet],rows:rows.length,
-          queuedCandidates:accepted,coverageComplete:false,limitedToNewestSignatures:true});
+          queuedCandidates:accepted,coverageComplete:false,limitedToNewestSignatures:true,
+          queueCapacityReached});
       }
       recoveryStats.headSpotchecks++;
       lastReconcileAt=Date.now();
@@ -465,7 +467,7 @@ async function reconcile(mode:'head'|'archive'='archive',isReconnect=false) {
     }
     recoveryStats.archiveAudits++;
     for (const wallet of Object.keys(ECHO_WALLETS)) {
-      if (stopping || !historyRpcAvailable() || queue.size > 64) break;
+      if (stopping || !historyRpcAvailable() || queue.size >= 15) break;
       // Page the fresh frontier independently; never advance its checkpoint until
       // reaching the previous checkpoint (or exhausting the available signatures).
       let fresh = freshCursors.get(wallet) ?? { checkpoint: null, before: null, candidate: null };
@@ -486,11 +488,11 @@ async function reconcile(mode:'head'|'archive'='archive',isReconnect=false) {
         for (const row of [...newest].reverse()) if (row.err == null &&
           (!Number.isFinite(row.blockTime) || row.blockTime >= cutoff) &&
           /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') &&
-          !store.has(`tx:${row.signature}`)) { if (!queue.add(row.signature)) throw Error('Echo queue full: cursor not advanced'); }
+          !store.has(`tx:${row.signature}`)) { if(queue.size>=15)throw Error('Echo background queue pressure: checkpoint retained'); if (!queue.add(row.signature)) throw Error('Echo queue full: cursor not advanced'); }
       }
       const freshPlan = echoFreshScanPlan(ECHO_WALLETS[wallet] === 'WHALE · slingoor',Boolean(fresh.before),queue.size,Boolean(fresh.olderGapPending),subscription.state.ready&&!isReconnect);
       for (let page = 0; page < freshPlan.maxPages && !freshComplete; page++) {
-        if (stopping || !historyRpcAvailable() || queue.size > 64) break;
+        if (stopping || !historyRpcAvailable() || queue.size >= 15) break;
         const rows = await rpc('getSignaturesForAddress', [wallet,
           { limit: freshPlan.pageLimit, commitment: 'confirmed', ...(fresh.before ? { before: fresh.before } : {}) }]);
         if (!Array.isArray(rows)) throw Error('Echo fresh signature page unavailable');
@@ -505,7 +507,7 @@ async function reconcile(mode:'head'|'archive'='archive',isReconnect=false) {
         for (const row of [...progress.scanned].reverse()) if (row.err == null &&
           (!Number.isFinite(row.blockTime) || row.blockTime! >= cutoff) &&
           /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') &&
-          !store.has(`tx:${row.signature}`)) { if (!queue.add(row.signature!)) throw Error('Echo queue full: fresh cursor not advanced'); }
+          !store.has(`tx:${row.signature}`)) { if(queue.size>=15)throw Error('Echo background queue pressure: checkpoint retained'); if (!queue.add(row.signature!)) throw Error('Echo queue full: fresh cursor not advanced'); }
         fresh = progress.state;
         freshComplete = progress.complete;
         freshCursors.set(wallet, fresh);
@@ -545,13 +547,13 @@ async function reconcile(mode:'head'|'archive'='archive',isReconnect=false) {
       // Reserve the first RPC request for fresh signals; use the remaining
       // bounded budget to catch up from the durable backlog cursor.
       for (let page = 1; page < historyPagesPerPass && !complete && before; page++) {
-        if (stopping || !historyRpcAvailable() || queue.size > 64) break;
+        if (stopping || !historyRpcAvailable() || queue.size >= 15) break;
         const rows = await rpc('getSignaturesForAddress', [wallet, { limit: 100, commitment: 'confirmed', ...(before ? { before } : {}) }]);
         if (!Array.isArray(rows)) throw new Error('Echo signature list unavailable');
         historyPagesScanned++;
         if (rows.length && Number.isFinite(rows[rows.length - 1]?.blockTime)) historyOldestBlockTime = rows[rows.length - 1].blockTime;
         for (const row of [...rows].reverse()) if (row.err == null && (!Number.isFinite(row.blockTime) || row.blockTime >= cutoff) &&
-          /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') && !store.has(`tx:${row.signature}`)) { if (!queue.add(row.signature)) throw Error('Echo history queue full: cursor not advanced'); }
+          /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') && !store.has(`tx:${row.signature}`)) { if(queue.size>=15)throw Error('Echo background queue pressure: checkpoint retained'); if (!queue.add(row.signature)) throw Error('Echo history queue full: cursor not advanced'); }
         const oldest = rows[rows.length - 1];
         if (rows.length < 100 || (Number.isFinite(oldest?.blockTime) && oldest.blockTime < cutoff)) {
           complete = true;
