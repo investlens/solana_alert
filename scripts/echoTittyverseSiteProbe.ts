@@ -22,3 +22,23 @@ console.log('TITTYVERSE_SOURCE_AUDIT',JSON.stringify({
  assetPaths,dataPaths,
  singleRequest:true,noAutomatedCollection:true
 }));
+
+
+const asset=assetPaths.find(path=>path.startsWith('/site.mjs'));
+if(asset){
+ const bodyResponse=await fetch(new URL(asset,site),{signal:AbortSignal.timeout(12000)});
+ if(!bodyResponse.ok)throw Error('PUBLIC_ASSET_UNAVAILABLE_'+bodyResponse.status);
+ const js=await bodyResponse.text();
+ if(js.length>2_000_000)throw Error('PUBLIC_ASSET_TOO_LARGE');
+ const sources=[...js.matchAll(/(?:fetch\s*\(\s*|["'])(https?:\/\/[^"'\s)]+|\/[^"'\s)]*\.(?:json|csv))(?:["'])?/g)]
+  .map(m=>m[1]).filter(url=>url.length<250).slice(0,18);
+ const candidatePaths=[...js.matchAll(/["']([^"'\s]{1,160}\.(?:json|csv)(?:\?[^"']*)?)["']/g)]
+  .map(m=>m[1]).slice(0,18);
+ const lookupHints=['fetch(','.json','token-pairs','dexscreener','supabase','tokens','planets','orbit','collection'];
+ const occurrences=Object.fromEntries(lookupHints.map(t=>[t,js.toLowerCase().split(t.toLowerCase()).length-1]));
+ console.log('TITTYVERSE_PUBLIC_BUNDLE_AUDIT',JSON.stringify({
+  status:bodyResponse.status,bytes:js.length,
+  taoMintInBundle:js.includes(roots[1]),rootMintInBundle:js.includes(roots[0]),
+  sources,candidatePaths,occurrences,assetRequestCount:1
+ }));
+}
