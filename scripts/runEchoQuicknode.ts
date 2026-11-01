@@ -484,7 +484,7 @@ async function reconcile(mode:'head'|'archive'='archive') {
           /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(row.signature ?? '') &&
           !store.has(`tx:${row.signature}`)) { if (!queue.add(row.signature)) throw Error('Echo queue full: cursor not advanced'); }
       }
-      const freshPlan = echoFreshScanPlan(ECHO_WALLETS[wallet] === 'WHALE · slingoor',Boolean(fresh.before),queue.size,Boolean(fresh.olderGapPending));
+      const freshPlan = echoFreshScanPlan(ECHO_WALLETS[wallet] === 'WHALE · slingoor',Boolean(fresh.before),queue.size,Boolean(fresh.olderGapPending),subscription.state.ready);
       for (let page = 0; page < freshPlan.maxPages && !freshComplete; page++) {
         if (stopping || !historyRpcAvailable() || queue.size > 64) break;
         const rows = await rpc('getSignaturesForAddress', [wallet,
@@ -522,7 +522,7 @@ async function reconcile(mode:'head'|'archive'='archive') {
       if (!freshComplete) {
         console.log('[Echo] COVERAGE_PROGRESS', {
           caller: ECHO_WALLETS[wallet], freshComplete: false, historyComplete: false,
-          freshPagesScanned, freshPageLimit: freshPlan.pageLimit, olderGapPending: Boolean(fresh.olderGapPending),
+          freshPagesScanned, freshPageLimit: freshPlan.pageLimit, backgroundAuditOnly:subscription.state.ready, olderGapPending: Boolean(fresh.olderGapPending),
           historyPagesScanned: 0, freshOldestBlockTime,
           historyOldestBlockTime: null, freshCursorAdvanced: freshCursorBeforePass !== fresh.before,
           historyCursorAdvanced: false, freshPending: fresh.before !== null,
@@ -562,7 +562,7 @@ async function reconcile(mode:'head'|'archive'='archive') {
       }
       console.log('[Echo] COVERAGE_PROGRESS', {
         caller: ECHO_WALLETS[wallet], freshComplete, historyComplete: complete,
-        freshPagesScanned, freshPageLimit: freshPlan.pageLimit, olderGapPending: Boolean(fresh.olderGapPending),
+        freshPagesScanned, freshPageLimit: freshPlan.pageLimit, backgroundAuditOnly:subscription.state.ready, olderGapPending: Boolean(fresh.olderGapPending),
         historyPagesScanned, freshOldestBlockTime, historyOldestBlockTime,
         freshCursorAdvanced: freshCursorBeforePass !== fresh.before,
         historyCursorAdvanced: historyCursorBeforePass !== (historyCursors.get(wallet) ?? null),
