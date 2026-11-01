@@ -11,7 +11,7 @@ type Options = {
 };
 export function startEchoSubscription(options: Options) {
   const later = options.later ?? setTimeout, cancel = options.cancel ?? clearTimeout;
-  const state = { ready: false, acknowledgedWallets: 0, reconnects: 0, lastMessageAt: null as number | null, lastDisconnectReason: 'none' as string, lastConnectedAt: null as number | null, activeProvider: 'primary' as 'primary' | 'fallback', skippedNonSwapLogs: 0, observedTradeSignatures: 0 };
+  const state = { ready: false, acknowledgedWallets: 0, reconnects: 0, lastMessageAt: null as number | null, lastNotificationAt: null as number | null, lastDisconnectReason: 'none' as string, lastConnectedAt: null as number | null, activeProvider: 'primary' as 'primary' | 'fallback', skippedNonSwapLogs: 0, observedTradeSignatures: 0 };
   let socket: Socket | null = null, stopped = false, reconnect: Timer | undefined;
   let timeout: Timer | undefined, delay = 1000, consecutiveFailures = 0, useFallback = false;
   function failedAttempt() {
@@ -66,6 +66,7 @@ export function startEchoSubscription(options: Options) {
         return;
       }
       if (message.method !== 'logsNotification' || !ids.has(message.params?.subscription)) return;
+      state.lastNotificationAt=Date.now();
       const value = message.params?.result?.value;
       if (value?.err != null || !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(value?.signature ?? '')) return;
       if (!mayContainWalletSwap(value.logs)) { state.skippedNonSwapLogs++; return; }
