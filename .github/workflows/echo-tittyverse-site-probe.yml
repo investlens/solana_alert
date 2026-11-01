@@ -1,0 +1,24 @@
+name: Echo Tittyverse site source probe (one-shot)
+on:
+  push:
+    branches:
+      - feat/echo-tittyverse-research-20261101
+    paths:
+      - scripts/echoTittyverseSiteProbe.ts
+      - .github/workflows/echo-tittyverse-site-probe.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Inspect public site HTML with one GET, no RPC or transactions
+        run: npx tsx scripts/echoTittyverseSiteProbe.ts
