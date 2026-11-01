@@ -53,6 +53,8 @@ const report={
  reason:result.reason,
  unsignedHash:result.transactionHash??null,
  programCount:result.programs?.length??null,
+ unresolvedLookupTables:result.unresolvedLookupTables??null,
+ signingApproved:result.signingApproved??false,
  unitsConsumed:result.unitsConsumed??null,
  worstCasePriorityLamports:result.worstCasePriorityLamports??null,
  builderMs:result.builderMs??null,simulationMs:result.simulationMs??null,
