@@ -41,4 +41,17 @@ if(asset){
   taoMintInBundle:js.includes(roots[1]),rootMintInBundle:js.includes(roots[0]),
   sources,candidatePaths,occurrences,assetRequestCount:1
  }));
+
+const marker=(term:string)=>{const positions:number[]=[];let from=0;
+ while(positions.length<8){const at=js.indexOf(term,from);if(at<0)break;
+ positions.push(at);from=at+term.length;}
+ return positions.map(at=>js.slice(Math.max(0,at-110),Math.min(js.length,at+180))
+  .replace(/[A-Za-z0-9_-]{40,}/g,'<long-string>'));
+};
+console.log('TITTYVERSE_ENDPOINT_CONTEXT',JSON.stringify({
+ backend:marker('sling-rewards-backend.onrender.com'),
+ json:marker('.json'),fetch:marker('fetch'),
+ api:marker('/api/'),graph:marker('connections')
+}));
+
 }
