@@ -14,6 +14,7 @@ const mint=e.ECHO_PREVIEW_MINT?.trim()??'';
 const rpcUrl=e.ECHO_PREVIEW_RPC_URL?.trim()??'';
 const pool=e.ECHO_PREVIEW_POOL??'pump';
 const amount=Number(e.ECHO_PREVIEW_AMOUNT_SOL??'0.01');
+const normalizedRpc=(()=>{try{return new URL(rpcUrl).toString()}catch{return ''}})();
 if(!wallet||!mint||!rpcUrl||!['pump','pump-amm','raydium','auto'].includes(pool)||
  !Number.isFinite(amount)||amount<=0||amount>0.1)throw Error('INVALID_READ_ONLY_INPUT');
 const valid=(v:string)=>{try{return new PublicKey(v).toBase58()===v}catch{return false}};
@@ -30,7 +31,7 @@ const allowed:typeof fetch=(async(url:any,options?:any)=>{
    if(request.action!=='buy'||request.priorityFee!==0||request.publicKey!==wallet||
        request.amount!==amount||request.slippage!==3||request.mint!==mint)
      throw Error('UNAUTHORIZED_BUILDER_PARAMETERS');
- }else if(address===rpcUrl&&options?.method==='POST'){
+ }else if(address===normalizedRpc&&options?.method==='POST'){
    simRequests++;
    if(simRequests!==1||requests>2)throw Error('PREVIEW_BUDGET_EXCEEDED');
    const request=JSON.parse(String(options.body));
