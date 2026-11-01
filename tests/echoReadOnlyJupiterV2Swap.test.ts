@@ -32,7 +32,7 @@ function fake(s:Scenario){
   calls.push('RPC_SIMULATE');
   const req=JSON.parse(String(options?.body));
   assert.equal(req.method,'simulateTransaction');
-  return {ok:true,json:async()=>({result:{value:{err:s.simulationError??null,logs:['ok']}}})} as Response;
+  return {ok:true,json:async()=>({result:{value:{err:s.simulationError??null,logs:['ok'],unitsConsumed:80000}}})} as Response;
  }) as typeof fetch;
  return {calls,fetcher};
 }
