@@ -41,3 +41,16 @@ test('bad clock, future audit marker and negative queues fail closed',()=>{
  assert.throws(()=>planEchoRecovery({...base,queueSize:-1}),/INVALID_RECOVERY_CLOCK_OR_QUEUE/);
  assert.throws(()=>planEchoRecovery({...base,lastHeadAtMs:now+1}),/INVALID_RECOVERY_CLOCK_OR_QUEUE/);
 });
+
+test('healthy incoming WS notifications suppress wasteful signature head polling',()=>{
+ const result=planEchoRecovery({...base,nowMs:now+ECHO_HEAD_SPOTCHECK_INTERVAL_MS,
+  lastArchiveAtMs:now,lastHeadAtMs:now,
+  lastStreamNotificationAtMs:now+ECHO_HEAD_SPOTCHECK_INTERVAL_MS-1000});
+ assert.deepEqual(result,{mode:'none',reason:'NOT_DUE'});
+});
+test('stale WS notification permits bounded spot-check even without archive debt',()=>{
+ const result=planEchoRecovery({...base,historyPending:false,
+  nowMs:now+ECHO_HEAD_SPOTCHECK_INTERVAL_MS,
+  lastArchiveAtMs:now,lastHeadAtMs:now,lastStreamNotificationAtMs:now});
+ assert.deepEqual(result,{mode:'head',reason:'LIVE_HEAD_SPOT_CHECK'});
+});
