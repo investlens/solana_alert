@@ -18,14 +18,17 @@ type Input={
  /** Has archive or fresh replay work outstanding (not a sign of live failure). */
  historyPending:boolean;
  lastHeadAtMs:number|null;lastArchiveAtMs:number|null;
+ /** Last incoming stream notification, separate from subscription ACK traffic. */
+ lastStreamNotificationAtMs?:number|null;
  reconnectEvent?:boolean;
 };
 export function planEchoRecovery(input:Input):EchoRecoveryDecision{
  const {nowMs,websocketReady,queueSize,historyPending,lastHeadAtMs,lastArchiveAtMs,
    reconnectEvent=false}=input;
+ const lastStreamNotificationAtMs=input.lastStreamNotificationAtMs??null;
  if(!Number.isSafeInteger(nowMs)||nowMs<=0||
     !Number.isSafeInteger(queueSize)||queueSize<0||
-    ![lastHeadAtMs,lastArchiveAtMs].every(x=>x===null||
+    ![lastHeadAtMs,lastArchiveAtMs,lastStreamNotificationAtMs].every(x=>x===null||
       (Number.isSafeInteger(x)&&x>=0&&x<=nowMs)))
    throw Error('INVALID_RECOVERY_CLOCK_OR_QUEUE');
  const due=(last:number|null,period:number)=>last===null||nowMs-last>=period;
@@ -37,6 +40,11 @@ export function planEchoRecovery(input:Input):EchoRecoveryDecision{
   return {mode:'archive',reason:'WS_DISCONNECTED'};
  if(websocketReady&&historyPending&&due(lastArchiveAtMs,ECHO_ARCHIVE_AUDIT_INTERVAL_MS))
   return {mode:'archive',reason:'ARCHIVE_AUDIT_DUE'};
+ // A healthy active stream is sufficient for the fast path; don't spend
+ // extra signature-list credits every 15 minutes merely to reconfirm traffic.
+ if(websocketReady&&lastStreamNotificationAtMs!==null&&
+    nowMs-lastStreamNotificationAtMs<ECHO_HEAD_SPOTCHECK_INTERVAL_MS)
+  return {mode:'none',reason:'NOT_DUE'};
  if(websocketReady&&due(lastHeadAtMs,ECHO_HEAD_SPOTCHECK_INTERVAL_MS))
   return {mode:'head',reason:'LIVE_HEAD_SPOT_CHECK'};
  return {mode:'none',reason:'NOT_DUE'};
