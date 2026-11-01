@@ -1,0 +1,26 @@
+name: Echo Tittyverse research (offline only)
+on:
+  push:
+    branches:
+      - feat/echo-tittyverse-research-20261101
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      ADMIN_TRADING_ENABLED: 'false'
+      AUTO_TRADE_MODE: paper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Tittyverse offline research tests
+        run: npx tsx --test tests/echoTittyverseResearch.test.ts
