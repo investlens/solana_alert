@@ -62,3 +62,11 @@ test('signature without blockTime remains eligible for verification even before 
  assert.equal(result.complete,false);
  assert.ok(result.scanned.some(row=>row.signature==='490'));
 });
+
+test('active WebSocket archives do not consume 1000-signature pages',()=>{
+ assert.deepEqual(echoFreshScanPlan(true,true,0,true,true),{pageLimit:100,maxPages:1});
+ assert.deepEqual(echoFreshScanPlan(true,true,0,false,true),{pageLimit:100,maxPages:1});
+ assert.deepEqual(echoFreshScanPlan(false,true,0,false,true),{pageLimit:100,maxPages:1});
+ // Disconnected catch-up retains its existing bounded wider-page behavior.
+ assert.deepEqual(echoFreshScanPlan(true,true,0,true,false),{pageLimit:1000,maxPages:1});
+});
