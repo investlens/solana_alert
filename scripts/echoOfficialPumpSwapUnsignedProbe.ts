@@ -38,6 +38,9 @@ try{
  const state=await online.swapSolanaState(poolKey,user);
  // Inspect live decoded pool accounts before authorizing any instruction.
  const pool=state?.pool;
+ report.observedPoolBaseMint=pool?.baseMint?.toBase58?.()??null;
+ report.observedPoolQuoteMint=pool?.quoteMint?.toBase58?.()??null;
+ report.poolStateKeys=Object.keys(state??{}).slice(0,18);
  if(!pool||!pool.baseMint?.equals(mint)||!pool.quoteMint?.equals(new PublicKey(WSOL)))
   throw Error('POOL_MINT_PAIR_NOT_VERIFIED');
  report.poolMintPairVerified=true;
