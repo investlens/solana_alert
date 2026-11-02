@@ -27,7 +27,8 @@ alter table public.echo_live_buy_intents
 create or replace function public.echo_pilot_reserve_all_in_atomic(
  p_execution_wallet text,p_mint text,p_caller_wallet text,
  p_source_signature text,p_amount_lamports bigint,
- p_principal_cents bigint,p_buy_cost_ceiling_cents bigint,
+ p_principal_cents bigint,p_verified_sol_usd_cents bigint,
+ p_buy_cost_ceiling_cents bigint,
  p_exit_reserve_cents bigint,p_verified_spendable_wallet_cents bigint,
  p_balance_verified_at timestamptz)
 returns text language plpgsql security invoker set search_path=''
@@ -38,6 +39,7 @@ declare
  v_committed bigint;
  v_reserved bigint;
  v_all_in bigint;
+ v_amount_fx_cents bigint;
  v_expected text := '8ndw7DJ6hyZBm1PD3JJMF8G4PD5CJhDCCUK13ECL2pgQ';
 begin
  if p_execution_wallet is distinct from v_expected
@@ -49,6 +51,8 @@ begin
     or p_amount_lamports is null or p_amount_lamports<=0
     or p_amount_lamports>100000000
     or p_principal_cents is null or p_principal_cents<=0
+    or p_verified_sol_usd_cents is null or
+       p_verified_sol_usd_cents<=0 or p_verified_sol_usd_cents>100000000
     or p_buy_cost_ceiling_cents is null or p_buy_cost_ceiling_cents<=0
     or p_exit_reserve_cents is null or p_exit_reserve_cents<=0
     or p_verified_spendable_wallet_cents is null
@@ -57,7 +61,12 @@ begin
        p_balance_verified_at>pg_catalog.now() or
        p_balance_verified_at<pg_catalog.now()-interval '3 seconds'
  then return 'INVALID_OR_STALE_ATTESTATION'; end if;
- v_all_in:=p_principal_cents+p_buy_cost_ceiling_cents;
+ -- Ceiling-convert the actual order lamports into USD cents in SQL.
+ -- This blocks an executor from claiming a $9.40 principal while submitting
+ -- a 0.05 SOL order at $200/SOL ($10 principal).
+ v_amount_fx_cents:=(p_amount_lamports*p_verified_sol_usd_cents+999999999)/1000000000;
+ if p_principal_cents<>v_amount_fx_cents then return 'PRINCIPAL_FX_MISMATCH'; end if;
+ v_all_in:=v_amount_fx_cents+p_buy_cost_ceiling_cents;
  if v_all_in>1000 then return 'ALL_IN_ENTRY_CAP'; end if;
  -- Every replica serializes on the execution wallet, before any reads.
  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_execution_wallet,17391));
@@ -101,9 +110,9 @@ exception
 end;
 $$;
 revoke all on function public.echo_pilot_reserve_all_in_atomic(
- text,text,text,text,bigint,bigint,bigint,bigint,bigint,timestamptz)
+ text,text,text,text,bigint,bigint,bigint,bigint,bigint,bigint,timestamptz)
  from public,anon,authenticated;
 grant execute on function public.echo_pilot_reserve_all_in_atomic(
- text,text,text,text,bigint,bigint,bigint,bigint,bigint,timestamptz)
+ text,text,text,text,bigint,bigint,bigint,bigint,bigint,bigint,timestamptz)
  to service_role;
 commit;
