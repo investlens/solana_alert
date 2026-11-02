@@ -43,19 +43,9 @@ export async function prepareEchoBuyFirstCoordinator(args:{
   return deny('DEDICATED_WALLET_OR_CALLER_PROOF_MISSING');
  const preview=await previewEchoBuyFirst(plan,args.preview).catch(()=>null);
  if(!preview?.eligible)return deny(preview?.reason??'BUY_PREVIEW_UNAVAILABLE');
- // Existing all-in Supabase adapter expects the full legacy plan shape.
- // Adapt only the structurally common order/budget/wallet fields. No SELL
- // expectation is trusted or signed, and no pre-owned tokens are required.
- const reservationPlan={
-  ...plan,heldTokenAmountRaw:'0',manualSell:{
-   ownerChatId:'',chatId:0,senderId:0,mint:plan.order.mint,
-   percent:100 as const,verifiedTokenBalanceRaw:'0',
-   heldPositionVerified:false,activeSellReservation:false,
-   quoteVerified:false,simulationPassed:false
-  }
- };
+ // Reserve using only the verified BUY fields. No fabricated SELL approval.
  let result:Awaited<ReturnType<EchoAllInPilotStore['reserveAllIn']>>;
- try{result=await args.store.reserveAllIn({plan:reservationPlan,callerSignature,proof});}
+ try{result=await args.store.reserveAllIn({plan,callerSignature,proof});}
  catch{return deny('ATOMIC_DATABASE_UNAVAILABLE',true);}
  if('reason' in result)return deny('ATOMIC_'+result.reason,true);
  // The reservation is intentionally irreversible for this mint. If the
