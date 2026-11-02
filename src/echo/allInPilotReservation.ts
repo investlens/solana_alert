@@ -13,9 +13,10 @@ export type AllInVerifiedSnapshot={
  /** Obtained from privileged real-time chain and SOL/USD sources. */
  balanceVerifiedAtIso:string;
 };
+export type EchoBuyReservationPlan=Pick<PilotReadOnlyPlan,'order'|'budget'|'executionWallet'>;
 export interface EchoAllInPilotStore {
  reserveAllIn(args:{
-  plan:PilotReadOnlyPlan;callerSignature:string;proof:AllInVerifiedSnapshot;
+  plan:EchoBuyReservationPlan;callerSignature:string;proof:AllInVerifiedSnapshot;
  }):Promise<AllInReservationResult>;
 }
 const asSafeInt=(s:string|null):number|null=>{
