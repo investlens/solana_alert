@@ -63,7 +63,7 @@ export async function previewEchoPilotRoundTrip(
   if(buy.side!=='BUY'||buy.inputRaw!==String(order.amountLamports)||
      buy.outputMint!==plan.order.mint||!buy.unsignedAudit?.feeEstimateComplete||
      buy.unsignedAudit.feePayer!==plan.executionWallet||
-     !Number.isSafeInteger(buy.unitsConsumed)||buy.unitsConsumed!<=0)
+     !Number.isSafeInteger(buy.unitsConsumed)||(buy.unitsConsumed??0)<=0)
    return result('BUY_PREVIEW_EVIDENCE_INCOMPLETE');
   const sellQuote=await preview({...base,side:'SELL',amountRaw:plan.heldTokenAmountRaw});
   if(!sellQuote.ok)return result('SELL_'+sellQuote.reason,true,false,buy.unsignedTransactionSha256);
@@ -71,7 +71,7 @@ export async function previewEchoPilotRoundTrip(
      sellQuote.inputRaw!==plan.heldTokenAmountRaw||
      !sellQuote.unsignedAudit?.feeEstimateComplete||
      sellQuote.unsignedAudit.feePayer!==plan.executionWallet||
-     !Number.isSafeInteger(sellQuote.unitsConsumed)||sellQuote.unitsConsumed!<=0)
+     !Number.isSafeInteger(sellQuote.unitsConsumed)||(sellQuote.unitsConsumed??0)<=0)
    return result('SELL_PREVIEW_EVIDENCE_INCOMPLETE',true,false,buy.unsignedTransactionSha256);
   return result('ROUND_TRIP_PREVIEW_ONLY',true,true,buy.unsignedTransactionSha256,
    sellQuote.unsignedTransactionSha256);
