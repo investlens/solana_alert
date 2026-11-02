@@ -15,7 +15,7 @@ export type EchoPumpLocalPreview={
 };
 export async function readOnlyPumpLocalPreview(
  r:EchoPumpLocalPreview,fetcher:typeof fetch=fetch
-):Promise<{ok:boolean;reason:string;transactionHash?:string;programs?:string[];unitsConsumed?:number;worstCasePriorityLamports?:string;builderMs?:number;simulationMs?:number;failureClass?:string;failingInstructionIndex?:number;customErrorCode?:number;unresolvedLookupTables?:number;signingApproved?:false}>{
+):Promise<{ok:boolean;reason:string;transactionHash?:string;programs?:string[];unitsConsumed?:number;worstCasePriorityLamports?:string;builderMs?:number;simulationMs?:number;failureClass?:string;builderHttpStatus?:number;failingInstructionIndex?:number;customErrorCode?:number;unresolvedLookupTables?:number;signingApproved?:false}>{
  try{
   if(!r.wallet||!r.mint||
     new PublicKey(r.wallet).toBase58()!==r.wallet||
@@ -35,7 +35,9 @@ export async function readOnlyPumpLocalPreview(
     slippage:r.slippagePercent,priorityFee:0,pool:r.pool
    })
   });
-  if(!response.ok)return {ok:false,reason:'UNSIGNED_BUILDER_UNAVAILABLE'};
+  if(!response.ok)return {ok:false,reason:'UNSIGNED_BUILDER_UNAVAILABLE',
+    builderHttpStatus:Number.isSafeInteger(response.status)&&response.status>=400&&response.status<=599?
+     response.status:undefined};
   const bytes=new Uint8Array(await response.arrayBuffer());
   const builderMs=Date.now()-builderStarted;
   if(bytes.length<100||bytes.length>2250)
