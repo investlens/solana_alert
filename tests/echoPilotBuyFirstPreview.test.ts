@@ -11,6 +11,8 @@ const now=1800000000000;
 const base={
  executionWallet:wallet,rpcUrl:'https://example.invalid',jupiterApiKey:'fixture',
  sameWalletManualExitAccessVerified:true,manualExitRiskAcknowledged:true,
+ marketCapUsd:45000,marketCapObservedAtMs:now-200,
+ callerEntryPriceSolPerToken:0.03,tokenDecimals:6,
  order:{callerWallet:SLINGOOR_WALLET,mint,verifiedBuyerSigner:true,
   originalSwapSucceeded:true,verifiedSpend:true,verifiedTokenCredit:true,
   priceSolUsd:200,priceObservedAtMs:now,nowMs:now,spentOrdersToday:0,
@@ -43,6 +45,9 @@ test('missing same-wallet app exit access blocks preview before network',async()
  for(const changed of [
   {sameWalletManualExitAccessVerified:false},
   {manualExitRiskAcknowledged:false},
+  {marketCapUsd:100000},
+  {marketCapObservedAtMs:now-3000},
+  {callerEntryPriceSolPerToken:0.02},
   {budget:{...base.budget,cumulativeCommittedCents:'2700'}},
   {order:{...base.order,openOrPendingPositions:2}},
   {order:{...base.order,alreadyReservedOrPurchased:true}}
@@ -57,4 +62,10 @@ test('failed BUY simulation is never treated as authority to spend',async()=>{
  const r=await previewEchoBuyFirst(base,async()=>({
   ok:false,reason:'RPC_SIMULATION_FAILED'}));
  assert.equal(r.eligible,false);assert.equal(r.reason,'BUY_RPC_SIMULATION_FAILED');
+});
+
+test('quoted amount controls 50% premium even when caller price is supplied',async()=>{
+ const r=await previewEchoBuyFirst({...base,callerEntryPriceSolPerToken:0.02},async x=>fake(x));
+ assert.equal(r.eligible,false);
+ assert.equal(r.reason,'CALLER_PRICE_PREMIUM_EXCEEDS_50_PERCENT');
 });
