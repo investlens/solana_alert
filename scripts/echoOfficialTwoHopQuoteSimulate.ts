@@ -129,6 +129,13 @@ try{
  report.provisionalDebitWithAtaRentLamports=provisionalDebitCeiling.toString();
  report.fullWalletDebitVerified=false;
  report.balanceCoversProvisionalDebit=BigInt(walletBalance)>=provisionalDebitCeiling;
+ // Safe numeric fault classification, never a transaction-data or secret dump.
+ // A positive provisional balance check is NOT a fully audited wallet debit.
+ report.networkFeeIncludesMessagePriorityFee=true;
+ report.cpiRentAndExtraWalletDebitsAudited=false;
+ report.fundingRequirementLamports=null;
+ report.fundingApproved=false;
+ report.simulationFailureKind=null;
 
  // Third-party output is not sufficient to claim actual wallet balance, ATA
  // rents or all-in USD eligibility; simulation failure remains a safe result.
@@ -139,7 +146,15 @@ try{
  });
  report.unitsConsumed=simulated.value?.unitsConsumed??null;
  report.simulationPassed=simulated.value?.err===null;
- if(!report.simulationPassed)throw Error('SIMULATION_FAILED_OR_UNFUNDED_WALLET');
+ if(!report.simulationPassed) {
+  // Fail-closed category only. Retain no full RPC error, transaction bytes,
+  // signer material, or simulation logs in stdout.
+  const err=simulated.value?.err;
+  report.simulationFailureKind=err===null?'UNKNOWN':
+    typeof err==='string'?err.replace(/[^a-zA-Z_]/g,'').slice(0,40):
+    err&&typeof err==='object'?Object.keys(err).slice(0,2).join('_'):'UNKNOWN';
+  throw Error('SIMULATION_FAILED_OR_UNFUNDED_WALLET');
+ }
  report.reason='SIMULATION_PASSED_BUT_ECONOMICS_UNAUTHORIZED';
 }catch(e){
  const x=e instanceof Error?e.message:'UNKNOWN';
