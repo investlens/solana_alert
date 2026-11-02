@@ -11,6 +11,7 @@ import {createHash} from 'node:crypto';
 import {VersionedTransaction} from '@solana/web3.js';
 import type {EchoTradeStateJournal} from './tradeStateJournal.js';
 import {verifyEchoExecutionWallet} from './executionWallet.js';
+import type {EchoTrustedReservationReader} from './trustedReservationPreview.js';
 import {verifyEchoSignedMessage} from './signedMessageAttestation.js';
 export const ECHO_ONE_SHOT_HANDOFF_BROADCAST_ENABLED=false as const;
 export type EchoHandoffResult=
@@ -20,13 +21,21 @@ export async function prepareEchoOneShotBuyHandoff(args:{
  journal:EchoTradeStateJournal;reservationKey:string;
  signedTransactionBase64:string;approvedMessageSha256:string;
  executionWallet:string;expectedMint:string;
- /** Must come from trusted database row, not the caller update. */
- dbReservedAndPending:boolean;
+ /** Independent privileged read-only database lookup; never caller flags. */
+ reservationReader:EchoTrustedReservationReader;
 }):Promise<EchoHandoffResult>{
  const deny=(reason:string):EchoHandoffResult=>({ok:false,reason,broadcastAllowed:false});
- if(!args.dbReservedAndPending||!verifyEchoExecutionWallet(args.executionWallet)||
+ if(!verifyEchoExecutionWallet(args.executionWallet)||
     args.reservationKey!==args.executionWallet+':'+args.expectedMint)
   return deny('DURABLE_RESERVATION_OR_WALLET_INVALID');
+ let reservation:Awaited<ReturnType<EchoTrustedReservationReader['getByWalletAndMint']>>;
+ try{reservation=await args.reservationReader.getByWalletAndMint(args.executionWallet,args.expectedMint);}
+ catch{return deny('TRUSTED_RESERVATION_DB_UNAVAILABLE');}
+ if(!reservation||reservation.executionWallet!==args.executionWallet||
+    reservation.mint!==args.expectedMint||reservation.state!=='reserved'||
+    reservation.positionClosedAt!==null||reservation.transactionSignature!==null||
+    !Number.isSafeInteger(reservation.amountLamports)||reservation.amountLamports<=0)
+  return deny('TRUSTED_RESERVATION_NOT_ACTIVE');
  const existing=args.journal.get(args.reservationKey);
  if(!existing||existing.state!=='SIMULATED')return deny('INTENT_NOT_IN_SIMULATED_STATE_OR_ALREADY_USED');
  const evidence=verifyEchoSignedMessage({
