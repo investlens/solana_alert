@@ -21,11 +21,13 @@ const outcome:any={mode:'OFFICIAL_INTERMEDIATE_HOP_READ_ONLY',mint:TOKEN,
  venue:'UNVERIFIED',chainReadCount:0,signer:false,broadcast:false,simulation:false};
 try{
  const {canonicalPumpPoolPda,PUMP_AMM_SDK}=await import('@pump-fun/pump-sdk/swap');
- const {bondingCurvePda,PUMP_SDK}=await import('@pump-fun/pump-sdk');
+ outcome.stage='SWAP_MODULE_LOADED';
  const con=new Connection(RPC,{commitment:'confirmed',fetch:requester});
  const mint=new PublicKey(TOKEN);
  const pda=canonicalPumpPoolPda(mint);
+ outcome.stage='POOL_PDA_DERIVED';
  const pool=await con.getAccountInfo(pda);
+ outcome.stage='POOL_RPC_READ';
  if(pool){
   if(!pool.owner.equals(new PublicKey(AMM)))throw Error('UNEXPECTED_POOL_OWNER');
   const x=PUMP_AMM_SDK.decodePool(pool);
@@ -36,6 +38,8 @@ try{
   outcome.pool=pda.toBase58();
   outcome.quoteMint=x.quoteMint.toBase58();
  }else{
+  const {bondingCurvePda,PUMP_SDK}=await import('@pump-fun/pump-sdk');
+  outcome.stage='CURVE_MODULE_LOADED';
   const bc=await con.getAccountInfo(bondingCurvePda(mint));
   if(!bc||!bc.owner.equals(new PublicKey(PUMP)))throw Error('NO_SUPPORTED_FIRST_HOP');
   const x=PUMP_SDK.decodeBondingCurve(bc);
