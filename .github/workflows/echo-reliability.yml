@@ -265,3 +265,23 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm install --no-save --ignore-scripts --no-package-lock @pump-fun/pump-sdk@4.3.1
       - run: npx tsx scripts/echoOfficialQuoteCapabilities.ts
+
+  echo-official-two-hop-quote-sim:
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[echo-two-hop-quote-sim]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      ADMIN_TRADING_ENABLED: 'false'
+      AUTO_TRADE_MODE: paper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm install --no-save --ignore-scripts --no-package-lock @pump-fun/pump-sdk@4.3.1
+      - name: Fee-aware official quote, non-broadcast build and one bounded unsigned simulateTransaction
+        run: npx tsx scripts/echoOfficialTwoHopQuoteSimulate.ts
