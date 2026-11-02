@@ -43,15 +43,24 @@ export async function prepareEchoOneShotBuyHandoff(args:{
    return deny('SIGNED_TRANSACTION_ROUTE_NOT_SUPPORTED');
  }catch{return deny('INVALID_SIGNED_TRANSACTION');}
  const fingerprint=createHash('sha256').update(bytes).digest('hex');
+ return persistEchoOneShotUnknown(args.journal,args.reservationKey,evidence.signature,fingerprint);
+}
+
+/** Storage-only test seam. This NEVER authorizes any signature or broadcast. */
+export async function persistEchoOneShotUnknown(journal:EchoTradeStateJournal,
+ reservationKey:string,signature:string,fingerprint:string):Promise<EchoHandoffResult>{
+ const deny=(reason:string):EchoHandoffResult=>({ok:false,reason,broadcastAllowed:false});
+ const existing=journal.get(reservationKey);
+ if(!existing||existing.state!=='SIMULATED')return deny('INTENT_NOT_IN_SIMULATED_STATE_OR_ALREADY_USED');
  // Record signature before sending; any persistence error is a hard stop.
  // Even if an external worker crashes after this transition, it must
  // reconcile the SAME signature, not rebuild and rebroadcast a new BUY.
  try{
-  const advanced=await args.journal.advance(args.reservationKey,{
-   kind:'SUBMISSION_RESULT_UNKNOWN',fingerprint,signature:evidence.signature
+  const advanced=await journal.advance(reservationKey,{
+   kind:'SUBMISSION_RESULT_UNKNOWN',fingerprint,signature
   });
   if(!advanced.ok)return deny('DURABLE_HANDOFF_NOT_PERSISTED');
  }catch{return deny('DURABLE_HANDOFF_STORAGE_UNAVAILABLE');}
- return {ok:true,mode:'PERSISTED_NO_BROADCAST',signature:evidence.signature,
+ return {ok:true,mode:'PERSISTED_NO_BROADCAST',signature,
   fingerprint,broadcastAllowed:false};
 }
