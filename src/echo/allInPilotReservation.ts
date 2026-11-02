@@ -38,7 +38,7 @@ export function createEchoAllInSupabaseStore(client:SupabaseClient):EchoAllInPil
       buyCosts===null||exitReserve===null||balance===null||
       !Number.isFinite(at)||Math.abs(Date.now()-at)>3000)
     return {reserved:false,reason:'INVALID_OR_STALE_CAPITAL_PROOF'};
-   const admitted=screenEchoTenDollarPilot(plan.order);
+   const admitted=screenEchoTenDollarPilot(plan.order,principal);
    if('reason' in admitted)return {reserved:false,reason:admitted.reason};
    // The legacy SQL function would bypass all-in capital accounting. Never
    // allow an automatic fallback to echo_pilot_reserve_atomic.
