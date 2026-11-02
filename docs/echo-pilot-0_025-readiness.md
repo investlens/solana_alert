@@ -20,3 +20,5 @@
 5. Verify Phantom access to the same wallet and test manual SELL with real token balance only after approved first BUY. No automatic sell.
 6. Confirm live fees, SOL/USD and $10 all-in per BUY, $30 lifetime budget, $0.025 SOL initial size, max two open/pending, one BUY per mint. Larger 0.1 or 0.2 SOL tiers need separate owner approval AND revision of the USD limits; never simply expose them as immediately spendable.
 7. Verify funds and fee/exit reserve then explicitly request owner approval before any mainnet send. A proposed 0.1 SOL wallet deposit does NOT authorize spending 0.1 SOL.
+
+A second bounded status-only diagnostic may be used to classify provider refusal; no signing or broadcast permitted.
