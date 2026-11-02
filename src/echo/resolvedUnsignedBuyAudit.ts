@@ -28,6 +28,7 @@ export type EchoResolvedBuyAudit=
    writableAccounts:string[];invokedPrograms:string[];unreviewedPrograms:string[];
    destinationTokenAccount:string;expectedDestinationDerived:true;mintVerified:true;
    accountStateReads:number;lookupReads:number;priorityFeeLamports:string;
+   explicitComputeBudgetVerified:boolean;
    directSolTransfers:0;unsupportedInstructions:string[];
    /** Program side effects and token balance deltas require separate proof. */
    economicOutcomeVerified:false}
@@ -109,9 +110,13 @@ export async function auditEchoResolvedUnsignedBuy(input:{
       return deny('UNKNOWN_ATA_INSTRUCTION',lookupReads);
   }
  }
- if(limit===null||price===null||limit<1||limit>MAX_UNITS)
-  return deny('COMPUTE_BUDGET_UNVERIFIED',lookupReads);
- const fee=(BigInt(limit)*price+999_999n)/1_000_000n;
+ // Missing ComputeBudget instructions use Solana runtime defaults; this is
+ // informational only, NOT an independently approved CU or fee budget.
+ const explicitComputeBudgetVerified=limit!==null&&price!==null;
+ if(limit!==null&&(limit<1||limit>MAX_UNITS))
+  return deny('COMPUTE_BUDGET_INVALID',lookupReads);
+ const conservativeUnits=limit??Math.min(MAX_UNITS,msg.compiledInstructions.length*200_000);
+ const fee=(BigInt(conservativeUnits)*(price??0n)+999_999n)/1_000_000n;
  if(fee>MAX_PRIORITY_LAMPORTS)return deny('PRIORITY_FEE_OVER_CAP',lookupReads);
  // Read the mint only. The output token account may not yet exist and will
  // be created as an ATA by the route. One bounded batch request.
@@ -141,6 +146,7 @@ export async function auditEchoResolvedUnsignedBuy(input:{
   destinationTokenAccount:destination.toBase58(),
   expectedDestinationDerived:true,mintVerified:true,
   lookupReads,accountStateReads,priorityFeeLamports:String(fee),
+  explicitComputeBudgetVerified,
   directSolTransfers:0,unsupportedInstructions:unsupported,
   economicOutcomeVerified:false
  };
