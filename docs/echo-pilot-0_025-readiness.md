@@ -22,3 +22,10 @@
 7. Verify funds and fee/exit reserve then explicitly request owner approval before any mainnet send. A proposed 0.1 SOL wallet deposit does NOT authorize spending 0.1 SOL.
 
 A second bounded status-only diagnostic may be used to classify provider refusal; no signing or broadcast permitted.
+
+## 2026-11-02 pool correction and bounded diagnostics
+- Public market observation for static mint `D4AnTZk3spQgCEMpC4iqtFp8U2qbiDvzrzdaq7Dopump` identified a principal **PumpSwap** (graduated) pool (`JBsGNXRZQr9ZPc5PAn3seDE7At6ELq9LjVDCujgLKaq8`) and a historical snapshot market capitalization **over $100K**. This test mint is NOT eligible for live pilot purchases; provider market data is not itself trusted price/route execution proof.
+- Changed diagnostic pool from `auto` to `pump-amm`. GitHub Actions `41502746144` still returned HTTP 400 at the *unsigned local builder*, before any RPC simulation.
+- Added a bounded, no-body logging error-category classifier to the isolated READ-ONLY builder. GitHub Actions `41502939467` returned `builderHttpStatus=400`, `builderFailureCategory=UNCLASSIFIED`, one builder call, zero simulation calls, zero signed or transmitted transactions.
+- Do NOT assert insufficient wallet balance as cause; endpoint returned no recognizable reason. Further blind retries are prohibited. Obtain verified current pool/mint onchain (including the pump vs pump-amm switch) and prefer a locally auditable first-party instruction builder or another reviewed unsigned route. Fresh real caller token for deployment must independently satisfy < $100k market cap, verified buyer entry price, liquidity and sellability.
+- Current signer remains on proof-only `echoIsolatedSignerProveOnce.ts`, no RPC and no BUY signing. Funding NOT approved.
