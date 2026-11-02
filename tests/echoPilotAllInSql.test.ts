@@ -16,13 +16,14 @@ test('database atomically enforces fee-inclusive $30 lifetime cap and exit reser
   const reserve=async(m:string,opts:{principal?:number;fee?:number;balance?:number;
     exit?:number;caller?:string;when?:string}={})=>{
    const reply=await db.query<{result:string}>(`select public.echo_pilot_reserve_all_in_atomic(
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10::timestamptz) as result`,
-     [wallet,m,opts.caller??SLINGOOR_WALLET,source,50000000,
-      opts.principal??900,opts.fee??100,opts.exit??100,
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::timestamptz) as result`,
+     [wallet,m,opts.caller??SLINGOOR_WALLET,source,45000000,
+      opts.principal??900,20000,opts.fee??100,opts.exit??100,
       opts.balance??3500,opts.when??new Date().toISOString()]);
    return reply.rows[0]?.result;
   };
-  assert.equal(await reserve(mint(4),{principal:950,fee:100}),'ALL_IN_ENTRY_CAP');
+  assert.equal(await reserve(mint(4),{principal:950,fee:100}),'PRINCIPAL_FX_MISMATCH');
+  assert.equal(await reserve(mint(4),{fee:101}),'ALL_IN_ENTRY_CAP');
   assert.equal(await reserve(mint(4),{balance:1000}),'BALANCE_AND_EXIT_RESERVE');
   assert.equal(await reserve(mint(4)),'RESERVED');
   assert.equal(await reserve(mint(4)),'DUPLICATE_TOKEN');
@@ -53,8 +54,8 @@ test('simultaneous reservations cannot exceed two slots or $30 even with racing 
     'docs/sql/echo-pilot-atomic-two-slot.sql','docs/sql/echo-pilot-all-in-atomic.sql'])
    await db.exec(await readFile(file,'utf8'));
   const run=(n:number)=>db.query<{reply:string}>(`select public.echo_pilot_reserve_all_in_atomic(
-    $1,$2,$3,$4,$5, $6,$7,$8,$9,now()) as reply`,
-    [wallet,mint(n),SLINGOOR_WALLET,source,50000000,900,100,100,3500]);
+    $1,$2,$3,$4,$5, $6,$7,$8,$9,$10,now()) as reply`,
+    [wallet,mint(n),SLINGOOR_WALLET,source,45000000,900,20000,100,100,3500]);
   const results=await Promise.all([run(4),run(5),run(6),run(7)]);
   assert.equal(results.filter(x=>x.rows[0]?.reply==='RESERVED').length,2);
   const counts=await db.query<{n:number}>(`select count(*)::int n
