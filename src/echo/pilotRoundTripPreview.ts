@@ -40,7 +40,10 @@ export async function previewEchoPilotRoundTrip(
    buySimulationPassed:buy,sellSimulationPassed:sell,
    buyQuoteHash:buyHash,sellQuoteHash:sellHash
  });
- const order=screenEchoTenDollarPilot(plan.order);
+ const principalCents=Number(plan.budget.newPrincipalCents);
+ if(!Number.isSafeInteger(principalCents)||principalCents<=0||principalCents>1000)
+  return result('INVALID_FEE_ADJUSTED_PRINCIPAL');
+ const order=screenEchoTenDollarPilot(plan.order,principalCents);
  if('reason' in order)return result('PILOT_'+order.reason);
  const budget=screenEchoPilotTotalBudget(plan.budget);
  if(!budget.eligible)return result('BUDGET_'+budget.reason);
