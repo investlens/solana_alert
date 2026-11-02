@@ -15,6 +15,8 @@ create table if not exists public.echo_pilot_capital_ledger (
 );
 alter table public.echo_pilot_capital_ledger enable row level security;
 revoke all on public.echo_pilot_capital_ledger from public,anon,authenticated;
+-- SECURITY INVOKER RPC runs under service_role: grant only required DML.
+grant select,insert,update on public.echo_pilot_capital_ledger to service_role;
 
 alter table public.echo_live_buy_intents
  add column if not exists pilot_all_in_reserved_cents bigint
