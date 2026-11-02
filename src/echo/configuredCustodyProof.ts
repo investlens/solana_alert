@@ -17,7 +17,7 @@ export async function verifyEchoConfiguredWalletCustody(
   provider:signer,expectedWallet:ECHO_EXPECTED_EXECUTION_WALLET,
   audience:'echo-isolated-signer',nowMs
  });
- if(!result.verified)return {verified:false,reason:result.reason,executionAuthorized:false};
+ if('reason' in result)return {verified:false,reason:result.reason,executionAuthorized:false};
  return {verified:true,wallet:result.wallet,mode:'OFFCHAIN_KEY_POSSESSION_ONLY',
   executionAuthorized:false};
 }
