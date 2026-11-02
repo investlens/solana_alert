@@ -26,7 +26,7 @@ export type EchoResolvedBuyAudit=
  |{ok:true;mode:'AUDIT_ONLY';signingApproved:false;
    unsignedSha256:string;lookupTables:number;resolvedAccounts:number;
    writableAccounts:string[];invokedPrograms:string[];unreviewedPrograms:string[];
-   destinationTokenAccount:string;destinationOwnerVerified:true;mintVerified:true;
+   destinationTokenAccount:string;expectedDestinationDerived:true;mintVerified:true;
    accountStateReads:number;lookupReads:number;priorityFeeLamports:string;
    directSolTransfers:0;unsupportedInstructions:string[];
    /** Program side effects and token balance deltas require separate proof. */
@@ -139,7 +139,7 @@ export async function auditEchoResolvedUnsignedBuy(input:{
   lookupTables:tables.length,resolvedAccounts:all.length,writableAccounts:writable,
   invokedPrograms:programs,unreviewedPrograms:unreviewed,
   destinationTokenAccount:destination.toBase58(),
-  destinationOwnerVerified:true,mintVerified:true,
+  expectedDestinationDerived:true,mintVerified:true,
   lookupReads,accountStateReads,priorityFeeLamports:String(fee),
   directSolTransfers:0,unsupportedInstructions:unsupported,
   economicOutcomeVerified:false
