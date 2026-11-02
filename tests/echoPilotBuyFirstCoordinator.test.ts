@@ -31,7 +31,7 @@ const plan={
 const preview=(req:EchoJupiterV2PreviewRequest):Promise<EchoJupiterV2PreviewResult>=>Promise.resolve({
  ok:true,reason:'RPC_SIMULATION_SUCCEEDED',side:'BUY',
  inputMint:'So11111111111111111111111111111111111111112',outputMint:mint,
- inputRaw:req.amountRaw,quotedOutputRaw:'120000',requestId:'fixture',
+ inputRaw:req.amountRaw,quotedOutputRaw:'1200000',requestId:'fixture',
  unsignedTransactionSha256:'a'.repeat(64),logs:[],unitsConsumed:90000,
  unsignedAudit:{feeEstimateComplete:true,feePayer:wallet} as any
 });
