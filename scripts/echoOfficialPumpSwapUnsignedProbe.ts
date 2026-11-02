@@ -41,8 +41,12 @@ try{
  report.observedPoolBaseMint=pool?.baseMint?.toBase58?.()??null;
  report.observedPoolQuoteMint=pool?.quoteMint?.toBase58?.()??null;
  report.poolStateKeys=Object.keys(state??{}).slice(0,18);
- if(!pool||!pool.baseMint?.equals(mint)||!pool.quoteMint?.equals(new PublicKey(WSOL)))
-  throw Error('POOL_MINT_PAIR_NOT_VERIFIED');
+ if(!pool||!pool.baseMint?.equals(mint))throw Error('POOL_BASE_MINT_MISMATCH');
+ if(!pool.quoteMint?.equals(new PublicKey(WSOL))){
+  report.intermediateQuoteMint=pool.quoteMint?.toBase58?.()??null;
+  report.requiredRoute='SOL_TO_INTERMEDIATE_TO_TARGET';
+  throw Error('MULTIHOP_REQUIRED_NOT_IMPLEMENTED');
+ }
  report.poolMintPairVerified=true;
  const instructions=await PUMP_AMM_SDK.buyQuoteInput(state,new BN(REQUESTED_LAMPORTS),3);
  if(!Array.isArray(instructions)||instructions.length===0||instructions.length>10)
@@ -50,7 +54,7 @@ try{
  const ids=instructions.map(ix=>ix.programId.toBase58());
  const allowed=new Set([PUMP_AMM,'ComputeBudget111111111111111111111111111111',
   '11111111111111111111111111111111','TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
-  'TokenzQdBNbLqP5VEhdkAS6EPFCE7uFyV9QnF4jrb',
+  'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
   'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL']);
  report.programs=ids;
  if(ids.some(id=>!allowed.has(id))||ids.filter(id=>id===PUMP_AMM).length!==1)
@@ -82,7 +86,7 @@ try{
  report.result='NOT_VERIFIED';
  const reason=e instanceof Error?e.message:'UNKNOWN';
  // Sanitized, finite failure categories; no provider text, URLs or raw tx.
- const known=['POOL_MINT_PAIR_NOT_VERIFIED','INVALID_SDK_INSTRUCTIONS',
+ const known=['POOL_BASE_MINT_MISMATCH','MULTIHOP_REQUIRED_NOT_IMPLEMENTED','INVALID_SDK_INSTRUCTIONS',
  'UNREVIEWED_PROGRAM_OR_SWAP_COUNT','UNRESOLVED_LOOKUP_TABLES',
  'UNEXPECTED_SIGNATURE','INSUFFICIENT_BALANCE_FOR_VALID_SIMULATION',
  'SIMULATION_REJECTED','RPC_DESTINATION_NOT_APPROVED','UNREVIEWED_RPC_METHOD',
