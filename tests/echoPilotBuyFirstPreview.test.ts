@@ -68,3 +68,45 @@ test('quoted amount controls 50% premium even when caller price is supplied',asy
  assert.equal(r.eligible,false);
  assert.equal(r.reason,'CALLER_PRICE_PREMIUM_EXCEEDS_50_PERCENT');
 });
+
+
+test('trusted 0.025 SOL tier reaches BUY preview as exactly 25m lamports',async()=>{
+ const positionSizing={
+  requestedSol:'0.025' as const,approvedSol:'0.025' as const,
+  explicitTierApproval:false,firstTradeAndManualExitVerified:false,
+  solUsdCentsPerSol:20000,estimatedFeeAndOtherCostsCents:'75',
+  cumulativeCommittedCents:'0'
+ };
+ const q:{amountRaw:string|null}={amountRaw:null};
+ const scenario={...base,positionSizing,
+  budget:{...base.budget,newPrincipalCents:'500',
+   allInBuyCostsCents:'75',cumulativeCommittedCents:'0'}};
+ const res=await previewEchoBuyFirst(scenario,async r=>{
+  q.amountRaw=r.amountRaw;
+  return fake(r);
+ });
+ assert.equal(q.amountRaw,'25000000');
+ assert.equal(res.eligible,true);
+ assert.equal(res.executable,false);
+});
+test('trusted owner-tier and budget mismatches fail before any quote call',async()=>{
+ let called=0;
+ const positionSizing={
+  requestedSol:'0.025' as const,approvedSol:'0.025' as const,
+  explicitTierApproval:false,firstTradeAndManualExitVerified:false,
+  solUsdCentsPerSol:20000,estimatedFeeAndOtherCostsCents:'75',
+  cumulativeCommittedCents:'0'
+ };
+ for(const changed of [
+  {positionSizing},
+  {positionSizing:{...positionSizing,requestedSol:'0.1' as const,approvedSol:'0.1' as const}},
+  {positionSizing:{...positionSizing,estimatedFeeAndOtherCostsCents:'60'}}
+ ]){
+  const res=await previewEchoBuyFirst({...base,...changed},async r=>{
+   called++;return fake(r);
+  });
+  assert.equal(res.eligible,false);
+  assert.equal(res.executable,false);
+ }
+ assert.equal(called,0);
+});
