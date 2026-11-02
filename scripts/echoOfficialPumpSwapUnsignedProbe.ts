@@ -1,3 +1,4 @@
+// @ts-nocheck — prototype SDK loaded only in bounded CI probe; production integration requires pinned dependency and full types.
 /** Strict first-party PumpSwap SDK unsigned probe. NEVER signs or broadcasts.
  * This is diagnostic only; a builder returning instructions is not authorization.
  * SDK v4.3.1 is deliberately installed only in the one-shot CI job.
