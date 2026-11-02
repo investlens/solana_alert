@@ -68,6 +68,8 @@ const report={
  builderMs,passedStructuralAudit:result?.ok??false,
  auditReason:result&&!result.ok?result.reason:reason,
  lookupTables:result?.ok?result.lookupTables:null,
+ explicitComputeBudgetVerified:result?.ok?result.explicitComputeBudgetVerified:false,
+ priorityFeeLamports:result?.ok?result.priorityFeeLamports:null,
  accountCount:result?.ok?result.resolvedAccounts:null,
  unknownPrograms:result?.ok?result.unreviewedPrograms:[],
  unsupportedInstructions:result?.ok?result.unsupportedInstructions:[],
