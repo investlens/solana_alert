@@ -39,8 +39,8 @@ export function observeEchoReceipt(x:EchoReceipt,side:'BUY'|'SELL'):Observed{
 }
 export function reconcileEchoObservedRoundTrip(buy:EchoReceipt,sell:EchoReceipt){
  const b=observeEchoReceipt(buy,'BUY'),s=observeEchoReceipt(sell,'SELL');
- if(!b.ok)return {ok:false as const,reason:'BUY_'+b.reason,signingApproved:false as const};
- if(!s.ok)return {ok:false as const,reason:'SELL_'+s.reason,signingApproved:false as const};
+ if('reason' in b)return {ok:false as const,reason:'BUY_'+b.reason,signingApproved:false as const};
+ if('reason' in s)return {ok:false as const,reason:'SELL_'+s.reason,signingApproved:false as const};
  if(buy.wallet!==sell.wallet||buy.mint!==sell.mint||buy.signature===sell.signature)
   return {ok:false as const,reason:'IDENTITY_MISMATCH',signingApproved:false as const};
  if(-s.tokenDelta<b.tokenDelta)
