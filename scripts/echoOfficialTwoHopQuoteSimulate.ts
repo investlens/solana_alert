@@ -127,20 +127,23 @@ try{
  report.currentWalletLamports=walletBalance;
  report.knownDebitFloorLamports=auditedDebitLowerBound.toString();
  report.provisionalDebitWithAtaRentLamports=provisionalDebitCeiling.toString();
+ // This is strictly a lower/provisional accounting envelope: a CPI
+ // can debit the signer without appearing as a top-level System transfer.
+ report.provisionalWalletDebitIsFinal=false;
  report.fullWalletDebitVerified=false;
  report.balanceCoversProvisionalDebit=BigInt(walletBalance)>=provisionalDebitCeiling;
- report.provisionalShortfallLamports=walletBalance<Number(provisionalDebitCeiling)?
+ report.provisionalShortfallLamports=BigInt(walletBalance)<provisionalDebitCeiling?
    (provisionalDebitCeiling-BigInt(walletBalance)).toString():'0';
- // Never attempt a known-insufficient unsigned simulation. This does not
- // certify complete fees: missing CPI rent must still be audited separately.
- if(!report.balanceCoversProvisionalDebit)throw Error('INSUFFICIENT_PROVISIONAL_BALANCE');
- // Safe numeric fault classification, never a transaction-data or secret dump.
- // A positive provisional balance check is NOT a fully audited wallet debit.
  report.networkFeeIncludesMessagePriorityFee=true;
  report.cpiRentAndExtraWalletDebitsAudited=false;
  report.fundingRequirementLamports=null;
  report.fundingApproved=false;
  report.simulationFailureKind=null;
+ // Never attempt a known-insufficient unsigned simulation. This does not
+ // certify complete fees: missing CPI rent must still be audited separately.
+ if(!report.balanceCoversProvisionalDebit)throw Error('INSUFFICIENT_PROVISIONAL_BALANCE');
+ // Safe numeric fault classification, never a transaction-data or secret dump.
+ // A positive provisional balance check is NOT a fully audited wallet debit.
 
  // Third-party output is not sufficient to claim actual wallet balance, ATA
  // rents or all-in USD eligibility; simulation failure remains a safe result.
