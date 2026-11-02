@@ -249,3 +249,19 @@ jobs:
       - run: npm install --no-save --ignore-scripts --no-package-lock @pump-fun/pump-sdk@4.3.1
       - name: Build official unsigned two-hop message without economic authorization
         run: npx tsx scripts/echoOfficialTwoHopBuildOnly.ts
+
+  echo-official-sdk-quote-surface:
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[echo-quote-surface]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm install --no-save --ignore-scripts --no-package-lock @pump-fun/pump-sdk@4.3.1
+      - run: npx tsx scripts/echoOfficialQuoteCapabilities.ts
