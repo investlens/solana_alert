@@ -183,5 +183,5 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci --ignore-scripts
-      - name: Two public RPC reads: program and program-data, never sign
+      - name: "Two public RPC reads: program and program-data, never sign"
         run: npx tsx scripts/echoThirdPartyProgramReadOnlyProbe.ts
