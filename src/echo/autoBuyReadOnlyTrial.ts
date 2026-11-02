@@ -84,7 +84,7 @@ export async function runEchoAutoBuyReadOnlyTrial(
  try{preview=await previewFn({
    side:'BUY',rpcUrl:input.rpcUrl,publicWallet:input.executionWallet,
    mint:input.signal.mint,amountRaw:String(MAX_INPUT_LAMPORTS),
-   maxSlippageBps:300,jupiterApiKey:input.jupiterApiKey
+   maxSlippageBps:1000,jupiterApiKey:input.jupiterApiKey
  },instrumented);}catch{return deny('REAL_READ_ONLY_PREVIEW_FAILED');}
  const previewFinished=clock();
  const timings={quoteAndSimulationMs:previewFinished-begin,feeSamplingMs:0,
@@ -142,7 +142,7 @@ export async function runEchoAutoBuyReadOnlyTrial(
   quoteAtMs,callerEntryPriceSolPerToken:input.callerEntryPriceSolPerToken,
   currentQuotePriceSolPerToken:currentPrice,quoteValid:true,
   unsignedSimulationPassed:true,accountsFullyResolved:true,
-  sellRouteVerified:input.sellRouteVerified,slippageBps:300,
+  sellRouteVerified:input.sellRouteVerified,slippageBps:1000,
   purchasedOrReservedMint:input.purchasedOrReservedMint,
   openOrPendingPositions:input.openOrPendingPositions,
   realizedLossSolToday:input.realizedLossSolToday,killSwitch:input.killSwitch
