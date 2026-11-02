@@ -48,3 +48,5 @@ A second bounded status-only diagnostic may be used to classify provider refusal
 - Second hop already decoded from official PumpSwap state: target pool `JBsGNXRZQr9ZPc5PAn3seDE7At6ELq9LjVDCujgLKaq8` base `D4AnTZk3spQgCEMpC4iqtFp8U2qbiDvzrzdaq7Dopump`, quote `qhbbjGBKJxW3AZGqngWM5tHcrENR3pVoRB9MCf1pump`.
 - Therefore exact documented continuous route is WSOL -> qhbbj...pump -> D4An...pump, **both PumpSwap hops**. This corrects the original wrong one-pool assumptions. Official Pump SDK `multiHopSwapInstructions` is the path forward, with independently verified final min-output, account resolutions, fee ceiling and simulation. Not yet built/simulated/signed.
 - All test work remains in isolated PR #279. The official SDK installed in ephemeral CI only, no production dependency pinned, no live signer change or funding approval.
+
+Two-hop SDK build-only run `41505520691` failed before network reads; bounded stage/error-category logging added, still no quoting, simulation, signature or broadcast. No production change.
