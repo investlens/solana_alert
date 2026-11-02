@@ -96,3 +96,35 @@ test('canonical Token-2022 mint derives different ATA and never authorizes a leg
  assert.deepEqual(result,{ok:false,reason:'WALLET_TOKEN_DESTINATION_NOT_WRITABLE',
   signingApproved:false,lookupReads:1,accountStateReads:1});
 });
+
+test('a swap plus unrelated SOL transfer is denied even if the output ATA is writable',async()=>{
+ const tx=new TransactionMessage({payerKey:payer,
+  recentBlockhash:Keypair.generate().publicKey.toBase58(),
+  instructions:[
+   ComputeBudgetProgram.setComputeUnitLimit({units:200000}),
+   ComputeBudgetProgram.setComputeUnitPrice({microLamports:1000}),
+   SystemProgram.transfer({fromPubkey:payer,toPubkey:pool,lamports:1000}),
+   new TransactionInstruction({programId:route,
+    keys:[{pubkey:pool,isSigner:false,isWritable:true},
+          {pubkey:destination,isSigner:false,isWritable:true}],data:Buffer.from([9])})
+  ]}).compileToV0Message([table]);
+ const checked=await run(Buffer.from(new VersionedTransaction(tx).serialize()).toString('base64'));
+ assert.equal(checked.ok,false);
+ if(!checked.ok)assert.equal(checked.reason,'UNREVIEWED_SYSTEM_INSTRUCTION');
+});
+test('a swap with an unaudited token transfer is denied before destination checks',async()=>{
+ const tx=new TransactionMessage({payerKey:payer,
+  recentBlockhash:Keypair.generate().publicKey.toBase58(),
+  instructions:[
+   ComputeBudgetProgram.setComputeUnitLimit({units:200000}),
+   ComputeBudgetProgram.setComputeUnitPrice({microLamports:1000}),
+   new TransactionInstruction({programId:token,
+    keys:[{pubkey:destination,isSigner:false,isWritable:true}],data:Buffer.from([3,1])}),
+   new TransactionInstruction({programId:route,
+    keys:[{pubkey:pool,isSigner:false,isWritable:true},
+          {pubkey:destination,isSigner:false,isWritable:true}],data:Buffer.from([9])})
+  ]}).compileToV0Message([table]);
+ const checked=await run(Buffer.from(new VersionedTransaction(tx).serialize()).toString('base64'));
+ assert.equal(checked.ok,false);
+ if(!checked.ok)assert.equal(checked.reason,'UNREVIEWED_TOKEN_INSTRUCTION');
+});
