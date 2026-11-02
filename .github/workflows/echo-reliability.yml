@@ -114,7 +114,7 @@ jobs:
       ECHO_PREVIEW_MINT: 'D4AnTZk3spQgCEMpC4iqtFp8U2qbiDvzrzdaq7Dopump'
       ECHO_PREVIEW_RPC_URL: 'https://api.mainnet-beta.solana.com'
       ECHO_PREVIEW_AMOUNT_SOL: '0.025'
-      ECHO_PREVIEW_POOL: auto
+      ECHO_PREVIEW_POOL: pump-amm
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
