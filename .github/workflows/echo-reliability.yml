@@ -186,3 +186,25 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: "Two public RPC reads: program and program-data, never sign"
         run: npx tsx scripts/echoThirdPartyProgramReadOnlyProbe.ts
+
+  echo-official-pumpswap-unsigned:
+    # One operator-triggered SDK-only proof. Never signs or broadcasts.
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[echo-official-pump-probe]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      ADMIN_TRADING_ENABLED: 'false'
+      AUTO_TRADE_MODE: paper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Install pinned official SDK in one-shot probe only, not production
+        run: npm install --no-save --ignore-scripts --no-package-lock @pump-fun/pump-sdk@4.3.1
+      - name: Read verified PumpSwap pool, compile unsigned 0.025 SOL, simulate only if funded
+        run: npx tsx scripts/echoOfficialPumpSwapUnsignedProbe.ts
