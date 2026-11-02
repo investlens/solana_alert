@@ -102,7 +102,7 @@ test('price premium and expensive localized fee cannot be overridden by shadow r
  assert.equal(x.reason,'OBSERVED_LANDING_FEE_EXCEEDS_BUDGET_SKIP_TRADE');
  const normal=deps();
  const inflated=await runEchoAutoBuyReadOnlyTrial({
-  ...base,callerEntryPriceSolPerToken:0.08},normal.deps);
+  ...base,callerEntryPriceSolPerToken:0.06},normal.deps);
  assert.equal(inflated.candidate,false);
  assert.equal(inflated.reason,'PRICE_ALREADY_INFLATED');
 });
