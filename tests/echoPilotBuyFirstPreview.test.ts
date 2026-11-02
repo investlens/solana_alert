@@ -47,7 +47,6 @@ test('missing same-wallet app exit access blocks preview before network',async()
   {manualExitRiskAcknowledged:false},
   {marketCapUsd:100000},
   {marketCapObservedAtMs:now-3000},
-  {callerEntryPriceSolPerToken:0.02},
   {budget:{...base.budget,cumulativeCommittedCents:'2700'}},
   {order:{...base.order,openOrPendingPositions:2}},
   {order:{...base.order,alreadyReservedOrPurchased:true}}
