@@ -80,6 +80,7 @@ const report={
  unsupportedInstructions:result?.ok?result.unsupportedInstructions:[],
  destinationDerived:result?.ok?result.expectedDestinationDerived:false,
  priceAndActualTokenCreditVerified:false,
+ auditScope:'ALT+fee-payer+derived ATA; does not prove output balances or dynamic CPI',
  signingApproved:false,broadcast:false,privateKeys:false,
  safeReadLimitHonored:builderCalls<=1&&rpcCalls<=2
 };
