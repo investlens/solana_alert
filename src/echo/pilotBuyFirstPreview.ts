@@ -16,6 +16,10 @@ export type EchoBuyFirstInput={
  sameWalletManualExitAccessVerified:boolean;
  /** Whether operator explicitly accepts manual-app-only SELL. */
  manualExitRiskAcknowledged:boolean;
+ /** Privileged, fresh USD market capitalization (no FDV substitution). */
+ marketCapUsd:number;marketCapObservedAtMs:number;
+ /** Price from verified caller receipt, not social post or transfer. */
+ callerEntryPriceSolPerToken:number;tokenDecimals:number;
 };
 export type EchoBuyFirstPreview={
  eligible:boolean;executable:false;reason:string;mode:'READ_ONLY_BUY_FIRST';
@@ -32,6 +36,16 @@ export async function previewEchoBuyFirst(
  // signer MUST verify cryptographic wallet ownership and server-side policy.
  if(!input.sameWalletManualExitAccessVerified||!input.manualExitRiskAcknowledged)
   return stop('SAME_WALLET_MANUAL_EXIT_UNVERIFIED');
+ if(!Number.isFinite(input.marketCapUsd)||input.marketCapUsd<=0||
+    input.marketCapUsd>=100_000||
+    !Number.isSafeInteger(input.marketCapObservedAtMs)||
+    input.marketCapObservedAtMs>input.order.nowMs||
+    input.order.nowMs-input.marketCapObservedAtMs>2000)
+  return stop('MARKET_CAP_UNVERIFIED_OR_ABOVE_100K');
+ if(!Number.isFinite(input.callerEntryPriceSolPerToken)||
+    input.callerEntryPriceSolPerToken<=0||
+    !Number.isSafeInteger(input.tokenDecimals)||input.tokenDecimals<0||
+    input.tokenDecimals>12)return stop('CALLER_ENTRY_OR_DECIMALS_UNVERIFIED');
  if(!input.rpcUrl||!input.jupiterApiKey?.trim())return stop('MISSING_PROVIDER');
  const principal=Number(input.budget.newPrincipalCents);
  if(!Number.isSafeInteger(principal)||principal<1||principal>1000)
@@ -55,6 +69,13 @@ export async function previewEchoBuyFirst(
      quote.unsignedAudit.feePayer!==input.executionWallet||
      !Number.isSafeInteger(quote.unitsConsumed)||(quote.unitsConsumed??0)<=0)
    return stop('BUY_QUOTE_OR_SIMULATION_UNVERIFIED');
+  const tokensReceived=Number(quote.quotedOutputRaw)/10**input.tokenDecimals;
+  const observedPriceSolPerToken=(size.amountLamports/1e9)/tokensReceived;
+  if(!Number.isFinite(observedPriceSolPerToken)||observedPriceSolPerToken<=0)
+   return stop('QUOTE_PRICE_UNVERIFIED');
+  const premiumBps=(observedPriceSolPerToken/input.callerEntryPriceSolPerToken-1)*10_000;
+  if(!Number.isFinite(premiumBps)||premiumBps>5000)
+   return stop('CALLER_PRICE_PREMIUM_EXCEEDS_50_PERCENT');
   return {eligible:true,executable:false,reason:'BUY_PREVIEW_ONLY_NO_SIGNING',
    mode:'READ_ONLY_BUY_FIRST',buyQuoteHash:quote.unsignedTransactionSha256};
  }catch{return stop('BUY_PROVIDER_UNAVAILABLE');}
