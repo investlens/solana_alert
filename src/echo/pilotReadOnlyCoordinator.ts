@@ -22,7 +22,7 @@ export type EchoCoordinatorResult={
 };
 type TrustedProvider={
  /** Must originate in privileged trusted server, not Telegram payload. */
- getTrustedPlan():Promise<PilotReadOnlyPlan>;
+ getTrustedPlan():Promise<{plan:PilotReadOnlyPlan;callerSignature:string}>;
 };
 type PreviewFn=(args:EchoJupiterV2PreviewRequest)=>Promise<EchoJupiterV2PreviewResult>;
 export async function prepareEchoPilotBuyAndExit(args:{
@@ -33,7 +33,9 @@ export async function prepareEchoPilotBuyAndExit(args:{
   prepared:false,executable:false,reason,buySimulationPassed:buy,sellSimulationPassed:sell
  });
  let plan:PilotReadOnlyPlan;
- try{plan=await args.provider.getTrustedPlan()}catch{return reject('TRUSTED_SNAPSHOT_UNAVAILABLE');}
+ let callerSignature:string;
+ try{({plan,callerSignature}=await args.provider.getTrustedPlan());}
+ catch{return reject('TRUSTED_SNAPSHOT_UNAVAILABLE');}
  if(!verifyEchoExecutionWallet(plan.executionWallet))return reject('DEDICATED_WALLET_MISMATCH');
  // Validate before touching persisted positions. Quote/simulation may be costly:
  // provider and signer still need their own rate limits and atomic rechecks.
@@ -42,7 +44,7 @@ export async function prepareEchoPilotBuyAndExit(args:{
  catch{return reject('READ_ONLY_PREFLIGHT_EXCEPTION');}
  if(!preflight.ok)return reject(preflight.reason,
   preflight.buySimulationPassed,preflight.sellSimulationPassed);
- const tx=plan.order.transactionSignature;
+ const tx=callerSignature;
  // Paper preview alone is not execution authorization; prevent mutating the DB
  // if the pilot is not admitted and we cannot attest the caller's signature.
  if(!/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(tx))
@@ -54,7 +56,7 @@ export async function prepareEchoPilotBuyAndExit(args:{
  try{
   const saved=await args.journal.reserve(db.key);
   if(!saved)return reject('JOURNAL_ALREADY_RESERVED_OR_UNAVAILABLE',true,true);
-  const now=plan.order.nowMs;
+  const now=Date.now();
   const quoted=await args.journal.advance(db.key,{kind:'QUOTE_OK',nowMs:now});
   if(!quoted.ok)return reject('JOURNAL_QUOTE_PERSIST_FAILED',true,true);
   const simulated=await args.journal.advance(db.key,{kind:'SIMULATION_OK',nowMs:now});
