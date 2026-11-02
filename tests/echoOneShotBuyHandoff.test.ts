@@ -49,10 +49,23 @@ test('unverified wallet and missing trusted DB reservation block before signed h
   const denied=await prepareEchoOneShotBuyHandoff({
    journal:f.journal,reservationKey:f.key,signedTransactionBase64:'no-signature',
    approvedMessageSha256:hash,executionWallet:wallet,expectedMint:'2'.repeat(44),
-   dbReservedAndPending:false
+   reservationReader:{getByWalletAndMint:async()=>null}
   });
-  assert.deepEqual(denied,{ok:false,reason:'DURABLE_RESERVATION_OR_WALLET_INVALID',
+  assert.deepEqual(denied,{ok:false,reason:'TRUSTED_RESERVATION_NOT_ACTIVE',
    broadcastAllowed:false});
+  assert.equal(f.journal.get(f.key)?.state,'SIMULATED');
+ }finally{await rm(f.dir,{recursive:true,force:true});}
+});
+
+test('DB outage prevents signed handoff without mutating a persisted intent',async()=>{
+ const f=await setup();
+ try{
+  const r=await prepareEchoOneShotBuyHandoff({
+   journal:f.journal,reservationKey:f.key,signedTransactionBase64:'invalid',
+   approvedMessageSha256:hash,executionWallet:wallet,expectedMint:'2'.repeat(44),
+   reservationReader:{getByWalletAndMint:async()=>{throw Error('offline');}}
+  });
+  assert.deepEqual(r,{ok:false,reason:'TRUSTED_RESERVATION_DB_UNAVAILABLE',broadcastAllowed:false});
   assert.equal(f.journal.get(f.key)?.state,'SIMULATED');
  }finally{await rm(f.dir,{recursive:true,force:true});}
 });
