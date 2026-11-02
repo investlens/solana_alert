@@ -47,7 +47,11 @@ test('missing or stale balance and absent all-in costs prevent all database writ
  for(const payload of [
   {plan:{...plan,budget:{...plan.budget,allInBuyCostsCents:null}},
    proof:{balanceVerifiedAtIso:new Date().toISOString(),wallet,spendableWalletCents:'3500',solUsdCents:20000,contextSlot:500}},
-  {plan,proof:{balanceVerifiedAtIso:'2020-01-01T00:00:00Z',wallet,spendableWalletCents:'3500',solUsdCents:20000,contextSlot:500}}
+  {plan,proof:{balanceVerifiedAtIso:'2020-01-01T00:00:00Z',wallet,spendableWalletCents:'3500',solUsdCents:20000,contextSlot:500}},
+  {plan,proof:{balanceVerifiedAtIso:new Date().toISOString(),wallet:'2'.repeat(44),spendableWalletCents:'3500',solUsdCents:20000,contextSlot:500}},
+  {plan,proof:{balanceVerifiedAtIso:new Date().toISOString(),wallet,spendableWalletCents:'999999',solUsdCents:20000,contextSlot:500}},
+  {plan,proof:{balanceVerifiedAtIso:new Date().toISOString(),wallet,spendableWalletCents:'3500',solUsdCents:19000,contextSlot:500}},
+  {plan,proof:{balanceVerifiedAtIso:new Date().toISOString(),wallet,spendableWalletCents:'3500',solUsdCents:20000,contextSlot:0}}
  ]){
   const r=await store.reserveAllIn({...payload,callerSignature:signature});
   assert.equal(r.reserved,false);
