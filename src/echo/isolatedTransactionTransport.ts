@@ -4,6 +4,7 @@
  */
 import { VersionedTransaction } from '@solana/web3.js';
 import bs58 from 'bs58';
+import {verifyEchoSignedMessage} from './signedMessageAttestation.js';
 export const ECHO_LIVE_SUBMISSION_COMPILED_ENABLED=false as const;
 export type EchoRpcOutcome =
  | {kind:'SUBMITTED';signature:string}
@@ -40,11 +41,17 @@ export function readSignedEchoTransaction(base64:string,expectedWallet:string):
 export async function submitEchoSignedTransaction(args:{
  rpcUrl:string;signedBase64:string;expectedWallet:string;
  killSwitchEngaged:boolean; ownerApprovedLiveExecution:boolean;
+ /** Exact unsigned Solana message digest from independent pre-sign review. */
+ approvedMessageSha256?:string;
 },post:typeof fetch=fetch):Promise<EchoRpcOutcome>{
  // Compiled hard-off: no credentials or runtime flags can bypass this.
  if(!ECHO_LIVE_SUBMISSION_COMPILED_ENABLED||!args.ownerApprovedLiveExecution||
     args.killSwitchEngaged)return {kind:'REJECTED',reason:'LIVE_SUBMISSION_DISABLED'};
  if(!validRpc(args.rpcUrl))return {kind:'REJECTED',reason:'INVALID_RPC_URL'};
+ if(!args.approvedMessageSha256)return {kind:'REJECTED',reason:'APPROVED_MESSAGE_HASH_REQUIRED'};
+ const attested=verifyEchoSignedMessage({signedTransactionBase64:args.signedBase64,
+  approvedMessageSha256:args.approvedMessageSha256,expectedFeePayer:args.expectedWallet});
+ if(!attested.ok)return {kind:'REJECTED',reason:attested.reason};
  const decoded=readSignedEchoTransaction(args.signedBase64,args.expectedWallet);
  if('reason' in decoded)return {kind:'REJECTED',reason:decoded.reason};
  try{
