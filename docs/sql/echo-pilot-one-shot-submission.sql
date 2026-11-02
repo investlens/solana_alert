@@ -20,6 +20,11 @@ alter table public.echo_live_buy_intents
  signed_transaction_fingerprint_sha256 is null or
  signed_transaction_fingerprint_sha256 ~ '^[0-9a-f]{64}$');
 
+-- The same on-chain signature must never be bound to two separate mints.
+create unique index if not exists echo_pilot_unique_signed_signature
+ on public.echo_live_buy_intents(execution_wallet,transaction_signature)
+ where transaction_signature is not null;
+
 create or replace function public.echo_pilot_claim_submission_once(
  p_execution_wallet text,p_mint text,p_signature text,
  p_approved_message_sha256 text,p_signed_fingerprint_sha256 text,
