@@ -6,8 +6,7 @@
  * The DB adapter must independently and atomically enforce wallet+mint uniqueness,
  * open-position count, total all-in USD exposure, and caller source idempotency.
  */
-import type {EchoAtomicPositionStore} from './atomicPilotReservation.js';
-import {reserveEchoTenDollarPilot} from './atomicPilotReservation.js';
+import type {EchoAllInPilotStore,AllInVerifiedSnapshot} from './allInPilotReservation.js';
 import type {EchoTradeStateJournal} from './tradeStateJournal.js';
 import type {PilotReadOnlyPlan} from './pilotRoundTripPreview.js';
 import {previewEchoPilotRoundTrip} from './pilotRoundTripPreview.js';
@@ -22,19 +21,19 @@ export type EchoCoordinatorResult={
 };
 type TrustedProvider={
  /** Must originate in privileged trusted server, not Telegram payload. */
- getTrustedPlan():Promise<{plan:PilotReadOnlyPlan;callerSignature:string}>;
+ getTrustedPlan():Promise<{plan:PilotReadOnlyPlan;callerSignature:string;proof:AllInVerifiedSnapshot}>;
 };
 type PreviewFn=(args:EchoJupiterV2PreviewRequest)=>Promise<EchoJupiterV2PreviewResult>;
 export async function prepareEchoPilotBuyAndExit(args:{
- provider:TrustedProvider;store:EchoAtomicPositionStore;
+ provider:TrustedProvider;store:EchoAllInPilotStore;
  journal:EchoTradeStateJournal;preview?:PreviewFn;
 }):Promise<EchoCoordinatorResult>{
  const reject=(reason:string,buy=false,sell=false):EchoCoordinatorResult=>({
   prepared:false,executable:false,reason,buySimulationPassed:buy,sellSimulationPassed:sell
  });
  let plan:PilotReadOnlyPlan;
- let callerSignature:string;
- try{({plan,callerSignature}=await args.provider.getTrustedPlan());}
+ let callerSignature:string;let proof:AllInVerifiedSnapshot;
+ try{({plan,callerSignature,proof}=await args.provider.getTrustedPlan());}
  catch{return reject('TRUSTED_SNAPSHOT_UNAVAILABLE');}
  if(!verifyEchoExecutionWallet(plan.executionWallet))return reject('DEDICATED_WALLET_MISMATCH');
  // Validate before touching persisted positions. Quote/simulation may be costly:
@@ -49,7 +48,9 @@ export async function prepareEchoPilotBuyAndExit(args:{
  // if the pilot is not admitted and we cannot attest the caller's signature.
  if(!/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(tx))
   return reject('CALLER_SIGNATURE_NOT_VERIFIED',true,true);
- const db=await reserveEchoTenDollarPilot(plan.order,plan.executionWallet,tx,args.store);
+ let db:Awaited<ReturnType<EchoAllInPilotStore['reserveAllIn']>>;
+ try{db=await args.store.reserveAllIn({plan,callerSignature:tx,proof});}
+ catch{return reject('ATOMIC_RESERVATION_DATABASE_UNAVAILABLE',true,true);}
  if('reason' in db)return reject('ATOMIC_RESERVATION_'+db.reason,true,true);
  // DB reserves the mint for good. If the process loses connectivity before
  // journal persistence, this remains held until independent reconciliation.
