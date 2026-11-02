@@ -49,7 +49,7 @@ async function fixture(){
   if(stored.has(key))return {reserved:false,reason:'DUPLICATE_TOKEN'};
   stored.add(key);return {reserved:true,key};
  }};
- const provider={async getTrustedPlan(){return {plan,callerSignature,proof:{balanceVerifiedAtIso:new Date().toISOString()}};}};
+ const provider={async getTrustedPlan(){return {plan,callerSignature,proof:{balanceVerifiedAtIso:new Date().toISOString(),wallet,spendableWalletCents:'3500',solUsdCents:20000,contextSlot:500}};}};
  return {dir,path,journal,provider,store,counts:()=>calls};
 }
 test('trusted preview reserves once and persists SIMULATED without signing',async()=>{
@@ -89,7 +89,7 @@ test('missing caller signature fails closed before database reservation',async()
  const f=await fixture();
  try{
   const result=await prepareEchoPilotBuyAndExit({...f,
-   provider:{async getTrustedPlan(){return {plan,callerSignature:'invalid',proof:{balanceVerifiedAtIso:new Date().toISOString()}};}},preview});
+   provider:{async getTrustedPlan(){return {plan,callerSignature:'invalid',proof:{balanceVerifiedAtIso:new Date().toISOString(),wallet,spendableWalletCents:'3500',solUsdCents:20000,contextSlot:500}};}},preview});
   assert.equal(result.reason,'CALLER_SIGNATURE_NOT_VERIFIED');assert.equal(f.counts(),0);
  }finally{await rm(f.dir,{recursive:true,force:true});}
 });
