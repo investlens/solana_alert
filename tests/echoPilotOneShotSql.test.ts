@@ -16,7 +16,7 @@ async function setup(){
  ])await db.exec(await readFile(path,'utf8'));
  const reserved=await db.query<{result:string}>(`select public.echo_pilot_reserve_all_in_atomic(
  $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now()) result`,
- [wallet,mint,SLINGOOR_WALLET,sig,45000000,900,20000,100,100,3500]);
+ [wallet,mint,SLINGOOR_WALLET,sig,25000000,500,20000,500,100,3500]);
  assert.equal(reserved.rows[0].result,'RESERVED');
  return db;
 }
@@ -84,7 +84,7 @@ test('a Solana signature cannot be associated with two token claims',async()=>{
  try{
   const reserve=await db.query<{result:string}>(`select public.echo_pilot_reserve_all_in_atomic(
    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now()) result`,
-   [wallet,secondMint,SLINGOOR_WALLET,'4'.repeat(64),45000000,900,20000,100,100,3500]);
+   [wallet,secondMint,SLINGOOR_WALLET,'4'.repeat(64),25000000,500,20000,500,100,3500]);
   assert.equal(reserve.rows[0].result,'RESERVED');
   assert.equal((await claim(db)).rows[0].result,'CLAIMED');
   await assert.rejects(
