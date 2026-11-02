@@ -51,7 +51,7 @@ export async function submitEchoSignedTransaction(args:{
  if(!args.approvedMessageSha256)return {kind:'REJECTED',reason:'APPROVED_MESSAGE_HASH_REQUIRED'};
  const attested=verifyEchoSignedMessage({signedTransactionBase64:args.signedBase64,
   approvedMessageSha256:args.approvedMessageSha256,expectedFeePayer:args.expectedWallet});
- if(!attested.ok)return {kind:'REJECTED',reason:attested.reason};
+ if('reason' in attested)return {kind:'REJECTED',reason:attested.reason};
  const decoded=readSignedEchoTransaction(args.signedBase64,args.expectedWallet);
  if('reason' in decoded)return {kind:'REJECTED',reason:decoded.reason};
  try{
