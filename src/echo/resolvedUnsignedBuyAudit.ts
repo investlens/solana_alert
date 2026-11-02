@@ -10,7 +10,7 @@ import type {EchoLookupTableProvider} from './readOnlyAddressLookupInspection.js
 
 export const ECHO_RESOLVED_BUY_ROUTE_GRANTS_SIGNING=false as const;
 const TOKEN='TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
-const TOKEN_2022='TokenzQdBNbLqP5VEhdkAS6EPFCE7uFyV9QnF4jrb';
+const TOKEN_2022='TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 const ATA='ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
 const MAX_LOOKUPS=4,MAX_KEYS=128,MAX_INSTRUCTIONS=40;
 const MAX_PRIORITY_LAMPORTS=500_000n;
