@@ -28,10 +28,14 @@ const result:any={mode:'FIRST_PARTY_MULTI_HOP_BUILD_ONLY',
  transactionConstructed:false,simulationAttempted:false,signing:false,
  broadcast:false,executable:false,readCalls:0};
 try{
+ result.stage='IMPORT_PUMP_ROOT';
  const {PUMP_SDK}=await import('@pump-fun/pump-sdk');
+ result.stage='PUMP_ROOT_LOADED';
  const {PUMP_AMM_SDK}=await import('@pump-fun/pump-sdk/swap');
+ result.stage='PUMP_SWAP_LOADED';
  const conn=new Connection(RPC,{commitment:'confirmed',fetch:fetcher});
  const pub=(s:string)=>new PublicKey(s);
+ result.stage='POOL_ACCOUNT_READ';
  const info=await conn.getMultipleAccountsInfo([pub(P1),pub(P2),pub(A),pub(B)]);
  if(info.length!==4||info.some(x=>!x))throw Error('MISSING_ROUTE_ACCOUNTS');
  const [poolA,poolB,tokenA,tokenB]=info;
@@ -50,6 +54,7 @@ try{
   {venue:'pool',baseMint:pub(B),quoteMint:pub(A),baseTokenProgram:pub(tB),quoteTokenProgram:pub(tA)}
  ];
  // min=1 is strictly for BUILD SHAPE ONLY, NOT suitable for execution.
+ result.stage='INSTRUCTION_BUILDER';
  const ixs=await PUMP_SDK.multiHopSwapInstructions({
   user:pub(WALLET),hops,side:'buy',amountIn:new BN(25_000_000),
   minAmountOut:new BN(1)
@@ -79,6 +84,8 @@ try{
  'MAYHEM_DISALLOWED','UNREVIEWED_TOKEN_PROGRAM','INVALID_BUILDER_OUTPUT',
  'UNREVIEWED_PROGRAM_IN_BUILT_ROUTE','SIGNATURE_PRESENT','UNREVIEWED_ALT','READ_LIMIT'];
  result.reason=known.includes(message)?message:'SDK_OR_RPC_BUILD_FAILURE';
+ result.errorKind=e instanceof Error?e.name:'NON_ERROR';
+ result.safeErrorCode=typeof e?.code==='string'&&/^[A-Z_]{3,40}$/.test(e.code)?e.code:null;
 }
 result.readCalls=reads;
 process.stdout.write('ECHO_OFFICIAL_TWO_HOP '+JSON.stringify(result)+'\n');
