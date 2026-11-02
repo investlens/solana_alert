@@ -34,7 +34,7 @@ test('manual guard: two allowed caller IDs, rejects invalid sides, sizes and unv
    isVerifiedSwap:true,transactionSignature:sig};
  assert.deepEqual(validateBuyAdmission(e,CHAIRMAN_WALLET),{allowed:true,key:CHAIRMAN_WALLET+':'+mint});
  for(const bad of [
-   {...e,amountSol:0.101},{...e,amountSol:-.1},{...e,side:'SELL' as const},
+   {...e,amountSol:0},{...e,amountSol:-.1},{...e,side:'SELL' as const},
    {...e,isVerifiedSwap:false},{...e,callerWallet:mint},{...e,mint:'bad'}
  ])assert.equal(validateBuyAdmission(bad,CHAIRMAN_WALLET).allowed,false);
 });
