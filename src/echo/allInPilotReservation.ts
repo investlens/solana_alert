@@ -12,6 +12,8 @@ export type AllInReservationResult=
 export type AllInVerifiedSnapshot={
  /** Obtained from privileged real-time chain and SOL/USD sources. */
  balanceVerifiedAtIso:string;
+ /** Must match independently observed pinned wallet, balance and price. */
+ wallet:string;spendableWalletCents:string;solUsdCents:number;contextSlot:number;
 };
 export type EchoBuyReservationPlan=Pick<PilotReadOnlyPlan,'order'|'budget'|'executionWallet'>;
 export interface EchoAllInPilotStore {
@@ -33,9 +35,13 @@ export function createEchoAllInSupabaseStore(client:SupabaseClient):EchoAllInPil
    const priceCents=Number.isFinite(plan.order.priceSolUsd)?Math.round(plan.order.priceSolUsd*100):NaN;
    const buyCosts=asSafeInt(plan.budget.allInBuyCostsCents);
    const exitReserve=asSafeInt(plan.budget.exitAndNetworkReserveCents);
-   const balance=asSafeInt(plan.budget.spendableWalletCents);
+   const balance=asSafeInt(proof.spendableWalletCents);
    const at=Date.parse(proof.balanceVerifiedAtIso);
-   if(principal===null||!Number.isSafeInteger(priceCents)||priceCents<=0||
+   if(principal===null||proof.wallet!==plan.executionWallet||
+      proof.spendableWalletCents!==plan.budget.spendableWalletCents||
+      !Number.isSafeInteger(proof.contextSlot)||proof.contextSlot<=0||
+      priceCents!==proof.solUsdCents||
+      !Number.isSafeInteger(priceCents)||priceCents<=0||
       buyCosts===null||exitReserve===null||balance===null||
       !Number.isFinite(at)||Math.abs(Date.now()-at)>3000)
     return {reserved:false,reason:'INVALID_OR_STALE_CAPITAL_PROOF'};
