@@ -7,7 +7,7 @@ import {SLINGOOR_WALLET} from '../src/echo/liveBuyPolicy.js';
 import {EchoTradeStateJournal} from '../src/echo/tradeStateJournal.js';
 import {prepareEchoPilotBuyAndExit} from '../src/echo/pilotReadOnlyCoordinator.js';
 import type {EchoJupiterV2PreviewRequest,EchoJupiterV2PreviewResult} from '../src/echo/readOnlyJupiterV2Swap.js';
-import type {EchoAtomicPositionStore} from '../src/echo/atomicPilotReservation.js';
+import type {EchoAllInPilotStore} from '../src/echo/allInPilotReservation.js';
 const mint='So11111111111111111111111111111111111111113';
 const wallet='8ndw7DJ6hyZBm1PD3JJMF8G4PD5CJhDCCUK13ECL2pgQ';
 const now=1800000000000;
@@ -43,13 +43,13 @@ async function fixture(){
  await journal.load();
  let calls=0;
  const stored=new Set<string>();
- const store:EchoAtomicPositionStore={async reserveIfCapacity(lease){
+ const store:EchoAllInPilotStore={async reserveAllIn({plan:next}){
   calls++;
-  const key=lease.executionWallet+':'+lease.mint;
+  const key=next.executionWallet+':'+next.order.mint;
   if(stored.has(key))return {reserved:false,reason:'DUPLICATE_TOKEN'};
   stored.add(key);return {reserved:true,key};
  }};
- const provider={async getTrustedPlan(){return {plan,callerSignature};}};
+ const provider={async getTrustedPlan(){return {plan,callerSignature,proof:{balanceVerifiedAtIso:new Date().toISOString()}};}};
  return {dir,path,journal,provider,store,counts:()=>calls};
 }
 test('trusted preview reserves once and persists SIMULATED without signing',async()=>{
@@ -79,7 +79,7 @@ test('missing trusted snapshot or failed SELL preview never reserves funds',asyn
 test('database unavailable fails closed, no journal record written',async()=>{
  const f=await fixture();
  try{
-  const store:EchoAtomicPositionStore={async reserveIfCapacity(){throw Error('db down');}};
+  const store:EchoAllInPilotStore={async reserveAllIn(){throw Error('db down');}};
   const result=await prepareEchoPilotBuyAndExit({...f,store,preview});
   assert.equal(result.reason,'ATOMIC_RESERVATION_DATABASE_UNAVAILABLE');
   assert.equal(f.journal.get(wallet+':'+mint),null);
@@ -89,7 +89,7 @@ test('missing caller signature fails closed before database reservation',async()
  const f=await fixture();
  try{
   const result=await prepareEchoPilotBuyAndExit({...f,
-   provider:{async getTrustedPlan(){return {plan,callerSignature:'invalid'};}},preview});
+   provider:{async getTrustedPlan(){return {plan,callerSignature:'invalid',proof:{balanceVerifiedAtIso:new Date().toISOString()}};}},preview});
   assert.equal(result.reason,'CALLER_SIGNATURE_NOT_VERIFIED');assert.equal(f.counts(),0);
  }finally{await rm(f.dir,{recursive:true,force:true});}
 });
