@@ -63,16 +63,19 @@ export function createEchoSealedCustodyProofOnly(args:{
   const secret=bs58.decode(args.secretBase58);
   if(secret.length!==64){secret.fill(0);return stop('INVALID_SEALED_KEY');}
   const wallet=Keypair.fromSecretKey(secret);
-  secret.fill(0);
-  if(wallet.publicKey.toBase58()!==args.expectedWallet){
-   wallet.secretKey.fill(0);return stop('SEALED_SIGNER_WALLET_MISMATCH');
+  // Capture the Ed25519 seed BEFORE wiping the decoded secret. Some Solana
+  // Keypair implementations share the same backing Uint8Array.
+  const expected=wallet.publicKey.toBase58();
+  if(expected!==args.expectedWallet){
+   wallet.secretKey.fill(0);secret.fill(0);
+   return stop('SEALED_SIGNER_WALLET_MISMATCH');
   }
   const der=Buffer.concat([
    Buffer.from('302e020100300506032b657004220420','hex'),
    Buffer.from(wallet.secretKey.slice(0,32))
   ]);
   const key=createPrivateKey({key:der,format:'der',type:'pkcs8'});
-  der.fill(0);wallet.secretKey.fill(0);
+  der.fill(0);wallet.secretKey.fill(0);secret.fill(0);
   const clock=args.clock??Date.now;
   return {ok:true,transactionSigningAllowed:false,provider:{
    publicWallet:args.expectedWallet,
