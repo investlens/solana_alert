@@ -113,7 +113,7 @@ jobs:
       ECHO_PREVIEW_WALLET: '8ndw7DJ6hyZBm1PD3JJMF8G4PD5CJhDCCUK13ECL2pgQ'
       ECHO_PREVIEW_MINT: 'D4AnTZk3spQgCEMpC4iqtFp8U2qbiDvzrzdaq7Dopump'
       ECHO_PREVIEW_RPC_URL: 'https://api.mainnet-beta.solana.com'
-      ECHO_PREVIEW_AMOUNT_SOL: '0.01'
+      ECHO_PREVIEW_AMOUNT_SOL: '0.025'
       ECHO_PREVIEW_POOL: auto
     steps:
       - uses: actions/checkout@v4
