@@ -77,3 +77,24 @@ test('concurrent claims elect one winner even after service restart',async()=>{
   assert.equal(rows.rows[0].n,1);
  }finally{await db.close();}
 });
+
+test('a Solana signature cannot be associated with two token claims',async()=>{
+ const db=await setup();
+ const secondMint='5'.repeat(44);
+ try{
+  const reserve=await db.query<{result:string}>(`select public.echo_pilot_reserve_all_in_atomic(
+   $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now()) result`,
+   [wallet,secondMint,SLINGOOR_WALLET,'4'.repeat(64),45000000,900,20000,100,100,3500]);
+  assert.equal(reserve.rows[0].result,'RESERVED');
+  assert.equal((await claim(db)).rows[0].result,'CLAIMED');
+  await assert.rejects(
+   claim(db,[wallet,secondMint,sig,sha,fingerprint,10000]),
+   /duplicate key value violates unique constraint/
+  );
+  const second=await db.query<{state:string;transaction_signature:string|null}>(
+   `select state,transaction_signature from public.echo_live_buy_intents
+    where execution_wallet=$1 and mint=$2`,[wallet,secondMint]);
+  assert.equal(second.rows[0].state,'reserved');
+  assert.equal(second.rows[0].transaction_signature,null);
+ }finally{await db.close();}
+});
