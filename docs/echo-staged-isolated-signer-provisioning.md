@@ -35,3 +35,15 @@ The tests generate a disposable wallet and prove that the signing callback is **
 - [ ] Build and inspect actual unsigned BUY route and simulation from a supported provider.
 - [ ] Perform signed BUY locally inside isolated signer **without broadcasting**, recording only pass/fail and transaction message digest.
 - [ ] Verify production DB migrations and cross-worker contention tests; only then seek authorization for one small controlled mainnet BUY and manual Phantom exit.
+
+## Staged Railway service created in this session
+
+- Project: existing Echo Railway project.
+- Service: `alphaos-echo-isolated-signer` (ID `17eeb56f-7530-4981-ad7f-26d80a5c4f37`).
+- Service state: `staged-create`, patch `dcff792d-8efc-4f9c-af08-87edbe5379e3`.
+- No source, deployment, key, domain or live processes. **Do not accept/deploy this empty service.**
+- Staged variables: `ECHO_SIGNER_MODE=PROOF_ONLY`, `ECHO_SIGNER_BROADCAST_ENABLED=false`, `ECHO_SIGNER_REQUESTS_ENABLED=false`, `ECHO_SIGNER_EXTERNAL_NETWORK_ENABLED=false`, pinned wallet public address.
+
+When an authorized operator independently provisions the **dedicated, low-balance** wallet inside this service through Railway's secure **sealed** variable mechanism, use only the new variable name `ECHO_ISOLATED_SIGNER_SECRET_B58`. Never reuse or reference `ADMIN_TRADING_PRIVATE_KEY` from the main bot, and never send the key to a tool or chat. The CLI `npx tsx scripts/echoIsolatedSignerProveOnce.ts` must run **inside the isolated service** after its reviewed source has been installed. It performs a fresh off-chain signature proof and prints only `ECHO_ISOLATED_CUSTODY=VERIFIED|MISMATCH|UNPROVISIONED;TRADING=OFF`.
+
+This proof-only adapter deliberately **refuses to sign arbitrary or transaction-like messages**. For a real signed-but-not-broadcast BUY, a separate transaction-signing custody provider must be reviewed against transaction program/accounts/fees and trusted admission before enabling the `offlineSignedBuyDryRun.ts` flow. No current deployment can perform that test yet.
