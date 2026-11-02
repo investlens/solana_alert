@@ -59,7 +59,7 @@ export async function previewEchoPilotRoundTrip(
  if('reason' in sell)return result('SELL_'+sell.reason);
  if(!/^[1-9][0-9]*$/.test(plan.heldTokenAmountRaw))return result('SELL_AMOUNT_UNVERIFIED');
  const base={rpcUrl:plan.rpcUrl,publicWallet:plan.executionWallet,
-  mint:plan.order.mint,maxSlippageBps:300,jupiterApiKey:plan.jupiterApiKey};
+  mint:plan.order.mint,maxSlippageBps:1000,jupiterApiKey:plan.jupiterApiKey};
  try{
   const buy=await preview({...base,side:'BUY',amountRaw:String(order.amountLamports)});
   if(!buy.ok)return result('BUY_'+buy.reason);
