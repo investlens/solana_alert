@@ -50,7 +50,7 @@ export async function prepareEchoPilotBuyAndExit(args:{
  if(!/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(tx))
   return reject('CALLER_SIGNATURE_NOT_VERIFIED',true,true);
  const db=await reserveEchoTenDollarPilot(plan.order,plan.executionWallet,tx,args.store);
- if(!db.reserved)return reject('ATOMIC_RESERVATION_'+db.reason,true,true);
+ if('reason' in db)return reject('ATOMIC_RESERVATION_'+db.reason,true,true);
  // DB reserves the mint for good. If the process loses connectivity before
  // journal persistence, this remains held until independent reconciliation.
  try{
