@@ -128,3 +128,38 @@ test('a swap with an unaudited token transfer is denied before destination check
  assert.equal(checked.ok,false);
  if(!checked.ok)assert.equal(checked.reason,'UNREVIEWED_TOKEN_INSTRUCTION');
 });
+
+test('canonical Token-2022 ATA passes structural audit and remains signing-disabled',async()=>{
+ const token2022=new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
+ const [destination2022]=PublicKey.findProgramAddressSync([
+  payer.toBuffer(),token2022.toBuffer(),mint.toBuffer()
+ ],ataProgram);
+ const alt22=new AddressLookupTableAccount({key:tableKey,state:{
+  ...table.state,addresses:[pool,destination2022]
+ }});
+ const message=new TransactionMessage({payerKey:payer,
+  recentBlockhash:Keypair.generate().publicKey.toBase58(),
+  instructions:[
+   ComputeBudgetProgram.setComputeUnitLimit({units:200000}),
+   ComputeBudgetProgram.setComputeUnitPrice({microLamports:1000}),
+   new TransactionInstruction({programId:route,keys:[
+    {pubkey:pool,isSigner:false,isWritable:true},
+    {pubkey:destination2022,isSigner:false,isWritable:true}
+   ],data:Buffer.from([1,2,3])})
+  ]}).compileToV0Message([alt22]);
+ const tx=Buffer.from(new VersionedTransaction(message).serialize()).toString('base64');
+ const result=await run(tx,{
+  lookupProvider:{lookup:async()=>alt22},
+  accountProvider:{getAccounts:async()=>[{
+   owner:token2022,data:new Uint8Array(412),executable:false
+  }]}
+ });
+ assert.equal(result.ok,true);
+ if(result.ok){
+  assert.equal(result.destinationTokenAccount,destination2022.toBase58());
+  assert.ok(result.writableAccounts.includes(destination2022.toBase58()));
+  assert.equal(result.expectedDestinationDerived,true);
+  assert.equal(result.economicOutcomeVerified,false);
+  assert.equal(result.signingApproved,false);
+ }
+});
