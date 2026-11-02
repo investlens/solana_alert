@@ -129,6 +129,11 @@ try{
  report.provisionalDebitWithAtaRentLamports=provisionalDebitCeiling.toString();
  report.fullWalletDebitVerified=false;
  report.balanceCoversProvisionalDebit=BigInt(walletBalance)>=provisionalDebitCeiling;
+ report.provisionalShortfallLamports=walletBalance<Number(provisionalDebitCeiling)?
+   (provisionalDebitCeiling-BigInt(walletBalance)).toString():'0';
+ // Never attempt a known-insufficient unsigned simulation. This does not
+ // certify complete fees: missing CPI rent must still be audited separately.
+ if(!report.balanceCoversProvisionalDebit)throw Error('INSUFFICIENT_PROVISIONAL_BALANCE');
  // Safe numeric fault classification, never a transaction-data or secret dump.
  // A positive provisional balance check is NOT a fully audited wallet debit.
  report.networkFeeIncludesMessagePriorityFee=true;
@@ -162,7 +167,7 @@ try{
  'POOL_MINT_CONTINUITY_FAILED','MISSING_FEE_AWARE_MIN_OUTPUT',
  'BAD_INSTRUCTION_SHAPE','UNREVIEWED_SWAP_INSTRUCTIONS',
  'EXCESSIVE_SOL_TRANSFER_INSTRUCTIONS','UNSAFE_SIGNER_OR_ALT',
- 'SIMULATION_FAILED_OR_UNFUNDED_WALLET','RPC_ENDPOINT_NOT_ALLOWLISTED',
+ 'INSUFFICIENT_PROVISIONAL_BALANCE','SIMULATION_FAILED_OR_UNFUNDED_WALLET','RPC_ENDPOINT_NOT_ALLOWLISTED',
  'RPC_METHOD_NOT_READONLY','RPC_CALL_LIMIT_REACHED'];
  report.reason=allowedReasons.includes(x)?x:'SDK_QUOTE_OR_SIMULATION_FAILED';
  report.errorType=e instanceof Error?e.name:'UNKNOWN';
