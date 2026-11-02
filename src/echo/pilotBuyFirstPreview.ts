@@ -5,12 +5,15 @@
 import {screenEchoPilotTotalBudget,type EchoPilotBudgetInput} from './pilotTotalBudgetGuard.js';
 import {screenEchoTenDollarPilot,type PilotOrder} from './tenDollarPilot.js';
 import {verifyEchoExecutionWallet} from './executionWallet.js';
+import {previewEchoOwnerPositionSize,type EchoSizingPolicy} from './ownerPositionSizePolicy.js';
 import {readOnlyEchoJupiterV2Swap,type EchoJupiterV2PreviewRequest,
  type EchoJupiterV2PreviewResult} from './readOnlyJupiterV2Swap.js';
 
 export const ECHO_BUY_FIRST_LIVE_ENABLED=false as const;
 export type EchoBuyFirstInput={
  order:PilotOrder;budget:EchoPilotBudgetInput;executionWallet:string;
+ /** Optional trusted owner-tier specification; 0.025 SOL for first funded pilot. */
+ positionSizing?:EchoSizingPolicy;
  rpcUrl:string;jupiterApiKey:string;
  /** Verified privileged chain-wallet check, NOT a Telegram/client flag. */
  sameWalletManualExitAccessVerified:boolean;
@@ -52,12 +55,27 @@ export async function previewEchoBuyFirst(
   return stop('INVALID_PRINCIPAL');
  const size=screenEchoTenDollarPilot(input.order,principal);
  if('reason' in size)return stop('PILOT_'+size.reason);
+ let buyAmountLamports=size.amountLamports;
+ if(input.positionSizing){
+  const fixed=previewEchoOwnerPositionSize(input.positionSizing);
+  if(!fixed.eligible)return stop('POSITION_SIZE_'+fixed.reason);
+  if(input.positionSizing.requestedSol!=='0.025'&&
+     !input.positionSizing.firstTradeAndManualExitVerified)
+    return stop('POSITION_SIZE_FIRST_ROUND_TRIP_UNVERIFIED');
+  if(fixed.principalCents!==input.budget.newPrincipalCents||
+     input.positionSizing.estimatedFeeAndOtherCostsCents!==input.budget.allInBuyCostsCents||
+     input.positionSizing.cumulativeCommittedCents!==input.budget.cumulativeCommittedCents)
+    return stop('POSITION_SIZE_BUDGET_MISMATCH');
+  if(fixed.lamports!=='25000000'&&input.positionSizing.requestedSol==='0.025')
+    return stop('POSITION_SIZE_WRONG_INITIAL_LAMPORTS');
+  buyAmountLamports=Number(fixed.lamports);
+ }
  const budget=screenEchoPilotTotalBudget(input.budget);
  if(!budget.eligible)return stop('BUDGET_'+budget.reason);
  try{
   const quote=await preview({
    side:'BUY',rpcUrl:input.rpcUrl,publicWallet:input.executionWallet,
-   mint:input.order.mint,amountRaw:String(size.amountLamports),
+   mint:input.order.mint,amountRaw:String(buyAmountLamports),
    maxSlippageBps:1000,jupiterApiKey:input.jupiterApiKey
   });
   if(!quote.ok)return stop('BUY_'+quote.reason);
@@ -70,7 +88,7 @@ export async function previewEchoBuyFirst(
      !Number.isSafeInteger(quote.unitsConsumed)||(quote.unitsConsumed??0)<=0)
    return stop('BUY_QUOTE_OR_SIMULATION_UNVERIFIED');
   const tokensReceived=Number(quote.quotedOutputRaw)/10**input.tokenDecimals;
-  const observedPriceSolPerToken=(size.amountLamports/1e9)/tokensReceived;
+  const observedPriceSolPerToken=(buyAmountLamports/1e9)/tokensReceived;
   if(!Number.isFinite(observedPriceSolPerToken)||observedPriceSolPerToken<=0)
    return stop('QUOTE_PRICE_UNVERIFIED');
   const premiumBps=(observedPriceSolPerToken/input.callerEntryPriceSolPerToken-1)*10_000;
