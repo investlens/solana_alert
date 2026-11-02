@@ -8,7 +8,7 @@
 - Database `public.echo_live_buy_intents` exists with PK on (execution_wallet,mint), amount <=0.1 SOL and 0 rows at review time. This proves a duplicate unique key constraint exists, NOT end-to-end reservation or restart safety.
 
 ## Real mainnet route check
-- 0.025 SOL bounded PumpPortal local builder test via run `41502056738`: one builder request, zero simulation requests; returned `UNSIGNED_BUILDER_UNAVAILABLE`, no unsigned bytes, no signer involvement, no broadcast. Provider HTTP status was not included in original telemetry; status-only diagnosis has now been added without request/response bodies.
+- 0.025 SOL bounded PumpPortal local builder test via run `41502056738`: one builder request, zero simulation requests; returned `UNSIGNED_BUILDER_UNAVAILABLE`, no unsigned bytes, no signer involvement, no broadcast. Second single bounded diagnostic run `41502390386` safely recorded **HTTP 400**, one builder request and zero simulations. The static test mint/pool/parameters require verification; no additional blind retries. Status only was logged, not response body or credentials.
 - PumpPortal is THIRD PARTY (not official Pump.fun API); local builder availability and onchain account/ALT/CPI validation remain unresolved. No repeated provider probing until meaningful diagnosis. Never use lightning endpoint for this credential: it is a broadcast service.
 - The static example mint is not a freshly verified live caller trade; success with it would not establish under-$100k market-cap or caller-price eligibility.
 
