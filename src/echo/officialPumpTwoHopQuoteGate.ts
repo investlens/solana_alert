@@ -26,6 +26,11 @@ export type EchoTwoHopFeeAwareQuote={
  firstPoolVerified:boolean;secondPoolVerified:boolean;
  allFeeAccountsVerified:boolean;mintOwnersVerified:boolean;
  callerEntryPriceVerified:boolean;manualSellRouteVerified:boolean;
+ /** Must be independently audited for exact message, including CPI debits
+  * and all ATA/account-creation rent. A provisional RPC fee estimate is false. */
+ fullWalletDebitVerified:boolean;
+ /** Exact unsigned message must succeed with the actual dedicated-wallet state. */
+ realWalletSimulationPassed:boolean;
 };
 export type EchoTwoHopQuoteResult=
  | {ok:true; executable:false;reason:'PRICE_AND_FEE_PREFLIGHT_ONLY';
@@ -38,6 +43,10 @@ export function screenEchoTwoHopQuote(x:EchoTwoHopFeeAwareQuote):EchoTwoHopQuote
   !x.allFeeAccountsVerified||!x.mintOwnersVerified||
   !x.callerEntryPriceVerified||!x.manualSellRouteVerified)
   return no('INDEPENDENT_POOL_FEES_OR_EXIT_PROOF_MISSING');
+ if(x.fullWalletDebitVerified!==true)
+  return no('FULL_WALLET_DEBIT_UNVERIFIED');
+ if(x.realWalletSimulationPassed!==true)
+  return no('REAL_WALLET_SIMULATION_REQUIRED');
  if(!MINT_RE.test(x.wallet)||!MINT_RE.test(x.intermediateMint)||
   !MINT_RE.test(x.outputMint)||!MINT_RE.test(x.firstPool)||!MINT_RE.test(x.secondPool)||
   x.inputMint!=='So11111111111111111111111111111111111111112'||
