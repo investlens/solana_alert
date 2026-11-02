@@ -49,7 +49,7 @@ begin
       '5YRgrP3mjGzrzirYYN5HAQH19cTYREYwGxW6XRJQUzij',
       'Be24Gbf5KisDk1LcWWZsBn8dvB816By7YzYF5zWZnRR6')
     or p_amount_lamports is null or p_amount_lamports<=0
-    or p_amount_lamports>100000000
+    or p_amount_lamports<>25000000
     or p_principal_cents is null or p_principal_cents<=0
     or p_verified_sol_usd_cents is null or
        p_verified_sol_usd_cents<=0 or p_verified_sol_usd_cents>100000000
@@ -96,7 +96,7 @@ begin
  (execution_wallet,mint,caller_wallet,source_signature,amount_lamports,state,
   principal_usd,pilot_all_in_reserved_cents)
  values(p_execution_wallet,p_mint,p_caller_wallet,p_source_signature,
-  p_amount_lamports,'reserved',10,v_all_in);
+  p_amount_lamports,'reserved',v_amount_fx_cents::numeric/100,v_all_in);
  update public.echo_pilot_capital_ledger set
  committed_cents=committed_cents+v_all_in,
  last_verified_spendable_cents=p_verified_spendable_wallet_cents,
