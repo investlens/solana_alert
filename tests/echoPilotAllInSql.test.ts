@@ -26,6 +26,16 @@ test('database atomically enforces fee-inclusive $30 lifetime cap and exit reser
   assert.equal(await reserve(mint(4),{fee:501}),'ALL_IN_ENTRY_CAP');
   assert.equal(await reserve(mint(4),{balance:1000}),'BALANCE_AND_EXIT_RESERVE');
   assert.equal(await reserve(mint(4)),'RESERVED');
+  const principal=await db.query<{principal:string;reserved:string}>(`select
+   principal_usd::text principal,pilot_all_in_reserved_cents::text reserved
+   from public.echo_live_buy_intents where execution_wallet=$1 and mint=$2`,
+   [wallet,mint(4)]);
+  assert.equal(principal.rows[0]?.principal,'5.00');
+  assert.equal(principal.rows[0]?.reserved,'1000');
+  const wrongSize=await db.query<{result:string}>(`select
+   public.echo_pilot_reserve_all_in_atomic($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now()) result`,
+   [wallet,mint(9),SLINGOOR_WALLET,source,50000000,1000,20000,1,100,3500]);
+  assert.equal(wrongSize.rows[0]?.result,'INVALID_OR_STALE_ATTESTATION');
   assert.equal(await reserve(mint(4)),'DUPLICATE_TOKEN');
   assert.equal(await reserve(mint(5),{caller:CHAIRMAN_WALLET}),'RESERVED');
   assert.equal(await reserve(mint(6)),'TWO_SLOTS_FULL');
