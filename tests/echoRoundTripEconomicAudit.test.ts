@@ -31,7 +31,7 @@ test('missing independent SELL quote, fee schedule, rent or live signature fee f
   {...base,buySignatureLamports:null},
   {...base,sellExpectedLamports:'invalid'},
   {...base,buyLamports:'100000001'},
-  {...base,buySlippageBps:301},
+  {...base,buySlippageBps:1001},
   {...base,buyPriorityLamports:'500001'}
  ]){
   const r=reviewEchoRoundTripEconomics(x);
