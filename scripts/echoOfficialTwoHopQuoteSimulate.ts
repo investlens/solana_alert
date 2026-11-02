@@ -12,10 +12,10 @@ const P1='8zBr6K8wxVy8SmkEkYNtZWSpfwnQYWE7S1ATSMa7D1WY';
 const P2='JBsGNXRZQr9ZPc5PAn3seDE7At6ELq9LjVDCujgLKaq8';
 const AMM='pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA';
 const INPUT=25_000_000;
-const MAX_REQUESTS=15;
+const MAX_REQUESTS=20;
 let requests=0;
 const allowed=new Set(['getMultipleAccounts','getAccountInfo','getLatestBlockhash',
-  'getMinimumBalanceForRentExemption','simulateTransaction']);
+  'getMinimumBalanceForRentExemption','getFeeForMessage','getBalance','simulateTransaction']);
 const fetcher:typeof fetch=(async(input:any,init:any)=>{
  if(![RPC,RPC+'/'].includes(String(input)))throw Error('RPC_ENDPOINT_NOT_ALLOWLISTED');
  const body=JSON.parse(String(init?.body??'{}'));
@@ -32,6 +32,7 @@ const report:any={mode:'MAINNET_OFFICIAL_TWO_HOP_QUOTE_SIMULATION',
  targetMint:B,quotedOutputRaw:null,minOutputRaw:null,
  poolAccountsRead:false,quoteVerified:false,additionalFeesFullyVerified:false,
  unsignedConstructed:false,simulationAttempted:false,simulationPassed:false,
+ fullWalletDebitVerified:false,possibleCpiRentUnknown:true,
  signed:false,broadcast:false,signingApproved:false,
  outputMintMarketCapEligible:false,reason:'NOT_VERIFIED'};
 try{
@@ -101,6 +102,34 @@ try{
  report.unsignedConstructed=true;
  report.instructionCount=ixs.length;report.unsignedBytes=tx.serialize().length;
  report.systemTransferLamports=systemTransferLamports.toString();
+ // Read-only fee and account-creation estimate. ATA rent is conservatively
+ // represented using 1024-byte token-account rent; CPI-created state remains
+ // UNKNOWN until successful simulation or exact independently audited program.
+ report.stage='RPC_FEE_AND_ATA_RENT_AUDIT';
+ const ataProgram='ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
+ const ataKeys=[...new Set(ixs.filter(ix=>ix.programId.toBase58()===ataProgram)
+   .map(ix=>ix.keys?.[1]?.pubkey?.toBase58?.()).filter(Boolean))];
+ const ataAccounts=ataKeys.length?await con.getMultipleAccountsInfo(ataKeys.map(pub)):[];
+ const missingAtaCount=ataAccounts.filter(x=>!x).length;
+ const ataRentUpperBound=await con.getMinimumBalanceForRentExemption(1024,'confirmed');
+ const networkFee=await con.getFeeForMessage(message,'confirmed');
+ const walletBalance=await con.getBalance(pub(WALLET),'confirmed');
+ if(!Number.isSafeInteger(ataRentUpperBound)||ataRentUpperBound<=0||
+    !Number.isSafeInteger(networkFee?.value)||networkFee.value<=0)
+   throw Error('RPC_NETWORK_FEE_OR_RENT_UNVERIFIED');
+ const auditedDebitLowerBound=BigInt(INPUT)+BigInt(networkFee.value);
+ const provisionalDebitCeiling=auditedDebitLowerBound+
+   BigInt(missingAtaCount)*BigInt(ataRentUpperBound);
+ report.ataInstructions=ataKeys.length;
+ report.missingAtaCount=missingAtaCount;
+ report.ataRentConservativePerAccountLamports=ataRentUpperBound;
+ report.networkBaseFeeLamports=networkFee.value;
+ report.currentWalletLamports=walletBalance;
+ report.knownDebitFloorLamports=auditedDebitLowerBound.toString();
+ report.provisionalDebitWithAtaRentLamports=provisionalDebitCeiling.toString();
+ report.fullWalletDebitVerified=false;
+ report.balanceCoversProvisionalDebit=BigInt(walletBalance)>=provisionalDebitCeiling;
+
  // Third-party output is not sufficient to claim actual wallet balance, ATA
  // rents or all-in USD eligibility; simulation failure remains a safe result.
  report.stage='RPC_SIMULATE_UNSIGNED';
