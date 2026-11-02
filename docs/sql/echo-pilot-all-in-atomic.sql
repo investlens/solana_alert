@@ -112,6 +112,10 @@ $$;
 revoke all on function public.echo_pilot_reserve_all_in_atomic(
  text,text,text,text,bigint,bigint,bigint,bigint,bigint,bigint,timestamptz)
  from public,anon,authenticated;
+-- Retire the principal-only RPC for service-role clients to prevent any
+-- live worker from bypassing the all-in ledger through a legacy call.
+revoke execute on function public.echo_pilot_reserve_atomic(text,text,text,text,bigint)
+ from service_role;
 grant execute on function public.echo_pilot_reserve_all_in_atomic(
  text,text,text,text,bigint,bigint,bigint,bigint,bigint,bigint,timestamptz)
  to service_role;
