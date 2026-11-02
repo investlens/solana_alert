@@ -29,11 +29,13 @@ export function createEchoAllInSupabaseStore(client:SupabaseClient):EchoAllInPil
       !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(callerSignature))
     return {reserved:false,reason:'UNVERIFIED_SOURCE_OR_WALLET'};
    const principal=asSafeInt(plan.budget.newPrincipalCents);
+   const priceCents=Number.isFinite(plan.order.priceSolUsd)?Math.round(plan.order.priceSolUsd*100):NaN;
    const buyCosts=asSafeInt(plan.budget.allInBuyCostsCents);
    const exitReserve=asSafeInt(plan.budget.exitAndNetworkReserveCents);
    const balance=asSafeInt(plan.budget.spendableWalletCents);
    const at=Date.parse(proof.balanceVerifiedAtIso);
-   if(principal===null||buyCosts===null||exitReserve===null||balance===null||
+   if(principal===null||!Number.isSafeInteger(priceCents)||priceCents<=0||
+      buyCosts===null||exitReserve===null||balance===null||
       !Number.isFinite(at)||Math.abs(Date.now()-at)>3000)
     return {reserved:false,reason:'INVALID_OR_STALE_CAPITAL_PROOF'};
    const admitted=screenEchoTenDollarPilot(plan.order);
@@ -47,6 +49,7 @@ export function createEchoAllInSupabaseStore(client:SupabaseClient):EchoAllInPil
     p_source_signature:callerSignature,
     p_amount_lamports:admitted.amountLamports,
     p_principal_cents:principal,
+    p_verified_sol_usd_cents:priceCents,
     p_buy_cost_ceiling_cents:buyCosts,
     p_exit_reserve_cents:exitReserve,
     p_verified_spendable_wallet_cents:balance,
