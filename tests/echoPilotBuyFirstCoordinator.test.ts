@@ -48,7 +48,7 @@ async function fixture(){
  }};
  return {dir,journal,store,reservations:()=>reservations,provider:{
   async getVerifiedPlan(){return {plan,callerSignature:sig,
-   proof:{balanceVerifiedAtIso:new Date().toISOString()}};}
+   proof:{balanceVerifiedAtIso:new Date().toISOString(),wallet,spendableWalletCents:'3500',solUsdCents:20000,contextSlot:500}};}
  }};
 }
 test('BUY-only route reserves once, journals, never signs or sends',async()=>{
@@ -73,7 +73,7 @@ test('failed simulation and unverified wallet exit never touch SQL',async()=>{
  try{
   const blocked=await prepareEchoBuyFirstCoordinator({...f,provider:{
    async getVerifiedPlan(){return {plan:{...plan,sameWalletManualExitAccessVerified:false},
-    callerSignature:sig,proof:{balanceVerifiedAtIso:new Date().toISOString()}};}
+    callerSignature:sig,proof:{balanceVerifiedAtIso:new Date().toISOString(),wallet,spendableWalletCents:'3500',solUsdCents:20000,contextSlot:500}};}
   },preview});
   assert.equal(blocked.prepared,false);assert.equal(f.reservations(),0);
   const failed=await prepareEchoBuyFirstCoordinator({...f,
