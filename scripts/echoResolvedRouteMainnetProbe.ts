@@ -24,6 +24,7 @@ async function jsonRpc(method:string,address:string){
  return body.result?.value??null;
 }
 let result:Awaited<ReturnType<typeof auditEchoResolvedUnsignedBuy>>|null=null;
+let observedMintOwner:string|null=null,observedMintBytes:number|null=null,observedMintExecutable:boolean|null=null;
 let reason:string|null=null,builderMs:number|null=null;
 try{
  builderCalls++;
@@ -57,6 +58,9 @@ try{
    if(!value)return [null];
    if(!Array.isArray(value.data)||typeof value.data[0]!=='string')
      throw Error('INVALID_MINT_DATA');
+   observedMintOwner=value.owner;
+   observedMintBytes=Buffer.from(value.data[0],'base64').length;
+   observedMintExecutable=value.executable===true;
    return [{owner:new PublicKey(value.owner),
     data:Buffer.from(value.data[0],'base64'),executable:value.executable===true}];
   }}
@@ -66,7 +70,8 @@ const report={
  mode:'MAINNET_RESOLVED_ROUTE_AUDIT',builderRequests:builderCalls,
  rpcReads:rpcCalls,totalReadRequests:builderCalls+rpcCalls,
  builderMs,passedStructuralAudit:result?.ok??false,
- auditReason:result&&!result.ok?result.reason:reason,
+ auditReason:result&&'reason' in result?result.reason:reason,
+ observedMintOwner,observedMintBytes,observedMintExecutable,
  lookupTables:result?.ok?result.lookupTables:null,
  explicitComputeBudgetVerified:result?.ok?result.explicitComputeBudgetVerified:false,
  priorityFeeLamports:result?.ok?result.priorityFeeLamports:null,
