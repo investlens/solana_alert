@@ -98,3 +98,32 @@ test('a Solana signature cannot be associated with two token claims',async()=>{
   assert.equal(second.rows[0].transaction_signature,null);
  }finally{await db.close();}
 });
+
+test('fee-inclusive reservation and one-shot RPCs are service-only; legacy bypass is retired',async()=>{
+ const db=await setup();
+ try{
+  const r=await db.query<{
+   rowRls:boolean;ledgerRls:boolean;
+   anonReserve:boolean;authenticatedReserve:boolean;serviceReserve:boolean;
+   anonClaim:boolean;authenticatedClaim:boolean;serviceClaim:boolean;
+   legacyService:boolean;anonLedgerInsert:boolean;serviceLedgerInsert:boolean
+  }>(`select
+   (select relrowsecurity from pg_class where oid='public.echo_live_buy_intents'::regclass) as "rowRls",
+   (select relrowsecurity from pg_class where oid='public.echo_pilot_capital_ledger'::regclass) as "ledgerRls",
+   has_function_privilege('anon','public.echo_pilot_reserve_all_in_atomic(text,text,text,text,bigint,bigint,bigint,bigint,bigint,bigint,timestamptz)','EXECUTE') as "anonReserve",
+   has_function_privilege('authenticated','public.echo_pilot_reserve_all_in_atomic(text,text,text,text,bigint,bigint,bigint,bigint,bigint,bigint,timestamptz)','EXECUTE') as "authenticatedReserve",
+   has_function_privilege('service_role','public.echo_pilot_reserve_all_in_atomic(text,text,text,text,bigint,bigint,bigint,bigint,bigint,bigint,timestamptz)','EXECUTE') as "serviceReserve",
+   has_function_privilege('anon','public.echo_pilot_claim_submission_once(text,text,text,text,text,bigint)','EXECUTE') as "anonClaim",
+   has_function_privilege('authenticated','public.echo_pilot_claim_submission_once(text,text,text,text,text,bigint)','EXECUTE') as "authenticatedClaim",
+   has_function_privilege('service_role','public.echo_pilot_claim_submission_once(text,text,text,text,text,bigint)','EXECUTE') as "serviceClaim",
+   has_function_privilege('service_role','public.echo_pilot_reserve_atomic(text,text,text,text,bigint)','EXECUTE') as "legacyService",
+   has_table_privilege('anon','public.echo_pilot_capital_ledger','INSERT') as "anonLedgerInsert",
+   has_table_privilege('service_role','public.echo_pilot_capital_ledger','INSERT') as "serviceLedgerInsert"`);
+  assert.deepEqual(r.rows[0],{
+   rowRls:true,ledgerRls:true,
+   anonReserve:false,authenticatedReserve:false,serviceReserve:true,
+   anonClaim:false,authenticatedClaim:false,serviceClaim:true,
+   legacyService:false,anonLedgerInsert:false,serviceLedgerInsert:true
+  });
+ }finally{await db.close();}
+});
