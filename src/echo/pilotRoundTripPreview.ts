@@ -41,7 +41,7 @@ export async function previewEchoPilotRoundTrip(
    buyQuoteHash:buyHash,sellQuoteHash:sellHash
  });
  const order=screenEchoTenDollarPilot(plan.order);
- if(!order.allowed)return result('PILOT_'+order.reason);
+ if('reason' in order)return result('PILOT_'+order.reason);
  const budget=screenEchoPilotTotalBudget(plan.budget);
  if(!budget.eligible)return result('BUDGET_'+budget.reason);
  if(!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(plan.executionWallet)||
@@ -53,7 +53,7 @@ export async function previewEchoPilotRoundTrip(
     plan.manualSell.verifiedTokenBalanceRaw!==plan.heldTokenAmountRaw)
   return result('SELL_POSITION_MISMATCH');
  const sell=screenEchoManualSell(plan.manualSell);
- if(!sell.allowed)return result('SELL_'+sell.reason);
+ if('reason' in sell)return result('SELL_'+sell.reason);
  if(!/^[1-9][0-9]*$/.test(plan.heldTokenAmountRaw))return result('SELL_AMOUNT_UNVERIFIED');
  const base={rpcUrl:plan.rpcUrl,publicWallet:plan.executionWallet,
   mint:plan.order.mint,maxSlippageBps:300,jupiterApiKey:plan.jupiterApiKey};
