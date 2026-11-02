@@ -96,7 +96,7 @@ export async function auditEchoResolvedUnsignedBuy(input:{
     if(data.length<4)return deny('UNKNOWN_SYSTEM_INSTRUCTION',lookupReads);
     // Transfer, create account, nonce and allocate calls require a fully
     // reconstructed payer debit/rent model; never approve implicitly.
-    unsupported.push('SYSTEM_'+data.readUInt32LE(0));
+    return deny('UNREVIEWED_SYSTEM_INSTRUCTION',lookupReads);
   }else if(program===ComputeBudgetProgram.programId.toBase58()){
     if(data[0]===2&&data.length===5&&limit===null)limit=data.readUInt32LE(1);
     else if(data[0]===3&&data.length===9&&price===null)price=data.readBigUInt64LE(1);
@@ -104,7 +104,7 @@ export async function auditEchoResolvedUnsignedBuy(input:{
   }else if(program===TOKEN||program===TOKEN_2022){
     // Token SetAuthority / CloseAccount / Approve / transfer etc can change
     // ownership or spend tokens: require separate deterministic instruction audit.
-    unsupported.push('TOKEN_INSTRUCTION_REQUIRES_SEMANTIC_AUDIT');
+    return deny('UNREVIEWED_TOKEN_INSTRUCTION',lookupReads);
   }else if(program===ATA){
     if(data.length>1||data.length===1&&data[0]!==1)
       return deny('UNKNOWN_ATA_INSTRUCTION',lookupReads);
