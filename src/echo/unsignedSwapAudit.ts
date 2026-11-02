@@ -10,7 +10,7 @@ const JUPITER='JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4';
 const allowed=new Set([
  ComputeBudgetProgram.programId.toBase58(),SystemProgram.programId.toBase58(),
  'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
- 'TokenzQdBNbLqP5VEhdkAS6EPFCE7uFyV9QnF4jrb',
+ 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
  'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',JUPITER
 ]);
 const MAX_COMPUTE_UNITS=1_400_000;

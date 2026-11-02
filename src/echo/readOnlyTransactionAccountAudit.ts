@@ -25,7 +25,7 @@ export type EchoAccountAudit=
 const reviewPrograms=new Set([
  ComputeBudgetProgram.programId.toBase58(),SystemProgram.programId.toBase58(),
  'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
- 'TokenzQdBNbLqP5VEhdkAS6EPFCE7uFyV9QnF4jrb',
+ 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
  'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
  'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4'
 ]);
