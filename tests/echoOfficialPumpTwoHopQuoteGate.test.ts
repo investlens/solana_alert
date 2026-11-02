@@ -14,7 +14,8 @@ const base={
  solUsdCentsPerSol:'20000',quoteObservedAtMs:1800000000100,
  nowMs:1800000000200,firstPoolVerified:true,secondPoolVerified:true,
  allFeeAccountsVerified:true,mintOwnersVerified:true,
- callerEntryPriceVerified:true,manualSellRouteVerified:true
+ callerEntryPriceVerified:true,manualSellRouteVerified:true,
+ fullWalletDebitVerified:true,realWalletSimulationPassed:true
 };
 test('verified fixture derives integer min-output with 10% slippage and full wallet ceiling',()=>{
  const r=screenEchoTwoHopQuote(base);
@@ -28,6 +29,7 @@ test('never accept unknown economics or stale independent attestations',()=>{
   {firstPoolVerified:false},{secondPoolVerified:false},
   {allFeeAccountsVerified:false},{mintOwnersVerified:false},
   {callerEntryPriceVerified:false},{manualSellRouteVerified:false},
+  {fullWalletDebitVerified:false},{realWalletSimulationPassed:false},
   {quotedOutputRaw:'0'},{quotedOutputRaw:'abc'},{maxAdditionalLamports:'-5'},
   {inputLamports:'25000001'},{inputLamports:'100000000'},
   {slippageBps:1001},{slippageBps:0},{nowMs:1800000004000},
@@ -45,4 +47,13 @@ test('any accepted quote remains preview only, and arbitrary caller fields canno
  const accepted=screenEchoTwoHopQuote({...base,slippageBps:200});
  assert.equal(accepted.ok,true);
  if(accepted.ok){assert.equal(accepted.minOutputRaw,'980001');assert.equal(accepted.executable,false);}
+});
+
+test('provisional fee bounds or unsigned failed simulations never count as authorized quote',()=>{
+ const provisional=screenEchoTwoHopQuote({...base,fullWalletDebitVerified:false});
+ assert.deepEqual(provisional,{ok:false,executable:false,reason:'FULL_WALLET_DEBIT_UNVERIFIED'});
+ const failedSim=screenEchoTwoHopQuote({...base,realWalletSimulationPassed:false});
+ assert.deepEqual(failedSim,{ok:false,executable:false,reason:'REAL_WALLET_SIMULATION_REQUIRED'});
+ const missing=screenEchoTwoHopQuote({...base,fullWalletDebitVerified:undefined as unknown as boolean});
+ assert.equal(missing.ok,false);
 });
