@@ -30,7 +30,7 @@ test('adapter uses ONLY fee-inclusive RPC and persists database outcome',async()
  }} as unknown as SupabaseClient;
  const store=createEchoAllInSupabaseStore(client);
  const result=await store.reserveAllIn({
-  plan,callerSignature:signature,proof:{balanceVerifiedAtIso:new Date().toISOString()}
+  plan,callerSignature:signature,proof:{balanceVerifiedAtIso:new Date().toISOString(),wallet,spendableWalletCents:'3500',solUsdCents:20000,contextSlot:500}
  });
  assert.equal(result.reserved,true);
  assert.equal(calls.length,1);
@@ -46,8 +46,8 @@ test('missing or stale balance and absent all-in costs prevent all database writ
  const store=createEchoAllInSupabaseStore(client);
  for(const payload of [
   {plan:{...plan,budget:{...plan.budget,allInBuyCostsCents:null}},
-   proof:{balanceVerifiedAtIso:new Date().toISOString()}},
-  {plan,proof:{balanceVerifiedAtIso:'2020-01-01T00:00:00Z'}}
+   proof:{balanceVerifiedAtIso:new Date().toISOString(),wallet,spendableWalletCents:'3500',solUsdCents:20000,contextSlot:500}},
+  {plan,proof:{balanceVerifiedAtIso:'2020-01-01T00:00:00Z',wallet,spendableWalletCents:'3500',solUsdCents:20000,contextSlot:500}}
  ]){
   const r=await store.reserveAllIn({...payload,callerSignature:signature});
   assert.equal(r.reserved,false);
@@ -60,7 +60,7 @@ test('Supabase error denies reservation, never falls back to legacy function',as
   calls.push(name);return {data:null,error:{message:'missing migration'}};
  }} as unknown as SupabaseClient;
  const r=await createEchoAllInSupabaseStore(client).reserveAllIn({
-  plan,callerSignature:signature,proof:{balanceVerifiedAtIso:new Date().toISOString()}
+  plan,callerSignature:signature,proof:{balanceVerifiedAtIso:new Date().toISOString(),wallet,spendableWalletCents:'3500',solUsdCents:20000,contextSlot:500}
  });
  assert.deepEqual(r,{reserved:false,reason:'DATABASE_UNAVAILABLE'});
  assert.deepEqual(calls,['echo_pilot_reserve_all_in_atomic']);
