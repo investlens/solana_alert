@@ -16,6 +16,8 @@ const when=1800000000000;
 const plan={
  executionWallet:wallet,rpcUrl:'https://example.invalid',jupiterApiKey:'fixture',
  sameWalletManualExitAccessVerified:true,manualExitRiskAcknowledged:true,
+ marketCapUsd:45000,marketCapObservedAtMs:when-200,
+ callerEntryPriceSolPerToken:0.03,tokenDecimals:6,
  order:{callerWallet:SLINGOOR_WALLET,mint,verifiedBuyerSigner:true,
   originalSwapSucceeded:true,verifiedSpend:true,verifiedTokenCredit:true,
   priceSolUsd:200,priceObservedAtMs:when,nowMs:when,spentOrdersToday:0,
