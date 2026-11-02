@@ -42,7 +42,9 @@ export function createEchoManualSellReadOnlyHandler(args:{
  return async(callback:EchoTelegramSellCallback):Promise<EchoSellCallbackResult>=>{
   const deny=(reason:string):EchoSellCallbackResult=>({
    accepted:false,reason,mode:'READ_ONLY_NO_SIGNING'});
-  if(!callback.id||callback.id.length>128||!callback.message||
+  if(!callback||typeof callback.id!=='string'||!callback.id||callback.id.length>128||
+     !Number.isSafeInteger(callback.from?.id)||
+     !Number.isSafeInteger(callback.message?.chat?.id)||
      typeof callback.data!=='string')return deny('INVALID_TELEGRAM_CALLBACK');
   // Even authorized payloads cannot authorize execution. Identity here is
   // meaningful ONLY when callback came from trusted Telegram webhook router.
