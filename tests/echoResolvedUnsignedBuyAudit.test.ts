@@ -86,3 +86,13 @@ test('invalid payload and failed RPC do not sign or submit',async()=>{
  assert.deepEqual(offline,{ok:false,reason:'ACCOUNT_STATE_UNAVAILABLE',
   signingApproved:false,lookupReads:1,accountStateReads:1});
 });
+
+test('canonical Token-2022 mint derives different ATA and never authorizes a legacy-token destination',async()=>{
+ const token2022=new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
+ const original=build();
+ const result=await run(original,{accountProvider:{getAccounts:async()=>[
+  {owner:token2022,data:new Uint8Array(412),executable:false}
+ ]}});
+ assert.deepEqual(result,{ok:false,reason:'WALLET_TOKEN_DESTINATION_NOT_WRITABLE',
+  signingApproved:false,lookupReads:1,accountStateReads:1});
+});
