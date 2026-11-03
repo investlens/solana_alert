@@ -285,3 +285,16 @@ jobs:
       - run: npm install --no-save --ignore-scripts --no-package-lock @pump-fun/pump-sdk@4.3.1
       - name: Fee-aware official quote, non-broadcast build and one bounded unsigned simulateTransaction
         run: npx tsx scripts/echoOfficialTwoHopQuoteSimulate.ts
+
+  echo-disposable-postgres:
+    # Explicit single-use zero-funding integration proof, on a GitHub runner.
+    # This Docker database is NOT Supabase; no live app secrets are provided.
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[echo-postgres-integration]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Four real Postgres clients, one-shot claim, nonce and hard restart
+        run: bash scripts/echoDisposablePostgresPilotIntegration.sh
