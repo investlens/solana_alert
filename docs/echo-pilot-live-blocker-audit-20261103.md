@@ -26,3 +26,9 @@ Avoid double-counting Solana fees or wrapped SOL transfers. Validate actual pre/
 
 ## Release controls
 Keep `ADMIN_TRADING_ENABLED=false`, `ECHO_SIGNED_BUY_DRY_RUN_BROADCAST_ENABLED=false`, `ECHO_ONE_SHOT_HANDOFF_BROADCAST_ENABLED=false`. Do not deploy revised signer, apply production DDL without backup, request wallet funding, or send transactions merely to clear a test.
+
+## Follow-up zero-funding cost gate and read-only probe
+- New pure gate: `src/echo/strictWalletFundingGate.ts` and tests. It requires independently attested exact message fee, all wallet-funded CPI debits, account creation rents, manual SELL reserve, any pending commitments, current wallet balance and SOL/USD. Missing any value FAILS CLOSED. It does not sign, submit, or recommend the test-fixture funding amount.
+- All-in entry ceiling is $10 and gross lifetime pilot cap is $30; the output remains review-only even if the exact cost envelope would fit.
+- CI one-shot tag below triggers the pre-existing official SDK read-only mainnet diagnostic for the dedicated wallet; it may legitimately fail due to insufficient SOL. Such a failure does not authorize funding or use of synthetic wallet state.
+- Supabase connection reports healthy Postgres 17; production still lacks all-in ledger, nonce journal, reservation and submission RPCs. Connected controls cannot verify recoverable backup creation, so production migration remains prohibited until a tested backup exists.
