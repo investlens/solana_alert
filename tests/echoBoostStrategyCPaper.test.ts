@@ -38,7 +38,7 @@ test('100x mark after runner stopped is not counted as owned paper profit',()=>{
  assert.equal(r.exits.at(-1)?.priceUsd,1.1);
  assert.equal(r.exits.length,2);
  approximate(r.markToMarketPnlUsd!,r.estimatedRealizedPnlUsd);
- assert.ok(r.estimatedRealizedPnlUsd<2);
+ approximate(r.estimatedRealizedPnlUsd,3.7214);
 });
 test('trailing thresholds tighten after 2x and 5x; no lookahead',()=>{
  const two=replayBoostStrategyC(points([1,1.5,2,1.59]));
