@@ -83,15 +83,22 @@ try{
     programs.filter(p=>p===AMM).length!==1)
   throw Error('UNREVIEWED_SWAP_INSTRUCTIONS');
  let systemTransferLamports=0n;
+ let systemInstructions=0;
  for(const ix of ixs){
-  if(ix.programId.equals(SystemProgram.programId)){
-   const raw=Buffer.from(ix.data);
-   if(raw.length>=12&&raw.readUInt32LE(0)===2)
-    systemTransferLamports+=raw.readBigUInt64LE(4);
-  }
+  if(!ix.programId.equals(SystemProgram.programId))continue;
+  systemInstructions++;
+  const raw=Buffer.from(ix.data);
+  // A System Program instruction other than an exact Transfer is NOT priced
+  // by the current audit. Reject account-creation/assign/reallocate variants
+  // until their full lamport and rent effects have independent review.
+  if(raw.length!==12||raw.readUInt32LE(0)!==2||ix.keys.length!==2)
+   throw Error('UNPRICED_SYSTEM_INSTRUCTION');
+  if(ix.keys[0]?.pubkey?.toBase58()!==WALLET)
+   throw Error('UNREVIEWED_SOL_TRANSFER_SOURCE');
+  systemTransferLamports+=raw.readBigUInt64LE(4);
  }
- if(systemTransferLamports>BigInt(INPUT)+10_000_000n)
-  throw Error('EXCESSIVE_SOL_TRANSFER_INSTRUCTIONS');
+ if(systemTransferLamports!==BigInt(INPUT))
+  throw Error('SYSTEM_TRANSFER_NOT_EXACT_SWAP_PRINCIPAL');
  const bh=await con.getLatestBlockhash('confirmed');
  const message=new TransactionMessage({
   payerKey:pub(WALLET),recentBlockhash:bh.blockhash,instructions:ixs
@@ -102,6 +109,11 @@ try{
  report.unsignedConstructed=true;
  report.instructionCount=ixs.length;report.unsignedBytes=tx.serialize().length;
  report.systemTransferLamports=systemTransferLamports.toString();
+ report.systemInstructionCount=systemInstructions;
+ report.systemTransfersPayerAndPrincipalReviewed=true;
+ // Program CPI debits remain UNKNOWN: top-level System transfers alone
+ // cannot certify full wallet debit, even with exact principal and rent.
+ report.cpiWalletDebitsIndependentlyVerified=false;
  // Read-only fee and account-creation estimate. ATA rent is conservatively
  // represented using 1024-byte token-account rent; CPI-created state remains
  // UNKNOWN until successful simulation or exact independently audited program.
@@ -169,7 +181,8 @@ try{
  const allowedReasons=['INCOMPLETE_POOL_OR_FEE_STATE','POOL_OWNER_NOT_VERIFIED',
  'POOL_MINT_CONTINUITY_FAILED','MISSING_FEE_AWARE_MIN_OUTPUT',
  'BAD_INSTRUCTION_SHAPE','UNREVIEWED_SWAP_INSTRUCTIONS',
- 'EXCESSIVE_SOL_TRANSFER_INSTRUCTIONS','UNSAFE_SIGNER_OR_ALT',
+ 'EXCESSIVE_SOL_TRANSFER_INSTRUCTIONS','UNPRICED_SYSTEM_INSTRUCTION',
+ 'UNREVIEWED_SOL_TRANSFER_SOURCE','SYSTEM_TRANSFER_NOT_EXACT_SWAP_PRINCIPAL','UNSAFE_SIGNER_OR_ALT',
  'INSUFFICIENT_PROVISIONAL_BALANCE','SIMULATION_FAILED_OR_UNFUNDED_WALLET','RPC_ENDPOINT_NOT_ALLOWLISTED',
  'RPC_METHOD_NOT_READONLY','RPC_CALL_LIMIT_REACHED'];
  report.reason=allowedReasons.includes(x)?x:'SDK_QUOTE_OR_SIMULATION_FAILED';
