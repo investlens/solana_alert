@@ -36,3 +36,11 @@ Strict code acceptance must fail closed unless:
 - separately validated real-wallet simulation succeeds and authorized signer test is completed with broadcast OFF.
 
 No funding instruction, production DDL, signer access, broadcasting or enabling real trading is authorized by this document.
+
+## Verified synthetic backup/restore evidence (2026-11-03)
+- GitHub Actions run **41577112773**, job `echo-disposable-postgres` succeeded on `ba751763`.
+- The test created two independent temporary PostgreSQL 17 **containers/clusters**, applied all reviewed SQL to the source, reserved two positions in four concurrent clients, claimed a submission once, and consumed a signer nonce.
+- It used `pg_dump --format=custom --schema=public`, then `pg_restore --exit-on-error` to the *other cluster*. Verified persisted BUY intent/state `unknown`, $20 in committed example paper capital, nonce presence/replay denial, required RLS, service-only function grants, and one-shot submission lock.
+- Test roles are separately provisioned on the target. **Production roles, custom role passwords, external storage and complete Supabase-managed schema backup are NOT validated by this synthetic public-schema test.**
+- This is evidence that a synthetic recovery procedure works, **NOT evidence that any backup of the actual Supabase project exists**.
+- Production DDL remains blocked until a timestamped real backup and independent restore of the actual required data and roles are verified and reviewed.
