@@ -20,6 +20,7 @@ on:
       - feat/echo-unsigned-route-audit-20261102
       - feat/echo-execution-economics-audit-20261102
       - feat/echo-pilot-total-budget-guard-20261102
+      - feat/echo-boost-strategy-c-paper-20261103
   pull_request:
     branches:
       - feat/echo-admin-pilot-20261021
