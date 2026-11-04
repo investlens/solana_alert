@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { openPaperStop, updatePaperStop, type PaperStop } from './signals.js';
 import { assessPaperExecution } from './paperExecutionAssessment.js';
+import { replayBoostStrategyC } from './boostStrategyCPaper.js';
 
 type Sample = { at: number; usd: number; liquidityUsd: number | null; pool: string };
 type Trial = {
@@ -13,7 +14,7 @@ type Trial = {
   status: 'AWAITING_PRICE' | 'TRACKING' | 'EXIT_OBSERVED' | 'CENSORED' | 'COMPLETE';
 };
 type PaperEvent={id:string;kind:'ENTRY'|'EXIT'|'MILESTONE';mint:string;caller:string;entry:number;price:number;multiple?:number;roiPercent:number;paperUsd:number;quantity:number;exitValueUsd:number;netPnlUsd:number;costBpsPerSide:number};
-type State = { version: 1; trials: Trial[]; pending?:PaperEvent[]; onceMints?:string[] };
+type State = { version: 1; trials: Trial[]; pending?:PaperEvent[]; onceMints?:string[]; strategyCShadowSince?:number|null };
 const windows = [300, 900, 1800, 3600, 21600, 86400] as const;
 const horizon = 86400;
 const PAPER_USD=10;
@@ -36,7 +37,11 @@ export class EchoResearch {
   private nextTick = 0;
   private lastError: string | null = null;
   private readonly maxActive = 64;
-  constructor(private readonly path: string, private readonly notify?: (event:PaperEvent)=>Promise<void>) {}
+  // Forward-only shadow start persists in the existing private research journal.
+  // A restart never reclassifies older BOOST tokens as prospective trials.
+  private strategyCShadowSince:number|null=null;
+  constructor(private readonly path: string, private readonly notify?: (event:PaperEvent)=>Promise<void>,
+    private readonly options: {boostStrategyCShadowEnabled?:boolean} = {}) {}
   async load() {
     try {
       const parsed = JSON.parse(await readFile(this.path,'utf8')) as State;
@@ -44,13 +49,19 @@ export class EchoResearch {
       this.trials = parsed.trials;
       this.onceMints = new Set([...(Array.isArray(parsed.onceMints)?parsed.onceMints:[]),...parsed.trials.map(t=>t.mint)].filter(validMint));
       this.pending=Array.isArray(parsed.pending)?parsed.pending.slice(-250):[];
+      this.strategyCShadowSince=Number.isFinite(parsed.strategyCShadowSince) && Number(parsed.strategyCShadowSince)>0
+        ? Number(parsed.strategyCShadowSince):null;
     } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
+    if(this.options.boostStrategyCShadowEnabled && this.strategyCShadowSince===null){
+      this.strategyCShadowSince=Date.now()/1000;
+      await this.persist();
+    }
   }
   private persist() {
     this.writes = this.writes.catch(() => {}).then(async () => {
       await mkdir(dirname(this.path),{recursive:true,mode:0o700});
       const tmp = this.path+'.tmp';
-      await writeFile(tmp,JSON.stringify({version:1,trials:this.trials,pending:this.pending,onceMints:[...this.onceMints]} satisfies State),{mode:0o600});
+      await writeFile(tmp,JSON.stringify({version:1,trials:this.trials,pending:this.pending,onceMints:[...this.onceMints],strategyCShadowSince:this.strategyCShadowSince} satisfies State),{mode:0o600});
       await rename(tmp,this.path);
     });
     return this.writes;
@@ -164,6 +175,38 @@ export class EchoResearch {
       await this.flush();
     } finally {this.working=false;}
   }
+  private strategyCShadowSummary(){
+    if(!this.options.boostStrategyCShadowEnabled||this.strategyCShadowSince===null)return null;
+    let prospects=0,priced=0,invalid=0,cClosed=0,cOpen=0,cClosedPnl=0,
+      pairedClosed=0,pairedAPnl=0,pairedCPnl=0,partialSales=0;
+    for(const t of this.trials){
+      if(t.caller!=='SOLANA_BOOST'||t.deliveryAt<this.strategyCShadowSince)continue;
+      prospects++;
+      if(!(t.entry!==null&&t.entry>0&&t.entryAt!==null&&t.points.length>=2))continue;
+      const samples=t.points.filter(p=>p.at>=t.entryAt!&&Number.isFinite(p.usd)&&p.usd>0)
+        .map(p=>({at:p.at,priceUsd:p.usd,liquidityUsd:p.liquidityUsd,pool:p.pool}));
+      // Reject unordered, stale or mismatched-pool observations; no price interpolation.
+      const result=replayBoostStrategyC(samples);
+      if(result.status==='INVALID_OBSERVATIONS'){invalid++;continue;}
+      priced++;
+      if(result.exits.some(x=>x.kind==='PARTIAL_75'))partialSales++;
+      if(result.status==='CLOSED'){
+        cClosed++;cClosedPnl+=result.estimatedRealizedPnlUsd;
+        if(t.exitAt!==null&&t.exitPrice!==null){
+          pairedClosed++;
+          pairedAPnl+=paperExitValue(t.entry,t.exitPrice)-PAPER_USD;
+          pairedCPnl+=result.estimatedRealizedPnlUsd;
+        }
+      }else cOpen++;
+    }
+    const usd=(n:number)=>Math.round(n*100)/100;
+    return {mode:'PAPER_ONLY_MARK_PRICE_SHADOW' as const,liveTrading:false as const,
+      executableVerified:false as const,forwardOnlySince:this.strategyCShadowSince,
+      prospects,priced,invalid,cClosed,cOpen,partialSales,
+      cClosedPnlUsd:usd(cClosedPnl),pairedClosed,
+      pairedExistingPnlUsd:usd(pairedAPnl),pairedStrategyCPnlUsd:usd(pairedCPnl),
+      caveat:'Paper estimates; no verified liquidity-adjusted execution and no results for still-open runners'};
+  }
   summary() {
     const counts:Record<string,number>={};
     for (const t of this.trials) counts[t.status]=(counts[t.status]||0)+1;
@@ -207,6 +250,6 @@ export class EchoResearch {
       group.hypotheticalNetPnlUsd=Math.round(group.hypotheticalNetPnlUsd*100)/100;
     return {executionRisk,bySource,paperUsd:PAPER_USD,uniqueTokensReserved:this.onceMints.size,suppressedRepeatBuys:this.suppressedRepeatBuys,estimatedCostBpsPerSide:SIMULATED_COST_BPS_PER_SIDE,closedExits:exits.length,
       closedNetPnlUsd:Math.round(totalPnl*100)/100,total:this.trials.length,counts,active:this.trials.filter(t=>(t.status==='TRACKING'||t.status==='AWAITING_PRICE'||t.status==='EXIT_OBSERVED') && Date.now()/1000-t.deliveryAt<horizon).length,
-      lastError:this.lastError,pendingNotifications:this.pending.length,lastNotified:this.lastNotified,notificationErrors:this.notificationErrors,milestones:Object.fromEntries(multiples.map(n=>[String(n),this.trials.filter(t=>!!t.milestones?.[String(n)]).length])),liveTrading:false,markPriceOnly:true};
+      lastError:this.lastError,pendingNotifications:this.pending.length,lastNotified:this.lastNotified,notificationErrors:this.notificationErrors,strategyCShadow:this.strategyCShadowSummary(),milestones:Object.fromEntries(multiples.map(n=>[String(n),this.trials.filter(t=>!!t.milestones?.[String(n)]).length])),liveTrading:false,markPriceOnly:true};
   }
 }
