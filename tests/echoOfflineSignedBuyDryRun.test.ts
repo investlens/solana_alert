@@ -84,3 +84,19 @@ test('a generated key cannot pass the real Echo signer gate or request a real si
  assert.deepEqual(result,{ok:false,reason:'PINNED_BUY_WALLET_REQUIRED',broadcastAllowed:false});
  assert.equal(f.calls(),0);
 });
+
+test('isolated provider cannot rewrite the admitted BUY message in place',async()=>{
+ const original=Uint8Array.from(message);
+ const provider={
+  publicWallet:mock.publicKey.toBase58(),
+  signTransactionMessageForDryRun:async(raw:Uint8Array)=>{
+   raw[raw.length-1]^=1;
+   return new Uint8Array(edSign(null,Buffer.from(raw),testKey));
+  }
+ };
+ const result=await verifySignedBuyDryRunInBoundary({
+  wallet:mock.publicKey.toBase58(),signer:provider,message:original
+ });
+ assert.deepEqual(result,{ok:false,reason:'SIGNER_MUTATED_MESSAGE',broadcastAllowed:false});
+ assert.deepEqual(original,message);
+});
