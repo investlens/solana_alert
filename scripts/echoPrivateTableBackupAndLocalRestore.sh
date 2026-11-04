@@ -30,8 +30,11 @@ mode="$(stat -c %a "$ECHO_RECOVERY_DIR")"
 [[ "$(psql --version)" == *" 17."* ]] || { echo "PSQL_17_REQUIRED" >&2; exit 2; }
 [[ "$PGHOST" != "localhost" && "$PGHOST" != "127.0.0.1" ]] ||
  { echo "SOURCE_MUST_BE_REMOTE_PRODUCTION" >&2; exit 2; }
-[[ "${ECHO_EXPECTED_SOURCE_HOST:-}" == "$PGHOST" && -n "${ECHO_EXPECTED_SOURCE_HOST:-}" ]] ||
- { echo "EXACT_SOURCE_HOST_ATTESTATION_REQUIRED" >&2; exit 2; }
+# Pin the known Supabase project so this backup cannot silently target a
+# different user's database. Direct-host access is required for this pilot
+# procedure; pooler/IPv4 routing changes need a separate security review.
+[[ "$PGHOST" == "db.spwiqtdxfwjlqftujohm.supabase.co" && "$PGDATABASE" == "postgres" ]] ||
+ { echo "PINNED_SUPABASE_PROJECT_AND_DATABASE_REQUIRED" >&2; exit 2; }
 docker image inspect postgres:17 >/dev/null || { echo "PREPULL_POSTGRES_17_LOCALLY" >&2; exit 2; }
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 dest="$ECHO_RECOVERY_DIR/echo-pre-migration-$stamp"
