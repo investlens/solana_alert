@@ -56,7 +56,7 @@ const research = new EchoResearch(config.statePath+'.research-v1.json',async eve
    reply_markup:{inline_keyboard:[[{text:'📈 Chart',url:'https://dexscreener.com/solana/'+event.mint}]]}})}).then(r=>r.json());
  if(!response?.ok||!Number.isInteger(response.result?.message_id))throw Error('Paper notification unconfirmed');
  console.log('[EchoResearch] NOTIFIED',JSON.stringify({kind:event.kind,mint:event.mint,multiple:event.multiple??null}));
-});
+}, {boostStrategyCShadowEnabled:process.env.ECHO_BOOST_STRATEGY_C_SHADOW_ENABLED==='true'});
 let researchReady = false;
 try { await research.load(); researchReady = true; }
 catch { console.warn('[EchoResearch] STARTUP_DISABLED: research state unavailable, alerts unaffected'); }
