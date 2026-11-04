@@ -43,16 +43,25 @@ export async function verifySignedBuyDryRunInBoundary(args:{
  const stop=(reason:string):EchoOfflineSignedBuyResult=>({ok:false,reason,broadcastAllowed:false});
  if(!args.wallet||args.signer.publicWallet!==args.wallet||args.message.length<20||args.message.length>2000)
   return stop('SIGNER_IDENTITY_OR_MESSAGE_INVALID');
+ // Pin a private byte-for-byte copy of the admitted message before invoking
+ // the isolated provider. A malicious/broken signer must never mutate the
+ // caller's authenticated transaction message without detection.
+ const pinnedMessage=Uint8Array.from(args.message);
+ const signerMessage=Uint8Array.from(pinnedMessage);
  let signature:Uint8Array;
- try{signature=await args.signer.signTransactionMessageForDryRun(args.message);}
+ try{signature=await args.signer.signTransactionMessageForDryRun(signerMessage);}
  catch{return stop('SIGNER_UNAVAILABLE');}
- // The bytes are intentionally not exported. Best-effort wipe local copies;
- // secure signer backends must also ensure temporary signing objects are scrubbed.
- const verified=cryptoVerify(args.message,signature,args.wallet);
+ const unchanged=Buffer.from(signerMessage).equals(Buffer.from(pinnedMessage)) &&
+   Buffer.from(args.message).equals(Buffer.from(pinnedMessage));
+ // Best-effort wipe temporary copies. Never export signature, message bytes
+ // or signer secrets into telemetry, logs or coordinator responses.
+ try{signerMessage.fill(0);}catch{}
+ if(!unchanged){try{signature.fill(0);}catch{};return stop('SIGNER_MUTATED_MESSAGE');}
+ const verified=cryptoVerify(pinnedMessage,signature,args.wallet);
  try{signature.fill(0);}catch{}
  if(!verified)return stop('SIGNATURE_MISMATCH');
  return {ok:true,mode:'SIGNED_LOCALLY_DISCARDED',
-  messageSha256:createHash('sha256').update(args.message).digest('hex'),
+  messageSha256:createHash('sha256').update(pinnedMessage).digest('hex'),
   signerVerified:true,signatureDiscarded:true,broadcastAllowed:false};
 }
 
