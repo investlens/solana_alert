@@ -3,6 +3,7 @@ name: Echo reliability checks
 on:
   push:
     branches:
+      - feat/echo-strategy-c-shadow-live-base-20261104
       - feat/echo-slingoor-livebuy-safety-20261027
       - feat/echo-paper-execution-safety-20261030
       - fix/echo-fresh-adaptive-budget-20261030
