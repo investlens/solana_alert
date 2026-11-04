@@ -44,7 +44,11 @@ test('opt-in Strategy C reuses research samples, persists activation, excludes h
   assert.ok(done);
   assert.equal(done.cClosed,1);
   assert.equal(done.partialSales,1);
-  assert.equal(done.pairedClosed,0);
+  // The existing full-position trailing stop also exits at 1.1; both
+  // strategies are now comparable on this same closed paper position.
+  assert.equal(done.pairedClosed,1);
+  assert.ok(done.pairedExistingPnlUsd>0);
+  assert.ok(done.pairedStrategyCPnlUsd>0);
   assert.ok(done.cClosedPnlUsd>0);
   const prior=JSON.parse(await readFile(file,'utf8'));
   assert.equal(prior.strategyCShadowSince,started/1000);
