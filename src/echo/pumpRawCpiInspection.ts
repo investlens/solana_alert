@@ -7,6 +7,7 @@
  */
 import {createHash} from 'node:crypto';
 import {VersionedTransaction} from '@solana/web3.js';
+import {ECHO_EXPECTED_EXECUTION_WALLET} from './executionWallet.js';
 export const ECHO_CPI_INSPECTION_SIGNING_ENABLED=false as const;
 export type EchoRpcCpiSnapshot={
  exactUnsignedSha256:string;
@@ -42,6 +43,8 @@ export function inspectEchoPumpRawCpi(input:{
     tx.message.header.numRequiredSignatures!==1||
     tx.signatures.length!==1||tx.signatures[0].some(x=>x!==0))
   return fail('UNTRUSTED_UNSIGNED_TRANSACTION');
+ if(tx.message.staticAccountKeys[0]?.toBase58()!==ECHO_EXPECTED_EXECUTION_WALLET)
+  return fail('UNTRUSTED_CPI_FEE_PAYER');
  if(s.simulationErr!==null||!Number.isSafeInteger(s.contextSlot)||s.contextSlot<=0)
   return fail('SIMULATION_SUCCESS_AND_SLOT_REQUIRED');
  // A backend cannot independently audit CPI without all account keys,
@@ -56,6 +59,10 @@ export function inspectEchoPumpRawCpi(input:{
     [...s.preBalances,...s.postBalances].some(
      v=>!Number.isSafeInteger(v as number)||(v as number)<0))
   return fail('MISSING_CPI_BALANCE_VECTOR');
+ // A complete raw balance-vector claim must show a positive change for the
+ // pinned payer. This still does NOT establish all token/CPI fee semantics.
+ if((s.postBalances[0] as number)>=(s.preBalances[0] as number))
+  return fail('NO_OBSERVED_FEE_PAYER_DEBIT');
  if(!Array.isArray(s.innerInstructions))
   return fail('MISSING_CPI_INNER_INSTRUCTIONS');
  const top=tx.message.compiledInstructions.length;
@@ -76,7 +83,8 @@ export function inspectEchoPumpRawCpi(input:{
       Number(ins.programIdIndex)>=count||
       !Array.isArray(ins.accounts)||ins.accounts.some(
         a=>!Number.isSafeInteger(a)||Number(a)<0||Number(a)>=count)||
-      typeof ins.data!=='string'||ins.data.length>4096)
+      typeof ins.data!=='string'||ins.data.length>4096||
+      (ins.data.length>0&&!/^[1-9A-HJ-NP-Za-km-z]+$/.test(ins.data)))
     return fail('INVALID_CPI_INSTRUCTION');
    innerCount++;
    if(innerCount>100)return fail('EXCESSIVE_CPI_INSTRUCTIONS');
