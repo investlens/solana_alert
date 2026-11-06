@@ -55,7 +55,7 @@ create or replace function public.echo_reserve_five_usd_distinct_call(
 returns text language plpgsql security invoker set search_path=''
 as $$
 declare v_debit bigint; v_cents bigint; v_reserved bigint; v_exit_reserves bigint;
- v_active_lots bigint;
+
 begin
  if p_execution_wallet is distinct from
      '8ndw7DJ6hyZBm1PD3JJMF8G4PD5CJhDCCUK13ECL2pgQ'
@@ -76,7 +76,7 @@ begin
        p_balance_verified_at>pg_catalog.now() or
        p_balance_verified_at<pg_catalog.now()-interval '3 seconds'
     or p_market_cap_usd is null or p_market_cap_usd<=0
-    or p_market_cap_usd>500000
+    or p_market_cap_usd>=100000
     or p_market_cap_verified_at is null
     or p_market_cap_verified_at>pg_catalog.now()
     or p_market_cap_verified_at<pg_catalog.now()-interval '2 seconds'
@@ -103,13 +103,11 @@ begin
           'reserved','signed','unknown','submitted','expired_unresolved')
         then all_in_lamports else 0 end),0),
         coalesce(sum(case when state not in ('failed_preflight','closed')
-          then sell_reserve_lamports else 0 end),0),
-        count(*) filter (where state not in ('failed_preflight','closed'))
- into v_reserved,v_exit_reserves,v_active_lots from public.echo_per_call_buy_intents
+          then sell_reserve_lamports else 0 end),0)
+ into v_reserved,v_exit_reserves from public.echo_per_call_buy_intents
  where execution_wallet=p_execution_wallet and position_closed_at is null;
- -- Atomic wallet-wide maximum of two live/pending lots. Advisory transaction
- -- lock serializes simultaneous independent calls before count and insert.
- if v_active_lots>=2 then return 'TWO_ACTIVE_OR_PENDING_LOTS_LIMIT';end if;
+ -- No arbitrary lot-count cap. Advisory wallet lock serializes concurrent
+ -- calls before reserving every pending debit and unclosed SELL reserve.
  -- The real existing legacy Echo table does NOT have position_closed_at.
  -- Until all legacy rows have been independently reconciled, fail closed if
  -- this wallet has any legacy intent; do not assume an old confirmed BUY sold.
