@@ -40,3 +40,22 @@ Official PumpSwap two-hop SDK build **succeeded** with input **0.025 SOL**, six 
 7. Explicit owner approval for wallet funding and one bounded live test, and separate approval before unattended trade broadcast.
 
 **Release status: BLOCKED.** No automatic BUY or real-money transaction has been activated.
+
+## Read-only dynamic $5 scenario diagnostic — 2026-11-06 05:06 UTC
+
+GitHub Actions job: https://github.com/investlens/solana_alert/actions/runs/42166418763. Runs only on an explicitly tagged commit; action deliberately exits nonzero when no **successful funded-state simulation** exists.
+
+Official SDK `@pump-fun/pump-sdk/swap@4.3.1` read pool/fee state, compiled 6 unsigned instructions, then recalculated its **SOL input** after conservative ATA rent, network fee and a declared extra CPI *assumption*. It **rebuilt** the quote and exact unsigned transaction for that input instead of treating the old fixed 0.025 SOL order as a $5 order.
+
+- Illustrative input FX **$200/SOL** (20,000 cents per SOL), supplied by the test workflow. **Not a verified market-price feed.**
+- Provisional CPI allowance **1,000,000 lamports**; **not independently verified**.
+- Exact new SOL principal: **12,290,680 lamports** (0.01229068 SOL).
+- New quote output raw: `5254832974971`; quoted minimum output raw `4729349677473` (10% slippage scenario).
+- Network fee 5,000 lamports, 2 missing ATA accounts each budgeted at 5,852,160 lamports.
+- Fee/rent/principal subtotal: **24,000,000 lamports**; plus assumed CPI buffer: **25,000,000 lamports**, exactly $5 at hypothetical FX. This is NOT a complete CPI audit or safe transfer amount.
+- Unsigned transaction SHA-256: `4dea85dc6d5d8602209876d1dbf519eea4b32346ed4100e35f5e18c9bca23368`.
+- Zero SOL actual wallet; `simulationAttempted=false`, `fullWalletDebitVerified=false`, `signed=false`, `broadcast=false`; nine read-only RPC calls.
+- **No Phantom manual-SELL reserve priced**. The $5 cap is an entry cap, not a wallet-funding estimate.
+- The new unsigned simulator explicitly requests fee-payer post-simulation account state via RPC; it fails closed on missing measured payer balance. That route has not yet produced results from a funded wallet.
+
+The next stage requires actual current FX attestation, independent CPI/ATA proof, Phantom exit reserve, and funded-state RPC simulation. Do **NOT** transfer 0.025 SOL based on this demonstration. Database restore remains operator-only; current connector read-only inspection is not an off-site pg_dump and does not qualify as a recovery drill.
