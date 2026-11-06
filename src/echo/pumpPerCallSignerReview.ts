@@ -117,6 +117,12 @@ export async function reviewEchoPumpPerCallSignerNoBroadcast(args:{
  // alone cannot ever admit a PumpSwap signer review.
  const simulation=auditEchoPumpSimulatedWalletDebit(trusted.debitEvidence);
  if(!simulation.ok)return deny('PUMP_SIMULATED_DEBIT_UNVERIFIED');
+ // A reservation below $5 is not enough: its booked USD amount must
+ // equal the independently audited all-in amount for THESE exact bytes.
+ // Otherwise a stale/understated DB reservation could pass signer review.
+ if(!Number.isSafeInteger(Number(simulation.allInCents))||
+    row.allInCents!==Number(simulation.allInCents))
+   return deny('PUMP_RESERVED_USD_DEBIT_MISMATCH');
  if(simulation.unsignedSha256!==r.transactionSha256||
     simulation.plannedWalletDebitUpperBoundLamports!==
       (BigInt(trusted.call.principalLamports)+
