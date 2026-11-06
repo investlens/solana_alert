@@ -50,10 +50,11 @@ create or replace function public.echo_reserve_five_usd_distinct_call(
  p_amount_lamports bigint,p_exact_fee_lamports bigint,
  p_account_rent_lamports bigint,p_extra_cpi_lamports bigint,
  p_exit_reserve_lamports bigint,p_sol_usd_cents bigint,
- p_spendable_wallet_lamports bigint,p_balance_verified_at timestamptz)
+ p_spendable_wallet_lamports bigint,p_balance_verified_at timestamptz,
+ p_market_cap_usd bigint,p_market_cap_verified_at timestamptz)
 returns text language plpgsql security invoker set search_path=''
 as $$
-declare v_debit bigint; v_cents bigint; v_reserved bigint; v_open bigint;
+declare v_debit bigint; v_cents bigint; v_reserved bigint;
 begin
  if p_execution_wallet is distinct from
      '8ndw7DJ6hyZBm1PD3JJMF8G4PD5CJhDCCUK13ECL2pgQ'
@@ -89,8 +90,8 @@ begin
    caller_wallet=p_caller_wallet and source_signature=p_source_signature)
  then return 'DUPLICATE_SOURCE_TRANSACTION';end if;
  -- Pending/UNKNOWN messages remain occupied until independently reconciled.
- select count(*),coalesce(sum(all_in_lamports),0)
- into v_open,v_reserved from public.echo_per_call_buy_intents
+ select coalesce(sum(all_in_lamports),0)
+ into v_reserved from public.echo_per_call_buy_intents
  where execution_wallet=p_execution_wallet
    and position_closed_at is null and state<>'failed_preflight';
  -- Also account for older outstanding BUYs until all positions migrate.
@@ -98,7 +99,6 @@ begin
      where execution_wallet=p_execution_wallet and position_closed_at is null
       and state<>'failed_preflight')
  then return 'LEGACY_ACTIVE_POSITIONS_REQUIRE_RECONCILIATION';end if;
- if v_open>=2 then return 'TWO_ACTIVE_LOTS_LIMIT';end if;
  if p_spendable_wallet_lamports < v_reserved+v_debit+p_exit_reserve_lamports
  then return 'INSUFFICIENT_WALLET_BALANCE_AND_EXIT_RESERVE';end if;
  insert into public.echo_per_call_buy_intents(
@@ -114,7 +114,7 @@ exception when unique_violation then return 'DUPLICATE_SOURCE_TRANSACTION';
 end;
 $$;
 revoke all on function public.echo_reserve_five_usd_distinct_call(
- text,text,text,text,bigint,bigint,bigint,bigint,bigint,bigint,bigint,timestamptz)
+ text,text,text,text,bigint,bigint,bigint,bigint,bigint,bigint,bigint,timestamptz,bigint,timestamptz)
  from public, anon, authenticated;
 grant execute on function public.echo_reserve_five_usd_distinct_call(
  text,text,text,text,bigint,bigint,bigint,bigint,bigint,bigint,bigint,timestamptz)
