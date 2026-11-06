@@ -16,7 +16,8 @@ export type EchoSignerRpcProbeResult=
  |{ok:true;mode:'SIGNER_RPC_PROVISIONAL_ONLY';unsignedSha256:string;
    payerBalanceBeforeLamports:string;payerBalanceAfterSimulationLamports:string;
    observedDeltaLamports:string;networkFeeEstimateLamports:string;
-   observedAtMs:number;fullCpiAndExitProven:false;
+   observedAtMs:number;simulationContextSlot:number;innerInstructionCount:number;
+   fullCpiAndExitProven:false;
    signingAllowed:false;broadcastAllowed:false}
  |{ok:false;reason:string;signingAllowed:false;broadcastAllowed:false};
 export type EchoSignerRpcReadOnly={
@@ -27,7 +28,7 @@ export type EchoSignerRpcReadOnly={
   sigVerify:false;replaceRecentBlockhash:true;commitment:'confirmed';
   innerInstructions:true;
   accounts:{encoding:'base64';addresses:string[]}
- }):Promise<{value:{err:unknown;innerInstructions?:unknown;
+ }):Promise<{context:{slot:number};value:{err:unknown;innerInstructions?:unknown;
   accounts?:({lamports:number;owner:string}|null)[]|null}}>;
 };
 const deny=(reason:string):EchoSignerRpcProbeResult=>({
@@ -79,6 +80,37 @@ export async function probeSignerOwnedPumpRpc(input:{
   // never evidence that the transaction has no CPI debits.
   if(!Array.isArray(result.value.innerInstructions))
    return deny('MISSING_SIGNER_OWNED_CPI_TRACE');
+  if(!Number.isSafeInteger(result.context?.slot)||result.context.slot<=0)
+   return deny('MISSING_SIMULATION_CONTEXT_SLOT');
+  // Bind every returned inner group to a valid compiled instruction index.
+  // This is structure validation only: it does not decode CPI effects or
+  // prove that the simulated slot shares state with the balance read.
+  let count=0;
+  const seen=new Set<number>();
+  for(const group of result.value.innerInstructions){
+   if(!group||typeof group!=='object')
+    return deny('MALFORMED_SIGNER_CPI_GROUP');
+   const g=group as Record<string,unknown>;
+   if(!Number.isSafeInteger(g.index)||Number(g.index)<0||
+      Number(g.index)>=tx.message.compiledInstructions.length||
+      seen.has(Number(g.index))||!Array.isArray(g.instructions))
+    return deny('MALFORMED_SIGNER_CPI_GROUP');
+   seen.add(Number(g.index));
+   for(const ix of g.instructions){
+    if(!ix||typeof ix!=='object')return deny('MALFORMED_SIGNER_CPI_INSTRUCTION');
+    const item=ix as Record<string,unknown>;
+    if(!Number.isSafeInteger(item.programIdIndex)||
+       Number(item.programIdIndex)<0||
+       Number(item.programIdIndex)>=tx.message.staticAccountKeys.length||
+       !Array.isArray(item.accounts)||
+       item.accounts.some(i=>!Number.isSafeInteger(i)||Number(i)<0||
+          Number(i)>=tx.message.staticAccountKeys.length)||
+       typeof item.data!=='string'||item.data.length>4096)
+     return deny('MALFORMED_SIGNER_CPI_INSTRUCTION');
+    count++;
+    if(count>100)return deny('EXCESSIVE_SIGNER_CPI_TRACE');
+   }
+  }
   const after=result.value.accounts?.[0];
   if(!after||after.owner!==SystemProgram.programId.toBase58()||
      !Number.isSafeInteger(after.lamports)||after.lamports<0||
@@ -92,7 +124,8 @@ export async function probeSignerOwnedPumpRpc(input:{
    payerBalanceAfterSimulationLamports:String(after.lamports),
    observedDeltaLamports:String(delta),
    networkFeeEstimateLamports:String(fee.value),
-   observedAtMs:input.nowMs,fullCpiAndExitProven:false,
+   observedAtMs:input.nowMs,simulationContextSlot:result.context.slot,
+   innerInstructionCount:count,fullCpiAndExitProven:false,
    signingAllowed:false,broadcastAllowed:false};
  }catch{return deny('SIGNER_RPC_READ_OR_SIMULATION_UNAVAILABLE');}
 }
