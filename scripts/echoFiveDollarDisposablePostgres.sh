@@ -26,15 +26,17 @@ mint='So11111111111111111111111111111111111111113'
 sig1="$(printf '2%.0s' {1..64})"
 sig2="$(printf '3%.0s' {1..64})"
 sig3="$(printf '4%.0s' {1..64})"
+sig4="$(printf '7%.0s' {1..64})"
+sig5="$(printf '8%.0s' {1..64})"
 tx1="$(printf '5%.0s' {1..64})"
 tx2="$(printf '6%.0s' {1..64})"
 sha="$(printf 'a%.0s' {1..64})"
 finger="$(printf 'b%.0s' {1..64})"
 reserve(){
- local sig="$1"
+ local sig="$1" marketcap="${2:-450000}" balance="${3:-100000000}"
  run "select public.echo_reserve_five_usd_distinct_call(
  '$wallet','$caller','$sig','$mint',
- 20000000,50000,2000000,100000,2000000,20000,100000000,now());"
+ 20000000,50000,2000000,100000,2000000,20000,$balance,now(),$marketcap,now());"
 }
 claim(){
  local sig="$1" tx="$2"
@@ -58,26 +60,32 @@ fi
 [[ "$(reserve "$sig1")" == DUPLICATE_SOURCE_TRANSACTION ]] ||
  { echo "REPLAY_NOT_REJECTED";exit 1; }
 [[ "$(reserve "$sig2")" == RESERVED ]] || { echo "SAME_MINT_NEW_CALL_FAILED";exit 1; }
-[[ "$(reserve "$sig3")" == TWO_ACTIVE_LOTS_LIMIT ]] ||
- { echo "TWO_LOTS_CAP_BYPASSED";exit 1; }
+[[ "$(reserve "$sig3")" == RESERVED ]] ||
+ { echo "THIRD_ACTIVE_LOT_REJECTED";exit 1; }
+[[ "$(reserve "$sig4" 500000)" == RESERVED ]] ||
+ { echo "EXACT_500K_MARKET_CAP_REJECTED";exit 1; }
+[[ "$(reserve "$sig5" 500001)" == INVALID_OR_STALE_ATTESTATION ]] ||
+ { echo "ABOVE_500K_MARKET_CAP_NOT_REJECTED";exit 1; }
+[[ "$(reserve "$sig5" 450000)" == INSUFFICIENT_WALLET_BALANCE_AND_EXIT_RESERVE ]] ||
+ { echo "WALLET_BALANCE_CAP_BYPASSED";exit 1; }
 [[ "$(claim "$sig1" "$tx1")" == CLAIMED ]] || { echo "FIRST_ONESHOT_FAILED";exit 1; }
 [[ "$(claim "$sig1" "$tx1")" == ALREADY_CLAIMED_OR_UNRESOLVED ]] ||
  { echo "ONESHOT_REPLAY_NOT_BLOCKED";exit 1; }
 [[ "$(claim "$sig2" "$tx2")" == CLAIMED ]] || { echo "SECOND_ONESHOT_FAILED";exit 1; }
 [[ "$(run "select state from public.echo_per_call_buy_intents where source_signature='$sig1';")" == unknown ]] ||
  { echo "UNKNOWN_OUTCOME_NOT_PRESERVED";exit 1; }
-[[ "$(run "select count(*) from public.echo_per_call_buy_intents where mint='$mint';")" == 2 ]] ||
- { echo "TWO_DISTINCT_CALLS_NOT_STORED";exit 1; }
+[[ "$(run "select count(*) from public.echo_per_call_buy_intents where mint='$mint';")" == 4 ]] ||
+ { echo "FOUR_DISTINCT_CALLS_NOT_STORED";exit 1; }
 [[ "$(run "select public.echo_reserve_five_usd_distinct_call(
  '$wallet','$caller','$sig3','So11111111111111111111111111111111111111114',
- 24000000,50000,2000000,100000,2000000,20000,100000000,now());")" == FIVE_DOLLAR_ALL_IN_CAP ]] ||
+ 24000000,50000,2000000,100000,2000000,20000,100000000,now(),450000,now());")" == FIVE_DOLLAR_ALL_IN_CAP ]] ||
  { echo "USD_CAP_NOT_ENFORCED";exit 1; }
 acl="$(run "select
  has_table_privilege('anon','public.echo_per_call_buy_intents','INSERT'),
  has_table_privilege('authenticated','public.echo_per_call_buy_intents','SELECT'),
- has_function_privilege('anon','public.echo_reserve_five_usd_distinct_call(text,text,text,text,bigint,bigint,bigint,bigint,bigint,bigint,bigint,timestamptz)','EXECUTE'),
- has_function_privilege('service_role','public.echo_reserve_five_usd_distinct_call(text,text,text,text,bigint,bigint,bigint,bigint,bigint,bigint,bigint,timestamptz)','EXECUTE');")"
+ has_function_privilege('anon','public.echo_reserve_five_usd_distinct_call(text,text,text,text,bigint,bigint,bigint,bigint,bigint,bigint,bigint,timestamptz,bigint,timestamptz)','EXECUTE'),
+ has_function_privilege('service_role','public.echo_reserve_five_usd_distinct_call(text,text,text,text,bigint,bigint,bigint,bigint,bigint,bigint,bigint,timestamptz,bigint,timestamptz)','EXECUTE');")"
 [[ "$acl" == 'f|f|f|t' ]] || { echo "ROLE_GRANTS_UNSAFE";exit 1; }
 [[ "$(run "select relrowsecurity from pg_class where oid='public.echo_per_call_buy_intents'::regclass;")" == t ]] ||
  { echo "RLS_NOT_ENABLED";exit 1; }
-echo "ECHO_FIVE_USD_DISPOSABLE_PG17=PASS;CONCURRENT_SOURCE_REPLAY=BLOCKED;REPEAT_MINT=PASS;SOURCE_REPLAY=BLOCKED;TWO_LOTS=PASS;ONE_SHOT=PASS;USD_CAP=PASS;RLS_AND_ACL=PASS;BROADCAST=OFF"
+echo "ECHO_FIVE_USD_DISPOSABLE_PG17=PASS;CONCURRENT_SOURCE_REPLAY=BLOCKED;REPEAT_MINT=PASS;SOURCE_REPLAY=BLOCKED;MULTIPLE_OPEN_LOTS=PASS;MARKET_CAP_500K=PASS;WALLET_BALANCE=ENFORCED;ONE_SHOT=PASS;USD_CAP=PASS;RLS_AND_ACL=PASS;BROADCAST=OFF"
