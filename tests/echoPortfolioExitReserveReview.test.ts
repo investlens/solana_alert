@@ -14,7 +14,7 @@ function lot(n:number):EchoOpenManualExitLot{
    walletTokenBalanceRaw:'900000',quotedSellInputRaw:'900000',
    minimumSolOutputLamports:'100000',networkAndPriorityFeeUpperLamports:'10000',
    accountRentUpperLamports:'2000000',extraCpiUpperLamports:'100000',
-   walletSolBalanceLamports:'10000000',existingReservedExitLamports:'0',
+   walletSolBalanceLamports:'6000000',existingReservedExitLamports:'0',
    quoteIndependentlyFetched:true,feeAndCpiIndependentlyBounded:true,
    poolAndTokenOwnersVerified:true,exactManualTransactionPreviewVerified:true}};
 }
@@ -33,6 +33,8 @@ test('duplicates, missing quotes, mismatched mint and insufficient reserve fail'
  for(const change of [
   {actualWalletBalanceLamports:'5219999'},
   {openLots:[lot(1),lot(1)]},
+  {openLots:[lot(1),lot(2),{...lot(2),sourceSignature:'4'.repeat(64)}]},
+  {openLots:[lot(1),{...lot(2),quote:{...lot(2).quote!,walletSolBalanceLamports:'9999999'}}]},
   {openLots:[lot(1),{...lot(2),quote:null}]},
   {openLots:[lot(1),{...lot(2),mint:lot(1).mint}]},
   {openLots:[lot(1),{...lot(2),quote:{...lot(2).quote!,existingReservedExitLamports:'100'}}]},
