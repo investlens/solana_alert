@@ -19,6 +19,8 @@ export function createEchoFiveDollarCallStore(client:SupabaseClient){
     if(!Number.isSafeInteger(Number(raw)))
       return {reserved:false,reason:'UNSAFE_INTEGER_AT_DATABASE_BOUNDARY',executable:false};
   }
+  if(!Number.isSafeInteger(input.marketCapUsd))
+    return {reserved:false,reason:'MARKET_CAP_MUST_BE_VERIFIED_INTEGER_USD',executable:false};
   try{
    const {data,error}=await client.rpc('echo_reserve_five_usd_distinct_call',{
     p_execution_wallet:input.executionWallet,
@@ -32,7 +34,9 @@ export function createEchoFiveDollarCallStore(client:SupabaseClient){
     p_exit_reserve_lamports:Number(input.sellReserveLamports),
     p_sol_usd_cents:Number(input.solUsdPriceCents),
     p_spendable_wallet_lamports:Number(input.availableWalletLamports),
-    p_balance_verified_at:new Date(input.balanceVerifiedAtMs).toISOString()
+    p_balance_verified_at:new Date(input.balanceVerifiedAtMs).toISOString(),
+    p_market_cap_usd:input.marketCapUsd,
+    p_market_cap_verified_at:new Date(input.marketCapObservedAtMs).toISOString()
    });
    if(error||typeof data!=='string')return {reserved:false,reason:'DATABASE_UNAVAILABLE',executable:false};
    if(data==='RESERVED')return {reserved:true,key:decision.intentKey,executable:false};
