@@ -11,6 +11,8 @@ import {reviewEchoPumpPerCallSignerNoBroadcast,
  ECHO_PUMP_SIGNER_REVIEW_CAN_SIGN,ECHO_PUMP_SIGNER_REVIEW_CAN_BROADCAST
 } from '../src/echo/pumpPerCallSignerReview.js';
 import type {EchoFiveDollarCall} from '../src/echo/fiveDollarCallPolicy.js';
+import {screenEchoFiveDollarCall} from '../src/echo/fiveDollarCallPolicy.js';
+import {prepareEchoPerCallNoBroadcast} from '../src/echo/perCallNoBroadcastCoordinator.js';
 import type {EchoPumpDebitEvidence} from '../src/echo/pumpSimulatedDebitEvidence.js';
 const wallet='8ndw7DJ6hyZBm1PD3JJMF8G4PD5CJhDCCUK13ECL2pgQ';
 const caller=SLINGOOR_WALLET,now=1800000000000;
@@ -236,4 +238,55 @@ test('two existing live lots block per-call signer admission before durable nonc
  assert.equal(result.signingAllowed,false);
  assert.equal(result.broadcastAllowed,false);
  assert.equal(nonceConsumed,0);
+});
+
+test('synthetic caller -> atomic reservation -> authenticated signer review is no-broadcast and replay-safe',async()=>{
+ const captured:string[]=[];
+ let reserved=false;
+ let consumed=0;
+ const nonces=new Set<string>();
+ const source={getVerifiedBuyAndQuote:async()=>({
+  call,chainAtMs:now-1000,websocketObservedAtMs:now-700,verifiedAtMs:now-300
+ })};
+ const result=await prepareEchoPerCallNoBroadcast({
+  source,
+  store:{reserve:async(candidate:EchoFiveDollarCall)=>{
+   const decision=screenEchoFiveDollarCall(candidate);
+   assert.equal(decision.eligible,true);
+   if(!decision.eligible)throw Error('invalid candidate');
+   reserved=true;captured.push(decision.intentKey);
+   return {reserved:true as const,key:decision.intentKey,executable:false as const};
+  }},
+  now:()=>now,manualAutoBuyEnabled:true
+ });
+ assert.equal(result.reserved,true);
+ assert.equal(result.executable,false);
+ assert.equal(result.broadcastAllowed,false);
+ assert.equal(result.timing?.submittedAtMs,null);
+ assert.equal(result.timing?.signedAtMs,null);
+ assert.equal(result.timing?.chainToReservedMs,1000);
+ assert.equal(reserved,true);
+ assert.deepEqual(captured,[request.reservationKey]);
+ const x=input();
+ x.reservationReader.getByCall=async(w,sig)=>{
+  assert.equal(w,wallet);
+  assert.equal(sig,request.sourceSignature);
+  return reserved?row:null;
+ };
+ x.nonceStore.consumeOnce=async(nonce:string)=>{
+  consumed++;
+  if(nonces.has(nonce))return false;
+  nonces.add(nonce);return true;
+ };
+ const first=await reviewEchoPumpPerCallSignerNoBroadcast(x);
+ assert.equal(first.ok,true,JSON.stringify(first));
+ assert.equal(first.signingAllowed,false);
+ assert.equal(first.broadcastAllowed,false);
+ const second=await reviewEchoPumpPerCallSignerNoBroadcast(x);
+ assert.deepEqual(second,{
+  ok:false,reason:'NONCE_ALREADY_CONSUMED',
+  signingAllowed:false,broadcastAllowed:false
+ });
+ assert.equal(consumed,2);
+ // This test does not use a real RPC, production DB, wallet key or broadcaster.
 });
