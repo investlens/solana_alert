@@ -25,8 +25,10 @@ const stub=(override:{balance?:number;fee?:number|null;after?:number|null;
    calls.simulation++;
    assert.equal(conf.sigVerify,false);
    assert.equal(conf.replaceRecentBlockhash,true);
+   assert.equal(conf.innerInstructions,true);
    assert.deepEqual(conf.accounts.addresses,[wallet]);
    return {value:{err:override.err===undefined?null:override.err,
+    innerInstructions:[],
     accounts:[override.after===null?null:{
      lamports:override.after??80000000,
      owner:SystemProgram.programId.toBase58()}]}};
