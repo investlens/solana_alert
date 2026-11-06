@@ -16,18 +16,23 @@ const sha=createHash('sha256').update(tx).digest('hex');
 const now=1800000000000;
 const stub=(override:{balance?:number;fee?:number|null;after?:number|null;
  err?:unknown;throwRpc?:boolean;contextSlot?:number;balanceSlot?:number;
+ feeSlot?:number;blockhashSlot?:number;blockhashValid?:boolean;
  innerInstructions?:unknown}={}):{rpc:EchoSignerRpcReadOnly;calls:{balance:number;fee:number;simulation:number}}=>{
  const calls={balance:0,fee:0,simulation:0};
  const rpc:EchoSignerRpcReadOnly={
   async getBalanceAndContext(){calls.balance++;if(override.throwRpc)throw Error('private error');
    return {context:{slot:override.balanceSlot??12344},value:override.balance??100000000};},
-  async getFeeForMessage(){calls.fee++;return {value:override.fee===undefined?5000:override.fee};},
+  async getFeeForMessage(){calls.fee++;return {context:{slot:override.feeSlot??12344},
+   value:override.fee===undefined?5000:override.fee};},
+  async isBlockhashValid(){return {context:{slot:override.blockhashSlot??12344},
+   value:override.blockhashValid??true};},
   async simulateTransaction(_tx,conf){
    calls.simulation++;
    assert.equal(conf.sigVerify,false);
    assert.equal(conf.replaceRecentBlockhash,false);
    assert.equal(conf.innerInstructions,true);
-   assert.equal(conf.minContextSlot,override.balanceSlot??12344);
+   assert.equal(conf.minContextSlot,Math.max(override.balanceSlot??12344,
+    override.feeSlot??12344,override.blockhashSlot??12344));
    assert.deepEqual(conf.accounts.addresses,[wallet]);
    return {context:{slot:override.contextSlot??12345},
     value:{err:override.err===undefined?null:override.err,
@@ -57,6 +62,8 @@ test('exact signer-owned simulation gives provisional observed debit but never a
 test('bad simulation context and malformed CPI traces fail closed',async()=>{
  for(const change of [
   {contextSlot:0},{contextSlot:12343},{balanceSlot:0},
+  {feeSlot:12343},{blockhashSlot:12343},{blockhashValid:false},
+  {feeSlot:12346},{blockhashSlot:12346},
   {innerInstructions:null},
   {innerInstructions:[{index:99,instructions:[]}]},
   {innerInstructions:[{index:0,instructions:[]},{index:0,instructions:[]}]},
