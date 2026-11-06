@@ -88,22 +88,22 @@ fi
 [[ "$(reserve "$sig1")" == DUPLICATE_SOURCE_TRANSACTION ]] ||
  { echo "REPLAY_NOT_REJECTED";exit 1; }
 [[ "$(reserve "$sig2")" == RESERVED ]] || { echo "SAME_MINT_NEW_CALL_FAILED";exit 1; }
-[[ "$(reserve "$sig3")" == RESERVED ]] ||
- { echo "THIRD_ACTIVE_LOT_REJECTED";exit 1; }
-[[ "$(reserve "$sig4" 500000)" == RESERVED ]] ||
- { echo "EXACT_500K_MARKET_CAP_REJECTED";exit 1; }
+[[ "$(reserve "$sig3")" == TWO_ACTIVE_OR_PENDING_LOTS_LIMIT ]] ||
+ { echo "THIRD_ACTIVE_LOT_WAS_NOT_REJECTED";exit 1; }
+[[ "$(reserve "$sig4" 500000)" == TWO_ACTIVE_OR_PENDING_LOTS_LIMIT ]] ||
+ { echo "EXACT_500K_STILL_MUST_RESPECT_TWO_LOT_LIMIT";exit 1; }
 [[ "$(reserve "$sig5" 500001)" == INVALID_OR_STALE_ATTESTATION ]] ||
  { echo "ABOVE_500K_MARKET_CAP_NOT_REJECTED";exit 1; }
-[[ "$(reserve "$sig5" 450000)" == INSUFFICIENT_WALLET_BALANCE_AND_EXIT_RESERVE ]] ||
- { echo "PENDING_WALLET_SOLVENCY_GATE_BYPASSED";exit 1; }
+[[ "$(reserve "$sig5" 450000)" == TWO_ACTIVE_OR_PENDING_LOTS_LIMIT ]] ||
+ { echo "PENDING_POSITION_CAP_WAS_BYPASSED";exit 1; }
 [[ "$(claim "$sig1" "$tx1")" == CLAIMED ]] || { echo "FIRST_ONESHOT_FAILED";exit 1; }
 [[ "$(claim "$sig1" "$tx1")" == ALREADY_CLAIMED_OR_UNRESOLVED ]] ||
  { echo "ONESHOT_REPLAY_NOT_BLOCKED";exit 1; }
 [[ "$(claim "$sig2" "$tx2")" == CLAIMED ]] || { echo "SECOND_ONESHOT_FAILED";exit 1; }
 [[ "$(run "select state from public.echo_per_call_buy_intents where source_signature='$sig1';")" == unknown ]] ||
  { echo "UNKNOWN_OUTCOME_NOT_PRESERVED";exit 1; }
-[[ "$(run "select count(*) from public.echo_per_call_buy_intents where mint='$mint';")" == 4 ]] ||
- { echo "FOUR_DISTINCT_CALLS_NOT_STORED";exit 1; }
+[[ "$(run "select count(*) from public.echo_per_call_buy_intents where mint='$mint';")" == 2 ]] ||
+ { echo "TWO_CALL_LIMIT_NOT_PERSISTED";exit 1; }
 [[ "$(run "select public.echo_reserve_five_usd_distinct_call(
  '$wallet','$caller','$sig3','So11111111111111111111111111111111111111114',
  24000000,50000,2000000,100000,2000000,20000,100000000,now(),450000,now());")" == FIVE_DOLLAR_ALL_IN_CAP ]] ||
@@ -117,8 +117,7 @@ fi
 run "update public.echo_per_call_buy_intents set
  state='confirmed' where source_signature='$sig1';" >/dev/null
 run "update public.echo_per_call_buy_intents set
- state='closed',position_closed_at=now() where source_signature in
- ('$sig2','$sig3','$sig4');" >/dev/null
+ state='closed',position_closed_at=now() where source_signature='$sig2';" >/dev/null
 # Existing confirmed position consumes one 2m SELL reserve, next call adds
 # 22.15m BUY and 2m new exit; exact required wallet=26.15m.
 [[ "$(reserve "$sig5" 450000 26150000)" == RESERVED ]] ||
@@ -126,6 +125,10 @@ run "update public.echo_per_call_buy_intents set
 [[ "$(run "select sum(sell_reserve_lamports) from public.echo_per_call_buy_intents
  where position_closed_at is null and state='confirmed';")" == 2000000 ]] ||
  { echo "CONFIRMED_EXIT_RESERVE_NOT_RETAINED";exit 1; }
+# Close the newly created lot to isolate a direct wallet-solvency assertion
+# from the independent maximum-two-position guard.
+run "update public.echo_per_call_buy_intents set
+ state='closed',position_closed_at=now() where source_signature='$sig5';" >/dev/null
 sig6="$(printf '9%.0s' {1..64})"
 [[ "$(run "select public.echo_reserve_five_usd_distinct_call(
  '$wallet','$caller','$sig6','$mint',
@@ -148,4 +151,4 @@ acl="$(run "select
 [[ "$acl" == 'f|f|f|t' ]] || { echo "ROLE_GRANTS_UNSAFE";exit 1; }
 [[ "$(run "select relrowsecurity from pg_class where oid='public.echo_per_call_buy_intents'::regclass;")" == t ]] ||
  { echo "RLS_NOT_ENABLED";exit 1; }
-echo "ECHO_FIVE_USD_DISPOSABLE_PG17=PASS;CONCURRENT_SOURCE_REPLAY=BLOCKED;DISTINCT_SOURCE_WALLET_OVERSUBSCRIPTION=BLOCKED;REPEAT_MINT=PASS;SOURCE_REPLAY=BLOCKED;MULTIPLE_OPEN_LOTS=PASS;MARKET_CAP_500K=PASS;WALLET_BALANCE=ENFORCED;NO_ARBITRARY_MIN_BALANCE=PASS;ONE_SHOT=PASS;USD_CAP=PASS;LEGACY_SCHEMA_COMPATIBLE=PASS;CONFIRMED_DEBIT_NOT_DOUBLE_COUNTED=PASS;ALL_EXIT_RESERVES=PASS;RLS_AND_ACL=PASS;BROADCAST=OFF"
+echo "ECHO_FIVE_USD_DISPOSABLE_PG17=PASS;CONCURRENT_SOURCE_REPLAY=BLOCKED;DISTINCT_SOURCE_WALLET_OVERSUBSCRIPTION=BLOCKED;REPEAT_MINT=PASS;SOURCE_REPLAY=BLOCKED;TWO_ACTIVE_LOT_CAP=PASS;MARKET_CAP_500K=PASS;WALLET_BALANCE=ENFORCED;NO_ARBITRARY_MIN_BALANCE=PASS;ONE_SHOT=PASS;USD_CAP=PASS;LEGACY_SCHEMA_COMPATIBLE=PASS;CONFIRMED_DEBIT_NOT_DOUBLE_COUNTED=PASS;ALL_EXIT_RESERVES=PASS;RLS_AND_ACL=PASS;BROADCAST=OFF"
