@@ -15,7 +15,7 @@ done
 run(){ docker exec "$name" psql -X -A -t -v ON_ERROR_STOP=1 -U postgres -d postgres -c "$1"; }
 docker exec "$name" psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres -c \
  "create role anon; create role authenticated; create role service_role;" >/dev/null
-for sql in docs/sql/echo-live-buy-intents.sql docs/sql/echo-pilot-atomic-two-slot.sql \
+for sql in docs/sql/echo-live-buy-intents.sql \
  docs/sql/echo-five-dollar-per-call-review-only.sql docs/sql/echo-five-dollar-one-shot-review-only.sql;do
  docker exec -i "$name" psql -X -q -v ON_ERROR_STOP=1 -U postgres -d postgres \
   < "$sql" >/dev/null
@@ -82,6 +82,38 @@ fi
  '$wallet','$caller','$sig3','So11111111111111111111111111111111111111114',
  24000000,50000,2000000,100000,2000000,20000,100000000,now(),450000,now());")" == FIVE_DOLLAR_ALL_IN_CAP ]] ||
  { echo "USD_CAP_NOT_ENFORCED";exit 1; }
+# Model the ACTUAL production legacy schema (11 columns, no position_closed_at).
+[[ "$(run "select count(*) from information_schema.columns where table_schema='public'
+ and table_name='echo_live_buy_intents' and column_name='position_closed_at';")" == 0 ]] ||
+ { echo "LEGACY_SCHEMA_FIXTURE_IS_NOT_PRODUCTION_SHAPE";exit 1; }
+# Confirmed BUYs already affect on-chain balance: never double-count the
+# original BUY debit, but retain its manual SELL reserve.
+run "update public.echo_per_call_buy_intents set
+ state='confirmed' where source_signature='$sig1';" >/dev/null
+run "update public.echo_per_call_buy_intents set
+ state='closed',position_closed_at=now() where source_signature in
+ ('$sig2','$sig3','$sig4');" >/dev/null
+# Existing confirmed position consumes one 2m SELL reserve, next call adds
+# 22.15m BUY and 2m new exit; exact required wallet=26.15m.
+[[ "$(reserve "$sig5" 450000 26150000)" == RESERVED ]] ||
+ { echo "CONFIRMED_DEBIT_DOUBLE_COUNTED_OR_EXISTING_EXIT_RESERVE_WRONG";exit 1; }
+[[ "$(run "select sum(sell_reserve_lamports) from public.echo_per_call_buy_intents
+ where position_closed_at is null and state='confirmed';")" == 2000000 ]] ||
+ { echo "CONFIRMED_EXIT_RESERVE_NOT_RETAINED";exit 1; }
+sig6="$(printf '9%.0s' {1..64})"
+[[ "$(run "select public.echo_reserve_five_usd_distinct_call(
+ '$wallet','$caller','$sig6','$mint',
+ 20000000,50000,2000000,100000,2000000,20000,26149999,now(),450000,now());")" == INSUFFICIENT_WALLET_BALANCE_AND_EXIT_RESERVE ]] ||
+ { echo "UNRESERVED_EXISTING_MANUAL_SELL_COST";exit 1; }
+# Independent recovery must establish the outcome of ANY legacy intent.
+run "insert into public.echo_live_buy_intents(
+ execution_wallet,mint,caller_wallet,source_signature,amount_lamports,state)
+ values('$wallet','So11111111111111111111111111111111111111115','$caller','$sig6',
+ 20000000,'confirmed');" >/dev/null
+[[ "$(run "select public.echo_reserve_five_usd_distinct_call(
+ '$wallet','$caller','$(printf 'A%.0s' {1..64})','$mint',
+ 20000000,50000,2000000,100000,2000000,20000,100000000,now(),450000,now());")" == LEGACY_INTENTS_REQUIRE_RECONCILIATION ]] ||
+ { echo "LEGACY_UNRECONCILED_POSITION_NOT_BLOCKED";exit 1; }
 acl="$(run "select
  has_table_privilege('anon','public.echo_per_call_buy_intents','INSERT'),
  has_table_privilege('authenticated','public.echo_per_call_buy_intents','SELECT'),
@@ -90,4 +122,4 @@ acl="$(run "select
 [[ "$acl" == 'f|f|f|t' ]] || { echo "ROLE_GRANTS_UNSAFE";exit 1; }
 [[ "$(run "select relrowsecurity from pg_class where oid='public.echo_per_call_buy_intents'::regclass;")" == t ]] ||
  { echo "RLS_NOT_ENABLED";exit 1; }
-echo "ECHO_FIVE_USD_DISPOSABLE_PG17=PASS;CONCURRENT_SOURCE_REPLAY=BLOCKED;REPEAT_MINT=PASS;SOURCE_REPLAY=BLOCKED;MULTIPLE_OPEN_LOTS=PASS;MARKET_CAP_500K=PASS;WALLET_BALANCE=ENFORCED;NO_ARBITRARY_MIN_BALANCE=PASS;ONE_SHOT=PASS;USD_CAP=PASS;RLS_AND_ACL=PASS;BROADCAST=OFF"
+echo "ECHO_FIVE_USD_DISPOSABLE_PG17=PASS;CONCURRENT_SOURCE_REPLAY=BLOCKED;REPEAT_MINT=PASS;SOURCE_REPLAY=BLOCKED;MULTIPLE_OPEN_LOTS=PASS;MARKET_CAP_500K=PASS;WALLET_BALANCE=ENFORCED;NO_ARBITRARY_MIN_BALANCE=PASS;ONE_SHOT=PASS;USD_CAP=PASS;LEGACY_SCHEMA_COMPATIBLE=PASS;CONFIRMED_DEBIT_NOT_DOUBLE_COUNTED=PASS;ALL_EXIT_RESERVES=PASS;RLS_AND_ACL=PASS;BROADCAST=OFF"
