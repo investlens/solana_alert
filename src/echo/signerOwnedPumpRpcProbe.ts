@@ -21,11 +21,13 @@ export type EchoSignerRpcProbeResult=
    signingAllowed:false;broadcastAllowed:false}
  |{ok:false;reason:string;signingAllowed:false;broadcastAllowed:false};
 export type EchoSignerRpcReadOnly={
- getBalance(wallet:PublicKey,commitment:'confirmed'):Promise<number>;
+ getBalanceAndContext(wallet:PublicKey,commitment:'confirmed'):
+  Promise<{context:{slot:number};value:number}>;
  getFeeForMessage(message:VersionedTransaction['message'],commitment:'confirmed'):
    Promise<{value:number|null}>;
  simulateTransaction(tx:VersionedTransaction,config:{
   sigVerify:false;replaceRecentBlockhash:false;commitment:'confirmed';
+  minContextSlot:number;
   innerInstructions:true;
   accounts:{encoding:'base64';addresses:string[]}
  }):Promise<{context:{slot:number};value:{err:unknown;innerInstructions?:unknown;
@@ -63,10 +65,14 @@ export async function probeSignerOwnedPumpRpc(input:{
  // Never replace the transaction blockhash during simulation: that would
  // simulate different message bytes than the coordinator-authenticated hash.
  // Expired blockhashes must fail closed and be rebuilt/requoted.
- // Same trusted connection, exact bytes. A balance read before and after
- // simulation does not establish a coherent chain slot snapshot.
+ // Require simulation at or after wallet-balance observation slot.
+ // This excludes older RPC snapshots, but does not guarantee identical
+ // state or prove full CPI/exit expenses.
  try{
-  const before=await input.connection.getBalance(payer,'confirmed');
+  const balance=await input.connection.getBalanceAndContext(payer,'confirmed');
+  const before=balance.value;
+  if(!Number.isSafeInteger(balance.context?.slot)||balance.context.slot<=0)
+   return deny('MISSING_WALLET_BALANCE_CONTEXT_SLOT');
   const fee=await input.connection.getFeeForMessage(tx.message,'confirmed');
   if(!Number.isSafeInteger(before)||before<0||
      !Number.isSafeInteger(fee.value)||fee.value===null||fee.value<=0)
@@ -75,6 +81,7 @@ export async function probeSignerOwnedPumpRpc(input:{
   if(before<=fee.value)return deny('UNFUNDED_PAYER_CANNOT_SIMULATE_BUY');
   const result=await input.connection.simulateTransaction(tx,{
    sigVerify:false,replaceRecentBlockhash:false,commitment:'confirmed',
+   minContextSlot:balance.context.slot,
    innerInstructions:true,
    accounts:{encoding:'base64',addresses:[ECHO_EXPECTED_EXECUTION_WALLET]}
   });
@@ -83,7 +90,8 @@ export async function probeSignerOwnedPumpRpc(input:{
   // never evidence that the transaction has no CPI debits.
   if(!Array.isArray(result.value.innerInstructions))
    return deny('MISSING_SIGNER_OWNED_CPI_TRACE');
-  if(!Number.isSafeInteger(result.context?.slot)||result.context.slot<=0)
+  if(!Number.isSafeInteger(result.context?.slot)||
+     result.context.slot<balance.context.slot)
    return deny('MISSING_SIMULATION_CONTEXT_SLOT');
   // Bind every returned inner group to a valid compiled instruction index.
   // This is structure validation only: it does not decode CPI effects or
