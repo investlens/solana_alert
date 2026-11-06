@@ -128,13 +128,16 @@ export async function probeSignerOwnedPumpRpc(input:{
        !Array.isArray(item.accounts)||
        item.accounts.some(i=>!Number.isSafeInteger(i)||Number(i)<0||
           Number(i)>=tx.message.staticAccountKeys.length)||
-       typeof item.data!=='string'||item.data.length>4096)
+       typeof item.data!=='string'||item.data.length>4096||
+       (item.data.length>0&&!/^[1-9A-HJ-NP-Za-km-z]+$/.test(item.data)))
      return deny('MALFORMED_SIGNER_CPI_INSTRUCTION');
     count++;
     if(count>100)return deny('EXCESSIVE_SIGNER_CPI_TRACE');
    }
   }
-  const after=result.value.accounts?.[0];
+  if(!Array.isArray(result.value.accounts)||result.value.accounts.length!==1)
+   return deny('UNEXPECTED_SIMULATION_ACCOUNT_SNAPSHOT');
+  const after=result.value.accounts[0];
   if(!after||after.owner!==SystemProgram.programId.toBase58()||
      !Number.isSafeInteger(after.lamports)||after.lamports<0||
      after.lamports>=before)
