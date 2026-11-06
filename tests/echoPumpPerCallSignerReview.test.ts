@@ -45,7 +45,7 @@ const call:EchoFiveDollarCall={
  availableWalletLamports:'100000000',solUsdPriceCents:'20000',
  exactMessageAndCpiAudited:true,manualSellRouteAndReserveVerified:true,
  walletBalanceAndFxVerified:true,durableReservationAvailable:true,
- killSwitch:false,openOrPendingLots:3,sourceTransactionAlreadyReserved:false
+ killSwitch:false,openOrPendingLots:0,sourceTransactionAlreadyReserved:false
 };
 const probe={
  unsignedTransactionSha256:sha,unsignedConstructed:true,simulationPassed:true,
@@ -223,4 +223,17 @@ test('unknown CPI, unfunded wallet, wrong lot and failed independent simulation 
   assert.equal(out.signingAllowed,false);
  }
  assert.equal(consumed,0);
+});
+
+test('two existing live lots block per-call signer admission before durable nonce',async()=>{
+ const x=input();let nonceConsumed=0;
+ x.evidenceReader.readFromTrustedProviders=async()=>({
+  call:{...call,openOrPendingLots:2},probe,independent,sizing,debitEvidence
+ });
+ x.nonceStore.consumeOnce=async()=>{nonceConsumed++;return true;};
+ const result=await reviewEchoPumpPerCallSignerNoBroadcast(x);
+ assert.equal(result.ok,false);
+ assert.equal(result.signingAllowed,false);
+ assert.equal(result.broadcastAllowed,false);
+ assert.equal(nonceConsumed,0);
 });
