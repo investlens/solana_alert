@@ -40,9 +40,20 @@ test('same on-chain call replay cannot reserve again even when Telegram redelive
  const result=screenEchoFiveDollarCall(candidate({sourceTransactionAlreadyReserved:true}));
  assert.deepEqual(result,{eligible:false,executable:false,reason:'DUPLICATE_SOURCE_TRANSACTION'});
 });
-test('more than two pending/open lots cannot be admitted before separate approval',()=>{
- const result=screenEchoFiveDollarCall(candidate({openOrPendingLots:2}));
- assert.deepEqual(result,{eligible:false,executable:false,reason:'TWO_ACTIVE_LOTS_LIMIT'});
+test('multiple open lots and repeat same-token calls remain eligible with fresh funding',()=>{
+ for(const n of [2,3,10]){
+  const result=screenEchoFiveDollarCall(candidate({openOrPendingLots:n,sourceSignature:b}));
+  assert.equal(result.eligible,true,'new source call at '+n+' active lots');
+ }
+ const invalid=screenEchoFiveDollarCall(candidate({openOrPendingLots:-1}));
+ assert.deepEqual(invalid,{eligible:false,executable:false,reason:'INVALID_OPEN_LOT_COUNT'});
+});
+test('the token market-cap ceiling is inclusive at $500,000',()=>{
+ assert.equal(screenEchoFiveDollarCall(candidate({marketCapUsd:499999})).eligible,true);
+ assert.equal(screenEchoFiveDollarCall(candidate({marketCapUsd:500000})).eligible,true);
+ assert.deepEqual(screenEchoFiveDollarCall(candidate({marketCapUsd:500000.01})),
+  {eligible:false,executable:false,reason:'MARKET_CAP_NOT_ELIGIBLE'});
+ assert.equal(screenEchoFiveDollarCall(candidate({marketCapUsd:500001})).eligible,false);
 });
 test('all-in debit including fees, rent and CPI must remain <= $5, no lifetime cap',()=>{
  const atCap=screenEchoFiveDollarCall(candidate({
@@ -67,7 +78,7 @@ test('reject gifts, transfers, invalid callers, stale calls, market cap, price p
  const cases:Partial<EchoFiveDollarCall>[]=[
   {side:'SELL'},{isTransferOrGift:true},{verifiedSpend:false},
   {callerWallet:'1'.repeat(44)},{sourceSignature:'bad'},
-  {observedAtMs:1800000000000-76000},{marketCapUsd:100000},
+  {observedAtMs:1800000000000-76000},{marketCapUsd:500001},
   {buyPriceSolPerToken:0.000001500001},{maxSlippageBps:1001}
  ];
  for(const change of cases)assert.equal(screenEchoFiveDollarCall(candidate(change)).eligible,false,
