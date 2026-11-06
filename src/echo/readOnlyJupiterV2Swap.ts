@@ -45,7 +45,7 @@ export async function readOnlyEchoJupiterV2Swap(
     !Number.isSafeInteger(Number(r.amountRaw))||
     (r.side==='BUY'&&Number(r.amountRaw)>MAX_PREVIEW_INPUT_LAMPORTS)||
     !Number.isSafeInteger(r.maxSlippageBps)||r.maxSlippageBps<1||
-    r.maxSlippageBps>300)
+    r.maxSlippageBps>1000)
   return {ok:false,reason:'INVALID_PREVIEW_REQUEST'};
  const inputMint=r.side==='BUY'?SOL:r.mint;
  const outputMint=r.side==='BUY'?r.mint:SOL;

@@ -46,3 +46,26 @@ test('read-only SELL builds token side, rejects wallet mismatch and failed simul
  const evil=async()=>new Response(new Uint8Array(bytes),{status:200});
  assert.equal((await readOnlyPumpLocalPreview({...base,wallet:Keypair.generate().publicKey.toBase58()},evil as typeof fetch)).ok,false);
 });
+
+test('HTTP 400 builder refusal stays fail-closed and emits categories, never arbitrary response',async()=>{
+ const scenarios:[
+  {body:'Insufficient funds for transaction',category:'WALLET_BALANCE'},
+  {body:'No matching bonding curve or pool',category:'POOL_OR_MIGRATION'},
+  {body:'Some opaque error [sensitive request content]',category:'UNCLASSIFIED'}
+ ]=[
+  {body:'Insufficient funds for transaction',category:'WALLET_BALANCE'},
+  {body:'No matching bonding curve or pool',category:'POOL_OR_MIGRATION'},
+  {body:'Some opaque error [sensitive request content]',category:'UNCLASSIFIED'}
+ ];
+ for(const s of scenarios){
+  let calls=0;
+  const mock=(async()=>{calls++;return new Response(s.body,{status:400})}) as typeof fetch;
+  const result=await readOnlyPumpLocalPreview({...base,amount:0.025,pool:'pump-amm'},mock);
+  assert.equal(result.ok,false);
+  assert.equal(result.builderHttpStatus,400);
+  assert.equal(result.builderFailureCategory,s.category);
+  assert.equal(JSON.stringify(result).includes(s.body),false);
+  assert.equal(calls,1);
+  assert.equal(result.transactionHash,undefined);
+ }
+});

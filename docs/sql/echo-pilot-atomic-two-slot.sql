@@ -7,7 +7,7 @@ alter table public.echo_live_buy_intents
   add column if not exists sell_signature text,
   add column if not exists principal_usd numeric(8,2) not null default 10;
 alter table public.echo_live_buy_intents
-  add constraint echo_pilot_principal_ten check (principal_usd = 10);
+  add constraint echo_pilot_principal_ten check (principal_usd > 0 and principal_usd <= 10);
 alter table public.echo_live_buy_intents
   add constraint echo_pilot_closed_requires_sell_proof check (
     position_closed_at is null or (state = 'confirmed' and sell_signature is not null)

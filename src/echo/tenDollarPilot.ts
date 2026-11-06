@@ -22,7 +22,7 @@ export type PilotOrder = {
 export type PilotDecision =
  | {allowed:true; amountLamports:number; principalUsd:10}
  | {allowed:false;reason:string};
-export function screenEchoTenDollarPilot(order:PilotOrder):PilotDecision {
+export function screenEchoTenDollarPilot(order:PilotOrder,principalCents=1000):PilotDecision {
  const reject=(reason:string):PilotDecision=>({allowed:false,reason});
  if(order.killSwitchEngaged)return reject('KILL_SWITCH');
  if(!ALLOWED_CALLERS.has(order.callerWallet))return reject('CALLER_NOT_ALLOWED');
@@ -44,7 +44,10 @@ export function screenEchoTenDollarPilot(order:PilotOrder):PilotDecision {
  if(!Number.isFinite(order.priceSolUsd)||order.priceSolUsd<=0)return reject('INVALID_SOL_USD_PRICE');
  if(!Number.isSafeInteger(order.maxFeeLamports)||order.maxFeeLamports<0||order.maxFeeLamports>1_000_000)
    return reject('EXCESSIVE_FEE_BUDGET');
- const amountLamports=Math.round(ECHO_PILOT_STAKE_USD/order.priceSolUsd*1e9);
+ if(!Number.isSafeInteger(principalCents)||principalCents<=0||principalCents>1000)
+   return reject('INVALID_FEE_ADJUSTED_PRINCIPAL');
+ // Floor rather than round: never exceed the authorized USD principal.
+ const amountLamports=Math.floor((principalCents/100)/order.priceSolUsd*1e9);
  if(!Number.isSafeInteger(amountLamports)||amountLamports<=0||amountLamports>100_000_000)
    return reject('EXCEEDS_0_1_SOL_HARD_CAP');
  return {allowed:true,amountLamports,principalUsd:10};

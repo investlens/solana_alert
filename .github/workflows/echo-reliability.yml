@@ -19,6 +19,7 @@ on:
       - feat/echo-autobuy-readonly-integration-20261101
       - feat/echo-unsigned-route-audit-20261102
       - feat/echo-execution-economics-audit-20261102
+      - feat/echo-pilot-total-budget-guard-20261102
   pull_request:
     branches:
       - feat/echo-admin-pilot-20261021
@@ -48,8 +49,10 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Typecheck
         run: npm run typecheck
+      - name: Validate recovery script syntax (never connect to production)
+        run: bash -n scripts/echoPrivateTableBackupAndLocalRestore.sh
       - name: Echo-focused tests
-        run: npx tsx --test tests/echoPipelineIntegration.test.ts tests/echoResearchIntegration.test.ts tests/echoExecutionWallet.test.ts tests/echoPaperTradeEngine.test.ts tests/echoQueueCapacity.test.ts tests/echoFreshScan.test.ts tests/echoReservationPostgres.test.ts tests/echoSupabaseReservation.test.ts tests/echoPaperReservation.test.ts tests/echoSecureBuyGuard.test.ts tests/echoLandingBudget.test.ts tests/echoSlingoorReliability.test.ts tests/echoSubscriptionReliability.test.ts tests/echoBuyOnlyTransferRejection.test.ts tests/echoLogPrefilter.test.ts tests/echoJupiterRouteSignals.test.ts tests/echoPriorityQueue.test.ts tests/echoFallbackReliability.test.ts tests/echoTenDollarPilot.test.ts tests/echoManualSellAdmission.test.ts tests/echoAtomicPilotReservation.test.ts tests/echoSupabaseAtomicPilotStore.test.ts tests/echoIsolatedSignerContract.test.ts tests/echoIsolatedTransactionTransport.test.ts tests/echoSharedTradeExecution.test.ts tests/echoUnknownSubmissionRecovery.test.ts tests/echoReconcileTradeFromChain.test.ts tests/echoWalletOwnershipProof.test.ts tests/echoPilotSqlMigration.test.ts tests/echoAuthenticatedSignerRequest.test.ts tests/echoPhantomLocalVerifier.test.ts tests/echoIsolatedCustodyProbe.test.ts tests/echoLocalIsolatedTradeModel.test.ts tests/echoReadOnlyJupiterV2Swap.test.ts tests/echoUnsignedSwapAudit.test.ts tests/echoTrustedReservationPreview.test.ts tests/echoReadOnlyPumpLocalPreview.test.ts tests/echoSupabaseTrustedReservationReader.test.ts tests/echoReadOnlySignerAdmission.test.ts tests/echoSignerNonceJournal.test.ts tests/echoSupabaseNonceStore.test.ts tests/echoReadOnlySimulationClassification.test.ts tests/echoReadOnlyAddressLookupInspection.test.ts tests/echoReadOnlyTransactionAccountAudit.test.ts tests/echoResolvedUnsignedBuyAudit.test.ts tests/echoRoundTripEconomicAudit.test.ts tests/echoObservedRoundTripReceipts.test.ts tests/echoProgramProvenanceResearch.test.ts tests/echoFastFollowerPriceGate.test.ts tests/echoFastFollowerShadowAdmission.test.ts tests/echoAutoBuyReadOnlyTrial.test.ts tests/echoAutoBuyDurableRestart.test.ts tests/echoAutoBuyShadowGate.test.ts tests/echoLandingFeeShadow.test.ts tests/echoRecentPriorityFeeReadOnly.test.ts tests/echoFastFollowerLatencyEvidence.test.ts tests/echoVerifiedBuyLatencyTracker.test.ts tests/echoVerifiedBuyTelemetryWiring.test.ts
+        run: npx tsx --test tests/echoPipelineIntegration.test.ts tests/echoResearchIntegration.test.ts tests/echoExecutionWallet.test.ts tests/echoPaperTradeEngine.test.ts tests/echoQueueCapacity.test.ts tests/echoFreshScan.test.ts tests/echoReservationPostgres.test.ts tests/echoSupabaseReservation.test.ts tests/echoPaperReservation.test.ts tests/echoSecureBuyGuard.test.ts tests/echoLandingBudget.test.ts tests/echoSlingoorReliability.test.ts tests/echoSubscriptionReliability.test.ts tests/echoBuyOnlyTransferRejection.test.ts tests/echoLogPrefilter.test.ts tests/echoJupiterRouteSignals.test.ts tests/echoPriorityQueue.test.ts tests/echoFallbackReliability.test.ts tests/echoTenDollarPilot.test.ts tests/echoManualSellAdmission.test.ts tests/echoAtomicPilotReservation.test.ts tests/echoSupabaseAtomicPilotStore.test.ts tests/echoIsolatedSignerContract.test.ts tests/echoIsolatedTransactionTransport.test.ts tests/echoSharedTradeExecution.test.ts tests/echoUnknownSubmissionRecovery.test.ts tests/echoReconcileTradeFromChain.test.ts tests/echoWalletOwnershipProof.test.ts tests/echoPilotSqlMigration.test.ts tests/echoAuthenticatedSignerRequest.test.ts tests/echoPhantomLocalVerifier.test.ts tests/echoIsolatedCustodyProbe.test.ts tests/echoLocalIsolatedTradeModel.test.ts tests/echoReadOnlyJupiterV2Swap.test.ts tests/echoUnsignedSwapAudit.test.ts tests/echoTrustedReservationPreview.test.ts tests/echoReadOnlyPumpLocalPreview.test.ts tests/echoSupabaseTrustedReservationReader.test.ts tests/echoReadOnlySignerAdmission.test.ts tests/echoSignerNonceJournal.test.ts tests/echoSignerNonceSqlSecurity.test.ts tests/echoSupabaseNonceStore.test.ts tests/echoReadOnlySimulationClassification.test.ts tests/echoReadOnlyAddressLookupInspection.test.ts tests/echoReadOnlyTransactionAccountAudit.test.ts tests/echoResolvedUnsignedBuyAudit.test.ts tests/echoRoundTripEconomicAudit.test.ts tests/echoObservedRoundTripReceipts.test.ts tests/echoProgramProvenanceResearch.test.ts tests/echoFastFollowerPriceGate.test.ts tests/echoFastFollowerShadowAdmission.test.ts tests/echoAutoBuyReadOnlyTrial.test.ts tests/echoAutoBuyDurableRestart.test.ts tests/echoAutoBuyShadowGate.test.ts tests/echoLandingFeeShadow.test.ts tests/echoRecentPriorityFeeReadOnly.test.ts tests/echoFastFollowerLatencyEvidence.test.ts tests/echoVerifiedBuyLatencyTracker.test.ts tests/echoVerifiedBuyTelemetryWiring.test.ts tests/echoPilotTotalBudgetGuard.test.ts tests/echoPilotRoundTripPreview.test.ts tests/echoPilotReadOnlyCoordinator.test.ts tests/echoPilotAllInSql.test.ts tests/echoAllInPilotReservation.test.ts tests/echoManualSellReadOnlyCallback.test.ts tests/echoConfiguredCustodyProof.test.ts tests/echoPilotBuyFirstPreview.test.ts tests/echoPilotBuyFirstCoordinator.test.ts tests/echoOfficialPumpRouteAdmission.test.ts tests/echoOfficialPumpTwoHopQuoteGate.test.ts tests/echoCallerAmountIndependence.test.ts tests/echoTrustedWalletCapitalReadOnly.test.ts tests/echoCheckLegacyWalletBinding.test.ts tests/echoPilotOneShotSql.test.ts tests/echoSupabaseOneShotBuyClaim.test.ts tests/echoOfflineSignedBuyDryRun.test.ts tests/echoIsolatedSealedCustodyProof.test.ts tests/echoSignedMessageAttestation.test.ts tests/echoOneShotBuyHandoff.test.ts tests/echoManualWalletAppExitVerifier.test.ts
       - name: Historical Slingoor read-only classifier replay
         env:
           ECHO_REPLAY_SIGNATURE: '5W5d2xZT8K2QTmpixHviNrt5E38esAhqmjNVfqxmfm4Jz8RoEfwsW6efsEJ6ptxT1tj5sxeGFj8UicopFP5TT3Ed'
@@ -112,8 +115,8 @@ jobs:
       ECHO_PREVIEW_WALLET: '8ndw7DJ6hyZBm1PD3JJMF8G4PD5CJhDCCUK13ECL2pgQ'
       ECHO_PREVIEW_MINT: 'D4AnTZk3spQgCEMpC4iqtFp8U2qbiDvzrzdaq7Dopump'
       ECHO_PREVIEW_RPC_URL: 'https://api.mainnet-beta.solana.com'
-      ECHO_PREVIEW_AMOUNT_SOL: '0.01'
-      ECHO_PREVIEW_POOL: auto
+      ECHO_PREVIEW_AMOUNT_SOL: '0.025'
+      ECHO_PREVIEW_POOL: pump-amm
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -185,3 +188,115 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: "Two public RPC reads: program and program-data, never sign"
         run: npx tsx scripts/echoThirdPartyProgramReadOnlyProbe.ts
+
+  echo-official-pumpswap-unsigned:
+    # One operator-triggered SDK-only proof. Never signs or broadcasts.
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[echo-official-pump-probe]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      ADMIN_TRADING_ENABLED: 'false'
+      AUTO_TRADE_MODE: paper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Install pinned official SDK in one-shot probe only, not production
+        run: npm install --no-save --ignore-scripts --no-package-lock @pump-fun/pump-sdk@4.3.1
+      - name: Read verified PumpSwap pool, compile unsigned 0.025 SOL, simulate only if funded
+        run: npx tsx scripts/echoOfficialPumpSwapUnsignedProbe.ts
+
+  echo-official-intermediate-hop:
+    # On-demand only; public Solana state with a strict RPC request cap.
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[echo-first-hop-probe]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      ADMIN_TRADING_ENABLED: 'false'
+      AUTO_TRADE_MODE: paper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm install --no-save --ignore-scripts --no-package-lock @pump-fun/pump-sdk@4.3.1
+      - name: One-shot official SDK intermediate pool or curve discovery
+        run: npx tsx scripts/echoOfficialFirstHopReadOnlyProbe.ts
+
+  echo-official-two-hop-build:
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[echo-two-hop-build]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      ADMIN_TRADING_ENABLED: 'false'
+      AUTO_TRADE_MODE: paper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm install --no-save --ignore-scripts --no-package-lock @pump-fun/pump-sdk@4.3.1
+      - name: Build official unsigned two-hop message without economic authorization
+        run: npx tsx scripts/echoOfficialTwoHopBuildOnly.ts
+
+  echo-official-sdk-quote-surface:
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[echo-quote-surface]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm install --no-save --ignore-scripts --no-package-lock @pump-fun/pump-sdk@4.3.1
+      - run: npx tsx scripts/echoOfficialQuoteCapabilities.ts
+
+  echo-official-two-hop-quote-sim:
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[echo-two-hop-quote-sim]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      ADMIN_TRADING_ENABLED: 'false'
+      AUTO_TRADE_MODE: paper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm install --no-save --ignore-scripts --no-package-lock @pump-fun/pump-sdk@4.3.1
+      - name: Fee-aware official quote, non-broadcast build and one bounded unsigned simulateTransaction
+        run: npx tsx scripts/echoOfficialTwoHopQuoteSimulate.ts
+
+  echo-disposable-postgres:
+    # Explicit single-use zero-funding integration proof, on a GitHub runner.
+    # This Docker database is NOT Supabase; no live app secrets are provided.
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[echo-postgres-integration]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Four real Postgres clients, one-shot claim, nonce and hard restart
+        run: bash scripts/echoDisposablePostgresPilotIntegration.sh

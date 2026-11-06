@@ -22,7 +22,7 @@ test('Slingoor and Chairman are eligible for paper admission and live execution 
     isVerifiedSwap: true, transactionSignature: signature };
   assert.equal(validateBuyAdmission(input, wallet).allowed, true);
   assert.equal(validateBuyAdmission({ ...input, callerWallet: CHAIRMAN_WALLET }, wallet).allowed, true);
-  assert.equal(validateBuyAdmission({ ...input, amountSol: .10001 }, wallet).allowed, false);
+  assert.equal(validateBuyAdmission({ ...input, amountSol: 2.5 }, wallet).allowed, true);
   assert.equal(validateBuyAdmission({ ...input, callerWallet: '5'.repeat(44) }, wallet).allowed, false);
   assert.equal(validateBuyAdmission({ ...input, isVerifiedSwap: false }, wallet).allowed, false);
   assert.equal(validateBuyAdmission({ ...input, side: 'SELL' }, wallet).allowed, false);

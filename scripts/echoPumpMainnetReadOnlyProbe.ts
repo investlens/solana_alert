@@ -52,6 +52,8 @@ const report={
  pool,amountSol:amount,
  result:result.ok?'SIMULATED_UNAUTHORIZED':'NOT_VERIFIED',
  reason:result.reason,
+ builderHttpStatus:result.builderHttpStatus??null,
+ builderFailureCategory:result.builderFailureCategory??null,
  failureClass:result.failureClass??null,
  failingInstructionIndex:result.failingInstructionIndex??null,
  customErrorCode:result.customErrorCode??null,

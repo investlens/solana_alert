@@ -5,8 +5,8 @@
 import {validateBuyAdmission,type BuyAdmission} from './liveBuyPolicy.js';
 export const ECHO_SHADOW_AUTO_BUY_EXECUTION_ENABLED=false as const;
 export const ECHO_AUTO_BUY_MAX_SOL=0.1;
-export const ECHO_AUTO_BUY_MAX_SLIPPAGE_BPS=300;
-export const ECHO_AUTO_BUY_MAX_PRICE_PREMIUM_BPS=300;
+export const ECHO_AUTO_BUY_MAX_SLIPPAGE_BPS=1000;
+export const ECHO_AUTO_BUY_MAX_PRICE_PREMIUM_BPS=5000;
 export const ECHO_AUTO_BUY_MAX_OPEN_POSITIONS=2;
 export const ECHO_AUTO_BUY_DAILY_LOSS_BREAKER_SOL=0.15;
 export const ECHO_AUTO_BUY_MAX_SIGNAL_AGE_MS=3_000;

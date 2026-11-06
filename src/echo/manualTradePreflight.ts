@@ -15,6 +15,9 @@ export function reviewManualBuyPreview(input:ManualPreview,nowMs:number):{eligib
  if(!input.ownerChatId||input.requestChatId!==input.ownerChatId)return deny('NOT_ADMIN');
  const admission=validateBuyAdmission(input.trade,input.ownerWallet);
  if('reason' in admission)return deny(admission.reason);
+ // A caller's observed BUY can be any positive size. A manual preview's
+ // requested OWN spend still has the independent 0.1 SOL hard ceiling.
+ if(input.trade.amountSol>MAX_SOL_PER_BUY)return deny('AMOUNT_OUT_OF_RANGE');
  if(input.quoteMint!==input.trade.mint)return deny('QUOTE_MINT_MISMATCH');
  if(!Number.isFinite(nowMs)||!Number.isFinite(input.quoteAtMs)||!Number.isFinite(input.quoteExpiresAtMs)||
     input.quoteAtMs>nowMs||nowMs-input.quoteAtMs>10_000||input.quoteExpiresAtMs<=nowMs)
@@ -22,7 +25,7 @@ export function reviewManualBuyPreview(input:ManualPreview,nowMs:number):{eligib
  if(input.simulationOk!==true||input.simulationError)return deny('SIMULATION_NOT_VERIFIED');
  if(input.alreadyPurchasedToken||input.reservationState!=='AVAILABLE')return deny('TOKEN_ALREADY_RESERVED_OR_UNKNOWN');
  if(!Number.isFinite(input.walletBalanceSol)||!Number.isFinite(input.networkReserveSol)||
-    input.networkReserveSol<0.005||input.trade.amountSol>MAX_SOL_PER_BUY||
+    input.networkReserveSol<0.005||
     input.walletBalanceSol<input.trade.amountSol+input.networkReserveSol)
     return deny('INSUFFICIENT_SPENDABLE_BALANCE');
  if(!LIVE_EXECUTION_ENABLED)return deny('LIVE_EXECUTION_DISABLED');

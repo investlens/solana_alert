@@ -29,7 +29,9 @@ export function validateBuyAdmission(
 ): AdmissionResult {
   if (!ELIGIBLE_CALLER_WALLETS.has(event.callerWallet)) return { allowed: false, reason: 'CALLER_NOT_ELIGIBLE' };
   if (event.side !== 'BUY' || !event.isVerifiedSwap) return { allowed: false, reason: 'NOT_VERIFIED_BUY' };
-  if (!Number.isFinite(event.amountSol) || event.amountSol <= 0 || event.amountSol > MAX_SOL_PER_BUY)
+  // Caller transaction size is NOT our position size: a reputable caller may
+  // purchase more than 0.1 SOL while our independent pilot stays under $10.
+  if (!Number.isFinite(event.amountSol) || event.amountSol <= 0)
     return { allowed: false, reason: 'AMOUNT_OUT_OF_RANGE' };
   if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(ownerWallet) ||
       !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(event.mint) ||

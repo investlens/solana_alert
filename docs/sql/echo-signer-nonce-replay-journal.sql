@@ -7,6 +7,8 @@ create table if not exists public.echo_signer_used_nonces (
   expires_at timestamptz not null,
   used_at timestamptz not null default now()
 );
+alter table public.echo_signer_used_nonces enable row level security;
+-- No user-facing policies: the signer service role alone may consume nonces.
 create or replace function public.echo_signer_consume_nonce(
   p_nonce_hex text, p_expires_at timestamptz)
 returns boolean language plpgsql security invoker set search_path = ''

@@ -6,7 +6,7 @@
 export const ECHO_ECONOMIC_AUDIT_ALLOWS_TRADING=false as const;
 const MAX_SOL_LAMPORTS=100_000_000n;
 const MAX_ADDITIONAL_FEE=500_000n;
-const MAX_SLIPPAGE_BPS=300n;
+const MAX_SLIPPAGE_BPS=1000n;
 export type EchoFeeScenario={
   buyLamports:string; sellExpectedLamports:string;
   /** Trusted source for venue fees on BOTH sides. Null blocks evaluation. */
@@ -43,7 +43,7 @@ export function reviewEchoRoundTripEconomics(x:EchoFeeScenario):EchoFeeReport{
   return fail('ROUND_TRIP_PRIORITY_FEE_BUDGET_EXCEEDED');
  if(![x.pumpBuyBps,x.pumpSellBps,x.builderBuyBps,x.builderSellBps]
   .every(v=>validBps(v,1000)))return fail('VENUE_FEE_UNVERIFIED');
- if(!validBps(x.buySlippageBps,300)||!validBps(x.sellSlippageBps,300))
+ if(!validBps(x.buySlippageBps,1000)||!validBps(x.sellSlippageBps,1000))
   return fail('SLIPPAGE_UNVERIFIED_OR_EXCESSIVE');
  const venueBuy=charge(spend,BigInt(x.pumpBuyBps!+x.builderBuyBps!));
  const venueSell=charge(gross,BigInt(x.pumpSellBps!+x.builderSellBps!));
