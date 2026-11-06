@@ -17,6 +17,9 @@ import {reviewEchoPumpPerCallSignerNoBroadcast,
 import type {EchoNonceStore} from './authenticatedSignerRequest.js';
 import {inspectSignerOwnedPumpPoolEvidence,
  type EchoSignerPoolRpc} from './signerOwnedPumpPoolEvidence.js';
+import {inspectSignerOwnedOfficialPumpQuote,
+ type EchoOfficialPumpSdkAdapter,type EchoOfficialPumpQuoteRpc}
+ from './signerOwnedOfficialPumpQuote.js';
 export const ECHO_PUMP_NO_BROADCAST_BRIDGE_CAN_SIGN=false as const;
 export const ECHO_PUMP_NO_BROADCAST_BRIDGE_CAN_BROADCAST=false as const;
 
@@ -46,6 +49,14 @@ export type EchoPumpBridgeInput={
   connection:EchoSignerPoolRpc;
   targetMint:string;
   sdkDerivedPools:readonly string[];
+ };
+ /** Official Pump SDK quote independently rebuilt in the isolated process.
+  * Still blocks pending complete CPI and Phantom full-sell evidence.
+  */
+ signerOwnedOfficialQuotePreflight?:{
+  rpc:EchoOfficialPumpQuoteRpc;
+  sdk:EchoOfficialPumpSdkAdapter;
+  firstPool:string;secondPool:string;intermediateMint:string;
  };
 };
 export type EchoPumpBridgeResult={
@@ -87,6 +98,22 @@ export async function prepareEchoPumpNoBroadcastBridge(
  try{currentSwitch=await x.ownerAutoBuyStillEnabled();}
  catch{return blocked('OWNER_SWITCH_UNAVAILABLE');}
  if(!currentSwitch)return blocked('OWNER_AUTO_BUY_OFF_DURING_QUOTE');
+ if(x.signerOwnedOfficialQuotePreflight){
+  const q=x.signerOwnedOfficialQuotePreflight;
+  const quote=await inspectSignerOwnedOfficialPumpQuote({
+   rpc:q.rpc,sdk:q.sdk,
+   unsignedBytes:x.unsignedTransactionBytes,
+   expectedUnsignedSha256:r.transactionSha256,
+   firstPool:q.firstPool,secondPool:q.secondPool,
+   intermediateMint:q.intermediateMint,targetMint:r.mint,
+   principalLamports:c.principalLamports,slippageBps:c.maxSlippageBps
+  });
+  if(!quote.ok)return blocked('OFFICIAL_PUMP_QUOTE_'+quote.reason);
+  // Exact SDK quote & pool-mint decode is real verification, but neither
+  // the full CPI envelope nor future Phantom EXIT is yet proven.
+  if(!quote.cpiAndRentFullyAudited||!quote.manualPhantomSellVerified)
+   return blocked('OFFICIAL_QUOTE_REQUIRES_COMPLETE_CPI_AND_PHANTOM_EXIT');
+ }
  if(x.signerOwnedPoolPreflight){
   const input=x.signerOwnedPoolPreflight;
   if(input.targetMint!==r.mint)
