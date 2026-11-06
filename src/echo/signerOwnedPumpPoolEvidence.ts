@@ -10,6 +10,9 @@ import {PublicKey,VersionedTransaction} from '@solana/web3.js';
 import {ECHO_EXPECTED_EXECUTION_WALLET} from './executionWallet.js';
 import {probeSignerOwnedPumpRpc,
  type EchoSignerRpcReadOnly,type EchoSignerRpcProbeResult} from './signerOwnedPumpRpcProbe.js';
+import {reconcileEchoSignerPumpCpiLedger,
+ type EchoCpiRawInnerGroup,type EchoSignerCpiLedger}
+ from './signerOwnedPumpCpiAccounting.js';
 
 export const ECHO_SIGNER_POOL_PROVENANCE_CAN_SIGN=false as const;
 export const ECHO_SIGNER_POOL_PROVENANCE_CAN_BROADCAST=false as const;
@@ -34,6 +37,7 @@ export type EchoSignerPoolEvidence={
  unsignedSha256:string;slot:number;poolsObserved:number;
  targetMint:string;targetDecimals:number;
  simulatedWalletProbe:EchoSignerRpcProbeResult;
+ payerCpiLedger:EchoSignerCpiLedger|null;
  poolMintContinuityProven:false;
  completeCpiEconomicsProven:false;
  phantomSellReserveProven:false;
@@ -113,16 +117,36 @@ export async function inspectSignerOwnedPumpPoolEvidence(input:{
   const decimals=mintAccount.data[44];
   if(!Number.isInteger(decimals)||decimals>12)
    return fail('UNVERIFIED_TARGET_TOKEN_DECIMALS');
+  // The local capture receives the SAME validated simulation made by the
+  // signer-owned probe; do not re-fetch a different bank and pretend that
+  // its balance/fee/inner instructions are one coherent result.
+  const captured:{snapshot:null|{
+   innerInstructions:unknown;payerBeforeLamports:number;
+   payerAfterLamports:number;networkFeeLamports:number;simulationSlot:number
+  }}={snapshot:null};
   const probe=await probeSignerOwnedPumpRpc({
    connection:input.connection,unsignedBytes:bytes,
-   expectedUnsignedSha256:expected,nowMs
+   expectedUnsignedSha256:expected,nowMs,
+   onValidatedSimulation:snapshot=>{captured.snapshot=snapshot;}
   });
+  let payerCpiLedger:EchoSignerCpiLedger|null=null;
+  if(probe.ok&&captured.snapshot){
+   const observed=captured.snapshot;
+   payerCpiLedger=reconcileEchoSignerPumpCpiLedger({
+    unsignedBytes:bytes,expectedUnsignedSha256:expected,
+    prePayerBalanceLamports:String(observed.payerBeforeLamports),
+    postSimulatedPayerBalanceLamports:String(observed.payerAfterLamports),
+    networkFeeLamports:String(observed.networkFeeLamports),
+    innerInstructions:observed.innerInstructions as EchoCpiRawInnerGroup[]
+   });
+  }
   // A pool-owner observation may succeed with an unfunded wallet, but
   // the complete wallet simulation CANNOT be called successful.
   return {ok:true,mode:'ONCHAIN_POOL_AND_MINT_OWNER_OBSERVATION',
    unsignedSha256:sha,slot:inspected.context.slot,
    poolsObserved:poolAccounts.length,targetMint:input.targetMint,
    targetDecimals:decimals,simulatedWalletProbe:probe,
+   payerCpiLedger,
    poolMintContinuityProven:false,
    completeCpiEconomicsProven:false,
    phantomSellReserveProven:false,
