@@ -104,11 +104,8 @@ begin
      where execution_wallet=p_execution_wallet and position_closed_at is null
       and state<>'failed_preflight')
  then return 'LEGACY_ACTIVE_POSITIONS_REQUIRE_RECONCILIATION';end if;
- -- Pre-trade gate: reject when effective wallet balance after any pending
- -- reservation is below $6. USD conversion floors rather than overstates.
- if p_spendable_wallet_lamports<v_reserved or
-    ((p_spendable_wallet_lamports-v_reserved)*p_sol_usd_cents)/1000000000<600
- then return 'WALLET_BELOW_SIX_DOLLARS';end if;
+ -- No arbitrary $6 floor. Keep exact available-wallet solvency checks,
+ -- including still-pending/UNKNOWN reservations and manual exit reserve.
  if p_spendable_wallet_lamports < v_reserved+v_debit+p_exit_reserve_lamports
  then return 'INSUFFICIENT_WALLET_BALANCE_AND_EXIT_RESERVE';end if;
  insert into public.echo_per_call_buy_intents(
