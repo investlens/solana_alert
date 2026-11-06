@@ -43,12 +43,11 @@ claim(){
  run "select public.echo_claim_five_usd_submission_once(
  '$wallet','$caller','$sig','$mint','$tx','$sha','$finger');"
 }
-# Independent $6 pre-BUY threshold, with all-in debit and exit reserve.
-[[ "$(reserve "$sig5" 450000 29999999)" == WALLET_BELOW_SIX_DOLLARS ]] ||
- { echo "WALLET_UNDER_SIX_GATE_BYPASSED";exit 1; }
+# Wallet balance below $6 is not by itself a rejection; exact all-in cost
+# and manual-exit reserve must fit before any commitment.
 # Two independent concurrent SQL clients race on the SAME verified source.
 # Exactly one may reserve. The other MUST fail as a durable duplicate.
-reserve "$sig1" 450000 30000000 > "$tmp/race-a" &
+reserve "$sig1" 450000 27500000 > "$tmp/race-a" &
 a_pid=$!
 reserve "$sig1" 450000 30000000 > "$tmp/race-b" &
 b_pid=$!
@@ -69,8 +68,8 @@ fi
  { echo "EXACT_500K_MARKET_CAP_REJECTED";exit 1; }
 [[ "$(reserve "$sig5" 500001)" == INVALID_OR_STALE_ATTESTATION ]] ||
  { echo "ABOVE_500K_MARKET_CAP_NOT_REJECTED";exit 1; }
-[[ "$(reserve "$sig5" 450000)" == WALLET_BELOW_SIX_DOLLARS ]] ||
- { echo "EFFECTIVE_WALLET_AFTER_PENDING_BELOW_SIX_NOT_BLOCKED";exit 1; }
+[[ "$(reserve "$sig5" 450000)" == INSUFFICIENT_WALLET_BALANCE_AND_EXIT_RESERVE ]] ||
+ { echo "PENDING_WALLET_SOLVENCY_GATE_BYPASSED";exit 1; }
 [[ "$(claim "$sig1" "$tx1")" == CLAIMED ]] || { echo "FIRST_ONESHOT_FAILED";exit 1; }
 [[ "$(claim "$sig1" "$tx1")" == ALREADY_CLAIMED_OR_UNRESOLVED ]] ||
  { echo "ONESHOT_REPLAY_NOT_BLOCKED";exit 1; }
@@ -91,4 +90,4 @@ acl="$(run "select
 [[ "$acl" == 'f|f|f|t' ]] || { echo "ROLE_GRANTS_UNSAFE";exit 1; }
 [[ "$(run "select relrowsecurity from pg_class where oid='public.echo_per_call_buy_intents'::regclass;")" == t ]] ||
  { echo "RLS_NOT_ENABLED";exit 1; }
-echo "ECHO_FIVE_USD_DISPOSABLE_PG17=PASS;CONCURRENT_SOURCE_REPLAY=BLOCKED;REPEAT_MINT=PASS;SOURCE_REPLAY=BLOCKED;MULTIPLE_OPEN_LOTS=PASS;MARKET_CAP_500K=PASS;WALLET_BALANCE=ENFORCED;SIX_USD_THRESHOLD=PASS;ONE_SHOT=PASS;USD_CAP=PASS;RLS_AND_ACL=PASS;BROADCAST=OFF"
+echo "ECHO_FIVE_USD_DISPOSABLE_PG17=PASS;CONCURRENT_SOURCE_REPLAY=BLOCKED;REPEAT_MINT=PASS;SOURCE_REPLAY=BLOCKED;MULTIPLE_OPEN_LOTS=PASS;MARKET_CAP_500K=PASS;WALLET_BALANCE=ENFORCED;NO_ARBITRARY_MIN_BALANCE=PASS;ONE_SHOT=PASS;USD_CAP=PASS;RLS_AND_ACL=PASS;BROADCAST=OFF"
