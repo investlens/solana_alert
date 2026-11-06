@@ -13,6 +13,8 @@ import {reviewEchoPumpPerCallSignerNoBroadcast,
 import type {EchoFiveDollarCall} from '../src/echo/fiveDollarCallPolicy.js';
 import {screenEchoFiveDollarCall} from '../src/echo/fiveDollarCallPolicy.js';
 import {prepareEchoPerCallNoBroadcast} from '../src/echo/perCallNoBroadcastCoordinator.js';
+import {prepareEchoPumpNoBroadcastBridge,ECHO_PUMP_NO_BROADCAST_BRIDGE_CAN_BROADCAST}
+ from '../src/echo/pumpNoBroadcastBridge.js';
 import type {EchoPumpDebitEvidence} from '../src/echo/pumpSimulatedDebitEvidence.js';
 const wallet='8ndw7DJ6hyZBm1PD3JJMF8G4PD5CJhDCCUK13ECL2pgQ';
 const caller=SLINGOOR_WALLET,now=1800000000000;
@@ -289,4 +291,63 @@ test('synthetic caller -> atomic reservation -> authenticated signer review is n
  });
  assert.equal(consumed,2);
  // This test does not use a real RPC, production DB, wallet key or broadcaster.
+});
+
+test('integrated no-broadcast bridge binds one verified caller to signer and never sends',async()=>{
+ let reserveCalls=0;
+ let evidenceReads=0;
+ const x=input();
+ const observation={call,chainAtMs:now-1000,websocketObservedAtMs:now-700,verifiedAtMs:now-300};
+ const result=await prepareEchoPumpNoBroadcastBridge({
+  source:{getVerifiedBuyAndQuote:async()=>observation},
+  store:{reserve:async(c)=>{reserveCalls++;
+   assert.equal(c.sourceSignature,request.sourceSignature);
+   return {reserved:true as const,key:request.reservationKey,executable:false as const};
+  }},
+  now:()=>now,manualAutoBuyEnabled:true,
+  unsignedTransactionBytes:bytes,signerRequest:request,
+  coordinatorSignatureBase58:signed(request),
+  pinnedCoordinatorPublicKey:coordinator.publicKey.toBase58(),
+  nonceStore:x.nonceStore,reservationReader:x.reservationReader,
+  evidenceReader:{readFromTrustedProviders:async()=>{evidenceReads++;
+   return {call,probe,independent,sizing,debitEvidence};}}
+ });
+ assert.equal(result.status,'REVIEWED_NO_BROADCAST',JSON.stringify(result));
+ assert.equal(result.reservation?.reserved,true);
+ assert.equal(result.signer?.ok,true);
+ assert.equal(result.canSign,false);
+ assert.equal(result.canBroadcast,false);
+ assert.equal(ECHO_PUMP_NO_BROADCAST_BRIDGE_CAN_BROADCAST,false);
+ assert.equal(reserveCalls,1);
+ assert.equal(evidenceReads,1);
+});
+
+test('bridge owner OFF, tampered bytes and cross-source mismatch do not reserve',async()=>{
+ let sourceReads=0,reserveCalls=0,signerReads=0;
+ const x=input();
+ const source={getVerifiedBuyAndQuote:async()=>{sourceReads++;
+  return {call,chainAtMs:now-1000,websocketObservedAtMs:now-700,verifiedAtMs:now-300};}};
+ const store={reserve:async()=>{reserveCalls++;throw Error('unexpected reserve');}};
+ const base={
+  source,store,now:()=>now,manualAutoBuyEnabled:true,
+  unsignedTransactionBytes:bytes,signerRequest:request,
+  coordinatorSignatureBase58:signed(request),
+  pinnedCoordinatorPublicKey:coordinator.publicKey.toBase58(),
+  nonceStore:x.nonceStore,reservationReader:x.reservationReader,
+  evidenceReader:{readFromTrustedProviders:async()=>{signerReads++;return null;}}
+ };
+ const off=await prepareEchoPumpNoBroadcastBridge({...base,manualAutoBuyEnabled:false});
+ assert.equal(off.reason,'OWNER_AUTO_BUY_OFF');
+ const tampered=Uint8Array.from(bytes);tampered[tampered.length-1]^=1;
+ const badBytes=await prepareEchoPumpNoBroadcastBridge({
+  ...base,unsignedTransactionBytes:tampered});
+ assert.equal(badBytes.reason,'UNTRUSTED_UNSIGNED_MESSAGE_OR_SIGNER_REQUEST');
+ const foreign=await prepareEchoPumpNoBroadcastBridge({
+  ...base,signerRequest:{...request,sourceSignature:'3'.repeat(64),
+   reservationKey:[wallet,caller,'3'.repeat(64),mint].join(':')}
+ });
+ assert.equal(foreign.reason,'CALLER_SOURCE_SIGNER_IDENTITY_MISMATCH');
+ assert.equal(sourceReads,1);
+ assert.equal(reserveCalls,0);
+ assert.equal(signerReads,0);
 });
