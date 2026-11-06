@@ -41,7 +41,41 @@ claim(){
  run "select public.echo_claim_five_usd_submission_once(
  '$wallet','$caller','$sig','$mint','$tx','$sha','$finger');"
 }
-[[ "$(reserve "$sig1")" == RESERVED ]] || { echo "FIRST_CALL_FAILED";exit 1; }
+# Two independent concurrent SQL clients race on the SAME verified source.
+# Exactly one may reserve. The other MUST fail as a durable duplicate.
+reserve "$sig1" > "$tmp/race-a" &
+a_pid=$!
+reserve "$sig1" > "$tmp/race-b" &
+b_pid=$!
+wait "$a_pid"
+wait "$b_pid"
+[[ "$(cat "$tmp/race-a" "$tmp/race-b" | sort)" == 
+[[ "$(reserve "$sig2")" == RESERVED ]] || { echo "SAME_MINT_NEW_CALL_FAILED";exit 1; }
+[[ "$(reserve "$sig3")" == TWO_ACTIVE_LOTS_LIMIT ]] ||
+ { echo "TWO_LOTS_CAP_BYPASSED";exit 1; }
+[[ "$(claim "$sig1" "$tx1")" == CLAIMED ]] || { echo "FIRST_ONESHOT_FAILED";exit 1; }
+[[ "$(claim "$sig1" "$tx1")" == ALREADY_CLAIMED_OR_UNRESOLVED ]] ||
+ { echo "ONESHOT_REPLAY_NOT_BLOCKED";exit 1; }
+[[ "$(claim "$sig2" "$tx2")" == CLAIMED ]] || { echo "SECOND_ONESHOT_FAILED";exit 1; }
+[[ "$(run "select state from public.echo_per_call_buy_intents where source_signature='$sig1';")" == unknown ]] ||
+ { echo "UNKNOWN_OUTCOME_NOT_PRESERVED";exit 1; }
+[[ "$(run "select count(*) from public.echo_per_call_buy_intents where mint='$mint';")" == 2 ]] ||
+ { echo "TWO_DISTINCT_CALLS_NOT_STORED";exit 1; }
+[[ "$(run "select public.echo_reserve_five_usd_distinct_call(
+ '$wallet','$caller','$sig3','So11111111111111111111111111111111111111114',
+ 24000000,50000,2000000,100000,2000000,20000,100000000,now());")" == FIVE_DOLLAR_ALL_IN_CAP ]] ||
+ { echo "USD_CAP_NOT_ENFORCED";exit 1; }
+acl="$(run "select
+ has_table_privilege('anon','public.echo_per_call_buy_intents','INSERT'),
+ has_table_privilege('authenticated','public.echo_per_call_buy_intents','SELECT'),
+ has_function_privilege('anon','public.echo_reserve_five_usd_distinct_call(text,text,text,text,bigint,bigint,bigint,bigint,bigint,bigint,bigint,timestamptz)','EXECUTE'),
+ has_function_privilege('service_role','public.echo_reserve_five_usd_distinct_call(text,text,text,text,bigint,bigint,bigint,bigint,bigint,bigint,bigint,timestamptz)','EXECUTE');")"
+[[ "$acl" == 'f|f|f|t' ]] || { echo "ROLE_GRANTS_UNSAFE";exit 1; }
+[[ "$(run "select relrowsecurity from pg_class where oid='public.echo_per_call_buy_intents'::regclass;")" == t ]] ||
+ { echo "RLS_NOT_ENABLED";exit 1; }
+echo "ECHO_FIVE_USD_DISPOSABLE_PG17=PASS;CONCURRENT_SOURCE_REPLAY=BLOCKED;REPEAT_MINT=PASS;SOURCE_REPLAY=BLOCKED;TWO_LOTS=PASS;ONE_SHOT=PASS;USD_CAP=PASS;RLS_AND_ACL=PASS;BROADCAST=OFF"
+DUPLICATE_SOURCE_TRANSACTION\nRESERVED' ]] ||
+ { echo "CONCURRENT_SOURCE_DEDUP_FAILED";exit 1; }
 [[ "$(reserve "$sig1")" == DUPLICATE_SOURCE_TRANSACTION ]] ||
  { echo "REPLAY_NOT_REJECTED";exit 1; }
 [[ "$(reserve "$sig2")" == RESERVED ]] || { echo "SAME_MINT_NEW_CALL_FAILED";exit 1; }
