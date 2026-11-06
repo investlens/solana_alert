@@ -24,3 +24,12 @@ Added `src/echo/integratedNoBroadcastReleaseGate.ts`. Combines the entry envelop
 ## No misleading completion claim
 
 The above completes the three **code review packages** and regression cases, subject to latest GitHub CI. It does **not** complete the entire real-money automatic trading system. Production must remain trading OFF until real-world evidence and owner approvals pass. Earlier illustrative FX and cost figures are not a funding target.
+
+## Follow-up hardening, 2026-11-06 (review-only)
+
+- **Package 1 — PumpSwap RPC evidence:** signer-owned simulation now rejects unexpected account snapshot cardinality and malformed base58 CPI instruction data; added fail-closed regressions. This remains a *structural* RPC check, not trusted complete CPI economics or a successful funded-wallet simulation.
+- **Package 2 — Phantom exits:** portfolio quote validation now requires all independently priced positions to reference the exact same wallet balance snapshot and enforces at most two open lots. Actual Phantom SELL transaction/fees/receipt are still absent.
+- **Package 3 — integrated per-call safety:** the two-active-or-pending-lot ceiling is enforced at the BUY preflight, independently in review-only wallet-locked PostgreSQL reservation logic, and in disposable SQL regression scenarios. Source signatures remain idempotent. Signing and broadcasting remain OFF.
+- **Verification:** the latest draft changes have been committed; do not call them CI-passing until GitHub Actions results for the latest head are independently observed. The production migration has NOT been applied and no live end-to-end BUY or manual exit has been observed.
+
+**Completion decision:** all three *code hardening substeps* above have drafts, but NONE of the three original real-world release-gate tasks can be called complete: actual independently verified CPI and real funded simulation, Phantom sell reserve/receipt, and authentic caller-to-signer signed/discarded integration remain outstanding. Do not request wallet funding based on assumed FX, CPI or rent.
