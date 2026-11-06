@@ -21,6 +21,7 @@ export type EchoDebitEnvelope={
 export type EchoDebitEnvelopeResult=
  |{ok:true;mode:'OFFLINE_COST_ENVELOPE_ONLY';upperBuyDebitLamports:string;
    allInCents:string;requiredWalletLamports:string;
+   exitReserveLamports:string;pendingCommitmentsLamports:string;
    realExecutionApproved:false;signingAllowed:false;broadcastAllowed:false}
  |{ok:false;reason:string;signingAllowed:false;broadcastAllowed:false};
 const fail=(reason:string):EchoDebitEnvelopeResult=>({
@@ -53,5 +54,6 @@ export function reconcileEchoSignerDebitEnvelope(x:EchoDebitEnvelope):EchoDebitE
  return {ok:true,mode:'OFFLINE_COST_ENVELOPE_ONLY',
   upperBuyDebitLamports:String(upper),allInCents:String(cents),
   requiredWalletLamports:String(upper+sell+pending),
+  exitReserveLamports:String(sell),pendingCommitmentsLamports:String(pending),
   realExecutionApproved:false,signingAllowed:false,broadcastAllowed:false};
 }
