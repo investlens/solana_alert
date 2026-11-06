@@ -85,12 +85,12 @@ test('reject gifts, transfers, invalid callers, stale calls, market cap, price p
   JSON.stringify(change));
 });
 
-test('wallet pre-buy threshold is $6 inclusive, after pending commitments',()=>{
- // $200/SOL -> 30,000,000 lamports is exactly $6.
- assert.deepEqual(screenEchoFiveDollarCall(candidate({availableWalletLamports:'29999999'})),
-  {eligible:false,executable:false,reason:'WALLET_BELOW_SIX_DOLLARS'});
- assert.equal(screenEchoFiveDollarCall(candidate({availableWalletLamports:'30000000'})).eligible,true);
- assert.equal(screenEchoFiveDollarCall(candidate({availableWalletLamports:'30000001'})).eligible,true);
- assert.deepEqual(screenEchoFiveDollarCall(candidate({availableWalletLamports:'40000000',pendingWalletDebitLamports:'10000001'})),
-  {eligible:false,executable:false,reason:'WALLET_BELOW_SIX_DOLLARS'});
+test('no arbitrary $6 floor; BUY permitted only if exact debit and exit reserve fit',()=>{
+ // At $200/SOL this wallet holds $5.50, still enough for the tested
+ // ~$4.43 all-in BUY plus the independent manual-exit reserve.
+ assert.equal(screenEchoFiveDollarCall(candidate({availableWalletLamports:'27500000'})).eligible,true);
+ assert.deepEqual(screenEchoFiveDollarCall(candidate({availableWalletLamports:'24149999'})),
+  {eligible:false,executable:false,reason:'INSUFFICIENT_WALLET_BALANCE_AND_EXIT_RESERVE'});
+ assert.deepEqual(screenEchoFiveDollarCall(candidate({availableWalletLamports:'27500000',pendingWalletDebitLamports:'4000000'})),
+  {eligible:false,executable:false,reason:'INSUFFICIENT_WALLET_BALANCE_AND_EXIT_RESERVE'});
 });
