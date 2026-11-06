@@ -24,7 +24,9 @@ export type EchoSignerRpcReadOnly={
  getBalanceAndContext(wallet:PublicKey,commitment:'confirmed'):
   Promise<{context:{slot:number};value:number}>;
  getFeeForMessage(message:VersionedTransaction['message'],commitment:'confirmed'):
-   Promise<{value:number|null}>;
+   Promise<{context:{slot:number};value:number|null}>;
+ isBlockhashValid(blockhash:string,commitment:'confirmed'):
+   Promise<{context:{slot:number};value:boolean}>;
  simulateTransaction(tx:VersionedTransaction,config:{
   sigVerify:false;replaceRecentBlockhash:false;commitment:'confirmed';
   minContextSlot:number;
@@ -73,7 +75,17 @@ export async function probeSignerOwnedPumpRpc(input:{
   const before=balance.value;
   if(!Number.isSafeInteger(balance.context?.slot)||balance.context.slot<=0)
    return deny('MISSING_WALLET_BALANCE_CONTEXT_SLOT');
+  // A fee response or blockhash check from an older bank than the wallet
+  // observation cannot establish that the exact message remains valid.
   const fee=await input.connection.getFeeForMessage(tx.message,'confirmed');
+  if(!Number.isSafeInteger(fee.context?.slot)||
+     fee.context.slot<balance.context.slot)
+   return deny('STALE_FEE_CONTEXT_SLOT');
+  const blockhash=await input.connection.isBlockhashValid(
+   tx.message.recentBlockhash,'confirmed');
+  if(!Number.isSafeInteger(blockhash.context?.slot)||
+     blockhash.context.slot<balance.context.slot||blockhash.value!==true)
+   return deny('EXPIRED_OR_STALE_MESSAGE_BLOCKHASH');
   if(!Number.isSafeInteger(before)||before<0||
      !Number.isSafeInteger(fee.value)||fee.value===null||fee.value<=0)
    return deny('UNVERIFIED_PAYER_BALANCE_OR_NETWORK_FEE');
@@ -81,7 +93,7 @@ export async function probeSignerOwnedPumpRpc(input:{
   if(before<=fee.value)return deny('UNFUNDED_PAYER_CANNOT_SIMULATE_BUY');
   const result=await input.connection.simulateTransaction(tx,{
    sigVerify:false,replaceRecentBlockhash:false,commitment:'confirmed',
-   minContextSlot:balance.context.slot,
+   minContextSlot:Math.max(balance.context.slot,fee.context.slot,blockhash.context.slot),
    innerInstructions:true,
    accounts:{encoding:'base64',addresses:[ECHO_EXPECTED_EXECUTION_WALLET]}
   });
@@ -91,7 +103,7 @@ export async function probeSignerOwnedPumpRpc(input:{
   if(!Array.isArray(result.value.innerInstructions))
    return deny('MISSING_SIGNER_OWNED_CPI_TRACE');
   if(!Number.isSafeInteger(result.context?.slot)||
-     result.context.slot<balance.context.slot)
+     result.context.slot<Math.max(balance.context.slot,fee.context.slot,blockhash.context.slot))
    return deny('MISSING_SIMULATION_CONTEXT_SLOT');
   // Bind every returned inner group to a valid compiled instruction index.
   // This is structure validation only: it does not decode CPI effects or
