@@ -168,3 +168,48 @@ test('malformed or duplicate compute-budget controls reject before signing',()=>
   assert.equal(result.broadcastAllowed,false,c.name);
  }
 });
+
+
+test('priority fee encoded into exact message must fit reserved fee envelope',()=>{
+ const swap=new TransactionInstruction({
+  programId:new PublicKey('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA'),
+  keys:[],data:Buffer.from([1])
+ });
+ const transfer=SystemProgram.transfer({fromPubkey:new PublicKey(wallet),
+  toPubkey:Keypair.generate().publicKey,lamports:amount});
+ const review=(instructions:TransactionInstruction[])=>{
+  const unsigned=new VersionedTransaction(new TransactionMessage({
+   payerKey:new PublicKey(wallet),
+   recentBlockhash:Keypair.generate().publicKey.toBase58(),
+   instructions
+  }).compileToV0Message()).serialize();
+  const h=createHash('sha256').update(unsigned).digest('hex');
+  return inspectPumpUnsignedPerCallHandoff({
+   caller:call,unsignedTxBytes:unsigned,
+   probe:{...probe,unsignedTransactionSha256:h},independent,sizing
+  });
+ };
+ // 900k CUs x 1_000_000 micro-lamports = 900k lamports; reservation 50k.
+ const expensive=review([
+  ComputeBudgetProgram.setComputeUnitLimit({units:900000}),
+  ComputeBudgetProgram.setComputeUnitPrice({microLamports:1000000}),
+  transfer,swap
+ ]);
+ assert.equal(expensive.ok,false);
+ if(!expensive.ok)assert.equal(expensive.reason,
+  'PRIORITY_FEE_EXCEEDS_RESERVED_NETWORK_BUDGET');
+ // No explicit limit: even a seemingly cheap price is ambiguous.
+ const noLimit=review([
+  ComputeBudgetProgram.setComputeUnitPrice({microLamports:1}),transfer,swap
+ ]);
+ assert.equal(noLimit.ok,false);
+ if(!noLimit.ok)assert.equal(noLimit.reason,'UNBOUNDED_COMPUTE_PRICE');
+ // 900k CUs x 10k micro-lamports = 9k lamports; 50k allows this part.
+ const bounded=review([
+  ComputeBudgetProgram.setComputeUnitLimit({units:900000}),
+  ComputeBudgetProgram.setComputeUnitPrice({microLamports:10000}),
+  transfer,swap
+ ]);
+ assert.equal(bounded.ok,true);
+ if(bounded.ok)assert.equal(bounded.broadcastAllowed,false);
+});
