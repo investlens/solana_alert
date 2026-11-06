@@ -24,7 +24,11 @@ export type EchoPerCallSignerRequest={
 };
 export type EchoPerCallReservation={
  executionWallet:string;callerWallet:string;mint:string;sourceSignature:string;
- state:string;amountLamports:number;allInCents:number;positionClosedAt:string|null;
+ state:string;amountLamports:number|string;allInCents:number|string;positionClosedAt:string|null;
+ /** PostgreSQL bigint fields generally arrive as decimal strings over JSON. */
+ exactFeeLamports?:number|string;accountRentLamports?:number|string;
+ cpiExtraLamports?:number|string;allInLamports?:number|string;
+ sellReserveLamports?:number|string;
  transactionSignature:string|null;
 };
 export interface EchoPerCallReservationReader{
