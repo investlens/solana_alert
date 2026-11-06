@@ -47,6 +47,14 @@ export async function probeSignerOwnedPumpRpc(input:{
  unsignedBytes:Uint8Array;
  expectedUnsignedSha256:string;
  nowMs:number;
+ /** Local signer-only observer for the actual validated RPC simulation,
+  * never client-supplied evidence. Called only after all structural checks.
+  */
+ onValidatedSimulation?:(snapshot:{
+  innerInstructions:unknown;payerBeforeLamports:number;
+  payerAfterLamports:number;networkFeeLamports:number;
+  simulationSlot:number;
+ })=>void;
 }):Promise<EchoSignerRpcProbeResult>{
  if(!Number.isSafeInteger(input.nowMs)||input.unsignedBytes.length<80||
     input.unsignedBytes.length>3072||
@@ -143,6 +151,11 @@ export async function probeSignerOwnedPumpRpc(input:{
      after.lamports>=before)
    return deny('MISSING_OR_INVALID_SIMULATED_PAYER_BALANCE');
   const delta=before-after.lamports;
+  input.onValidatedSimulation?.({
+   innerInstructions:result.value.innerInstructions,
+   payerBeforeLamports:before,payerAfterLamports:after.lamports,
+   networkFeeLamports:fee.value,simulationSlot:result.context.slot
+  });
   // RPC versions differ on whether simulated account lamports include
   // transaction fees. Do not assume this delta is full all-in wallet cost.
   return {ok:true,mode:'SIGNER_RPC_PROVISIONAL_ONLY',
