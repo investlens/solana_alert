@@ -73,3 +73,14 @@ Read-only non-executable SOL/USD market cross-check added:
 - The existing Railway live signer remains a custody proof with `TRADING=OFF`, on its previous branch. No real-wallet PumpSwap signing or broadcast was run.
 
 **Hard blocks remain:** wallet-funded exact-message successful simulation and observed before/after lamports; bounded unknown CPI and account creation; independently priced Phantom SELL path for every open position; an authenticated signed-but-not-broadcast real-key check under approved operator controls; and separate production migrations/deployment/funding approval. The operator's private data was not uploaded to GitHub.
+
+
+## Actual dual-spot-FX mainnet diagnostic — 2026-11-06 06:37 UTC
+
+One-shot GitHub Actions run: https://github.com/investlens/solana_alert/actions/runs/42175612436, official SDK @pump-fun/pump-sdk/swap@4.3.1. Inspect the job log for its exact structured `ECHO_TWO_HOP_QUOTE_SIM` result.
+
+- Two public FX responses accepted, conservative upper SOL/USD **8988 cents ($89.88)**, reported source discrepancy **1 basis point**. Both HTTP retrievals occurred in the same 3-second window. The price feed tick ages / signatures are **not** independently proven; this is only a public quote cross-check.
+- Built and fee-quoted the exact new six-instruction, 1038-byte unsigned two-hop PumpSwap transaction, **0.042920408 SOL principal**, 10% slippage. SHA-256 `66bb48300160925f25dfd8fb2a85b6a516bba3264447f3258b78671f75253089`.
+- Network fee 5,000 lamports; two absent token accounts each provisionally priced 5,852,160 lamports. Conservative known input+fee+ATA envelope **54,629,728 lamports**. Separate **1,000,000 lamport CPI assumption** produced a hypothetical **55,629,728 lamport ($5)** scenario. CPI assumption remains **unverified** and Phantom manual-SELL reserve absent.
+- Public RPC wallet balance **0 lamports**. `simulationAttempted=false`, `simulationPassed=false`, `fullWalletDebitVerified=false`, `signed=false`, `broadcast=false`. The intentional nonzero diagnostic exit reason was `INSUFFICIENT_PROVISIONAL_BALANCE`. **Do not treat 54,629,728 or 55,629,728 lamports as a verified funding target or request funding.**
+- The production isolated signer still reported `ECHO_ISOLATED_CUSTODY=VERIFIED;TRADING=OFF`; this is an old custody proof, **not** a real-key signed-and-discarded PumpSwap transaction.
