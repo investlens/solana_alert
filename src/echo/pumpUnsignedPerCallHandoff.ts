@@ -91,12 +91,34 @@ export function inspectPumpUnsignedPerCallHandoff(x:{
   return deny('UNVERIFIED_PUMP_SIGNER_OR_LOOKUP');
  const keys=msg.staticAccountKeys.map(k=>k.toBase58());
  let swaps=0,systemTransfers=0,transferred=0n;
+ let computeLimitInstructions=0,computePriceInstructions=0;
  for(const ix of msg.compiledInstructions){
   if(ix.programIdIndex>=keys.length||
      ix.accountKeyIndexes.some(k=>k>=keys.length))return deny('INVALID_PUMP_ACCOUNT_INDEX');
   const program=keys[ix.programIdIndex];
   if(!PROGRAMS.has(program))return deny('UNREVIEWED_PUMP_PROGRAM');
   if(program===AMM)swaps++;
+  if(program===ComputeBudgetProgram.programId.toBase58()){
+   // Only explicit compute-unit limit and unit-price are supported. Do not
+   // accept duplicate instructions, heap controls, or unknown variants:
+   // the independent fee estimate must cover the EXACT reviewed message.
+   const raw=Buffer.from(ix.data);
+   if(ix.accountKeyIndexes.length!==0||raw.length<1)
+    return deny('UNREVIEWED_COMPUTE_BUDGET_INSTRUCTION');
+   if(raw[0]===2){
+    computeLimitInstructions++;
+    if(raw.length!==5||raw.readUInt32LE(1)<1||
+       raw.readUInt32LE(1)>1_400_000||computeLimitInstructions>1)
+     return deny('INVALID_OR_DUPLICATED_COMPUTE_LIMIT');
+   }else if(raw[0]===3){
+    computePriceInstructions++;
+    if(raw.length!==9||computePriceInstructions>1)
+     return deny('INVALID_OR_DUPLICATED_COMPUTE_PRICE');
+    // Zero is permissible; a high priority price is NOT authorization:
+    // its full message fee must independently match the DB reservation.
+    raw.readBigUInt64LE(1);
+   }else return deny('UNREVIEWED_COMPUTE_BUDGET_INSTRUCTION');
+  }
   if(program===SystemProgram.programId.toBase58()){
    const raw=Buffer.from(ix.data);
    if(raw.length!==12||raw.readUInt32LE(0)!==2||
