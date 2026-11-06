@@ -25,7 +25,7 @@ export type EchoSignerRpcReadOnly={
  getFeeForMessage(message:VersionedTransaction['message'],commitment:'confirmed'):
    Promise<{value:number|null}>;
  simulateTransaction(tx:VersionedTransaction,config:{
-  sigVerify:false;replaceRecentBlockhash:true;commitment:'confirmed';
+  sigVerify:false;replaceRecentBlockhash:false;commitment:'confirmed';
   innerInstructions:true;
   accounts:{encoding:'base64';addresses:string[]}
  }):Promise<{context:{slot:number};value:{err:unknown;innerInstructions?:unknown;
@@ -60,6 +60,9 @@ export async function probeSignerOwnedPumpRpc(input:{
     tx.message.staticAccountKeys[0]?.toBase58()!==ECHO_EXPECTED_EXECUTION_WALLET)
   return deny('UNTRUSTED_MESSAGE_SIGNER_OR_ALTS');
  const payer=new PublicKey(ECHO_EXPECTED_EXECUTION_WALLET);
+ // Never replace the transaction blockhash during simulation: that would
+ // simulate different message bytes than the coordinator-authenticated hash.
+ // Expired blockhashes must fail closed and be rebuilt/requoted.
  // Same trusted connection, exact bytes. A balance read before and after
  // simulation does not establish a coherent chain slot snapshot.
  try{
@@ -71,7 +74,7 @@ export async function probeSignerOwnedPumpRpc(input:{
   // A zero-balance wallet cannot produce a valid positive-debit BUY.
   if(before<=fee.value)return deny('UNFUNDED_PAYER_CANNOT_SIMULATE_BUY');
   const result=await input.connection.simulateTransaction(tx,{
-   sigVerify:false,replaceRecentBlockhash:true,commitment:'confirmed',
+   sigVerify:false,replaceRecentBlockhash:false,commitment:'confirmed',
    innerInstructions:true,
    accounts:{encoding:'base64',addresses:[ECHO_EXPECTED_EXECUTION_WALLET]}
   });
