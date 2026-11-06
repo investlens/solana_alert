@@ -39,7 +39,7 @@ const call:EchoFiveDollarCall={
  availableWalletLamports:'100000000',solUsdPriceCents:'20000',
  exactMessageAndCpiAudited:true,manualSellRouteAndReserveVerified:true,
  walletBalanceAndFxVerified:true,durableReservationAvailable:true,
- killSwitch:false,openOrPendingLots:5,sourceTransactionAlreadyReserved:false
+ killSwitch:false,openOrPendingLots:0,sourceTransactionAlreadyReserved:false
 };
 const probe:PumpUnsignedProbe={
  unsignedTransactionSha256:hash,unsignedConstructed:true,simulationPassed:true,
