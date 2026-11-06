@@ -7,6 +7,7 @@ import {CHAIRMAN_WALLET,SLINGOOR_WALLET} from './liveBuyPolicy.js';
 import {verifyEchoExecutionWallet} from './executionWallet.js';
 
 export const ECHO_CALL_ENTRY_CAP_CENTS=500n;
+export const ECHO_CALL_MIN_WALLET_BALANCE_CENTS=600n;
 export const ECHO_FIVE_DOLLAR_CALL_BROADCAST_ENABLED=false as const;
 const base58=/^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const signature=/^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
@@ -80,6 +81,12 @@ export function screenEchoFiveDollarCall(c:EchoFiveDollarCall):EchoFiveDollarDec
  if([p,n,rent,cpi,sell,pending,balance,price].some(v=>v===null))
    return deny('INVALID_WALLET_ECONOMICS');
  if(p===0n||n===0n||sell===0n||price===0n)return deny('MISSING_PRINCIPAL_FEE_OR_SELL_RESERVE');
+ // Apply the $6 threshold to verified wallet balance after outstanding
+ // pending commitments. This is a PRE-BUY threshold, not a $6 post-buy floor.
+ const availableAfterPending=balance!-pending!;
+ if(availableAfterPending<0n ||
+    (availableAfterPending*price!)/1_000_000_000n<ECHO_CALL_MIN_WALLET_BALANCE_CENTS)
+   return deny('WALLET_BELOW_SIX_DOLLARS');
  const buyDebit=p!+n!+rent!+cpi!;
  if(buyDebit<=0n)return deny('INVALID_WALLET_DEBIT');
  const allInCents=ceilDiv(buyDebit*price!,1_000_000_000n);
