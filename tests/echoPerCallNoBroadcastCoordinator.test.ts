@@ -23,7 +23,7 @@ function verified(signature=signatureA):EchoPerCallTrustedInput{
   availableWalletLamports:'100000000',solUsdPriceCents:'20000',
   exactMessageAndCpiAudited:true,manualSellRouteAndReserveVerified:true,
   walletBalanceAndFxVerified:true,durableReservationAvailable:true,
-  killSwitch:false,openOrPendingLots:10,sourceTransactionAlreadyReserved:false
+  killSwitch:false,openOrPendingLots:0,sourceTransactionAlreadyReserved:false
  };
  return {call,chainAtMs:now-800,websocketObservedAtMs:now-500,verifiedAtMs:now-100};
 }
@@ -109,4 +109,18 @@ test('a slow but verified reservation reports missed 3s target, never forges sub
  assert.equal(result.timing?.chainToReservedMs,3200);
  assert.equal(result.timing?.meetsThreeSecondTarget,false);
  assert.equal(result.timing?.submittedAtMs,null);
+});
+
+test('third simultaneous active or pending lot never reaches database reservation',async()=>{
+ let calls=0;
+ const candidate=verified();candidate.call.openOrPendingLots=2;
+ const result=await prepareEchoPerCallNoBroadcast({
+  source:{getVerifiedBuyAndQuote:async()=>candidate},
+  store:{reserve:async()=>{calls++;throw Error('should not reserve');}},
+  now:()=>now,manualAutoBuyEnabled:true
+ });
+ assert.equal(result.reason,'TWO_ACTIVE_OR_PENDING_LOTS_LIMIT');
+ assert.equal(result.reserved,false);
+ assert.equal(result.broadcastAllowed,false);
+ assert.equal(calls,0);
 });
