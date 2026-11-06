@@ -35,7 +35,7 @@ export function createEchoFiveDollarCallStore(client:SupabaseClient){
     p_sol_usd_cents:Number(input.solUsdPriceCents),
     p_spendable_wallet_lamports:Number(input.availableWalletLamports),
     p_balance_verified_at:new Date(input.balanceVerifiedAtMs).toISOString(),
-    p_market_cap_usd:input.marketCapUsd,
+    p_market_cap_usd:Math.ceil(input.marketCapUsd),
     p_market_cap_verified_at:new Date(input.marketCapObservedAtMs).toISOString()
    });
    if(error||typeof data!=='string')return {reserved:false,reason:'DATABASE_UNAVAILABLE',executable:false};
