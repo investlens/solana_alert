@@ -13,6 +13,7 @@ import {reviewEchoPumpPerCallSignerNoBroadcast,
 import type {EchoFiveDollarCall} from '../src/echo/fiveDollarCallPolicy.js';
 import {screenEchoFiveDollarCall} from '../src/echo/fiveDollarCallPolicy.js';
 import {prepareEchoPerCallNoBroadcast} from '../src/echo/perCallNoBroadcastCoordinator.js';
+import {inspectLiveCallerForPumpQuote} from '../src/echo/liveCallerPumpQuoteIngress.js';
 import {prepareEchoPumpNoBroadcastBridge,ECHO_PUMP_NO_BROADCAST_BRIDGE_CAN_BROADCAST}
  from '../src/echo/pumpNoBroadcastBridge.js';
 import type {EchoPumpDebitEvidence} from '../src/echo/pumpSimulatedDebitEvidence.js';
@@ -395,4 +396,49 @@ test('owner OFF after atomic reservation holds record and blocks signer',async()
  assert.equal(result.reservation?.reserved,true);
  assert.equal(reserved,1);assert.equal(signerReads,0);
  assert.equal(result.canBroadcast,false);
+});
+
+test('synthetic queue BUY -> quote ingress -> reservation -> signer is entirely no-broadcast',async()=>{
+ const event={
+  id:request.sourceSignature+':'+caller+':'+mint+':BUY',
+  wallet:caller,caller:'WHALE · slingoor',signature:request.sourceSignature,
+  timestamp:now/1000-1,mint,side:'BUY' as const,tokenAmount:1500,
+  quoteAmount:.01,quoteSymbol:'SOL',
+  quoteBasis:'token-account net change' as const
+ };
+ let quoteReads=0,reserveCount=0,nonceCount=0;
+ const ingress=await inspectLiveCallerForPumpQuote({
+  signal:event,nowMs:now,verifiedAtMs:now,
+  websocketObservedAtMs:now-500,historicalReplay:false,
+  provider:{readIndependentlyVerifiedCall:async q=>{
+   quoteReads++;
+   assert.equal(q.callerWallet,caller);
+   assert.equal(q.sourceSignature,request.sourceSignature);
+   return call;
+  }}
+ });
+ assert.equal(ingress.status,'VERIFIED_NO_BROADCAST',JSON.stringify(ingress));
+ assert.ok(ingress.source);
+ if(!ingress.source)throw Error('unreachable');
+ const x=input();
+ const source=ingress.source;
+ const result=await prepareEchoPumpNoBroadcastBridge({
+  source:{getVerifiedBuyAndQuote:async()=>source},
+  store:{reserve:async c=>{reserveCount++;
+   assert.equal(c.sourceSignature,request.sourceSignature);
+   return {reserved:true as const,key:request.reservationKey,executable:false as const};
+  }},
+  now:()=>now,manualAutoBuyEnabled:true,
+  ownerAutoBuyStillEnabled:async()=>true,
+  unsignedTransactionBytes:bytes,signerRequest:request,
+  coordinatorSignatureBase58:signed(request),
+  pinnedCoordinatorPublicKey:coordinator.publicKey.toBase58(),
+  nonceStore:{consumeOnce:async()=>{nonceCount++;return nonceCount===1;}},
+  reservationReader:x.reservationReader,evidenceReader:x.evidenceReader
+ });
+ assert.equal(result.status,'REVIEWED_NO_BROADCAST',JSON.stringify(result));
+ assert.equal(result.canSign,false);assert.equal(result.canBroadcast,false);
+ assert.equal(result.canDeploy,false);
+ assert.equal(quoteReads,1);assert.equal(reserveCount,1);assert.equal(nonceCount,1);
+ // All evidence and wallet state in this test are SYNTHETIC; no live RPC.
 });
