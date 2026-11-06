@@ -15,7 +15,8 @@ const tx=new VersionedTransaction(new TransactionMessage({
 const sha=createHash('sha256').update(tx).digest('hex');
 const now=1800000000000;
 const stub=(override:{balance?:number;fee?:number|null;after?:number|null;
- err?:unknown;throwRpc?:boolean}={}):{rpc:EchoSignerRpcReadOnly;calls:{balance:number;fee:number;simulation:number}}=>{
+ err?:unknown;throwRpc?:boolean;contextSlot?:number;
+ innerInstructions?:unknown}={}):{rpc:EchoSignerRpcReadOnly;calls:{balance:number;fee:number;simulation:number}}=>{
  const calls={balance:0,fee:0,simulation:0};
  const rpc:EchoSignerRpcReadOnly={
   async getBalance(){calls.balance++;if(override.throwRpc)throw Error('private error');
@@ -27,8 +28,9 @@ const stub=(override:{balance?:number;fee?:number|null;after?:number|null;
    assert.equal(conf.replaceRecentBlockhash,true);
    assert.equal(conf.innerInstructions,true);
    assert.deepEqual(conf.accounts.addresses,[wallet]);
-   return {value:{err:override.err===undefined?null:override.err,
-    innerInstructions:[],
+   return {context:{slot:override.contextSlot??12345},
+    value:{err:override.err===undefined?null:override.err,
+    innerInstructions:override.innerInstructions===undefined?[]:override.innerInstructions,
     accounts:[override.after===null?null:{
      lamports:override.after??80000000,
      owner:SystemProgram.programId.toBase58()}]}};
@@ -45,10 +47,29 @@ test('exact signer-owned simulation gives provisional observed debit but never a
   payerBalanceAfterSimulationLamports:'80000000',
   observedDeltaLamports:'20000000',
   networkFeeEstimateLamports:'5000',observedAtMs:now,
+  simulationContextSlot:12345,innerInstructionCount:0,
   fullCpiAndExitProven:false,signingAllowed:false,broadcastAllowed:false});
  assert.equal(x.calls.simulation,1);
  assert.equal(ECHO_SIGNER_RPC_PROBE_CAN_SIGN,false);
  assert.equal(ECHO_SIGNER_RPC_PROBE_CAN_BROADCAST,false);
+});
+test('bad simulation context and malformed CPI traces fail closed',async()=>{
+ for(const change of [
+  {contextSlot:0},
+  {innerInstructions:null},
+  {innerInstructions:[{index:99,instructions:[]}]},
+  {innerInstructions:[{index:0,instructions:[]},{index:0,instructions:[]}]},
+  {innerInstructions:[{index:0,instructions:[{programIdIndex:999,accounts:[],data:'2'}]}]},
+  {innerInstructions:[{index:0,instructions:[{programIdIndex:0,accounts:[999],data:'2'}]}]},
+  {innerInstructions:[{index:0,instructions:[{programIdIndex:0,accounts:[],data:4}]}]}
+ ]){
+  const x=stub(change);
+  const result=await probeSignerOwnedPumpRpc({connection:x.rpc,unsignedBytes:tx,
+   expectedUnsignedSha256:sha,nowMs:now});
+  assert.equal(result.ok,false,JSON.stringify(change));
+  assert.equal(result.signingAllowed,false);
+  assert.equal(result.broadcastAllowed,false);
+ }
 });
 test('tampered bytes and foreign fee payer cannot call RPC',async()=>{
  const x=stub();
