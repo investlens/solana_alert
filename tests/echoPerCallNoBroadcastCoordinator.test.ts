@@ -13,7 +13,7 @@ function verified(signature=signatureA):EchoPerCallTrustedInput{
   executionWallet:wallet,callerWallet:SLINGOOR_WALLET,mint,
   sourceSignature:signature,side:'BUY',verifiedCallerSigner:true,
   verifiedSwap:true,verifiedSpend:true,verifiedTokenCredit:true,isTransferOrGift:false,
-  marketCapUsd:450000,callerPriceSolPerToken:.000001,
+  marketCapUsd:45000,callerPriceSolPerToken:.000001,
   buyPriceSolPerToken:.0000013,maxSlippageBps:1000,
   observedAtMs:now-800,nowMs:now,
   marketCapObservedAtMs:now,balanceVerifiedAtMs:now,solUsdObservedAtMs:now,
@@ -70,7 +70,7 @@ test('missing independent quote, stale price and over-cap mint fail before SQL',
  let reserveCalls=0;
  const store={reserve:async()=>{reserveCalls++;throw Error('not reached');}};
  for(const change of [
-  {marketCapUsd:500001},{exactMessageAndCpiAudited:false},
+  {marketCapUsd:100000},{exactMessageAndCpiAudited:false},
   {sourceTransactionAlreadyReserved:true},{balanceVerifiedAtMs:now-3100},
   {availableWalletLamports:'1'}
  ]){
@@ -111,16 +111,19 @@ test('a slow but verified reservation reports missed 3s target, never forges sub
  assert.equal(result.timing?.submittedAtMs,null);
 });
 
-test('third simultaneous active or pending lot never reaches database reservation',async()=>{
+test('any position count can reach atomic DB reservation when exit reserves fit',async()=>{
  let calls=0;
- const candidate=verified();candidate.call.openOrPendingLots=2;
+ const candidate=verified();candidate.call.openOrPendingLots=10;
+ const policy=screenEchoFiveDollarCall(candidate.call);
+ assert.equal(policy.eligible,true);
+ if(!policy.eligible)throw Error('unreachable');
  const result=await prepareEchoPerCallNoBroadcast({
   source:{getVerifiedBuyAndQuote:async()=>candidate},
-  store:{reserve:async()=>{calls++;throw Error('should not reserve');}},
+  store:{reserve:async()=>{calls++;return {
+   reserved:true as const,key:policy.intentKey,executable:false as const};}},
   now:()=>now,manualAutoBuyEnabled:true
  });
- assert.equal(result.reason,'TWO_ACTIVE_OR_PENDING_LOTS_LIMIT');
- assert.equal(result.reserved,false);
+ assert.equal(result.reserved,true);
  assert.equal(result.broadcastAllowed,false);
- assert.equal(calls,0);
+ assert.equal(calls,1);
 });
