@@ -305,6 +305,7 @@ test('integrated no-broadcast bridge binds one verified caller to signer and nev
    return {reserved:true as const,key:request.reservationKey,executable:false as const};
   }},
   now:()=>now,manualAutoBuyEnabled:true,
+  ownerAutoBuyStillEnabled:async()=>true,
   unsignedTransactionBytes:bytes,signerRequest:request,
   coordinatorSignatureBase58:signed(request),
   pinnedCoordinatorPublicKey:coordinator.publicKey.toBase58(),
@@ -330,6 +331,7 @@ test('bridge owner OFF, tampered bytes and cross-source mismatch do not reserve'
  const store={reserve:async()=>{reserveCalls++;throw Error('unexpected reserve');}};
  const base={
   source,store,now:()=>now,manualAutoBuyEnabled:true,
+  ownerAutoBuyStillEnabled:async()=>true,
   unsignedTransactionBytes:bytes,signerRequest:request,
   coordinatorSignatureBase58:signed(request),
   pinnedCoordinatorPublicKey:coordinator.publicKey.toBase58(),
@@ -350,4 +352,47 @@ test('bridge owner OFF, tampered bytes and cross-source mismatch do not reserve'
  assert.equal(sourceReads,1);
  assert.equal(reserveCalls,0);
  assert.equal(signerReads,0);
+});
+
+test('owner can disable auto-BUY during quote; no reservation and no signer review',async()=>{
+ let reservations=0,signerReads=0,checks=0;
+ const x=input();
+ const result=await prepareEchoPumpNoBroadcastBridge({
+  source:{getVerifiedBuyAndQuote:async()=>({
+   call,chainAtMs:now-1000,websocketObservedAtMs:now-700,verifiedAtMs:now-300
+  })},
+  store:{reserve:async()=>{reservations++;throw Error('should not reserve');}},
+  now:()=>now,manualAutoBuyEnabled:true,
+  ownerAutoBuyStillEnabled:async()=>{checks++;return false;},
+  unsignedTransactionBytes:bytes,signerRequest:request,
+  coordinatorSignatureBase58:signed(request),
+  pinnedCoordinatorPublicKey:coordinator.publicKey.toBase58(),
+  nonceStore:x.nonceStore,reservationReader:x.reservationReader,
+  evidenceReader:{readFromTrustedProviders:async()=>{signerReads++;return null;}}
+ });
+ assert.equal(result.reason,'OWNER_AUTO_BUY_OFF_DURING_QUOTE');
+ assert.equal(reservations,0);assert.equal(signerReads,0);
+ assert.equal(checks,1);assert.equal(result.canBroadcast,false);
+});
+test('owner OFF after atomic reservation holds record and blocks signer',async()=>{
+ let reserved=0,signerReads=0,checks=0;
+ const x=input();
+ const result=await prepareEchoPumpNoBroadcastBridge({
+  source:{getVerifiedBuyAndQuote:async()=>({
+   call,chainAtMs:now-1000,websocketObservedAtMs:now-700,verifiedAtMs:now-300
+  })},
+  store:{reserve:async()=>{reserved++;return {
+   reserved:true as const,key:request.reservationKey,executable:false as const};}},
+  now:()=>now,manualAutoBuyEnabled:true,
+  ownerAutoBuyStillEnabled:async()=>{checks++;return checks===1;},
+  unsignedTransactionBytes:bytes,signerRequest:request,
+  coordinatorSignatureBase58:signed(request),
+  pinnedCoordinatorPublicKey:coordinator.publicKey.toBase58(),
+  nonceStore:x.nonceStore,reservationReader:x.reservationReader,
+  evidenceReader:{readFromTrustedProviders:async()=>{signerReads++;return null;}}
+ });
+ assert.equal(result.reason,'OWNER_AUTO_BUY_OFF_AFTER_RESERVATION');
+ assert.equal(result.reservation?.reserved,true);
+ assert.equal(reserved,1);assert.equal(signerReads,0);
+ assert.equal(result.canBroadcast,false);
 });
