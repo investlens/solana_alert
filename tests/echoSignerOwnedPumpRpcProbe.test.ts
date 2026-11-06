@@ -112,3 +112,26 @@ test('unfunded, failed, missing payer and RPC errors deny without signer access'
   assert.equal(r.broadcastAllowed,false);
  }
 });
+
+test('accounting observer sees only the same validated signer-owned simulation',async()=>{
+ let captured:unknown=null;
+ const x=stub();
+ const r=await probeSignerOwnedPumpRpc({
+  connection:x.rpc,unsignedBytes:tx,expectedUnsignedSha256:sha,
+  nowMs:now,onValidatedSimulation:snapshot=>{captured=snapshot;}
+ });
+ assert.equal(r.ok,true);
+ assert.deepEqual(captured,{
+  innerInstructions:[],payerBeforeLamports:100000000,
+  payerAfterLamports:80000000,networkFeeLamports:5000,
+  simulationSlot:12345
+ });
+ let rejectedCapture=false;
+ const bad=stub({balance:0});
+ const denied=await probeSignerOwnedPumpRpc({
+  connection:bad.rpc,unsignedBytes:tx,expectedUnsignedSha256:sha,
+  nowMs:now,onValidatedSimulation:()=>{rejectedCapture=true;}
+ });
+ assert.equal(denied.ok,false);
+ assert.equal(rejectedCapture,false);
+});
