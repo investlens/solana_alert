@@ -23,6 +23,12 @@ import type {EchoPumpSizeInput} from './fiveDollarPumpInputSizing.js';
 import {auditEchoPumpSimulatedWalletDebit,
  type EchoPumpDebitEvidence} from './pumpSimulatedDebitEvidence.js';
 
+/** Exact integer normalization; never round 64-bit PostgreSQL BIGINTs. */
+const dbInt=(v:number|string|undefined):string|null=>{
+ if(typeof v==='number')return Number.isSafeInteger(v)&&v>=0?String(v):null;
+ if(typeof v==='string'&&/^(0|[1-9][0-9]{0,17})$/.test(v))return v;
+ return null;
+};
 export const ECHO_PUMP_SIGNER_REVIEW_CAN_SIGN=false as const;
 export const ECHO_PUMP_SIGNER_REVIEW_CAN_BROADCAST=false as const;
 export type EchoTrustedPumpObservation={
@@ -104,8 +110,9 @@ export async function reviewEchoPumpPerCallSignerNoBroadcast(args:{
   row.callerWallet!==r.callerWallet||row.sourceSignature!==r.sourceSignature||
   row.mint!==r.mint||row.state!=='reserved'||
   row.transactionSignature!==null||row.positionClosedAt!==null||
-  !Number.isSafeInteger(row.amountLamports)||row.amountLamports<=0||
-  !Number.isSafeInteger(row.allInCents)||row.allInCents<1||row.allInCents>500)
+  dbInt(row.amountLamports)===null||dbInt(row.amountLamports)==='0'||
+  dbInt(row.allInCents)===null||BigInt(dbInt(row.allInCents)!)<1n||
+  BigInt(dbInt(row.allInCents)!)>500n)
   return deny('PER_CALL_RESERVATION_MISMATCH');
  let trusted:EchoTrustedPumpObservation|null;
  try{trusted=await args.evidenceReader.readFromTrustedProviders(
@@ -120,8 +127,7 @@ export async function reviewEchoPumpPerCallSignerNoBroadcast(args:{
  // A reservation below $5 is not enough: its booked USD amount must
  // equal the independently audited all-in amount for THESE exact bytes.
  // Otherwise a stale/understated DB reservation could pass signer review.
- if(!Number.isSafeInteger(Number(simulation.allInCents))||
-    row.allInCents!==Number(simulation.allInCents))
+ if(dbInt(row.allInCents)!==simulation.allInCents)
    return deny('PUMP_RESERVED_USD_DEBIT_MISMATCH');
  if(simulation.unsignedSha256!==r.transactionSha256||
     simulation.plannedWalletDebitUpperBoundLamports!==
@@ -138,25 +144,20 @@ export async function reviewEchoPumpPerCallSignerNoBroadcast(args:{
  const c=trusted.call;
  if(c.executionWallet!==r.executionWallet||c.callerWallet!==r.callerWallet||
   c.sourceSignature!==r.sourceSignature||c.mint!==r.mint||
-  c.principalLamports!==String(row.amountLamports))
+  c.principalLamports!==dbInt(row.amountLamports))
   return deny('PUMP_CALL_RESERVATION_MISMATCH');
  // The immutable DB reservation must commit to EACH cost component, not
  // just principal and rounded USD cents. An understated fee/rent/CPI/exit
  // reservation otherwise lets a different spending envelope pass review.
  // Only safe integers returned by the trusted DB reader are acceptable.
- const stored=row as typeof row & {
-  exactFeeLamports?:number;accountRentLamports?:number;
-  cpiExtraLamports?:number;allInLamports?:number;sellReserveLamports?:number;
- };
  const fields=[
-  [stored.exactFeeLamports,c.networkAndPriorityFeeLamports],
-  [stored.accountRentLamports,c.accountRentLamports],
-  [stored.cpiExtraLamports,c.additionalCpiDebitLamports],
-  [stored.allInLamports,simulation.plannedWalletDebitUpperBoundLamports],
-  [stored.sellReserveLamports,c.sellReserveLamports]
+  [row.exactFeeLamports,c.networkAndPriorityFeeLamports],
+  [row.accountRentLamports,c.accountRentLamports],
+  [row.cpiExtraLamports,c.additionalCpiDebitLamports],
+  [row.allInLamports,simulation.plannedWalletDebitUpperBoundLamports],
+  [row.sellReserveLamports,c.sellReserveLamports]
  ] as const;
- if(fields.some(([db,attested])=>!Number.isSafeInteger(db)||db===undefined||
-      db<0||String(db)!==attested))
+ if(fields.some(([db,attested])=>dbInt(db)!==attested))
    return deny('PUMP_RESERVED_COST_COMPONENTS_MISMATCH');
  const audited=inspectPumpUnsignedPerCallHandoff({
   caller:c,unsignedTxBytes:bytes,probe:trusted.probe,
