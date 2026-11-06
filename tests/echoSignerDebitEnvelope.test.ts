@@ -21,7 +21,8 @@ test('conservative envelope never grants execution',()=>{
  const r=reconcileEchoSignerDebitEnvelope(evidence);
  assert.deepEqual(r,{ok:true,mode:'OFFLINE_COST_ENVELOPE_ONLY',
   upperBuyDebitLamports:'22105000',allInCents:'443',
-  requiredWalletLamports:'25105000',realExecutionApproved:false,
+  requiredWalletLamports:'25105000',exitReserveLamports:'2000000',
+  pendingCommitmentsLamports:'1000000',realExecutionApproved:false,
   signingAllowed:false,broadcastAllowed:false});
  assert.equal(ECHO_DEBIT_RECONCILIATION_CAN_SIGN,false);
 });
