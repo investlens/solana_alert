@@ -7,6 +7,7 @@ import {inspectPumpUnsignedPerCallHandoff,
  ECHO_PUMP_PER_CALL_HANDOFF_SIGNING_ENABLED,
  ECHO_PUMP_PER_CALL_HANDOFF_BROADCAST_ENABLED,
  type PumpUnsignedProbe,type PumpIndependentEvidence} from '../src/echo/pumpUnsignedPerCallHandoff.js';
+import type {EchoPumpSizeInput} from '../src/echo/fiveDollarPumpInputSizing.js';
 import {SLINGOOR_WALLET} from '../src/echo/liveBuyPolicy.js';
 import type {EchoFiveDollarCall} from '../src/echo/fiveDollarCallPolicy.js';
 const now=1800000000000;
@@ -50,8 +51,19 @@ const independent:PumpIndependentEvidence={
  simulationMatchesExactBytes:true,allCpiAndRentDebitsIndependentlyAudited:true,
  manualPhantomSellReserveIndependentlyAudited:true,freshSolUsdAndBalanceVerified:true
 };
+const sizing:EchoPumpSizeInput={
+ solUsdCents:call.solUsdPriceCents,
+ networkAndPriorityFeeLamports:call.networkAndPriorityFeeLamports,
+ ataAndOtherAccountRentLamports:call.accountRentLamports,
+ maximumAdditionalCpiDebitLamports:call.additionalCpiDebitLamports,
+ walletBalanceLamports:call.availableWalletLamports,
+ pendingReservedLamports:call.pendingWalletDebitLamports,
+ manualSellReserveLamports:call.sellReserveLamports,
+ freshFxVerified:true,completeFeeAndCpiAudit:true,
+ freshWalletBalanceVerified:true,manualSellReserveVerified:true
+};
 test('PumpSwap unsigned review only: matching exact message and per-call key, never signs',()=>{
- const result=inspectPumpUnsignedPerCallHandoff({caller:call,unsignedTxBytes:tx,probe,independent});
+ const result=inspectPumpUnsignedPerCallHandoff({caller:call,unsignedTxBytes:tx,probe,independent,sizing});
  assert.equal(result.ok,true);
  if(result.ok){
   assert.equal(result.fingerprint,hash);
@@ -66,7 +78,7 @@ test('actual unfunded/provisional Pump diagnostic must NEVER satisfy complete-de
  const fromRealProbe={...probe,simulationPassed:false,fullWalletDebitVerified:false,
   cpiRentAndExtraWalletDebitsAudited:false,currentWalletLamports:0};
  const result=inspectPumpUnsignedPerCallHandoff({
-  caller:call,unsignedTxBytes:tx,probe:fromRealProbe,independent});
+  caller:call,unsignedTxBytes:tx,probe:fromRealProbe,independent,sizing});
  assert.deepEqual(result,{ok:false,reason:'INDEPENDENT_PUMP_SIMULATION_OR_FULL_DEBIT_NOT_VERIFIED',
   signerAllowed:false,broadcastAllowed:false});
 });
@@ -80,11 +92,13 @@ test('changing bytes, mint, principal, fees and fund state fails closed',()=>{
   {independent:{...independent,simulationMatchesExactBytes:false}},
   {independent:{...independent,allCpiAndRentDebitsIndependentlyAudited:false}},
   {caller:{...call,marketCapUsd:500001}},
-  {caller:{...call,sourceTransactionAlreadyReserved:true}}
+  {caller:{...call,sourceTransactionAlreadyReserved:true}},
+  {sizing:{...sizing,maximumAdditionalCpiDebitLamports:'2000000'}},
+  {sizing:{...sizing,completeFeeAndCpiAudit:false}}
  ];
  for(const change of cases){
   const result=inspectPumpUnsignedPerCallHandoff({
-   caller:call,probe,independent,unsignedTxBytes:tx,...change});
+   caller:call,probe,independent,sizing,unsignedTxBytes:tx,...change});
   assert.equal(result.ok,false,JSON.stringify(change));
  }
 });
