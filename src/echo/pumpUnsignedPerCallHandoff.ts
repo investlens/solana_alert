@@ -58,7 +58,7 @@ export function inspectPumpUnsignedPerCallHandoff(x:{
     s.solUsdCents!==x.caller.solUsdPriceCents)
   return deny('PUMP_SIZING_WALLET_AND_FEE_ATTESTATION_MISMATCH');
  const sized=sizeEchoFiveUsdPumpInput(s);
- if(!sized.ok)return deny('PUMP_SIZING_'+sized.reason);
+ if('reason' in sized)return deny('PUMP_SIZING_'+sized.reason);
  if(BigInt(x.caller.principalLamports)>BigInt(sized.inputLamports))
   return deny('PUMP_INPUT_EXCEEDS_FIVE_DOLLAR_FEE_ADJUSTED_CAP');
 
