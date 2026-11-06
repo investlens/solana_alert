@@ -32,7 +32,7 @@ export function reviewEchoPortfolioExitReserve(input:{
  const balance=dec(input.actualWalletBalanceLamports);
  const pending=dec(input.pendingBuyCommitmentsLamports);
  if(balance===null||pending===null)return no('UNKNOWN_WALLET_OR_PENDING_DEBITS');
- if(input.openLots.length>1000)return no('EXCESSIVE_OPEN_LOTS');
+ if(input.openLots.length>2)return no('TWO_OPEN_LOT_EXIT_RESERVE_LIMIT');
  const ids=new Set<string>();
  let reserve=0n;
  for(const lot of input.openLots){
@@ -43,7 +43,8 @@ export function reviewEchoPortfolioExitReserve(input:{
   ids.add(lot.sourceSignature);
   if(lot.quote.wallet!==lot.wallet||lot.quote.mint!==lot.mint||
      lot.quote.nowMs!==input.nowMs||
-     lot.quote.existingReservedExitLamports!=='0')
+     lot.quote.existingReservedExitLamports!=='0'||
+     lot.quote.walletSolBalanceLamports!==input.actualWalletBalanceLamports)
    return no('EXIT_QUOTE_IDENTITY_OR_DOUBLE_COUNT');
   // Each lot is priced without subtracting other positions inside this
   // per-lot quote. The portfolio sums them exactly once.
