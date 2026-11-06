@@ -90,7 +90,7 @@ export function inspectPumpUnsignedPerCallHandoff(x:{
     msg.staticAccountKeys[0]?.toBase58()!==x.caller.executionWallet)
   return deny('UNVERIFIED_PUMP_SIGNER_OR_LOOKUP');
  const keys=msg.staticAccountKeys.map(k=>k.toBase58());
- let swaps=0,transferred=0n;
+ let swaps=0,systemTransfers=0,transferred=0n;
  for(const ix of msg.compiledInstructions){
   if(ix.programIdIndex>=keys.length||
      ix.accountKeyIndexes.some(k=>k>=keys.length))return deny('INVALID_PUMP_ACCOUNT_INDEX');
@@ -100,12 +100,15 @@ export function inspectPumpUnsignedPerCallHandoff(x:{
   if(program===SystemProgram.programId.toBase58()){
    const raw=Buffer.from(ix.data);
    if(raw.length!==12||raw.readUInt32LE(0)!==2||
-      keys[ix.accountKeyIndexes[0]]!==x.caller.executionWallet)
+      ix.accountKeyIndexes.length!==2||
+      keys[ix.accountKeyIndexes[0]]!==x.caller.executionWallet||
+      keys[ix.accountKeyIndexes[1]]===x.caller.executionWallet)
     return deny('UNREVIEWED_PUMP_SYSTEM_INSTRUCTION');
+   systemTransfers++;
    transferred+=raw.readBigUInt64LE(4);
   }
  }
- if(swaps!==1||transferred!==BigInt(x.caller.principalLamports))
+ if(swaps!==1||systemTransfers!==1||transferred!==BigInt(x.caller.principalLamports))
   return deny('PUMP_SWAP_OR_PRINCIPAL_MISMATCH');
  // Only trace the connection; do not reuse Jupiter-only signer audit or
  // promote self-attested simulation booleans into an execution permit.
