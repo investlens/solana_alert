@@ -18,12 +18,25 @@ umask 077
 : "${PGPASSWORD:?PGPASSWORD is required}"
 export PGSSLMODE="${PGSSLMODE:-require}"
 [[ "$PGSSLMODE" != "disable" ]] || { echo "PG_SSL_REQUIRED" >&2; exit 2; }
-for cmd in pg_dump pg_restore psql docker sha256sum stat; do
+for cmd in pg_dump pg_restore psql docker stat; do
  command -v "$cmd" >/dev/null || { echo "MISSING_TOOL:$cmd" >&2; exit 2; }
 done
+# BSD (macOS) and GNU (Linux) utilities have different flag sets.
+file_mode(){
+ if stat -c '%a' "$1" >/dev/null 2>&1; then stat -c '%a' "$1"
+ else stat -f '%Lp' "$1"; fi
+}
+if command -v sha256sum >/dev/null 2>&1; then
+ hash_write(){ sha256sum "$1"; }
+ hash_check(){ sha256sum --check --status "$1"; }
+elif command -v shasum >/dev/null 2>&1; then
+ hash_write(){ shasum -a 256 "$1"; }
+ hash_check(){ shasum -a 256 --check --status "$1"; }
+else echo "SHA256_TOOL_REQUIRED" >&2;exit 2
+fi
 [[ -d "$ECHO_RECOVERY_DIR" && ! -L "$ECHO_RECOVERY_DIR" ]] || { echo "PRIVATE_OUTPUT_DIRECTORY_REQUIRED" >&2; exit 2; }
 # 0700 only; fail rather than silently weaken permissions.
-mode="$(stat -c %a "$ECHO_RECOVERY_DIR")"
+mode="$(file_mode "$ECHO_RECOVERY_DIR")"
 [[ "$mode" == "700" ]] || { echo "OUTPUT_DIRECTORY_MUST_BE_0700" >&2; exit 2; }
 [[ "$(pg_dump --version)" == *" 17."* ]] || { echo "PG_DUMP_17_REQUIRED" >&2; exit 2; }
 [[ "$(pg_restore --version)" == *" 17."* ]] || { echo "PG_RESTORE_17_REQUIRED" >&2; exit 2; }
@@ -56,8 +69,8 @@ pg_dump --format=custom --no-owner --no-acl --table=public.echo_live_buy_intents
 [[ -s "$archive" ]] || { echo "EMPTY_BACKUP" >&2;exit 1; }
 chmod 600 "$archive"
 pg_restore --list "$archive" > "$dest/archive-contents.txt"
-sha256sum "$archive" > "$dest/archive.sha256"
-(cd "$dest" && sha256sum --check --status archive.sha256) ||
+(cd "$dest" && hash_write "echo-tables.dump") > "$dest/archive.sha256"
+(cd "$dest" && hash_check "archive.sha256") ||
  { echo "BACKUP_INTEGRITY_FAILED" >&2;exit 1; }
 after="$(read_source)"
 [[ "$before" == "$after" ]] ||
@@ -86,7 +99,7 @@ identity="$(docker exec "$name" psql -X -A -t -v ON_ERROR_STOP=1 -U postgres -d 
 [[ "$identity" == 'true|true|PRIMARY KEY (execution_wallet, mint)' ]] ||
  { echo "RECOVERY_RLS_OR_UNIQUE_CONSTRAINT_MISMATCH" >&2;exit 1; }
 # Check restore backup is stored with secret-safe filesystem permissions.
-[[ "$(stat -c %a "$archive")" == 600 ]] || { echo "ARCHIVE_PERMISSIONS_UNSAFE" >&2;exit 1; }
+[[ "$(file_mode "$archive")" == 600 ]] || { echo "ARCHIVE_PERMISSIONS_UNSAFE" >&2;exit 1; }
 printf 'SOURCE_TABLE_COUNTS=%s\nARCHIVE_SHA256_FILE=archive.sha256\nRESTORE=INDEPENDENT_OFFLINE_LOCAL_CONTAINER\nRLS_AND_PKEY=PASS\nSCOPE=ECHO_TABLES_ONLY\nPRODUCTION_SCHEMA_UNCHANGED=true\n' "$restored" > "$dest/verification.txt"
 chmod 600 "$dest/"*
 echo "ECHO_REAL_TABLE_BACKUP_LOCAL_RESTORE=PASS;SCOPE=ECHO_TABLES_ONLY;FULL_SUPABASE_RECOVERY=NOT_VERIFIED"
