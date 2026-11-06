@@ -24,6 +24,10 @@ export type EchoPumpBridgeInput={
  now:()=>number;
  /** Must be an independent, durable owner switch. OFF prevents all reads. */
  manualAutoBuyEnabled:boolean;
+ /** Read the durable owner toggle again after asynchronous provider work.
+  * A stale ON snapshot cannot override sleep OFF or the emergency switch.
+  */
+ ownerAutoBuyStillEnabled:()=>Promise<boolean>;
  /** The exact unsigned Pump SDK-produced bytes, never a Telegram payload. */
  unsignedTransactionBytes:Uint8Array;
  signerRequest:EchoPerCallSignerRequest;
@@ -68,6 +72,10 @@ export async function prepareEchoPumpNoBroadcastBridge(
     c.sourceSignature!==r.sourceSignature||c.mint!==r.mint||
     perCallKey(c)!==r.reservationKey)
   return blocked('CALLER_SOURCE_SIGNER_IDENTITY_MISMATCH');
+ let currentSwitch=false;
+ try{currentSwitch=await x.ownerAutoBuyStillEnabled();}
+ catch{return blocked('OWNER_SWITCH_UNAVAILABLE');}
+ if(!currentSwitch)return blocked('OWNER_AUTO_BUY_OFF_DURING_QUOTE');
  const preflight=screenEchoFiveDollarCall({...c,nowMs:x.now()});
  if(!preflight.eligible)return blocked('PER_CALL_POLICY_'+preflight.reason);
  // Adapter returns the previously captured trusted bundle, never refetches
@@ -77,6 +85,11 @@ export async function prepareEchoPumpNoBroadcastBridge(
   store:x.store,now:x.now,manualAutoBuyEnabled:x.manualAutoBuyEnabled
  });
  if(!reservation.reserved)return blocked(reservation.reason,reservation);
+ // The reservation stays held if the owner disables trading here; never
+ // release and blindly retry an unresolved source transaction.
+ try{currentSwitch=await x.ownerAutoBuyStillEnabled();}
+ catch{return blocked('OWNER_SWITCH_UNAVAILABLE_AFTER_RESERVATION',reservation);}
+ if(!currentSwitch)return blocked('OWNER_AUTO_BUY_OFF_AFTER_RESERVATION',reservation);
  // A successful reservation is durable; if signer review fails it must remain
  // held for explicit reconciliation. NEVER implicitly release and retry.
  const signer=await reviewEchoPumpPerCallSignerNoBroadcast({
