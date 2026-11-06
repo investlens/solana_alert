@@ -92,6 +92,7 @@ export function inspectPumpUnsignedPerCallHandoff(x:{
  const keys=msg.staticAccountKeys.map(k=>k.toBase58());
  let swaps=0,systemTransfers=0,transferred=0n;
  let computeLimitInstructions=0,computePriceInstructions=0;
+ let computeUnitLimit:bigint|null=null,computeMicroLamports:bigint|null=null;
  for(const ix of msg.compiledInstructions){
   if(ix.programIdIndex>=keys.length||
      ix.accountKeyIndexes.some(k=>k>=keys.length))return deny('INVALID_PUMP_ACCOUNT_INDEX');
@@ -110,13 +111,14 @@ export function inspectPumpUnsignedPerCallHandoff(x:{
     if(raw.length!==5||raw.readUInt32LE(1)<1||
        raw.readUInt32LE(1)>1_400_000||computeLimitInstructions>1)
      return deny('INVALID_OR_DUPLICATED_COMPUTE_LIMIT');
+    computeUnitLimit=BigInt(raw.readUInt32LE(1));
    }else if(raw[0]===3){
     computePriceInstructions++;
     if(raw.length!==9||computePriceInstructions>1)
      return deny('INVALID_OR_DUPLICATED_COMPUTE_PRICE');
     // Zero is permissible; a high priority price is NOT authorization:
     // its full message fee must independently match the DB reservation.
-    raw.readBigUInt64LE(1);
+    computeMicroLamports=raw.readBigUInt64LE(1);
    }else return deny('UNREVIEWED_COMPUTE_BUDGET_INSTRUCTION');
   }
   if(program===SystemProgram.programId.toBase58()){
@@ -129,6 +131,16 @@ export function inspectPumpUnsignedPerCallHandoff(x:{
    systemTransfers++;
    transferred+=raw.readBigUInt64LE(4);
   }
+ }
+ // Priority fee is ceil(limit * microLamports / 1_000_000). An explicit
+ // compute-unit price without an explicit limit is rejected because the
+ // runtime default cannot be independently bounded from this message alone.
+ // Even the priority portion alone must fit the trusted network-fee budget.
+ if(computeMicroLamports!==null){
+  if(computeUnitLimit===null)return deny('UNBOUNDED_COMPUTE_PRICE');
+  const priority=(computeMicroLamports*computeUnitLimit+999_999n)/1_000_000n;
+  if(priority>BigInt(x.caller.networkAndPriorityFeeLamports))
+   return deny('PRIORITY_FEE_EXCEEDS_RESERVED_NETWORK_BUDGET');
  }
  if(swaps!==1||systemTransfers!==1||transferred!==BigInt(x.caller.principalLamports))
   return deny('PUMP_SWAP_OR_PRINCIPAL_MISMATCH');
