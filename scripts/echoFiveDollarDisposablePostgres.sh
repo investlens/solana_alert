@@ -43,11 +43,14 @@ claim(){
  run "select public.echo_claim_five_usd_submission_once(
  '$wallet','$caller','$sig','$mint','$tx','$sha','$finger');"
 }
+# Independent $6 pre-BUY threshold, with all-in debit and exit reserve.
+[[ "$(reserve "$sig5" 450000 29999999)" == WALLET_BELOW_SIX_DOLLARS ]] ||
+ { echo "WALLET_UNDER_SIX_GATE_BYPASSED";exit 1; }
 # Two independent concurrent SQL clients race on the SAME verified source.
 # Exactly one may reserve. The other MUST fail as a durable duplicate.
-reserve "$sig1" > "$tmp/race-a" &
+reserve "$sig1" 450000 30000000 > "$tmp/race-a" &
 a_pid=$!
-reserve "$sig1" > "$tmp/race-b" &
+reserve "$sig1" 450000 30000000 > "$tmp/race-b" &
 b_pid=$!
 wait "$a_pid"
 wait "$b_pid"
@@ -88,4 +91,4 @@ acl="$(run "select
 [[ "$acl" == 'f|f|f|t' ]] || { echo "ROLE_GRANTS_UNSAFE";exit 1; }
 [[ "$(run "select relrowsecurity from pg_class where oid='public.echo_per_call_buy_intents'::regclass;")" == t ]] ||
  { echo "RLS_NOT_ENABLED";exit 1; }
-echo "ECHO_FIVE_USD_DISPOSABLE_PG17=PASS;CONCURRENT_SOURCE_REPLAY=BLOCKED;REPEAT_MINT=PASS;SOURCE_REPLAY=BLOCKED;MULTIPLE_OPEN_LOTS=PASS;MARKET_CAP_500K=PASS;WALLET_BALANCE=ENFORCED;ONE_SHOT=PASS;USD_CAP=PASS;RLS_AND_ACL=PASS;BROADCAST=OFF"
+echo "ECHO_FIVE_USD_DISPOSABLE_PG17=PASS;CONCURRENT_SOURCE_REPLAY=BLOCKED;REPEAT_MINT=PASS;SOURCE_REPLAY=BLOCKED;MULTIPLE_OPEN_LOTS=PASS;MARKET_CAP_500K=PASS;WALLET_BALANCE=ENFORCED;SIX_USD_THRESHOLD=PASS;ONE_SHOT=PASS;USD_CAP=PASS;RLS_AND_ACL=PASS;BROADCAST=OFF"
