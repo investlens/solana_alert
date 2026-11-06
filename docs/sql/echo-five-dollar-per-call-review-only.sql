@@ -43,7 +43,7 @@ create unique index if not exists echo_per_call_one_signed_transaction
 -- A single source chain transaction can generate multiple notification/classifier
 -- paths; guard the signature alone for wallet, regardless of reported mint.
 create unique index if not exists echo_per_call_one_source_transaction
- on public.echo_per_call_buy_intents(execution_wallet,caller_wallet,source_signature);
+ on public.echo_per_call_buy_intents(execution_wallet,source_signature);
 
 create or replace function public.echo_reserve_five_usd_distinct_call(
  p_execution_wallet text,p_caller_wallet text,p_source_signature text,p_mint text,
