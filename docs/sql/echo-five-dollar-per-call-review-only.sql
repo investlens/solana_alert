@@ -74,6 +74,11 @@ begin
     or p_balance_verified_at is null or
        p_balance_verified_at>pg_catalog.now() or
        p_balance_verified_at<pg_catalog.now()-interval '3 seconds'
+    or p_market_cap_usd is null or p_market_cap_usd<=0
+    or p_market_cap_usd>500000
+    or p_market_cap_verified_at is null
+    or p_market_cap_verified_at>pg_catalog.now()
+    or p_market_cap_verified_at<pg_catalog.now()-interval '2 seconds'
  then return 'INVALID_OR_STALE_ATTESTATION';end if;
  -- Validated trusted coordinator supplies exact message/inner CPI and balance
  -- attestations. SQL can enforce arithmetic and serialization, but CANNOT
