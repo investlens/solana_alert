@@ -34,6 +34,11 @@ export type EchoPerCallReservation={
 export interface EchoPerCallReservationReader{
  getByCall(wallet:string,sourceSignature:string):Promise<EchoPerCallReservation|null>;
 }
+const exactRowNonnegativeInt=(v:string|number):bigint|null=>{
+ if(typeof v==='number')return Number.isSafeInteger(v)&&v>=0?BigInt(v):null;
+ if(typeof v==='string'&&/^(0|[1-9][0-9]{0,17})$/.test(v))return BigInt(v);
+ return null;
+};
 export const perCallKey=(r:Pick<EchoPerCallSignerRequest,
  'executionWallet'|'callerWallet'|'sourceSignature'|'mint'>)=>
  [r.executionWallet,r.callerWallet,r.sourceSignature,r.mint].join(':');
@@ -94,8 +99,11 @@ export async function admitEchoPerCallSignerV2(args:{
   row.callerWallet!==r.callerWallet||row.mint!==r.mint||
   row.sourceSignature!==r.sourceSignature||row.state!=='reserved'||
   row.transactionSignature!==null||row.positionClosedAt!==null||
-  !Number.isSafeInteger(row.amountLamports)||row.amountLamports<=0||
-  !Number.isSafeInteger(row.allInCents)||row.allInCents<1||row.allInCents>500||
+  exactRowNonnegativeInt(row.amountLamports)===null||
+  exactRowNonnegativeInt(row.amountLamports)!<=0n||
+  exactRowNonnegativeInt(row.allInCents)===null||
+  exactRowNonnegativeInt(row.allInCents)!<1n||
+  exactRowNonnegativeInt(row.allInCents)!>500n||
   args.preview.inputMint!=='So11111111111111111111111111111111111111112'||
   args.preview.outputMint!==r.mint||
   args.preview.inputRaw!==String(row.amountLamports))
