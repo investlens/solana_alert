@@ -32,8 +32,7 @@ export function reviewEchoPortfolioExitReserve(input:{
  const balance=dec(input.actualWalletBalanceLamports);
  const pending=dec(input.pendingBuyCommitmentsLamports);
  if(balance===null||pending===null)return no('UNKNOWN_WALLET_OR_PENDING_DEBITS');
- if(input.openLots.length>2)return no('TWO_OPEN_LOT_EXIT_RESERVE_LIMIT');
- const ids=new Set<string>();
+  const ids=new Set<string>();
  let reserve=0n;
  for(const lot of input.openLots){
   if(lot.wallet!==input.wallet||
