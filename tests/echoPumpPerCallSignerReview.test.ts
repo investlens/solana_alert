@@ -91,6 +91,8 @@ const row={
  executionWallet:wallet,callerWallet:caller,mint,
  sourceSignature:call.sourceSignature,state:'reserved',
  amountLamports:principal,allInCents:443,
+ exactFeeLamports:50000,accountRentLamports:2000000,
+ cpiExtraLamports:100000,allInLamports:22150000,sellReserveLamports:2000000,
  positionClosedAt:null,transactionSignature:null
 };
 function input(){
@@ -144,6 +146,25 @@ test('reserved USD amount must match independently audited transaction debit',as
  const result=await reviewEchoPumpPerCallSignerNoBroadcast(x);
  assert.deepEqual(result,{ok:false,reason:'PUMP_RESERVED_USD_DEBIT_MISMATCH',
   signingAllowed:false,broadcastAllowed:false});
+ assert.equal(consumed,0);
+});
+test('immutable fee, rent, CPI and sell-reserve mismatches reject before nonce',async()=>{
+ let consumed=0;
+ for(const modified of [
+  {exactFeeLamports:49999},
+  {accountRentLamports:1999999},
+  {cpiExtraLamports:0},
+  {allInLamports:22149999},
+  {sellReserveLamports:1999999},
+  {exactFeeLamports:undefined}
+ ]){
+  const x=input();
+  x.reservationReader.getByCall=async()=>({...row,...modified});
+  x.nonceStore.consumeOnce=async()=>{consumed++;return true;};
+  const result=await reviewEchoPumpPerCallSignerNoBroadcast(x);
+  assert.deepEqual(result,{ok:false,reason:'PUMP_RESERVED_COST_COMPONENTS_MISMATCH',
+   signingAllowed:false,broadcastAllowed:false});
+ }
  assert.equal(consumed,0);
 });
 test('unknown CPI, unfunded wallet, wrong lot and failed independent simulation reject without nonce',async()=>{
