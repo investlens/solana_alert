@@ -138,8 +138,41 @@ try{
    throw Error('RPC_NETWORK_FEE_OR_RENT_UNVERIFIED');
  // This is a DIAGNOSTIC SCENARIO using operator-supplied USD price and
  // an unverified CPI allowance. It is NOT a verified $5 trade or funding quote.
- const priceRaw=process.env.ECHO_SCENARIO_SOL_USD_CENTS;
+ let priceRaw=process.env.ECHO_SCENARIO_SOL_USD_CENTS;
  const cpiRaw=process.env.ECHO_SCENARIO_CPI_ALLOWANCE_LAMPORTS;
+ report.publicFxCrosscheckPassed=false;
+ report.publicFxExchangeTickTimestampVerified=false;
+ report.publicFxTradeAuthorization=false;
+ if(process.env.ECHO_SCENARIO_USE_PUBLIC_FX==='true'){
+  const {parseCoinbaseSolUsdProduct,parseKrakenSolUsdTicker,
+    crossCheckSolUsdPublicQuotes}=await import('../src/echo/solUsdIndependentPrice.js');
+  const sources=[
+   {source:'coinbase' as const,
+    url:'https://api.coinbase.com/api/v3/brokerage/market/products/SOL-USD',
+    parse:parseCoinbaseSolUsdProduct},
+   {source:'kraken' as const,
+    url:'https://api.kraken.com/0/public/Ticker?pair=SOLUSD',
+    parse:parseKrakenSolUsdTicker}
+  ];
+  const observed=await Promise.all(sources.map(async s=>{
+   try{
+    const response=await fetch(s.url,{headers:{Accept:'application/json'},
+     signal:AbortSignal.timeout(2500),redirect:'error'});
+    if(!response.ok)return null;
+    const cents=s.parse(await response.json());
+    return cents?{source:s.source,cents,receivedAtMs:Date.now()}:null;
+   }catch{return null;}
+  }));
+  const cross=crossCheckSolUsdPublicQuotes(observed.filter(x=>x!==null),Date.now());
+  if(!cross.ok)throw Error('PUBLIC_SOL_USD_CROSSCHECK_FAILED');
+  priceRaw=cross.upperCents;
+  report.publicFxCrosscheckPassed=true;
+  report.publicFxSourceCount=2;
+  report.publicFxDivergenceBps=cross.divergenceBps;
+  report.publicFxObservedAtMs=cross.observedAtMs;
+  report.publicFxExchangeTickTimestampVerified=false;
+  report.publicFxTradeAuthorization=false;
+ }
  if(!priceRaw||!cpiRaw||!/^[1-9][0-9]{0,8}$/.test(priceRaw)||
     !/^[1-9][0-9]{0,12}$/.test(cpiRaw))
   throw Error('SCENARIO_PRICE_AND_CPI_ALLOWANCE_REQUIRED');
@@ -152,7 +185,7 @@ try{
  INPUT=Number(maxInput);
  report.amountLamports=INPUT;
  report.scenarioSolUsdCents=priceRaw;
- report.scenarioSolUsdIndependentlyVerified=false;
+ report.scenarioSolUsdIndependentlyVerified=report.publicFxCrosscheckPassed;
  report.scenarioCpiAllowanceLamports=cpiRaw;
  report.scenarioCpiIndependentlyVerified=false;
  report.stage='DYNAMIC_FIVE_USD_QUOTE_AND_REBUILD';
@@ -292,7 +325,8 @@ try{
  'SCENARIO_FEES_EXHAUST_ENTRY','DYNAMIC_MIN_OUTPUT_MISSING',
  'DYNAMIC_UNREVIEWED_INSTRUCTIONS','DYNAMIC_UNREVIEWED_SYSTEM_TRANSFER',
  'DYNAMIC_TRANSFER_MISMATCH','DYNAMIC_ATA_SET_CHANGED','DYNAMIC_UNSAFE_SIGNER',
- 'DYNAMIC_FEE_REQUOTE_REQUIRED','DYNAMIC_USD_CAP_EXCEEDED'];
+ 'DYNAMIC_FEE_REQUOTE_REQUIRED','DYNAMIC_USD_CAP_EXCEEDED',
+ 'PUBLIC_SOL_USD_CROSSCHECK_FAILED'];
  report.reason=allowedReasons.includes(x)?x:'SDK_QUOTE_OR_SIMULATION_FAILED';
  report.errorType=e instanceof Error?e.name:'UNKNOWN';
 }
