@@ -11,6 +11,7 @@ import {reviewEchoPumpPerCallSignerNoBroadcast,
  ECHO_PUMP_SIGNER_REVIEW_CAN_SIGN,ECHO_PUMP_SIGNER_REVIEW_CAN_BROADCAST
 } from '../src/echo/pumpPerCallSignerReview.js';
 import type {EchoFiveDollarCall} from '../src/echo/fiveDollarCallPolicy.js';
+import type {EchoPumpDebitEvidence} from '../src/echo/pumpSimulatedDebitEvidence.js';
 const wallet='8ndw7DJ6hyZBm1PD3JJMF8G4PD5CJhDCCUK13ECL2pgQ';
 const caller=SLINGOOR_WALLET,now=1800000000000;
 const mint=Keypair.generate().publicKey.toBase58();
@@ -64,6 +65,20 @@ const sizing={
  freshFxVerified:true,completeFeeAndCpiAudit:true,
  freshWalletBalanceVerified:true,manualSellReserveVerified:true
 };
+const debitEvidence:EchoPumpDebitEvidence={
+ unsignedBytes:bytes,
+ simulatedUnsignedSha256:sha,
+ simulationSucceeded:true,
+ simulationSignatureVerificationDisabled:true,
+ actualWalletBalanceBeforeLamports:'100000000',
+ simulatedWalletBalanceAfterLamports:'79950000',
+ independentlyObservedNetworkFeeLamports:'50000',
+ reservedAccountRentLamports:'2000000',
+ independentlyBoundedAdditionalCpiLamports:'100000',
+ exitReserveLamports:'2000000',
+ pendingReservedLamports:'0',solUsdCents:'20000',
+ observedAtMs:now,nowMs:now
+};
 const request:EchoPerCallSignerRequest={
  audience:'echo-isolated-signer',action:'BUY',
  executionWallet:wallet,callerWallet:caller,mint,sourceSignature:call.sourceSignature,
@@ -85,7 +100,7 @@ function input(){
   unsignedTransactionBytes:bytes,
   nonceStore:{consumeOnce:async(_nonce:string,_exp:number)=>true},
   reservationReader:{getByCall:async()=>row},
-  evidenceReader:{readFromTrustedProviders:async()=>({call,probe,independent,sizing})}
+  evidenceReader:{readFromTrustedProviders:async()=>({call,probe,independent,sizing,debitEvidence})}
  };
 }
 test('authenticated synthetic per-call PumpSwap review stays no-sign/no-broadcast',async()=>{
@@ -129,6 +144,8 @@ test('unknown CPI, unfunded wallet, wrong lot and failed independent simulation 
   {...x,evidenceReader:{readFromTrustedProviders:async()=>({call,probe:{...probe,simulationPassed:false},independent,sizing})}},
   {...x,evidenceReader:{readFromTrustedProviders:async()=>({call,probe:{...probe,currentWalletLamports:0},independent,sizing})}},
   {...x,evidenceReader:{readFromTrustedProviders:async()=>({call,probe,independent:{...independent,allCpiAndRentDebitsIndependentlyAudited:false},sizing})}},
+  {...x,evidenceReader:{readFromTrustedProviders:async()=>({call,probe,independent,sizing,debitEvidence:{...debitEvidence,simulationSucceeded:false}})}},
+  {...x,evidenceReader:{readFromTrustedProviders:async()=>({call,probe,independent,sizing,debitEvidence:{...debitEvidence,simulatedWalletBalanceAfterLamports:'79900000'}})}},
   {...x,evidenceReader:{readFromTrustedProviders:async()=>null}}
  ];
  for(const b of bads){
