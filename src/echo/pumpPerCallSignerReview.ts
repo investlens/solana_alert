@@ -140,6 +140,24 @@ export async function reviewEchoPumpPerCallSignerNoBroadcast(args:{
   c.sourceSignature!==r.sourceSignature||c.mint!==r.mint||
   c.principalLamports!==String(row.amountLamports))
   return deny('PUMP_CALL_RESERVATION_MISMATCH');
+ // The immutable DB reservation must commit to EACH cost component, not
+ // just principal and rounded USD cents. An understated fee/rent/CPI/exit
+ // reservation otherwise lets a different spending envelope pass review.
+ // Only safe integers returned by the trusted DB reader are acceptable.
+ const stored=row as typeof row & {
+  exactFeeLamports?:number;accountRentLamports?:number;
+  cpiExtraLamports?:number;allInLamports?:number;sellReserveLamports?:number;
+ };
+ const fields=[
+  [stored.exactFeeLamports,c.networkAndPriorityFeeLamports],
+  [stored.accountRentLamports,c.accountRentLamports],
+  [stored.cpiExtraLamports,c.additionalCpiDebitLamports],
+  [stored.allInLamports,simulation.plannedWalletDebitUpperBoundLamports],
+  [stored.sellReserveLamports,c.sellReserveLamports]
+ ] as const;
+ if(fields.some(([db,attested])=>!Number.isSafeInteger(db)||db===undefined||
+      db<0||String(db)!==attested))
+   return deny('PUMP_RESERVED_COST_COMPONENTS_MISMATCH');
  const audited=inspectPumpUnsignedPerCallHandoff({
   caller:c,unsignedTxBytes:bytes,probe:trusted.probe,
   independent:trusted.independent,sizing:trusted.sizing});
