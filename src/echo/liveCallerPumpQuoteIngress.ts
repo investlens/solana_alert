@@ -47,7 +47,8 @@ export async function inspectLiveCallerForPumpQuote(input:{
     !Number.isFinite(s.quoteAmount)||s.quoteAmount===null||
     s.quoteAmount<=0||!Number.isFinite(s.tokenAmount)||s.tokenAmount<=0||
     (s.quoteSymbol!=='SOL'&&s.quoteSymbol!=='USDC')||
-    s.quoteBasis==='unavailable'||!Number.isSafeInteger(input.nowMs)||
+    (s.quoteBasis!=='token-account net change'&&
+     s.quoteBasis!=='wallet SOL net change; includes fees/rent')||!Number.isSafeInteger(input.nowMs)||
     !Number.isSafeInteger(input.verifiedAtMs)||
     !Number.isSafeInteger(input.websocketObservedAtMs)||
     !Number.isSafeInteger(s.timestamp)||
