@@ -185,7 +185,8 @@ try{
  INPUT=Number(maxInput);
  report.amountLamports=INPUT;
  report.scenarioSolUsdCents=priceRaw;
- report.scenarioSolUsdIndependentlyVerified=report.publicFxCrosscheckPassed;
+ report.scenarioSolUsdIndependentlyVerified=false;
+ report.scenarioSolUsdPublicTwoSourceCrosschecked=report.publicFxCrosscheckPassed;
  report.scenarioCpiAllowanceLamports=cpiRaw;
  report.scenarioCpiIndependentlyVerified=false;
  report.stage='DYNAMIC_FIVE_USD_QUOTE_AND_REBUILD';
@@ -205,15 +206,18 @@ try{
     rebuilt.some(ix=>!permitted.has(ix.programId.toBase58())))
   throw Error('DYNAMIC_UNREVIEWED_INSTRUCTIONS');
  let transfer=0n;
+ let transferInstructions=0;
  for(const ix of rebuilt){
   if(!ix.programId.equals(SystemProgram.programId))continue;
   const raw=Buffer.from(ix.data);
   if(raw.length!==12||raw.readUInt32LE(0)!==2||
      ix.keys.length!==2||ix.keys[0].pubkey.toBase58()!==WALLET)
     throw Error('DYNAMIC_UNREVIEWED_SYSTEM_TRANSFER');
+  transferInstructions++;
   transfer+=raw.readBigUInt64LE(4);
  }
- if(transfer!==BigInt(INPUT))throw Error('DYNAMIC_TRANSFER_MISMATCH');
+ if(transferInstructions!==1||transfer!==BigInt(INPUT))
+  throw Error('DYNAMIC_TRANSFER_MISMATCH');
  const revisedAta=[...new Set(rebuilt.filter(ix=>ix.programId.toBase58()===ataProgram)
    .map(ix=>ix.keys?.[1]?.pubkey?.toBase58?.()).filter(Boolean))];
  if(revisedAta.length!==ataKeys.length||revisedAta.some(a=>!ataKeys.includes(a)))
@@ -238,6 +242,7 @@ try{
  report.instructionCount=ixs.length;
  report.unsignedBytes=tx.serialize().length;
  report.systemTransferLamports=transfer.toString();
+ report.systemInstructionCount=transferInstructions;
  report.fiveUsdScenarioTotalWithAssumedCpiLamports=
   String(BigInt(INPUT)+BigInt(networkFee.value)+ataAllowance+cpiAllowance);
  report.fiveUsdScenarioAllInCents=String(
