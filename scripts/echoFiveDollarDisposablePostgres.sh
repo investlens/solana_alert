@@ -119,6 +119,10 @@ run "update public.echo_per_call_buy_intents set
  state='confirmed' where source_signature='$sig1';" >/dev/null
 run "update public.echo_per_call_buy_intents set
  state='closed',position_closed_at=now() where source_signature='$sig2';" >/dev/null
+# Independently close the additional synthetic lots before the single
+# remaining-confirmed-position exit reserve accounting fixture.
+run "update public.echo_per_call_buy_intents set
+ state='closed',position_closed_at=now() where source_signature in ('$sig3','$sig4');" >/dev/null
 # Existing confirmed position consumes one 2m SELL reserve, next call adds
 # 22.15m BUY and 2m new exit; exact required wallet=26.15m.
 [[ "$(reserve "$sig5" 45000 26150000)" == RESERVED ]] ||
