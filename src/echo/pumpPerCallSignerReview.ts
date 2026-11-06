@@ -20,6 +20,8 @@ import type {EchoFiveDollarCall} from './fiveDollarCallPolicy.js';
 import {inspectPumpUnsignedPerCallHandoff,type PumpUnsignedProbe,
  type PumpIndependentEvidence} from './pumpUnsignedPerCallHandoff.js';
 import type {EchoPumpSizeInput} from './fiveDollarPumpInputSizing.js';
+import {auditEchoPumpSimulatedWalletDebit,
+ type EchoPumpDebitEvidence} from './pumpSimulatedDebitEvidence.js';
 
 export const ECHO_PUMP_SIGNER_REVIEW_CAN_SIGN=false as const;
 export const ECHO_PUMP_SIGNER_REVIEW_CAN_BROADCAST=false as const;
@@ -28,6 +30,7 @@ export type EchoTrustedPumpObservation={
  probe:PumpUnsignedProbe;
  independent:PumpIndependentEvidence;
  sizing:EchoPumpSizeInput;
+ debitEvidence:EchoPumpDebitEvidence;
  /** Trusted observer must attest against EXACT bytes and wallet state. */
 };
 export interface EchoTrustedPumpEvidenceReader{
@@ -109,6 +112,23 @@ export async function reviewEchoPumpPerCallSignerNoBroadcast(args:{
   r.executionWallet,r.mint,Uint8Array.from(bytes));}
  catch{return deny('PUMP_TRUSTED_EVIDENCE_UNAVAILABLE');}
  if(!trusted)return deny('PUMP_TRUSTED_EVIDENCE_UNAVAILABLE');
+ // Independent numeric pre/post-wallet simulation evidence must agree with
+ // the exact bytes, spending cap and signer-side cost bounds. Legacy booleans
+ // alone cannot ever admit a PumpSwap signer review.
+ const simulation=auditEchoPumpSimulatedWalletDebit(trusted.debitEvidence);
+ if(!simulation.ok)return deny('PUMP_SIMULATED_DEBIT_UNVERIFIED');
+ if(simulation.unsignedSha256!==r.transactionSha256||
+    simulation.plannedWalletDebitUpperBoundLamports!==
+      (BigInt(trusted.call.principalLamports)+
+       BigInt(trusted.call.networkAndPriorityFeeLamports)+
+       BigInt(trusted.call.accountRentLamports)+
+       BigInt(trusted.call.additionalCpiDebitLamports)).toString()||
+    trusted.debitEvidence.solUsdCents!==trusted.call.solUsdPriceCents||
+    trusted.debitEvidence.actualWalletBalanceBeforeLamports!==
+      trusted.call.availableWalletLamports||
+    trusted.debitEvidence.pendingReservedLamports!==trusted.call.pendingWalletDebitLamports||
+    trusted.debitEvidence.exitReserveLamports!==trusted.call.sellReserveLamports)
+   return deny('PUMP_SIMULATED_DEBIT_OR_SIZING_MISMATCH');
  const c=trusted.call;
  if(c.executionWallet!==r.executionWallet||c.callerWallet!==r.callerWallet||
   c.sourceSignature!==r.sourceSignature||c.mint!==r.mint||
