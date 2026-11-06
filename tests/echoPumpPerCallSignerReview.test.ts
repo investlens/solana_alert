@@ -136,6 +136,16 @@ test('source signature, token mint and signed message tampering reject before tr
  }
  assert.equal(reads,0);
 });
+test('reserved USD amount must match independently audited transaction debit',async()=>{
+ let consumed=0;
+ const x=input();
+ x.reservationReader.getByCall=async()=>({...row,allInCents:442});
+ x.nonceStore.consumeOnce=async()=>{consumed++;return true;};
+ const result=await reviewEchoPumpPerCallSignerNoBroadcast(x);
+ assert.deepEqual(result,{ok:false,reason:'PUMP_RESERVED_USD_DEBIT_MISMATCH',
+  signingAllowed:false,broadcastAllowed:false});
+ assert.equal(consumed,0);
+});
 test('unknown CPI, unfunded wallet, wrong lot and failed independent simulation reject without nonce',async()=>{
  let consumed=0;
  const x=input();
