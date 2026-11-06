@@ -22,3 +22,20 @@ Instrument (a) observed whale source BUY chain slot, (b) monitor reception, (c) 
 - Explicit separate approval for any live wallet funding, signing or broadcast.
 
 No deployment or funds are authorized by this evidence file.
+
+## Actual bounded mainnet diagnostic evidence — 2026-11-06
+
+Read-only GitHub Actions job: https://github.com/investlens/solana_alert/actions/runs/42159931550
+
+- SDK: `@pump-fun/pump-sdk/swap@4.3.1` — two pool accounts verified; 6 unsigned instructions.
+- Legacy input: `25,000,000` lamports (0.025 SOL), **not** a $5-sized order.
+- Expected output raw: `9560405783527`; fee-aware minimum raw: `8604365205174`.
+- Exact unsigned SHA-256: `5959da4c71ea02af134838cb8baf1481abb4df72d85c0bc7bf53613ce2d055d9`.
+- Base fee returned: `5,000` lamports; 2 absent token accounts; conservative rent for each: `5,852,160` lamports.
+- Known (incomplete) debit floor: `25,005,000` lamports; provisional total including ATA allowance: `36,709,320` lamports (0.03670932 SOL).
+- Observed execution wallet balance: `0` lamports. The diagnostic stopped with `INSUFFICIENT_PROVISIONAL_BALANCE` **before** `simulateTransaction`.
+- CPI and full wallet debit independently verified: **NO**. Manual Phantom SELL reserve: **NOT ESTABLISHED**.
+- Simulation passed: **NO**; signatures created: **NO**; broadcast: **NO**.
+- Total read-only RPC requests: 8.
+
+This evidence proves the unsigned SDK build and a partial cost estimate, not a completed $5 real-wallet BUY. The exact fingerprint is **necessary but insufficient** for signer-side admission: unsigned bytes must independently be furnished through an authenticated private channel and inspected against a funded-state simulation, complete CPI accounting and the immutable per-call reservation.
