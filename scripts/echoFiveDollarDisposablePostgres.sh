@@ -45,6 +45,32 @@ claim(){
 }
 # Wallet balance below $6 is not by itself a rejection; exact all-in cost
 # and manual-exit reserve must fit before any commitment.
+# Two DIFFERENT source signatures may race for one wallet with enough SOL
+# for only ONE $5 all-in BUY plus its exit reserve. Advisory wallet locking
+# must make the second reservation fail instead of oversubscribing balance.
+race_sig_a="$(printf 'B%.0s' {1..64})"
+race_sig_b="$(printf 'C%.0s' {1..64})"
+reserve "$race_sig_a" 450000 25000000 > "$tmp/solvency-a" &
+cash_a=$!
+reserve "$race_sig_b" 450000 25000000 > "$tmp/solvency-b" &
+cash_b=$!
+wait "$cash_a"
+wait "$cash_b"
+cash_one="$(cat "$tmp/solvency-a")"
+cash_two="$(cat "$tmp/solvency-b")"
+if ! { [[ "$cash_one" == RESERVED &&
+          "$cash_two" == INSUFFICIENT_WALLET_BALANCE_AND_EXIT_RESERVE ]] ||
+        [[ "$cash_two" == RESERVED &&
+          "$cash_one" == INSUFFICIENT_WALLET_BALANCE_AND_EXIT_RESERVE ]]; };then
+ echo "CONCURRENT_DISTINCT_CALLS_OVERRAN_WALLET";exit 1
+fi
+[[ "$(run "select count(*) from public.echo_per_call_buy_intents
+ where source_signature in ('$race_sig_a','$race_sig_b');")" == 1 ]] ||
+ { echo "DISTINCT_CALL_BALANCE_SERIALIZATION_FAILED";exit 1; }
+# Disposable PG only: reset the fixture before the existing scenario tests.
+run "delete from public.echo_per_call_buy_intents
+ where source_signature in ('$race_sig_a','$race_sig_b');" >/dev/null
+
 # Two independent concurrent SQL clients race on the SAME verified source.
 # Exactly one may reserve. The other MUST fail as a durable duplicate.
 reserve "$sig1" 450000 27500000 > "$tmp/race-a" &
@@ -122,4 +148,4 @@ acl="$(run "select
 [[ "$acl" == 'f|f|f|t' ]] || { echo "ROLE_GRANTS_UNSAFE";exit 1; }
 [[ "$(run "select relrowsecurity from pg_class where oid='public.echo_per_call_buy_intents'::regclass;")" == t ]] ||
  { echo "RLS_NOT_ENABLED";exit 1; }
-echo "ECHO_FIVE_USD_DISPOSABLE_PG17=PASS;CONCURRENT_SOURCE_REPLAY=BLOCKED;REPEAT_MINT=PASS;SOURCE_REPLAY=BLOCKED;MULTIPLE_OPEN_LOTS=PASS;MARKET_CAP_500K=PASS;WALLET_BALANCE=ENFORCED;NO_ARBITRARY_MIN_BALANCE=PASS;ONE_SHOT=PASS;USD_CAP=PASS;LEGACY_SCHEMA_COMPATIBLE=PASS;CONFIRMED_DEBIT_NOT_DOUBLE_COUNTED=PASS;ALL_EXIT_RESERVES=PASS;RLS_AND_ACL=PASS;BROADCAST=OFF"
+echo "ECHO_FIVE_USD_DISPOSABLE_PG17=PASS;CONCURRENT_SOURCE_REPLAY=BLOCKED;DISTINCT_SOURCE_WALLET_OVERSUBSCRIPTION=BLOCKED;REPEAT_MINT=PASS;SOURCE_REPLAY=BLOCKED;MULTIPLE_OPEN_LOTS=PASS;MARKET_CAP_500K=PASS;WALLET_BALANCE=ENFORCED;NO_ARBITRARY_MIN_BALANCE=PASS;ONE_SHOT=PASS;USD_CAP=PASS;LEGACY_SCHEMA_COMPATIBLE=PASS;CONFIRMED_DEBIT_NOT_DOUBLE_COUNTED=PASS;ALL_EXIT_RESERVES=PASS;RLS_AND_ACL=PASS;BROADCAST=OFF"
