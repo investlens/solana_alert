@@ -29,7 +29,7 @@ const hash=createHash('sha256').update(tx).digest('hex');
 const call:EchoFiveDollarCall={
  executionWallet:wallet,callerWallet:SLINGOOR_WALLET,mint,sourceSignature:'2'.repeat(64),
  side:'BUY',verifiedCallerSigner:true,verifiedSwap:true,verifiedSpend:true,
- verifiedTokenCredit:true,isTransferOrGift:false,marketCapUsd:450000,
+ verifiedTokenCredit:true,isTransferOrGift:false,marketCapUsd:45000,
  callerPriceSolPerToken:0.00001,buyPriceSolPerToken:0.000013,
  maxSlippageBps:1000,observedAtMs:now-1000,nowMs:now,
  marketCapObservedAtMs:now,balanceVerifiedAtMs:now,solUsdObservedAtMs:now,
@@ -91,7 +91,7 @@ test('changing bytes, mint, principal, fees and fund state fails closed',()=>{
   {probe:{...probe,currentWalletLamports:0}},
   {independent:{...independent,simulationMatchesExactBytes:false}},
   {independent:{...independent,allCpiAndRentDebitsIndependentlyAudited:false}},
-  {caller:{...call,marketCapUsd:500001}},
+  {caller:{...call,marketCapUsd:100000}},
   {caller:{...call,sourceTransactionAlreadyReserved:true}},
   {sizing:{...sizing,maximumAdditionalCpiDebitLamports:'2000000'}},
   {sizing:{...sizing,completeFeeAndCpiAudit:false}}
