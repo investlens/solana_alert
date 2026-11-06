@@ -301,3 +301,18 @@ jobs:
       - uses: actions/checkout@v4
       - name: Four real Postgres clients, one-shot claim, nonce and hard restart
         run: bash scripts/echoDisposablePostgresPilotIntegration.sh
+
+  echo-five-dollar-postgres:
+    # Fully isolated disposable PostgreSQL 17 test; never touches Supabase.
+    if: github.event_name == 'push' && github.ref_name == 'feat/echo-five-usd-per-call-safety-20261106'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    env:
+      ADMIN_TRADING_ENABLED: 'false'
+      AUTO_TRADE_MODE: paper
+    steps:
+      - uses: actions/checkout@v4
+      - name: Atomic per-call SQL, duplicate replay, $5 ceiling and no-broadcast
+        run: bash scripts/echoFiveDollarDisposablePostgres.sh
