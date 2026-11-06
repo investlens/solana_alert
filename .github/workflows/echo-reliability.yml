@@ -329,6 +329,9 @@ jobs:
     env:
       ADMIN_TRADING_ENABLED: 'false'
       AUTO_TRADE_MODE: paper
+      # Public Coinbase/Kraken consensus overrides illustrative fallback;
+      # exchange tick age and CPI remain unverified; no signing or broadcasting.
+      ECHO_SCENARIO_USE_PUBLIC_FX: 'true'
       ECHO_SCENARIO_SOL_USD_CENTS: '20000'
       ECHO_SCENARIO_CPI_ALLOWANCE_LAMPORTS: '1000000'
     steps:
