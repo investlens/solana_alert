@@ -33,7 +33,6 @@ test('duplicates, missing quotes, mismatched mint and insufficient reserve fail'
  for(const change of [
   {actualWalletBalanceLamports:'5219999'},
   {openLots:[lot(1),lot(1)]},
-  {openLots:[lot(1),lot(2),{...lot(2),sourceSignature:'4'.repeat(64)}]},
   {openLots:[lot(1),{...lot(2),quote:{...lot(2).quote!,walletSolBalanceLamports:'9999999'}}]},
   {openLots:[lot(1),{...lot(2),quote:null}]},
   {openLots:[lot(1),{...lot(2),mint:lot(1).mint}]},
@@ -43,5 +42,19 @@ test('duplicates, missing quotes, mismatched mint and insufficient reserve fail'
   const r=reviewEchoPortfolioExitReserve({...x,...change});
   assert.equal(r.ok,false,JSON.stringify(change));
   assert.equal(r.broadcastAllowed,false);
+ }
+});
+
+test('three or more lots permitted with distinct signatures and adequate wallet reserves',()=>{
+ const third={...lot(2),sourceSignature:'4'.repeat(64)};
+ const openLots=[lot(1),lot(2),third];
+ const fundedWallet='9000000';
+ const normalized=openLots.map(l=>({...l,quote:{...l.quote!,walletSolBalanceLamports:fundedWallet}}));
+ const result=reviewEchoPortfolioExitReserve({wallet,openLots:normalized,
+  actualWalletBalanceLamports:fundedWallet,pendingBuyCommitmentsLamports:'1000000',nowMs:now});
+ assert.equal(result.ok,true,JSON.stringify(result));
+ if(result.ok){
+  assert.equal(result.requiredExitReserveLamports,'6330000');
+  assert.equal(result.signingAllowed,false);
  }
 });
