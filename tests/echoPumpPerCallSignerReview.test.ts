@@ -442,3 +442,41 @@ test('synthetic queue BUY -> quote ingress -> reservation -> signer is entirely 
  assert.equal(quoteReads,1);assert.equal(reserveCount,1);assert.equal(nonceCount,1);
  // All evidence and wallet state in this test are SYNTHETIC; no live RPC.
 });
+
+test('signer-owned official quote rejection prevents any DB reservation',async()=>{
+ let reservations=0;
+ const result=await prepareEchoPumpNoBroadcastBridge({
+  source:{getVerifiedBuyAndQuote:async()=>({
+   call,chainAtMs:now-1000,websocketObservedAtMs:now-700,verifiedAtMs:now-300})},
+  store:{reserve:async()=>{reservations++;throw Error('must not reserve');}},
+  now:()=>now,manualAutoBuyEnabled:true,
+  ownerAutoBuyStillEnabled:async()=>true,
+  unsignedTransactionBytes:bytes,signerRequest:request,
+  coordinatorSignatureBase58:signed(request),
+  pinnedCoordinatorPublicKey:coordinator.publicKey.toBase58(),
+  nonceStore:input().nonceStore,
+  reservationReader:input().reservationReader,
+  evidenceReader:input().evidenceReader,
+  signerOwnedOfficialQuotePreflight:{
+   rpc:{
+    getMultipleAccountsInfo:async()=>[],
+    getFeeForMessage:async()=>({context:{slot:1},value:5000})
+   },
+   sdk:{
+    multiHopPoolHops:async()=>({hops:[],globalConfig:{},feeConfig:{}}),
+    decodePool:()=>{throw Error('not reached');},
+    quote:()=>{throw Error('not reached');},
+    swapInstructions:async()=>[],
+    amount:()=>0
+   },
+   firstPool:Keypair.generate().publicKey.toBase58(),
+   secondPool:Keypair.generate().publicKey.toBase58(),
+   intermediateMint:Keypair.generate().publicKey.toBase58()
+  }
+ });
+ assert.equal(result.status,'BLOCKED');
+ assert.ok(result.reason.startsWith('OFFICIAL_PUMP_QUOTE_'));
+ assert.equal(result.canSign,false);
+ assert.equal(result.canBroadcast,false);
+ assert.equal(reservations,0);
+});
