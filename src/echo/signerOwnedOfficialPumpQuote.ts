@@ -140,6 +140,16 @@ export async function inspectSignerOwnedOfficialPumpQuote(input:{
   }
   if(transfers!==1||amountTransferred!==BigInt(input.principalLamports))
    return deny('WRONG_OFFICIAL_SWAP_PRINCIPAL');
+  const compiled=tx.message;
+  const exactAccounts=compiled.staticAccountKeys.map(k=>k.toBase58());
+  const pumpIndex=exactAccounts.indexOf(PUMP_SWAP_PROGRAM_ID);
+  const swap=compiled.compiledInstructions.filter(ix=>ix.programIdIndex===pumpIndex);
+  if(swap.length!==1)return deny('MISSING_EXACT_PUMPSWAP_INSTRUCTION');
+  const referenced=new Set(Array.from(swap[0].accountKeyIndexes)
+   .map(i=>exactAccounts[i]));
+  if(![input.firstPool,input.secondPool,input.intermediateMint,
+      input.targetMint].every(address=>referenced.has(address)))
+   return deny('VERIFIED_POOLS_NOT_BOUND_TO_EXACT_SWAP_INSTRUCTION');
   const rebuilt=new VersionedTransaction(new TransactionMessage({
    payerKey:new PublicKey(ECHO_EXPECTED_EXECUTION_WALLET),
    recentBlockhash:tx.message.recentBlockhash,
