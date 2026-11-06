@@ -15,6 +15,8 @@ import {reviewEchoPumpPerCallSignerNoBroadcast,
  type EchoTrustedPumpEvidenceReader,
  type EchoPumpSignerReviewResult} from './pumpPerCallSignerReview.js';
 import type {EchoNonceStore} from './authenticatedSignerRequest.js';
+import {inspectSignerOwnedPumpPoolEvidence,
+ type EchoSignerPoolRpc} from './signerOwnedPumpPoolEvidence.js';
 export const ECHO_PUMP_NO_BROADCAST_BRIDGE_CAN_SIGN=false as const;
 export const ECHO_PUMP_NO_BROADCAST_BRIDGE_CAN_BROADCAST=false as const;
 
@@ -36,6 +38,15 @@ export type EchoPumpBridgeInput={
  nonceStore:EchoNonceStore;
  reservationReader:EchoPerCallReservationReader;
  evidenceReader:EchoTrustedPumpEvidenceReader;
+ /** Optional additional signer-pinned real-RPC preflight. When used, it MUST
+  * independently establish economic/exit provenance before any reservation.
+  * This new pool verifier currently checks owners, not complete CPI or SELL.
+  */
+ signerOwnedPoolPreflight?:{
+  connection:EchoSignerPoolRpc;
+  targetMint:string;
+  sdkDerivedPools:readonly string[];
+ };
 };
 export type EchoPumpBridgeResult={
  status:'BLOCKED'|'REVIEWED_NO_BROADCAST';
@@ -76,6 +87,27 @@ export async function prepareEchoPumpNoBroadcastBridge(
  try{currentSwitch=await x.ownerAutoBuyStillEnabled();}
  catch{return blocked('OWNER_SWITCH_UNAVAILABLE');}
  if(!currentSwitch)return blocked('OWNER_AUTO_BUY_OFF_DURING_QUOTE');
+ if(x.signerOwnedPoolPreflight){
+  const input=x.signerOwnedPoolPreflight;
+  if(input.targetMint!==r.mint)
+   return blocked('SIGNER_OWNED_POOL_MINT_MISMATCH');
+  const actual=await inspectSignerOwnedPumpPoolEvidence({
+   connection:input.connection,
+   unsignedBytes:x.unsignedTransactionBytes,
+   expectedUnsignedSha256:r.transactionSha256,
+   targetMint:r.mint,
+   sdkDerivedPools:input.sdkDerivedPools,
+   nowMs:x.now()
+  });
+  if(!actual.ok)return blocked('SIGNER_OWNED_'+actual.reason);
+  // Actual pool ownership alone cannot verify pool-mint continuity, a
+  // fee-adjusted SDK quote, CPI economics or manual Phantom SELL reserve.
+  // Fail BEFORE creating any DB reservation; no synthetic bool overrides.
+  if(!actual.poolMintContinuityProven||
+     !actual.completeCpiEconomicsProven||
+     !actual.phantomSellReserveProven)
+   return blocked('SIGNER_OWNED_ECONOMICS_AND_EXIT_NOT_PROVEN');
+ }
  const preflight=screenEchoFiveDollarCall({...c,nowMs:x.now()});
  if(!preflight.eligible)return blocked('PER_CALL_POLICY_'+preflight.reason);
  // Adapter returns the previously captured trusted bundle, never refetches
