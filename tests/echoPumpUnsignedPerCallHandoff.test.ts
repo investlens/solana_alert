@@ -102,3 +102,25 @@ test('changing bytes, mint, principal, fees and fund state fails closed',()=>{
   assert.equal(result.ok,false,JSON.stringify(change));
  }
 });
+
+test('split principal across two system transfers is rejected even when total matches',()=>{
+ const split=new VersionedTransaction(new TransactionMessage({
+  payerKey:new PublicKey(wallet),recentBlockhash:Keypair.generate().publicKey.toBase58(),
+  instructions:[
+   ComputeBudgetProgram.setComputeUnitLimit({units:900000}),
+   SystemProgram.transfer({fromPubkey:new PublicKey(wallet),
+    toPubkey:Keypair.generate().publicKey,lamports:amount/2}),
+   SystemProgram.transfer({fromPubkey:new PublicKey(wallet),
+    toPubkey:Keypair.generate().publicKey,lamports:amount/2}),
+   new TransactionInstruction({programId:new PublicKey('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA'),
+    keys:[],data:Buffer.from([1])})
+  ]
+ }).compileToV0Message()).serialize();
+ const splitHash=createHash('sha256').update(split).digest('hex');
+ const result=inspectPumpUnsignedPerCallHandoff({
+  caller:call,unsignedTxBytes:split,
+  probe:{...probe,unsignedTransactionSha256:splitHash},independent,sizing
+ });
+ assert.deepEqual(result,{ok:false,reason:'PUMP_SWAP_OR_PRINCIPAL_MISMATCH',
+  signerAllowed:false,broadcastAllowed:false});
+});
