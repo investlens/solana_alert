@@ -11,6 +11,14 @@ export function createEchoFiveDollarCallStore(client:SupabaseClient){
  return {async reserve(input:EchoFiveDollarCall):Promise<EchoFiveDollarStoreResult>{
   const decision=screenEchoFiveDollarCall(input);
   if(!decision.eligible)return {reserved:false,reason:decision.reason,executable:false};
+  // Supabase JSON represents JS numbers, so reject any lamport/cents integer
+  // outside Number.MAX_SAFE_INTEGER rather than silently rounding the debit.
+  for(const raw of [input.principalLamports,input.networkAndPriorityFeeLamports,
+    input.accountRentLamports,input.additionalCpiDebitLamports,
+    input.sellReserveLamports,input.availableWalletLamports,input.solUsdPriceCents]){
+    if(!Number.isSafeInteger(Number(raw)))
+      return {reserved:false,reason:'UNSAFE_INTEGER_AT_DATABASE_BOUNDARY',executable:false};
+  }
   try{
    const {data,error}=await client.rpc('echo_reserve_five_usd_distinct_call',{
     p_execution_wallet:input.executionWallet,
@@ -24,7 +32,7 @@ export function createEchoFiveDollarCallStore(client:SupabaseClient){
     p_exit_reserve_lamports:Number(input.sellReserveLamports),
     p_sol_usd_cents:Number(input.solUsdPriceCents),
     p_spendable_wallet_lamports:Number(input.availableWalletLamports),
-    p_balance_verified_at:new Date(input.nowMs).toISOString()
+    p_balance_verified_at:new Date(input.balanceVerifiedAtMs).toISOString()
    });
    if(error||typeof data!=='string')return {reserved:false,reason:'DATABASE_UNAVAILABLE',executable:false};
    if(data==='RESERVED')return {reserved:true,key:decision.intentKey,executable:false};
