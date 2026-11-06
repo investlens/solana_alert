@@ -25,7 +25,7 @@ const stub=(override:{balance?:number;fee?:number|null;after?:number|null;
   async simulateTransaction(_tx,conf){
    calls.simulation++;
    assert.equal(conf.sigVerify,false);
-   assert.equal(conf.replaceRecentBlockhash,true);
+   assert.equal(conf.replaceRecentBlockhash,false);
    assert.equal(conf.innerInstructions,true);
    assert.deepEqual(conf.accounts.addresses,[wallet]);
    return {context:{slot:override.contextSlot??12345},
