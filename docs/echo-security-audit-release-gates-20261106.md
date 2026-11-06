@@ -39,3 +39,14 @@ Review-only migration absent from production. Existing production admin/signer r
 - Verify alert timing separately from full follower RPC submission. No guaranteed 1–3 seconds on public RPC under congestion.
 
 **Decision:** NOT READY FOR REAL-MONEY AUTO-BUY. Review branch may continue code/test work with signing and broadcast OFF. Do not deploy, change production SQL or wallet state without specific owner authorization.
+
+## Follow-up verification record — 2026-11-06 14:15 UTC
+
+The user requested all remaining gates. Independent read-only production checks were performed; **none** of the real-world acceptance gates may be certified from this inspection:
+- Supabase `spwiqtdxfwjlqftujohm`: `to_regclass('public.echo_per_call_buy_intents')` returned NULL, with 0 legacy BUY intents. Per-call migration **NOT APPLIED**, and production rollback/integration **NOT TESTED**.
+- Railway `alphaos-echo-admin` remains pinned at `b8943b0bfb74f223972e457c2ef93ed78186de09`; isolated custody proof service remains pinned at `fe4188aeef8bf4b3e7710612199dfefd1f9cfcb3` with a one-shot off-chain ownership proof command. The current draft per-call signer is **NOT DEPLOYED**, no trusted evidence reader is running, and trading remains OFF.
+- Signed transaction, RPC CPI audit, full funded-wallet simulation and a Phantom manual full-SELL receipt **NOT OBSERVED**. Previous public RPC reported zero SOL. No wallet funding amount may be recommended on the basis of an unverified CPI allowance.
+- Additional review-only code hardening: raw CPI inspector now pins the transaction fee payer, requires a positive payer debit in supplied simulation balance vectors, rejects malformed inner-data base58 encoding; focused negative tests added. Legacy synthetic PumpSwap fixtures were adjusted from 3/5 open positions to the agreed maximum-two-lot preflight. These structural checks are **NOT** authoritative CPI / source verification.
+- Latest current-branch GitHub Actions/combined-status lookup reported no results. This **DOES NOT** mean PASS. Do not deploy the SQL, restart services, sign, fund, or broadcast until current CI passes and real-world verification and separate owner approvals are complete.
+
+**Decision: RELEASE BLOCKED — preserve current alert-only production and sealed key.**
