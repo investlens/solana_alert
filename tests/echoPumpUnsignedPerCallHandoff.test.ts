@@ -124,3 +124,47 @@ test('split principal across two system transfers is rejected even when total ma
  assert.deepEqual(result,{ok:false,reason:'PUMP_SWAP_OR_PRINCIPAL_MISMATCH',
   signerAllowed:false,broadcastAllowed:false});
 });
+
+
+test('malformed or duplicate compute-budget controls reject before signing',()=>{
+ const amm=new TransactionInstruction({
+  programId:new PublicKey('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA'),
+  keys:[],data:Buffer.from([1])
+ });
+ const transfer=SystemProgram.transfer({fromPubkey:new PublicKey(wallet),
+  toPubkey:Keypair.generate().publicKey,lamports:amount});
+ const cases=[
+  {name:'duplicate compute limit',instructions:[
+   ComputeBudgetProgram.setComputeUnitLimit({units:900000}),
+   ComputeBudgetProgram.setComputeUnitLimit({units:900000}),transfer,amm]},
+  {name:'duplicate priority price',instructions:[
+   ComputeBudgetProgram.setComputeUnitPrice({microLamports:1000}),
+   ComputeBudgetProgram.setComputeUnitPrice({microLamports:2000}),transfer,amm]},
+  {name:'excessive compute limit',instructions:[
+   ComputeBudgetProgram.setComputeUnitLimit({units:1400001}),transfer,amm]},
+  {name:'zero compute limit',instructions:[
+   ComputeBudgetProgram.setComputeUnitLimit({units:0}),transfer,amm]},
+  {name:'unsupported heap control',instructions:[
+   ComputeBudgetProgram.requestHeapFrame({bytes:32768}),transfer,amm]},
+  {name:'bad account-bearing compute instruction',instructions:[
+   new TransactionInstruction({programId:ComputeBudgetProgram.programId,
+    keys:[{pubkey:new PublicKey(wallet),isSigner:false,isWritable:false}],
+    data:Buffer.from([2,64,66,15,0])}),transfer,amm]}
+ ];
+ for(const c of cases){
+  const unsigned=new VersionedTransaction(new TransactionMessage({
+   payerKey:new PublicKey(wallet),
+   recentBlockhash:Keypair.generate().publicKey.toBase58(),
+   instructions:c.instructions
+  }).compileToV0Message()).serialize();
+  const h=createHash('sha256').update(unsigned).digest('hex');
+  const result=inspectPumpUnsignedPerCallHandoff({
+   caller:call,unsignedTxBytes:unsigned,
+   probe:{...probe,unsignedTransactionSha256:h},
+   independent,sizing
+  });
+  assert.equal(result.ok,false,c.name);
+  assert.equal(result.signerAllowed,false,c.name);
+  assert.equal(result.broadcastAllowed,false,c.name);
+ }
+});
