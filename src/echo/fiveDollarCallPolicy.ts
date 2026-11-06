@@ -7,7 +7,6 @@ import {CHAIRMAN_WALLET,SLINGOOR_WALLET} from './liveBuyPolicy.js';
 import {verifyEchoExecutionWallet} from './executionWallet.js';
 
 export const ECHO_CALL_ENTRY_CAP_CENTS=500n;
-export const ECHO_CALL_MAX_OPEN_OR_PENDING=2; // retain pending-limit until separately approved
 export const ECHO_FIVE_DOLLAR_CALL_BROADCAST_ENABLED=false as const;
 const base58=/^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const signature=/^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
@@ -58,7 +57,7 @@ export function screenEchoFiveDollarCall(c:EchoFiveDollarCall):EchoFiveDollarDec
    if(!Number.isSafeInteger(t)||t>c.nowMs||c.nowMs-t>maxAge)
      return deny('STALE_MARKET_CAP_WALLET_OR_FX_ATTESTATION');
  }
- if(!Number.isFinite(c.marketCapUsd)||c.marketCapUsd<=0||c.marketCapUsd>=100_000)
+ if(!Number.isFinite(c.marketCapUsd)||c.marketCapUsd<=0||c.marketCapUsd>500_000)
    return deny('MARKET_CAP_NOT_ELIGIBLE');
  if(!Number.isFinite(c.callerPriceSolPerToken)||c.callerPriceSolPerToken<=0||
    !Number.isFinite(c.buyPriceSolPerToken)||c.buyPriceSolPerToken<=0||
@@ -67,9 +66,10 @@ export function screenEchoFiveDollarCall(c:EchoFiveDollarCall):EchoFiveDollarDec
  if(!Number.isSafeInteger(c.maxSlippageBps)||c.maxSlippageBps<1||
    c.maxSlippageBps>1000)return deny('SLIPPAGE_EXCEEDED');
  if(!c.durableReservationAvailable)return deny('ATOMIC_RESERVATION_UNAVAILABLE');
- if(!Number.isSafeInteger(c.openOrPendingLots)||c.openOrPendingLots<0||
-   c.openOrPendingLots>=ECHO_CALL_MAX_OPEN_OR_PENDING)
-   return deny('TWO_ACTIVE_LOTS_LIMIT');
+ // Multiple open lots are permitted. Still reject inconsistent ledger
+ // observations; actual wallet balance and all pending debits must be audited.
+ if(!Number.isSafeInteger(c.openOrPendingLots)||c.openOrPendingLots<0)
+   return deny('INVALID_OPEN_LOT_COUNT');
  if(!c.exactMessageAndCpiAudited)return deny('UNVERIFIED_EXACT_WALLET_DEBIT');
  if(!c.manualSellRouteAndReserveVerified)return deny('MANUAL_SELL_RESERVE_UNVERIFIED');
  if(!c.walletBalanceAndFxVerified)return deny('BALANCE_OR_FX_UNVERIFIED');
