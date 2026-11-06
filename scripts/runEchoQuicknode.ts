@@ -20,6 +20,7 @@ import { readEchoTransaction } from '../src/echo/readTransaction.js';
 import { advanceFreshScan, type FreshScanState } from '../src/echo/freshScan.js';
 import { echoFreshPageBudget } from '../src/echo/freshBudget.js';
 import { EchoVerifiedBuyLatencyTracker } from '../src/echo/verifiedBuyLatencyTracker.js';
+import {inspectLiveCallerForPumpQuote} from '../src/echo/liveCallerPumpQuoteIngress.js';
 
 // Independent executable: no shared startup/config, database, bot polling,
 // Helius requests, private keys or trade execution imports.
@@ -291,9 +292,26 @@ const queue = new EchoQueue(async signature => {
   for (const signal of signals) {
     // User requested only confirmed BUY notifications, never incoming transfers or SELLs.
     if (signal.side !== 'BUY' || store.has(signal.id)) continue;
-    // Actual independent swap classification has completed. Record shadow
-    // latency BEFORE waiting for Telegram, enrichment, or paper research.
-    // There is no provider-backed trade quote here, so quote/decision remain null.
+    // Preserve alert delivery ordering and existing production behavior.
+    // This *optional* shadow hook is OFF by default. Until a pinned, fully
+    // independent Pump SDK/RPC/exit-cost reader is installed, the hook MUST
+    // report PROVIDER_NOT_CONNECTED instead of claiming quote readiness.
+    const echoVerifiedAtMs=Date.now();
+    const echoLiveWsAtMs=echoShadowLatency.websocketTimestamp(signal.signature,signal.wallet);
+    if(process.env.ECHO_PUMP_READ_ONLY_INGRESS_ENABLED==='true'){
+      void inspectLiveCallerForPumpQuote({
+        signal,nowMs:echoVerifiedAtMs,verifiedAtMs:echoVerifiedAtMs,
+        websocketObservedAtMs:echoLiveWsAtMs,
+        historicalReplay:echoLiveWsAtMs===null,
+        provider:null
+      }).then(review=>{
+        // Sanitize: no token IDs, private wallet material, quote, or RPC dumps.
+        console.log('[EchoPumpIngress] READ_ONLY', {
+          status:review.status,reason:review.reason,canBroadcast:review.canBroadcast
+        });
+      }).catch(()=>console.warn('[EchoPumpIngress] READ_ONLY_UNAVAILABLE'));
+    }
+    // Existing WebSocket + receipt latency metrics are not reset by shadow hook.
     echoShadowLatency.verifiedBuy({
       signature:signal.signature,wallet:signal.wallet,
       chainTimestampSec:signal.timestamp,
