@@ -69,8 +69,8 @@ fi
  { echo "EXACT_500K_MARKET_CAP_REJECTED";exit 1; }
 [[ "$(reserve "$sig5" 500001)" == INVALID_OR_STALE_ATTESTATION ]] ||
  { echo "ABOVE_500K_MARKET_CAP_NOT_REJECTED";exit 1; }
-[[ "$(reserve "$sig5" 450000)" == INSUFFICIENT_WALLET_BALANCE_AND_EXIT_RESERVE ]] ||
- { echo "WALLET_BALANCE_CAP_BYPASSED";exit 1; }
+[[ "$(reserve "$sig5" 450000)" == WALLET_BELOW_SIX_DOLLARS ]] ||
+ { echo "EFFECTIVE_WALLET_AFTER_PENDING_BELOW_SIX_NOT_BLOCKED";exit 1; }
 [[ "$(claim "$sig1" "$tx1")" == CLAIMED ]] || { echo "FIRST_ONESHOT_FAILED";exit 1; }
 [[ "$(claim "$sig1" "$tx1")" == ALREADY_CLAIMED_OR_UNRESOLVED ]] ||
  { echo "ONESHOT_REPLAY_NOT_BLOCKED";exit 1; }
