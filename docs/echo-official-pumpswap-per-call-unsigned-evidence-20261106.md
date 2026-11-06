@@ -39,3 +39,12 @@ Read-only GitHub Actions job: https://github.com/investlens/solana_alert/actions
 - Total read-only RPC requests: 8.
 
 This evidence proves the unsigned SDK build and a partial cost estimate, not a completed $5 real-wallet BUY. The exact fingerprint is **necessary but insufficient** for signer-side admission: unsigned bytes must independently be furnished through an authenticated private channel and inspected against a funded-state simulation, complete CPI accounting and the immutable per-call reservation.
+
+## November 6: conservative funding gate and offline signer bridge
+
+- `src/echo/pumpFundingReadiness.ts` reports separately (a) the provisional lamport floor for **attempting** the already-built unsigned message and (b) a complete requirement *only when* wallet CPI bound, manual-SELL reserve, pending debits and fresh SOL/USD are independently known. It does not authorize funding. The historic 25m-lamport unsigned diagnostic still has a **36,709,320 lamport provisional floor**, with the real wallet at zero.
+- This prior fixed 0.025 SOL test is **not a $5 BUY**. At deployment the SOL principal must be recomputed using the current rate and all-in costs, then the exact quote and unsigned bytes rebuilt.
+- `src/echo/pumpPerCallSignedDiscard.ts` is an isolated authenticated PumpSwap review-to-signature-discard bridge: the pinned Echo signer must independently prove a complete trusted quote+fee+simulation+DB reservation, then sign only the exact serialized message; verified signature is discarded without RPC submission.
+- Synthetic tests cannot prove control of the real Phantom trading wallet and do **not** count as the real-wallet signing acceptance. Do not send or store a key in GitHub, logs or this chat.
+- The existing RPC simulation has **not passed against the actual 0 SOL wallet**. Wallet funding and live sign/send remain separately prohibited. No current claim of 1–3-second observed whale-to-RPC submission latency is supported.
+- Independent full Supabase recovery and the production per-call schema migration remain distinct release blockers.
