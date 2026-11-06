@@ -25,8 +25,10 @@ export type EchoSignerRpcReadOnly={
    Promise<{value:number|null}>;
  simulateTransaction(tx:VersionedTransaction,config:{
   sigVerify:false;replaceRecentBlockhash:true;commitment:'confirmed';
+  innerInstructions:true;
   accounts:{encoding:'base64';addresses:string[]}
- }):Promise<{value:{err:unknown;accounts?:({lamports:number;owner:string}|null)[]|null}}>;
+ }):Promise<{value:{err:unknown;innerInstructions?:unknown;
+  accounts?:({lamports:number;owner:string}|null)[]|null}}>;
 };
 const deny=(reason:string):EchoSignerRpcProbeResult=>({
  ok:false,reason,signingAllowed:false,broadcastAllowed:false
@@ -69,9 +71,14 @@ export async function probeSignerOwnedPumpRpc(input:{
   if(before<=fee.value)return deny('UNFUNDED_PAYER_CANNOT_SIMULATE_BUY');
   const result=await input.connection.simulateTransaction(tx,{
    sigVerify:false,replaceRecentBlockhash:true,commitment:'confirmed',
+   innerInstructions:true,
    accounts:{encoding:'base64',addresses:[ECHO_EXPECTED_EXECUTION_WALLET]}
   });
   if(result.value.err!==null)return deny('PUMPSWAP_SIMULATION_FAILED');
+  // Require an explicitly requested inner-CPI trace; absence is UNKNOWN,
+  // never evidence that the transaction has no CPI debits.
+  if(!Array.isArray(result.value.innerInstructions))
+   return deny('MISSING_SIGNER_OWNED_CPI_TRACE');
   const after=result.value.accounts?.[0];
   if(!after||after.owner!==SystemProgram.programId.toBase58()||
      !Number.isSafeInteger(after.lamports)||after.lamports<0||
