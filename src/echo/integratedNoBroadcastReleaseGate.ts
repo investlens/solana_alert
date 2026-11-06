@@ -40,6 +40,22 @@ export function assessEchoIntegratedRelease(x:EchoIntegratedGateInput):EchoInteg
   ['REAL_SIGNED_AND_DISCARDED_PROOF',x.isolatedRealKeySignedAndDiscardedVerified]
  ];
  const unresolved=checks.filter(([,ok])=>ok!==true).map(([key])=>key);
+ // Independent SELL quotes for existing lots and the entry reservation must
+ // agree on an exit floor. Pending BUY commitments cannot masquerade as
+ // reserved exit capital. Numeric strings are bounded and compared exactly.
+ if(x.entry.ok&&x.exits.ok){
+  const num=(v:string):bigint|null=>
+   /^(0|[1-9][0-9]{0,17})$/.test(v)?BigInt(v):null;
+  const booked=num(x.entry.exitReserveLamports);
+  const allExits=num(x.exits.requiredExitReserveLamports);
+  const upper=num(x.entry.upperBuyDebitLamports);
+  const pending=num(x.entry.pendingCommitmentsLamports);
+  const required=num(x.entry.requiredWalletLamports);
+  if(booked===null||allExits===null||upper===null||
+     pending===null||required===null||
+     booked<allExits||required!==upper+booked+pending)
+   unresolved.push('ENTRY_EXIT_RESERVE_RECONCILIATION');
+ }
  if(!x.manualKillSwitchIsOff)unresolved.push('ADMIN_KILL_SWITCH_ACTIVE');
  return {
   status:unresolved.length?'BLOCKED':'NO_BROADCAST_REVIEW',
