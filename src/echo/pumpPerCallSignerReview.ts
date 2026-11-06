@@ -111,7 +111,7 @@ export async function reviewEchoPumpPerCallSignerNoBroadcast(args:{
  try{trusted=await args.evidenceReader.readFromTrustedProviders(
   r.executionWallet,r.mint,Uint8Array.from(bytes));}
  catch{return deny('PUMP_TRUSTED_EVIDENCE_UNAVAILABLE');}
- if(!trusted)return deny('PUMP_TRUSTED_EVIDENCE_UNAVAILABLE');
+ if(!trusted||!trusted.debitEvidence)return deny('PUMP_TRUSTED_EVIDENCE_UNAVAILABLE');
  // Independent numeric pre/post-wallet simulation evidence must agree with
  // the exact bytes, spending cap and signer-side cost bounds. Legacy booleans
  // alone cannot ever admit a PumpSwap signer review.
