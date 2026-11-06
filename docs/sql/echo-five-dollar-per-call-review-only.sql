@@ -54,7 +54,7 @@ create or replace function public.echo_reserve_five_usd_distinct_call(
  p_market_cap_usd bigint,p_market_cap_verified_at timestamptz)
 returns text language plpgsql security invoker set search_path=''
 as $$
-declare v_debit bigint; v_cents bigint; v_reserved bigint;
+declare v_debit bigint; v_cents bigint; v_reserved bigint; v_exit_reserves bigint;
 begin
  if p_execution_wallet is distinct from
      '8ndw7DJ6hyZBm1PD3JJMF8G4PD5CJhDCCUK13ECL2pgQ'
@@ -95,18 +95,26 @@ begin
    caller_wallet=p_caller_wallet and source_signature=p_source_signature)
  then return 'DUPLICATE_SOURCE_TRANSACTION';end if;
  -- Pending/UNKNOWN messages remain occupied until independently reconciled.
- select coalesce(sum(all_in_lamports),0)
- into v_reserved from public.echo_per_call_buy_intents
- where execution_wallet=p_execution_wallet
-   and position_closed_at is null and state<>'failed_preflight';
- -- Also account for older outstanding BUYs until all positions migrate.
+ -- Current on-chain balance already reflects confirmed debits, so don't
+ -- subtract them a second time. Pending/UNKNOWN debits remain reserved.
+ -- Every unclosed lot (including confirmed) retains a manual SELL reserve.
+ select coalesce(sum(case when state in (
+          'reserved','signed','unknown','submitted','expired_unresolved')
+        then all_in_lamports else 0 end),0),
+        coalesce(sum(case when state not in ('failed_preflight','closed')
+          then sell_reserve_lamports else 0 end),0)
+ into v_reserved,v_exit_reserves from public.echo_per_call_buy_intents
+ where execution_wallet=p_execution_wallet and position_closed_at is null;
+ -- The real existing legacy Echo table does NOT have position_closed_at.
+ -- Until all legacy rows have been independently reconciled, fail closed if
+ -- this wallet has any legacy intent; do not assume an old confirmed BUY sold.
  if exists(select 1 from public.echo_live_buy_intents
-     where execution_wallet=p_execution_wallet and position_closed_at is null
-      and state<>'failed_preflight')
- then return 'LEGACY_ACTIVE_POSITIONS_REQUIRE_RECONCILIATION';end if;
- -- No arbitrary $6 floor. Keep exact available-wallet solvency checks,
- -- including still-pending/UNKNOWN reservations and manual exit reserve.
- if p_spendable_wallet_lamports < v_reserved+v_debit+p_exit_reserve_lamports
+     where execution_wallet=p_execution_wallet)
+ then return 'LEGACY_INTENTS_REQUIRE_RECONCILIATION';end if;
+ -- Keep exact available-wallet solvency checks and every open position's
+ -- independent manual-exit reserve. The next order has its own reserve.
+ if p_spendable_wallet_lamports < 
+    v_reserved+v_exit_reserves+v_debit+p_exit_reserve_lamports
  then return 'INSUFFICIENT_WALLET_BALANCE_AND_EXIT_RESERVE';end if;
  insert into public.echo_per_call_buy_intents(
    execution_wallet,caller_wallet,source_signature,mint,amount_lamports,
