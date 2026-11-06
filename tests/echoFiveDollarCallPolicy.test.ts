@@ -40,11 +40,11 @@ test('same on-chain call replay cannot reserve again even when Telegram redelive
  const result=screenEchoFiveDollarCall(candidate({sourceTransactionAlreadyReserved:true}));
  assert.deepEqual(result,{eligible:false,executable:false,reason:'DUPLICATE_SOURCE_TRANSACTION'});
 });
-test('multiple open lots and repeat same-token calls remain eligible with fresh funding',()=>{
- for(const n of [2,3,10]){
-  const result=screenEchoFiveDollarCall(candidate({openOrPendingLots:n,sourceSignature:b}));
-  assert.equal(result.eligible,true,'new source call at '+n+' active lots');
- }
+test('at most two open or pending lots; distinct source calls may still repurchase after exit',()=>{
+ for(const n of [0,1])assert.equal(screenEchoFiveDollarCall(candidate({openOrPendingLots:n,sourceSignature:b})).eligible,true);
+ for(const n of [2,3,10])assert.deepEqual(
+  screenEchoFiveDollarCall(candidate({openOrPendingLots:n,sourceSignature:b})),
+  {eligible:false,executable:false,reason:'TWO_ACTIVE_OR_PENDING_LOTS_LIMIT'});
  const invalid=screenEchoFiveDollarCall(candidate({openOrPendingLots:-1}));
  assert.deepEqual(invalid,{eligible:false,executable:false,reason:'INVALID_OPEN_LOT_COUNT'});
 });
