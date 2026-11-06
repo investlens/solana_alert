@@ -49,7 +49,14 @@ reserve "$sig1" > "$tmp/race-b" &
 b_pid=$!
 wait "$a_pid"
 wait "$b_pid"
-[[ "$(cat "$tmp/race-a" "$tmp/race-b" | sort)" == 
+race_a="$(cat "$tmp/race-a")"
+race_b="$(cat "$tmp/race-b")"
+if ! { [[ "$race_a" == RESERVED && "$race_b" == DUPLICATE_SOURCE_TRANSACTION ]] ||
+       [[ "$race_b" == RESERVED && "$race_a" == DUPLICATE_SOURCE_TRANSACTION ]]; };then
+ echo "CONCURRENT_SOURCE_DEDUP_FAILED";exit 1
+fi
+[[ "$(reserve "$sig1")" == DUPLICATE_SOURCE_TRANSACTION ]] ||
+ { echo "REPLAY_NOT_REJECTED";exit 1; }
 [[ "$(reserve "$sig2")" == RESERVED ]] || { echo "SAME_MINT_NEW_CALL_FAILED";exit 1; }
 [[ "$(reserve "$sig3")" == TWO_ACTIVE_LOTS_LIMIT ]] ||
  { echo "TWO_LOTS_CAP_BYPASSED";exit 1; }
