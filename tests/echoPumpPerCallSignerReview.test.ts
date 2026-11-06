@@ -37,7 +37,7 @@ const sha=createHash('sha256').update(bytes).digest('hex');
 const call:EchoFiveDollarCall={
  executionWallet:wallet,callerWallet:caller,mint,sourceSignature:'2'.repeat(64),
  side:'BUY',verifiedCallerSigner:true,verifiedSwap:true,verifiedSpend:true,
- verifiedTokenCredit:true,isTransferOrGift:false,marketCapUsd:450000,
+ verifiedTokenCredit:true,isTransferOrGift:false,marketCapUsd:45000,
  callerPriceSolPerToken:0.00001,buyPriceSolPerToken:0.000014,
  maxSlippageBps:1000,observedAtMs:now-1000,nowMs:now,
  marketCapObservedAtMs:now,balanceVerifiedAtMs:now,solUsdObservedAtMs:now,
@@ -227,17 +227,17 @@ test('unknown CPI, unfunded wallet, wrong lot and failed independent simulation 
  assert.equal(consumed,0);
 });
 
-test('two existing live lots block per-call signer admission before durable nonce',async()=>{
+test('existing lots are allowed when independently reserved exit costs and available SOL are verified',async()=>{
  const x=input();let nonceConsumed=0;
  x.evidenceReader.readFromTrustedProviders=async()=>({
   call:{...call,openOrPendingLots:2},probe,independent,sizing,debitEvidence
  });
  x.nonceStore.consumeOnce=async()=>{nonceConsumed++;return true;};
  const result=await reviewEchoPumpPerCallSignerNoBroadcast(x);
- assert.equal(result.ok,false);
+ assert.equal(result.ok,true,JSON.stringify(result));
  assert.equal(result.signingAllowed,false);
  assert.equal(result.broadcastAllowed,false);
- assert.equal(nonceConsumed,0);
+ assert.equal(nonceConsumed,1);
 });
 
 test('synthetic caller -> atomic reservation -> authenticated signer review is no-broadcast and replay-safe',async()=>{
