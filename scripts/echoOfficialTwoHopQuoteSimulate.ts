@@ -31,7 +31,8 @@ const report:any={mode:'MAINNET_OFFICIAL_TWO_HOP_QUOTE_SIMULATION',
  amountLamports:INPUT,maxSlippageBps:1000,
  targetMint:B,quotedOutputRaw:null,minOutputRaw:null,
  poolAccountsRead:false,quoteVerified:false,additionalFeesFullyVerified:false,
- unsignedConstructed:false,simulationAttempted:false,simulationPassed:false,
+ unsignedConstructed:false,unsignedTransactionSha256:null,
+ simulationAttempted:false,simulationPassed:false,
  fullWalletDebitVerified:false,possibleCpiRentUnknown:true,
  signed:false,broadcast:false,signingApproved:false,
  outputMintMarketCapEligible:false,reason:'NOT_VERIFIED'};
@@ -104,6 +105,12 @@ try{
   payerKey:pub(WALLET),recentBlockhash:bh.blockhash,instructions:ixs
  }).compileToV0Message();
  const tx=new VersionedTransaction(message);
+ const {createHash}=await import('node:crypto');
+ // This hash binds the exact SDK-built unsigned transaction to a future
+ // signer-side independent audit. It is not an execution authorization.
+ report.unsignedTransactionSha256=createHash('sha256').update(tx.serialize()).digest('hex');
+ report.pumpSwapProgram=AMM;
+ report.pumpSwapRoute='TWO_HOP_SOL_INTERMEDIATE_TARGET';
  if(message.addressTableLookups.length!==0||tx.signatures.length!==1||
    tx.signatures[0].some(v=>v!==0))throw Error('UNSAFE_SIGNER_OR_ALT');
  report.unsignedConstructed=true;
