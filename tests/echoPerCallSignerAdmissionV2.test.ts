@@ -55,7 +55,7 @@ const args=()=>({
  request,signatureBase58:signed(request),
  pinnedCoordinatorPublicKey:coordinator.publicKey.toBase58(),nowMs:now,
  unsignedTransactionBytes:bytes,
- nonceStore:{consumeOnce:async()=>true},
+ nonceStore:{consumeOnce:async(_nonce:string,_expiresAtMs:number)=>true},
  reader:{getByCall:async()=>row},preview
 });
 test('distinct source call authenticates through pinned coordinator and DB, never signs',async()=>{
