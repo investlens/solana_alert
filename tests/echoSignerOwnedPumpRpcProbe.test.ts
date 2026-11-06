@@ -17,7 +17,7 @@ const now=1800000000000;
 const stub=(override:{balance?:number;fee?:number|null;after?:number|null;
  err?:unknown;throwRpc?:boolean;contextSlot?:number;balanceSlot?:number;
  feeSlot?:number;blockhashSlot?:number;blockhashValid?:boolean;
- innerInstructions?:unknown}={}):{rpc:EchoSignerRpcReadOnly;calls:{balance:number;fee:number;simulation:number}}=>{
+ innerInstructions?:unknown;extraAccounts?:boolean}={}):{rpc:EchoSignerRpcReadOnly;calls:{balance:number;fee:number;simulation:number}}=>{
  const calls={balance:0,fee:0,simulation:0};
  const rpc:EchoSignerRpcReadOnly={
   async getBalanceAndContext(){calls.balance++;if(override.throwRpc)throw Error('private error');
@@ -39,7 +39,8 @@ const stub=(override:{balance?:number;fee?:number|null;after?:number|null;
     innerInstructions:override.innerInstructions===undefined?[]:override.innerInstructions,
     accounts:[override.after===null?null:{
      lamports:override.after??80000000,
-     owner:SystemProgram.programId.toBase58()}]}};
+     owner:SystemProgram.programId.toBase58()},
+    ...(override.extraAccounts?[{lamports:1,owner:SystemProgram.programId.toBase58()}]:[])]}};
   }
  };
  return {rpc,calls};
@@ -64,7 +65,8 @@ test('bad simulation context and malformed CPI traces fail closed',async()=>{
   {contextSlot:0},{contextSlot:12343},{balanceSlot:0},
   {feeSlot:12343},{blockhashSlot:12343},{blockhashValid:false},
   {feeSlot:12346},{blockhashSlot:12346},
-  {innerInstructions:null},
+  {innerInstructions:null},{extraAccounts:true},
+  {innerInstructions:[{index:0,instructions:[{programIdIndex:0,accounts:[],data:'0'}]}]},
   {innerInstructions:[{index:99,instructions:[]}]},
   {innerInstructions:[{index:0,instructions:[]},{index:0,instructions:[]}]},
   {innerInstructions:[{index:0,instructions:[{programIdIndex:999,accounts:[],data:'2'}]}]},
