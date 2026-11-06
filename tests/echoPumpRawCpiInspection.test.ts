@@ -28,6 +28,8 @@ test('raw complete simulation structure is observational only, never CPI authori
 test('missing inner instructions, balances, or mismatch fails closed',()=>{
  for(const patch of [
   {innerInstructions:null},{preBalances:null},{postBalances:[]},
+  {postBalances:accounts.map(()=>100000000)},
+  {innerInstructions:[{index:0,instructions:[{programIdIndex:0,accounts:[],data:'0'}]}]},
   {accountKeys:[...accounts].reverse()},{contextSlot:0},
   {simulationErr:{InstructionError:[0,'InvalidAccountData']}},
   {exactUnsignedSha256:'f'.repeat(64)},
