@@ -148,6 +148,42 @@ test('reserved USD amount must match independently audited transaction debit',as
   signingAllowed:false,broadcastAllowed:false});
  assert.equal(consumed,0);
 });
+test('Postgres bigint decimal strings pass exact reserved-cost matching',async()=>{
+ const x=input();
+ x.reservationReader.getByCall=async()=>({
+  ...row,
+  amountLamports:String(row.amountLamports),
+  allInCents:String(row.allInCents),
+  exactFeeLamports:String(row.exactFeeLamports),
+  accountRentLamports:String(row.accountRentLamports),
+  cpiExtraLamports:String(row.cpiExtraLamports),
+  allInLamports:String(row.allInLamports),
+  sellReserveLamports:String(row.sellReserveLamports)
+ });
+ const result=await reviewEchoPumpPerCallSignerNoBroadcast(x);
+ assert.equal(result.ok,true,JSON.stringify(result));
+ if(result.ok){
+  assert.equal(result.signingAllowed,false);
+  assert.equal(result.broadcastAllowed,false);
+ }
+});
+test('unsafe rounded JS bigint and malformed decimal database amounts reject',async()=>{
+ let consumed=0;
+ for(const altered of [
+  {allInLamports:Number.MAX_SAFE_INTEGER+1},
+  {allInLamports:'022150000'},
+  {amountLamports:'20000000.5'},
+  {exactFeeLamports:'-1'},
+  {allInCents:'500.0'}
+ ]){
+  const x=input();
+  x.reservationReader.getByCall=async()=>({...row,...altered});
+  x.nonceStore.consumeOnce=async()=>{consumed++;return true;};
+  const result=await reviewEchoPumpPerCallSignerNoBroadcast(x);
+  assert.equal(result.ok,false,JSON.stringify(altered));
+ }
+ assert.equal(consumed,0);
+});
 test('immutable fee, rent, CPI and sell-reserve mismatches reject before nonce',async()=>{
  let consumed=0;
  for(const modified of [
