@@ -9,6 +9,7 @@ import {createHash} from 'node:crypto';
 import {ComputeBudgetProgram,PublicKey,SystemProgram,VersionedTransaction} from '@solana/web3.js';
 import {screenEchoFiveDollarCall,type EchoFiveDollarCall} from './fiveDollarCallPolicy.js';
 import {perCallKey} from './perCallSignerAdmissionV2.js';
+import {sizeEchoFiveUsdPumpInput,type EchoPumpSizeInput} from './fiveDollarPumpInputSizing.js';
 const AMM='pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA';
 const TOKEN='TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const TOKEN2022='TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
@@ -41,11 +42,26 @@ export type PumpHandoffResult=
 export function inspectPumpUnsignedPerCallHandoff(x:{
  caller:EchoFiveDollarCall; unsignedTxBytes:Uint8Array;
  probe:PumpUnsignedProbe; independent:PumpIndependentEvidence;
+ sizing:EchoPumpSizeInput;
 }):PumpHandoffResult{
  const deny=(reason:string):PumpHandoffResult=>({
   ok:false,reason,signerAllowed:false,broadcastAllowed:false});
  const d=screenEchoFiveDollarCall(x.caller);
  if(!d.eligible)return deny('PER_CALL_POLICY_'+d.reason);
+ const s=x.sizing;
+ if(s.networkAndPriorityFeeLamports!==x.caller.networkAndPriorityFeeLamports||
+    s.ataAndOtherAccountRentLamports!==x.caller.accountRentLamports||
+    s.maximumAdditionalCpiDebitLamports!==x.caller.additionalCpiDebitLamports||
+    s.walletBalanceLamports!==x.caller.availableWalletLamports||
+    s.pendingReservedLamports!==x.caller.pendingWalletDebitLamports||
+    s.manualSellReserveLamports!==x.caller.sellReserveLamports||
+    s.solUsdCents!==x.caller.solUsdPriceCents)
+  return deny('PUMP_SIZING_WALLET_AND_FEE_ATTESTATION_MISMATCH');
+ const sized=sizeEchoFiveUsdPumpInput(s);
+ if(!sized.ok)return deny('PUMP_SIZING_'+sized.reason);
+ if(BigInt(x.caller.principalLamports)>BigInt(sized.inputLamports))
+  return deny('PUMP_INPUT_EXCEEDS_FIVE_DOLLAR_FEE_ADJUSTED_CAP');
+
  if(!x.probe.unsignedConstructed||!x.probe.quoteVerified||
     !x.probe.simulationPassed||!x.probe.fullWalletDebitVerified||
     !x.probe.cpiRentAndExtraWalletDebitsAudited||
