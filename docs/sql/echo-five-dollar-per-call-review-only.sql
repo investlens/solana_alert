@@ -117,6 +117,6 @@ revoke all on function public.echo_reserve_five_usd_distinct_call(
  text,text,text,text,bigint,bigint,bigint,bigint,bigint,bigint,bigint,timestamptz,bigint,timestamptz)
  from public, anon, authenticated;
 grant execute on function public.echo_reserve_five_usd_distinct_call(
- text,text,text,text,bigint,bigint,bigint,bigint,bigint,bigint,bigint,timestamptz)
+ text,text,text,text,bigint,bigint,bigint,bigint,bigint,bigint,bigint,timestamptz,bigint,timestamptz)
  to service_role;
 commit;
