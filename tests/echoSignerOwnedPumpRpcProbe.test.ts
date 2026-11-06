@@ -15,18 +15,19 @@ const tx=new VersionedTransaction(new TransactionMessage({
 const sha=createHash('sha256').update(tx).digest('hex');
 const now=1800000000000;
 const stub=(override:{balance?:number;fee?:number|null;after?:number|null;
- err?:unknown;throwRpc?:boolean;contextSlot?:number;
+ err?:unknown;throwRpc?:boolean;contextSlot?:number;balanceSlot?:number;
  innerInstructions?:unknown}={}):{rpc:EchoSignerRpcReadOnly;calls:{balance:number;fee:number;simulation:number}}=>{
  const calls={balance:0,fee:0,simulation:0};
  const rpc:EchoSignerRpcReadOnly={
-  async getBalance(){calls.balance++;if(override.throwRpc)throw Error('private error');
-   return override.balance??100000000;},
+  async getBalanceAndContext(){calls.balance++;if(override.throwRpc)throw Error('private error');
+   return {context:{slot:override.balanceSlot??12344},value:override.balance??100000000};},
   async getFeeForMessage(){calls.fee++;return {value:override.fee===undefined?5000:override.fee};},
   async simulateTransaction(_tx,conf){
    calls.simulation++;
    assert.equal(conf.sigVerify,false);
    assert.equal(conf.replaceRecentBlockhash,false);
    assert.equal(conf.innerInstructions,true);
+   assert.equal(conf.minContextSlot,override.balanceSlot??12344);
    assert.deepEqual(conf.accounts.addresses,[wallet]);
    return {context:{slot:override.contextSlot??12345},
     value:{err:override.err===undefined?null:override.err,
@@ -55,7 +56,7 @@ test('exact signer-owned simulation gives provisional observed debit but never a
 });
 test('bad simulation context and malformed CPI traces fail closed',async()=>{
  for(const change of [
-  {contextSlot:0},
+  {contextSlot:0},{contextSlot:12343},{balanceSlot:0},
   {innerInstructions:null},
   {innerInstructions:[{index:99,instructions:[]}]},
   {innerInstructions:[{index:0,instructions:[]},{index:0,instructions:[]}]},
