@@ -58,7 +58,7 @@ test('modified unsigned bytes or foreign signer fail closed before funding',()=>
   }).compileToV0Message()).serialize()
  ]){
   const x=input();x.unsignedBytes=unsignedBytes;
-  x.expectedSha256=createHash('sha256').update(unsignedBytes).digest('hex');
+  x.expectedSha256=unsignedBytes===modified?sha:createHash('sha256').update(unsignedBytes).digest('hex');
   const r=assessEchoUnfundedStageOne(x);
   assert.equal(r.completed,false);
   assert.ok(r.missing.includes('EXACT_UNSIGNED_PUMPSWAP_BYTES_AND_SIGNER'));
