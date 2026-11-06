@@ -20,6 +20,7 @@ export type EchoFiveDollarCall={
  verifiedSpend:boolean;verifiedTokenCredit:boolean;isTransferOrGift:boolean;
  marketCapUsd:number;callerPriceSolPerToken:number;buyPriceSolPerToken:number;
  maxSlippageBps:number;observedAtMs:number;nowMs:number;
+ marketCapObservedAtMs:number;balanceVerifiedAtMs:number;solUsdObservedAtMs:number;
  // Fully independently attested wallet debit (excluding manual sell reserve).
  principalLamports:string;networkAndPriorityFeeLamports:string;
  accountRentLamports:string;additionalCpiDebitLamports:string;
@@ -49,6 +50,14 @@ export function screenEchoFiveDollarCall(c:EchoFiveDollarCall):EchoFiveDollarDec
  if(!Number.isSafeInteger(c.nowMs)||!Number.isSafeInteger(c.observedAtMs)||
    c.observedAtMs>c.nowMs||c.nowMs-c.observedAtMs>75_000)
    return deny('STALE_CALL');
+ for(const [t,maxAge] of [
+   [c.marketCapObservedAtMs,2000],
+   [c.balanceVerifiedAtMs,3000],
+   [c.solUsdObservedAtMs,3000]
+ ]){
+   if(!Number.isSafeInteger(t)||t>c.nowMs||c.nowMs-t>maxAge)
+     return deny('STALE_MARKET_CAP_WALLET_OR_FX_ATTESTATION');
+ }
  if(!Number.isFinite(c.marketCapUsd)||c.marketCapUsd<=0||c.marketCapUsd>=100_000)
    return deny('MARKET_CAP_NOT_ELIGIBLE');
  if(!Number.isFinite(c.callerPriceSolPerToken)||c.callerPriceSolPerToken<=0||
