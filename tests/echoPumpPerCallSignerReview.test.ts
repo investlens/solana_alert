@@ -6,7 +6,7 @@ import {Keypair,ComputeBudgetProgram,SystemProgram,PublicKey,
  TransactionMessage,TransactionInstruction,VersionedTransaction} from '@solana/web3.js';
 import {SLINGOOR_WALLET} from '../src/echo/liveBuyPolicy.js';
 import {canonicalEchoPerCallSignerRequest,perCallKey,
- type EchoPerCallSignerRequest} from '../src/echo/perCallSignerAdmissionV2.js';
+ type EchoPerCallSignerRequest,type EchoPerCallReservation} from '../src/echo/perCallSignerAdmissionV2.js';
 import {reviewEchoPumpPerCallSignerNoBroadcast,
  ECHO_PUMP_SIGNER_REVIEW_CAN_SIGN,ECHO_PUMP_SIGNER_REVIEW_CAN_BROADCAST
 } from '../src/echo/pumpPerCallSignerReview.js';
@@ -101,7 +101,7 @@ function input(){
   pinnedCoordinatorPublicKey:coordinator.publicKey.toBase58(),nowMs:now,
   unsignedTransactionBytes:bytes,
   nonceStore:{consumeOnce:async(_nonce:string,_exp:number)=>true},
-  reservationReader:{getByCall:async()=>row},
+  reservationReader:{getByCall:async():Promise<EchoPerCallReservation>=>row},
   evidenceReader:{readFromTrustedProviders:async()=>({call,probe,independent,sizing,debitEvidence})}
  };
 }
