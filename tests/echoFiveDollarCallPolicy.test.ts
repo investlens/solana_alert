@@ -40,20 +40,18 @@ test('same on-chain call replay cannot reserve again even when Telegram redelive
  const result=screenEchoFiveDollarCall(candidate({sourceTransactionAlreadyReserved:true}));
  assert.deepEqual(result,{eligible:false,executable:false,reason:'DUPLICATE_SOURCE_TRANSACTION'});
 });
-test('at most two open or pending lots; distinct source calls may still repurchase after exit',()=>{
- for(const n of [0,1])assert.equal(screenEchoFiveDollarCall(candidate({openOrPendingLots:n,sourceSignature:b})).eligible,true);
- for(const n of [2,3,10])assert.deepEqual(
-  screenEchoFiveDollarCall(candidate({openOrPendingLots:n,sourceSignature:b})),
-  {eligible:false,executable:false,reason:'TWO_ACTIVE_OR_PENDING_LOTS_LIMIT'});
+test('no numeric open-lot limit when all pending debits and exits are funded',()=>{
+ for(const n of [0,1,2,3,10,100])assert.equal(
+  screenEchoFiveDollarCall(candidate({openOrPendingLots:n,sourceSignature:b})).eligible,true);
  const invalid=screenEchoFiveDollarCall(candidate({openOrPendingLots:-1}));
  assert.deepEqual(invalid,{eligible:false,executable:false,reason:'INVALID_OPEN_LOT_COUNT'});
 });
-test('the token market-cap ceiling is inclusive at $500,000',()=>{
- assert.equal(screenEchoFiveDollarCall(candidate({marketCapUsd:499999})).eligible,true);
- assert.equal(screenEchoFiveDollarCall(candidate({marketCapUsd:500000})).eligible,true);
- assert.deepEqual(screenEchoFiveDollarCall(candidate({marketCapUsd:500000.01})),
+test('market cap must be strictly below $100,000',()=>{
+ assert.equal(screenEchoFiveDollarCall(candidate({marketCapUsd:99999})).eligible,true);
+ assert.equal(screenEchoFiveDollarCall(candidate({marketCapUsd:100000})).eligible,false);
+ assert.deepEqual(screenEchoFiveDollarCall(candidate({marketCapUsd:100000.01})),
   {eligible:false,executable:false,reason:'MARKET_CAP_NOT_ELIGIBLE'});
- assert.equal(screenEchoFiveDollarCall(candidate({marketCapUsd:500001})).eligible,false);
+ assert.equal(screenEchoFiveDollarCall(candidate({marketCapUsd:100001})).eligible,false);
 });
 test('all-in debit including fees, rent and CPI must remain <= $5, no lifetime cap',()=>{
  const atCap=screenEchoFiveDollarCall(candidate({
