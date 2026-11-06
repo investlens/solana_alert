@@ -57,7 +57,7 @@ export function screenEchoFiveDollarCall(c:EchoFiveDollarCall):EchoFiveDollarDec
    if(!Number.isSafeInteger(t)||t>c.nowMs||c.nowMs-t>maxAge)
      return deny('STALE_MARKET_CAP_WALLET_OR_FX_ATTESTATION');
  }
- if(!Number.isFinite(c.marketCapUsd)||c.marketCapUsd<=0||c.marketCapUsd>500_000)
+ if(!Number.isFinite(c.marketCapUsd)||c.marketCapUsd<=0||c.marketCapUsd>=100_000)
    return deny('MARKET_CAP_NOT_ELIGIBLE');
  if(!Number.isFinite(c.callerPriceSolPerToken)||c.callerPriceSolPerToken<=0||
    !Number.isFinite(c.buyPriceSolPerToken)||c.buyPriceSolPerToken<=0||
@@ -70,9 +70,8 @@ export function screenEchoFiveDollarCall(c:EchoFiveDollarCall):EchoFiveDollarDec
  // observations; actual wallet balance and all pending debits must be audited.
  if(!Number.isSafeInteger(c.openOrPendingLots)||c.openOrPendingLots<0)
    return deny('INVALID_OPEN_LOT_COUNT');
- // Defense in depth: the atomic wallet-wide DB reservation must separately
- // enforce this cap under concurrency. Never rely on this snapshot alone.
- if(c.openOrPendingLots>=2)return deny('TWO_ACTIVE_OR_PENDING_LOTS_LIMIT');
+ // No numeric position limit: wallet-wide atomic reservation still must
+ // cover every open SELL reserve plus all pending/unknown BUY debits.
  if(!c.exactMessageAndCpiAudited)return deny('UNVERIFIED_EXACT_WALLET_DEBIT');
  if(!c.manualSellRouteAndReserveVerified)return deny('MANUAL_SELL_RESERVE_UNVERIFIED');
  if(!c.walletBalanceAndFxVerified)return deny('BALANCE_OR_FX_UNVERIFIED');
