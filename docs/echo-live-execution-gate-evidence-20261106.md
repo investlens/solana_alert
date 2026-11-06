@@ -59,3 +59,17 @@ Official SDK `@pump-fun/pump-sdk/swap@4.3.1` read pool/fee state, compiled 6 uns
 - The new unsigned simulator explicitly requests fee-payer post-simulation account state via RPC; it fails closed on missing measured payer balance. That route has not yet produced results from a funded wallet.
 
 The next stage requires actual current FX attestation, independent CPI/ATA proof, Phantom exit reserve, and funded-state RPC simulation. Do **NOT** transfer 0.025 SOL based on this demonstration. Database restore remains operator-only; current connector read-only inspection is not an off-site pg_dump and does not qualify as a recovery drill.
+
+
+## 2026-11-06: encrypted Mac operator recovery + public SOL/USD diagnostic
+
+The operator completed PostgreSQL 17.11 table-level recovery using an encrypted macOS HFS+ sparse image, a separate cluster on local port 5434 and a custom-format `pg_dump` imported by `pg_restore --exit-on-error --single-transaction`. Local restore showed **468** alert-audit rows and **0** legacy BUY-intent rows; a contemporaneous read-only production Supabase query showed the same counts. Both local tables retained primary keys, enabled RLS, and matched production column counts (13/11) and RLS policy counts (0/0). The operator reported clean shutdown and ejection. This validates the two selected tables' recoverability, **not** a complete Supabase restore, bytewise row identity, original grants (dump used `--no-acl`), cross-device backup or perpetual disaster recovery coverage.
+
+Read-only non-executable SOL/USD market cross-check added:
+- `src/echo/solUsdIndependentPrice.ts` parses Coinbase SOL-USD product and Kraken SOLUSD ticker, requires both responses received within three seconds, rejects >2% disagreement or missing/invalid quotes, and selects the higher conservative USD-cents quote.
+- `scripts/echoSolUsdPublicPriceDiagnostic.ts` makes at most two HTTPS GETs to those fixed public URLs with 2.5-second timeouts. No API keys, private wallet, RPC signing, broadcaster or paid feed. Its explicitly tagged CI job is `echo-sol-fx-public-read-only`.
+- A good result establishes **two recently retrieved spot responses only**. Exchange ticker trade timestamps are not independently authenticated; there is no signed oracle, current PumpSwap CPI proof, wallet-debit attestation, manual Phantom SELL simulation or trading authorization. The prior illustrative $200/SOL must **never** be promoted to live pricing.
+- Added stale/missing/discordant/duplicate-source and integer-cent rounding rejection tests, wired into Echo-focused CI.
+- The existing Railway live signer remains a custody proof with `TRADING=OFF`, on its previous branch. No real-wallet PumpSwap signing or broadcast was run.
+
+**Hard blocks remain:** wallet-funded exact-message successful simulation and observed before/after lamports; bounded unknown CPI and account creation; independently priced Phantom SELL path for every open position; an authenticated signed-but-not-broadcast real-key check under approved operator controls; and separate production migrations/deployment/funding approval. The operator's private data was not uploaded to GitHub.
