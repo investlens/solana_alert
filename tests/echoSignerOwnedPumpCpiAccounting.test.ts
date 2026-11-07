@@ -92,7 +92,9 @@ test('unexplained simulated payer delta reports exact discrepancy without approv
    networkFeeLamports:'5000',
    unexplainedAgainstDebitOnlyLamports:'-1000000',
    unexplainedAgainstNetSystemLamports:'-1000000',
-   programInstructionsReviewed:3
+   programInstructionsReviewed:3,
+   candidateTokenCloseRefundCount:0,
+   candidateTokenCloseFundedLamports:'0'
   });
   assert.equal(r.signingAllowed,false);
   assert.equal(r.broadcastAllowed,false);
