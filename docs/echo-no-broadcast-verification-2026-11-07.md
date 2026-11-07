@@ -100,3 +100,20 @@ Do not fund, migrate production database, expose secrets, deploy or change the l
 - Extended the payer ledger to observe exact unsigned transaction's **top-level SPL Token/Token-2022 CloseAccount opcode 9** as well as compiled binary **inner** CloseAccount CPI. Require byte opcode/length, exact indexed source/destination/authority accounts and destination equal to the trusted payer. Count only unique close sources and classify top-level vs inner. This is observation only; unknown refunds are **not** credited, and `PAYER_CPI_LEDGER_UNEXPLAINED_PAYER_LAMPORT_BALANCE_CHANGE` stays blocking.
 - Regression tests cover both binary close families and assert no signing/broadcasting permission on an unexplained wallet delta.
 - This `[echo-isolated-test]` read-only push requests fresh mainnet evidence; a confirmed CloseAccount still does not prove the refund amount without same-bank account-balance evidence. Continue live AUTO BUY OFF; no further funding or production deployment.
+
+## November 7 — thorough funded-wallet safety audit (must remain NO LIVE BUY)
+User's latest real-RPC no-broadcast evidence:
+- Exact unsigned SHA and independent official SDK pool/quote passed.
+- Actual fee payer observed balance change: `45,773,072` lamports; decoded System outgoing `47,256,512` lamports; separately estimated message fee `5,000` lamports.
+- Observed difference `47,256,512 - 45,773,072 = 1,483,440` lamports. Adding fee yields `1,488,440` lamports, consistent with newer 165-byte SPL token-account rent **but still an unproven inference**.
+- Exactly one top-level token CloseAccount targets the payer, zero inner closes. Its source is absent from later confirmed on-chain read; this is consistent with an ephemeral closed token account, NOT proof of the exact simulation-bank refund amount or prestate.
+- New diagnostic requests signer-pinned RPC `getMinimumBalanceForRentExemption(165)`, classifies whether `observed difference + network fee` equals independently returned rent. Returns `exactBankRefundProven:false`, `canSign:false`, `canBroadcast:false` regardless of numeric match; the ledger remains blocked.
+- Added negative test protecting the recorded 1,483,440-versus-1,488,440 arithmetic and blocking a guessed account refund.
+- SELL unsigned SDK preview now pins recipient independently sourced from approved on-chain global config, preventing random recipient drift; new negative test blocks absent recipient config.
+### Remaining release blockers
+1. Obtain rigorous, same-simulation-bank ephemeral WSOL account lifecycle accounting: source created/funded, rent reserve, WSOL amount after swap, close destination and exact SOL returned, including network fee convention. Avoid accepting equality to current standalone rent as proof by itself.
+2. Independently inspect the exact target token post-simulation account amount/mint and token fee effects; parsed SPL token CPI treated as opaque is not independently complete.
+3. Replace scenario's unverified operator CPI allowance and non-live price assumptions with independently checked current SOL/USD and hard total **$2.50 all-in** buyer debit limit; current proof scenario is still $5, **not** the user-approved pilot size.
+4. Verify genuine full-balance Phantom manual SELL path and reserved SOL even under worthless-token conditions. The current unsigned reverse-route shape is only preliminary.
+5. Isolated signer signed-but-not-broadcast verification, DB atomic constraints and owner gate reviewed together; ensure caller policy and no retry. Main alert service on older Railway branch remains untouched. No live trading until independent user authorization after these gates.
+This tagged `[echo-isolated-test]` requests one new keyless GitHub read-only RPC test and focused regression checks; it does NOT deploy to Railway, sign, broadcast or activate a trade.
