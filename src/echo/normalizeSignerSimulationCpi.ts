@@ -22,7 +22,10 @@ export type IndexedCpi={
  index:number;instructions:Array<{
   programIdIndex:number;accounts:number[];data:string;
   /** True only for allowed non-System JSON-parsed CPI. Not a token audit. */
-  opaqueParsedNonSystem?:true
+  opaqueParsedNonSystem?:true;
+  /** A parsed Token CloseAccount directed to the verified payer; amount unknown. */
+  closesAccountToPayer?:true;
+  closedAccountIndex?:number
  }>
 };
 const number=(v:unknown):number=>{
@@ -101,6 +104,17 @@ export function normalizeSignerSimulationCpi(
    if(!opaquePrograms.has(program)||item.parsed.type.length>80||
       Object.keys(info).length>32)
     throw Error('UNREVIEWED_PARSED_NON_SYSTEM_CPI');
+   if((program==='TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'||
+       program==='TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')&&
+      (parsed.type==='closeAccount'||parsed.type==='closeAccountChecked')&&
+      info.destination===keys[0]&&
+      typeof info.account==='string'){
+    const closedAccountIndex=indexOf(info.account);
+    if(closedAccountIndex===0)throw Error('PAYER_ACCOUNT_IS_TOKEN_CLOSE_SOURCE');
+    return {programIdIndex,accounts:[],data:'',
+     opaqueParsedNonSystem:true as const,closesAccountToPayer:true as const,
+     closedAccountIndex};
+   }
    return {programIdIndex,accounts:[],data:'',opaqueParsedNonSystem:true as const};
   });
   return {index:Number(g.index),instructions};
