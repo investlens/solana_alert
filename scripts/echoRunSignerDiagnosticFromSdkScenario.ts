@@ -66,11 +66,14 @@ try{
  }):null;
  // A quote-only budget check is not a signed exchange oracle and
  // cannot override any signer or full CPI verification failure.
+ const budgetPassed=diagnosticBudget?.status==='CONSERVATIVE_UPPER_WITHIN_SCENARIO_CAP';
  const output={...r,
+  ...(!budgetPassed?{status:'BLOCKED' as const,
+   reason:'PILOT_NO_REFUND_ALL_IN_CAP_NOT_VERIFIED'}:{}),
   ...(diagnosticBudget?{pilotNoRefundBudgetDiagnostic:diagnosticBudget}:{})};
  process.stdout.write('ECHO_SIGNER_DIAGNOSTIC='+JSON.stringify(output)+'\n');
  // A blocked funded-state simulation MUST produce a failing CI job,
  // including when the wallet is unfunded. Never convert diagnostic failure
  // into a green release gate or unconditionally swallow RPC errors.
- if(r.status!=='PROVISIONAL')process.exitCode=2;
+ if(output.status!=='PROVISIONAL')process.exitCode=2;
 }catch{fail('SCENARIO_MISSING_OR_INVALID');}
