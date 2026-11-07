@@ -4,6 +4,8 @@
 import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {ECHO_EXPECTED_EXECUTION_WALLET} from '../src/echo/executionWallet.js';
+import {evaluateEchoPilotNoRefundBudget}
+ from '../src/echo/signerOwnedPilotNoRefundCostGate.js';
 import {runEchoSignerNoBroadcastTest}
  from './echoSignerNoBroadcastTestOnce.js';
 
@@ -31,7 +33,10 @@ try{
     bytes.toString('base64')!==b64||
     createHash('sha256').update(bytes).digest('hex')!==x.unsignedSha256||
     !natural.test(str('principalLamports'))||
-    x.slippageBps!==1000)
+    x.slippageBps!==1000||
+    (x.scenarioAllInCents!==250&&x.scenarioAllInCents!==500)||
+    !natural.test(str('publicFxUpperCents'))||
+    x.publicFxConsensusOnly!==true)
   throw Error('UNTRUSTED_EXACT_UNSIGNED_SCENARIO');
  const env={
   ECHO_SIGNER_TEST_ONLY:'true',
@@ -49,7 +54,21 @@ try{
   ECHO_SIGNER_TEST_SLIPPAGE_BPS:'1000'
  };
  const r=await runEchoSignerNoBroadcastTest(env);
- process.stdout.write('ECHO_SIGNER_DIAGNOSTIC='+JSON.stringify(r)+'\n');
+ const diagnostic=r.payerDebitMismatchDiagnostic;
+ const upperInput=diagnostic?.outboundSystemDebitsLamports ??
+  r.provisionalWalletDebitUpperLamports;
+ const diagnosticBudget=upperInput?evaluateEchoPilotNoRefundBudget({
+  scenarioCapCents:x.scenarioAllInCents as 250|500,
+  solUsdUpperCents:str('publicFxUpperCents'),
+  reconstructedOutboundLamports:upperInput,
+  independentlyQuotedNetworkFeeLamports:diagnostic?.networkFeeLamports ??
+   r.provisionalNetworkFeeLamports??'0'
+ }):null;
+ // A quote-only budget check is not a signed exchange oracle and
+ // cannot override any signer or full CPI verification failure.
+ const output={...r,
+  ...(diagnosticBudget?{pilotNoRefundBudgetDiagnostic:diagnosticBudget}:{})};
+ process.stdout.write('ECHO_SIGNER_DIAGNOSTIC='+JSON.stringify(output)+'\n');
  // A blocked funded-state simulation MUST produce a failing CI job,
  // including when the wallet is unfunded. Never convert diagnostic failure
  // into a green release gate or unconditionally swallow RPC errors.
