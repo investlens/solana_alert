@@ -42,3 +42,9 @@ Do not fund, migrate production database, expose secrets, deploy or change the l
 - **Fix:** `signerOwnedOfficialPumpQuote.ts` requires the signer-read `globalConfig.buybackFeeRecipients` array, validates nonempty unique public keys, selects its first entry, and explicitly passes `buybackFeeRecipient` to both SDK calls. `echoOfficialFiveUsdScenarioQuote.ts` uses the very same on-chain config recipient for both the first provisional quote and dynamically resized exact $5 scenario transaction. No hardcoded recipient, no arbitrary client choice.
 - Added CI cases requiring explicit pinned SDK recipient and rejecting absent authoritative recipient list. The exact unmodified serialized transaction SHA, original transaction account checks and no-broadcast rules remain mandatory. No production bot or signer modified.
 - This tagged commit requests a fresh ephemeral GitHub Actions **read-only** official SDK scenario; passing would establish only stable quote reconstruction, not real funded-wallet simulation, CPI attestation, manual Phantom exit or authorized real trading.
+
+## November 7 — post-funding read-only real RPC verification
+- Owner reports dedicated Phantom wallet funded at 2026-11-07 08:08 UTC; **amount, confirmation and actual balance not independently established in this note**.
+- Prior diagnostic `EXACT_WALLET_SIMULATION_UNFUNDED_PAYER_CANNOT_SIMULATE_BUY` followed successful exact unsigned transaction hash and independently rebuilt official two-hop PumpSwap quote.
+- This tagged push requests a **read-only** CI rerun against fresh confirmed Solana RPC wallet state, with signing and broadcasting still explicitly disabled. This is a repeat of the actual-wallet scenario, NOT a live purchase or production rollout.
+- A passing provisional simulation will NOT certify CPI rent/priority-fee completeness, Phantom manual SELL, or signer signing authorization. The system stays trading OFF.
