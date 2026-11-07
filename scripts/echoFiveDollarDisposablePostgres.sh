@@ -65,7 +65,10 @@ if ! { [[ "$cash_one" == RESERVED &&
           "$cash_two" == INSUFFICIENT_WALLET_BALANCE_AND_EXIT_RESERVE ]] ||
         [[ "$cash_two" == RESERVED &&
           "$cash_one" == INSUFFICIENT_WALLET_BALANCE_AND_EXIT_RESERVE ]]; };then
- echo "CONCURRENT_DISTINCT_CALLS_OVERRAN_WALLET";exit 1
+ echo "CONCURRENT_DISTINCT_CALLS_OVERRAN_WALLET" >&2
+ printf 'First reservation result: %q\\nSecond reservation result: %q\\n' "$cash_one" "$cash_two" >&2
+ run "select source_signature,state,all_in_lamports,sell_reserve_lamports from public.echo_per_call_buy_intents where source_signature in ('$race_sig_a','$race_sig_b') order by source_signature;" >&2
+ exit 1
 fi
 [[ "$(run "select count(*) from public.echo_per_call_buy_intents
  where source_signature in ('$race_sig_a','$race_sig_b');")" == 1 ]] ||
