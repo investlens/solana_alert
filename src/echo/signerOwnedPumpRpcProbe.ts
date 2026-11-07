@@ -19,6 +19,7 @@ export type EchoSignerRpcProbeResult=
    observedDeltaLamports:string;networkFeeEstimateLamports:string;
    observedAtMs:number;simulationContextSlot:number;innerInstructionCount:number;
    computeUnitsConsumed:number|null;
+   sameSimulationTokenCloseConfirmed:boolean;
    fullCpiAndExitProven:false;
    signingAllowed:false;broadcastAllowed:false}
  |{ok:false;reason:string;signingAllowed:false;broadcastAllowed:false};
@@ -76,6 +77,23 @@ export async function probeSignerOwnedPumpRpc(input:{
     tx.signatures.length!==1||tx.signatures[0].some(v=>v!==0)||
     tx.message.staticAccountKeys[0]?.toBase58()!==ECHO_EXPECTED_EXECUTION_WALLET)
   return deny('UNTRUSTED_MESSAGE_SIGNER_OR_ALTS');
+ // Observe a bounded, unambiguous top-level token closure in the same
+ // simulation bank as the fee payer. This is *not* a rent amount proof.
+ const tokenProgram='TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+ const keys=tx.message.staticAccountKeys.map(x=>x.toBase58());
+ const tokenIndex=keys.indexOf(tokenProgram);
+ const closes=tx.message.compiledInstructions.filter(ix=>
+  ix.programIdIndex===tokenIndex&&ix.data.length===1&&
+  ix.data[0]===9&&ix.accountKeyIndexes.length>=3&&
+  ix.accountKeyIndexes[1]===0);
+ if(closes.length>1)return deny('MULTIPLE_UNREVIEWED_PAYER_TOKEN_CLOSES');
+ const closedIndex=closes.length===1?Number(closes[0].accountKeyIndexes[0]):null;
+ if(closedIndex!==null&&(closedIndex<=0||closedIndex>=keys.length||
+    closedIndex===Number(closes[0].accountKeyIndexes[1])||
+    Number(closes[0].accountKeyIndexes[2])!==0))
+  return deny('UNTRUSTED_PAYER_TOKEN_CLOSE_ACCOUNT_OR_AUTHORITY');
+ const simulationAccountAddresses=[ECHO_EXPECTED_EXECUTION_WALLET,
+  ...(closedIndex===null?[]:[keys[closedIndex]])];
  const payer=new PublicKey(ECHO_EXPECTED_EXECUTION_WALLET);
  // Never replace the transaction blockhash during simulation: that would
  // simulate different message bytes than the coordinator-authenticated hash.
@@ -108,7 +126,7 @@ export async function probeSignerOwnedPumpRpc(input:{
    sigVerify:false,replaceRecentBlockhash:false,commitment:'confirmed',
    minContextSlot:Math.max(balance.context.slot,fee.context.slot,blockhash.context.slot),
    innerInstructions:true,innerInstructionsEncoding:'json',
-   accounts:{encoding:'base64',addresses:[ECHO_EXPECTED_EXECUTION_WALLET]}
+   accounts:{encoding:'base64',addresses:simulationAccountAddresses}
   });
   if(result.value.err!==null)return deny('PUMPSWAP_SIMULATION_FAILED');
   const units=result.value.unitsConsumed;
@@ -163,8 +181,11 @@ export async function probeSignerOwnedPumpRpc(input:{
     if(count>100)return deny('EXCESSIVE_SIGNER_CPI_TRACE');
    }
   }
-  if(!Array.isArray(result.value.accounts)||result.value.accounts.length!==1)
+  if(!Array.isArray(result.value.accounts)||
+     result.value.accounts.length!==simulationAccountAddresses.length)
    return deny('UNEXPECTED_SIMULATION_ACCOUNT_SNAPSHOT');
+  if(closedIndex!==null&&result.value.accounts[1]!==null)
+   return deny('PAYER_TOKEN_CLOSE_SOURCE_NOT_ABSENT_AFTER_SIMULATION');
   const after=result.value.accounts[0];
   if(!after||after.owner!==SystemProgram.programId.toBase58()||
      !Number.isSafeInteger(after.lamports)||after.lamports<0||
@@ -185,6 +206,7 @@ export async function probeSignerOwnedPumpRpc(input:{
    networkFeeEstimateLamports:String(fee.value),
    observedAtMs:input.nowMs,simulationContextSlot:result.context.slot,
    innerInstructionCount:count,computeUnitsConsumed:units??null,
+   sameSimulationTokenCloseConfirmed:closedIndex!==null,
    fullCpiAndExitProven:false,
    signingAllowed:false,broadcastAllowed:false};
  }catch{return deny('SIGNER_RPC_READ_OR_SIMULATION_UNAVAILABLE');}
