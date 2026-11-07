@@ -144,7 +144,27 @@ test('SDK-generated changing account list is rejected even with identical pool s
   })];
  };
  const result=await inspectSignerOwnedOfficialPumpQuote(input(sdkAdapter));
- assert.equal(result.ok,false,JSON.stringify(result));
- assert.equal(result.signingAllowed,false);
- assert.equal(result.broadcastAllowed,false);
+ assert.deepEqual(result,{ok:false,
+  reason:'SDK_SNAPSHOT_PUMPSWAP_ACCOUNT_ADDRESS_DRIFT',
+  signingAllowed:false,broadcastAllowed:false});
+});
+
+test('changing associated-token account address is identified and still blocked',async()=>{
+ let calls=0;
+ const sdkAdapter=sdk();
+ const original=sdkAdapter.swapInstructions.bind(sdkAdapter);
+ sdkAdapter.swapInstructions=async x=>{
+  calls++;
+  const base=await original(x);
+  return [...base,new TransactionInstruction({
+   programId:new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'),
+   keys:[{pubkey:Keypair.generate().publicKey,
+    isWritable:true,isSigner:false}],
+   data:Buffer.alloc(0)
+  })];
+ };
+ const res=await inspectSignerOwnedOfficialPumpQuote(input(sdkAdapter));
+ assert.deepEqual(res,{ok:false,reason:'SDK_SNAPSHOT_ATA_ACCOUNT_ADDRESS_DRIFT',
+  signingAllowed:false,broadcastAllowed:false});
+ assert.equal(calls,2);
 });
