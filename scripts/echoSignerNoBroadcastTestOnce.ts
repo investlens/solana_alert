@@ -29,6 +29,7 @@ export type EchoTestRunnerResult={
  provisionalWalletDebitUpperLamports?:string;
  provisionalNetworkFeeLamports?:string;
  provisionalCpiInstructionCount?:number;
+ provisionalComputeUnitsConsumed?:number|null;
  completeCpiAndTokenEffectsVerified:false;
  manualPhantomExitVerified:false;
  signingAllowed:false;broadcastAllowed:false;
@@ -138,7 +139,8 @@ export async function runEchoSignerNoBroadcastTest(
   provisionalWalletBalanceLamports:rpc.payerBalanceBeforeLamports,
   provisionalWalletDebitUpperLamports:ledger.conservativeWalletDebitLamports,
   provisionalNetworkFeeLamports:rpc.networkFeeEstimateLamports,
-  provisionalCpiInstructionCount:rpc.innerInstructionCount
+  provisionalCpiInstructionCount:rpc.innerInstructionCount,
+  provisionalComputeUnitsConsumed:rpc.computeUnitsConsumed
  };
 }
 
