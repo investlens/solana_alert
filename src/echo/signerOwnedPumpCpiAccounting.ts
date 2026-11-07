@@ -42,6 +42,8 @@ export type EchoSignerCpiLedger={
   programInstructionsReviewed:number;
   candidateTokenCloseRefundCount:number;
   candidateTokenCloseFundedLamports:string;
+  candidateTopLevelTokenCloseCount:number;
+  candidateInnerTokenCloseCount:number;
   /** Exact message indexes, internal only; caller must not print these. */
   candidateTokenCloseSourceIndexes?:number[];
  }};
@@ -84,6 +86,24 @@ export function reconcileEchoSignerPumpCpiLedger(input:{
  let debits=0n,credits=0n,scanned=0;
  const sentTo=new Map<number,bigint>();
  const tokenCloseSources=new Set<number>();
+ let topLevelTokenCloses=0,innerTokenCloses=0;
+ const TOKEN_PROGRAMS=new Set([
+  'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+  'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'
+ ]);
+ const inspectTokenClose=(programIdIndex:number,accounts:readonly number[],raw:Uint8Array,
+  topLevel:boolean):string|null=>{
+  if(!TOKEN_PROGRAMS.has(keys[programIdIndex])||raw.length===0||raw[0]!==9)return null;
+  if(raw.length!==1||accounts.length<3||accounts[0]===0)
+   return 'INVALID_BINARY_TOKEN_CLOSE_ACCOUNT';
+  if(accounts[1]===0){
+   if(tokenCloseSources.has(accounts[0]))return 'DUPLICATE_PAYER_TOKEN_CLOSE';
+   tokenCloseSources.add(accounts[0]);
+   if(topLevel)topLevelTokenCloses++;
+   else innerTokenCloses++;
+  }
+  return null;
+ };
  const scan=(programIdIndex:number,accounts:readonly number[],raw:Uint8Array):string|null=>{
   if(!Number.isSafeInteger(programIdIndex)||programIdIndex<0||
      programIdIndex>=keys.length||
@@ -119,7 +139,10 @@ export function reconcileEchoSignerPumpCpiLedger(input:{
   return null;
  };
  for(const ix of msg.compiledInstructions){
-  const error=scan(ix.programIdIndex,Array.from(ix.accountKeyIndexes),ix.data);
+  const accounts=Array.from(ix.accountKeyIndexes);
+  const closeError=inspectTokenClose(ix.programIdIndex,accounts,ix.data,true);
+  if(closeError)return fail(closeError);
+  const error=scan(ix.programIdIndex,accounts,ix.data);
   if(error)return fail(error);
  }
  const seen=new Set<number>();
@@ -159,6 +182,8 @@ export function reconcileEchoSignerPumpCpiLedger(input:{
     return fail('INVALID_CPI_INSTRUCTION');
    let raw:Uint8Array;
    try{raw=bs58.decode(ix.data);}catch{return fail('INVALID_CPI_BASE58_DATA');}
+   const closeError=inspectTokenClose(ix.programIdIndex,ix.accounts,raw,false);
+   if(closeError)return fail(closeError);
    const error=scan(ix.programIdIndex,ix.accounts,raw);
    if(error)return fail(error);
   }
@@ -180,6 +205,8 @@ export function reconcileEchoSignerPumpCpiLedger(input:{
    unexplainedAgainstNetSystemLamports:String(delta-(debits-credits)),
    programInstructionsReviewed:scanned,
    candidateTokenCloseRefundCount:tokenCloseSources.size,
+   candidateTopLevelTokenCloseCount:topLevelTokenCloses,
+   candidateInnerTokenCloseCount:innerTokenCloses,
    candidateTokenCloseFundedLamports:String([...tokenCloseSources]
     .reduce((sum,i)=>sum+(sentTo.get(i)??0n),0n)),
    candidateTokenCloseSourceIndexes:[...tokenCloseSources]
