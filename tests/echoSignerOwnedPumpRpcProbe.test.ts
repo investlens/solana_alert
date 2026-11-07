@@ -54,7 +54,7 @@ test('exact signer-owned simulation gives provisional observed debit but never a
   payerBalanceAfterSimulationLamports:'80000000',
   observedDeltaLamports:'20000000',
   networkFeeEstimateLamports:'5000',observedAtMs:now,
-  simulationContextSlot:12345,innerInstructionCount:0,
+  simulationContextSlot:12345,innerInstructionCount:0,computeUnitsConsumed:null,
   fullCpiAndExitProven:false,signingAllowed:false,broadcastAllowed:false});
  assert.equal(x.calls.simulation,1);
  assert.equal(ECHO_SIGNER_RPC_PROBE_CAN_SIGN,false);
