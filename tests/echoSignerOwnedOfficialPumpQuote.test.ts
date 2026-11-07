@@ -13,6 +13,7 @@ const wsol=new PublicKey('So11111111111111111111111111111111111111112');
 const a=Keypair.generate().publicKey,b=Keypair.generate().publicKey;
 const p1=Keypair.generate().publicKey,p2=Keypair.generate().publicKey;
 const sink=Keypair.generate().publicKey;
+const extra=Keypair.generate().publicKey;
 const amount='20000000';
 const ixs=[
  SystemProgram.transfer({fromPubkey:payer,toPubkey:sink,lamports:Number(amount)}),
@@ -53,7 +54,7 @@ function sdk(override:{wrongMint?:boolean;wrongOutput?:boolean;
     return [ixs[0],new TransactionInstruction({
      programId:swapProgram,
      keys:override.alterSwapKey?
-      [...ixs[1].keys.slice(0,4),{pubkey:Keypair.generate().publicKey,
+      [...ixs[1].keys.slice(0,4),{pubkey:extra,
        isSigner:false,isWritable:false}]:ixs[1].keys,
      data:Buffer.from([override.alterSwapData?2:1])
     })];
@@ -124,6 +125,26 @@ test('rebuilding exact transaction rejects differing SDK instruction bytes and a
   signingAllowed:false,broadcastAllowed:false});
  const keys=await inspectSignerOwnedOfficialPumpQuote(input(sdk({alterSwapKey:true})));
  assert.deepEqual(keys,{ok:false,
-  reason:'OFFICIAL_REBUILD_ACCOUNT_KEYS_DIFFERED',
+  reason:'OFFICIAL_REBUILD_ACCOUNT_KEY_COUNT_DIFFERED',
   signingAllowed:false,broadcastAllowed:false});
+});
+
+test('SDK-generated changing account list is rejected even with identical pool snapshot',async()=>{
+ let counter=0;
+ const sdkAdapter=sdk();
+ const original=sdkAdapter.swapInstructions.bind(sdkAdapter);
+ sdkAdapter.swapInstructions=async x=>{
+  counter++;
+  const instructions=await original(x);
+  return [...instructions,new TransactionInstruction({
+   programId:swapProgram,
+   keys:[{pubkey:Keypair.generate().publicKey,
+    isWritable:false,isSigner:false}],
+   data:Buffer.from([counter])
+  })];
+ };
+ const result=await inspectSignerOwnedOfficialPumpQuote(input(sdkAdapter));
+ assert.equal(result.ok,false,JSON.stringify(result));
+ assert.equal(result.signingAllowed,false);
+ assert.equal(result.broadcastAllowed,false);
 });
