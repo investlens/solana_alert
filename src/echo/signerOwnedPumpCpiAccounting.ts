@@ -142,7 +142,7 @@ export function reconcileEchoSignerPumpCpiLedger(input:{
      return fail('UNTRUSTED_OPAQUE_PARSED_CPI');
     if(ix.closesAccountToPayer===true){
      if(!Number.isSafeInteger(ix.closedAccountIndex)||
-        ix.closedAccountIndex!<=0||ix.closedAccountIndex!>=keys.length||
+        Number(ix.closedAccountIndex)<=0||Number(ix.closedAccountIndex)>=keys.length||
         tokenCloseSources.has(ix.closedAccountIndex!))
       return fail('UNTRUSTED_TOKEN_CLOSE_REFUND_CANDIDATE');
      tokenCloseSources.add(ix.closedAccountIndex!);
