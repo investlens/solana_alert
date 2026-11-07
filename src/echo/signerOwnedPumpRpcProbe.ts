@@ -22,7 +22,10 @@ export type EchoSignerRpcProbeResult=
    sameSimulationTokenCloseConfirmed:boolean;
    fullCpiAndExitProven:false;
    signingAllowed:false;broadcastAllowed:false}
- |{ok:false;reason:string;signingAllowed:false;broadcastAllowed:false};
+ |{ok:false;reason:string;
+   closeSourceDiagnostic?:{state:'NONZERO_LAMPORTS'|'NONEMPTY_DATA'|'UNTRUSTED_OWNER'|'UNRECOGNIZED_SHAPE';
+     lamports?:string;ownerIsSystem?:boolean;dataBytes?:number};
+   signingAllowed:false;broadcastAllowed:false};
 export type EchoSignerRpcReadOnly={
  getBalanceAndContext(wallet:PublicKey,commitment:'confirmed'):
   Promise<{context:{slot:number};value:number}>;
@@ -184,8 +187,37 @@ export async function probeSignerOwnedPumpRpc(input:{
   if(!Array.isArray(result.value.accounts)||
      result.value.accounts.length!==simulationAccountAddresses.length)
    return deny('UNEXPECTED_SIMULATION_ACCOUNT_SNAPSHOT');
-  if(closedIndex!==null&&result.value.accounts[1]!==null)
-   return deny('PAYER_TOKEN_CLOSE_SOURCE_NOT_ABSENT_AFTER_SIMULATION');
+  if(closedIndex!==null&&result.value.accounts[1]!==null){
+   const closed=result.value.accounts[1] as Record<string,unknown>;
+   // A close can remain represented as a zero-lamport, zero-data System
+   // account until runtime garbage collection. Never accept merely
+   // 'not owned by Token' or an unchecked non-null RPC response.
+   const raw=closed.data;
+   const isEmptyData=Array.isArray(raw)&&raw.length===2&&
+    raw[0]===''&&raw[1]==='base64';
+   const isZeroed=closed.lamports===0&&
+    closed.owner===SystemProgram.programId.toBase58()&&
+    closed.executable===false&&isEmptyData;
+   if(!isZeroed){
+    const state=typeof closed.lamports!=='number'||
+     !Number.isSafeInteger(closed.lamports)||closed.lamports<0?
+     'UNRECOGNIZED_SHAPE':closed.lamports>0?'NONZERO_LAMPORTS':
+     closed.owner!==SystemProgram.programId.toBase58()?'UNTRUSTED_OWNER':
+     'NONEMPTY_DATA';
+    const dataBytes=Array.isArray(raw)&&raw.length===2&&
+     raw[1]==='base64'&&typeof raw[0]==='string'&&
+     raw[0].length<2048?Buffer.from(raw[0],'base64').length:undefined;
+    return {ok:false,reason:'PAYER_TOKEN_CLOSE_SOURCE_NOT_ABSENT_AFTER_SIMULATION',
+     closeSourceDiagnostic:{
+      state,
+      ...(typeof closed.lamports==='number'&&
+       Number.isSafeInteger(closed.lamports)&&closed.lamports>=0?
+       {lamports:String(closed.lamports)}:{}),
+      ownerIsSystem:closed.owner===SystemProgram.programId.toBase58(),
+      ...(dataBytes!==undefined?{dataBytes}:{})
+     },signingAllowed:false,broadcastAllowed:false};
+   }
+  }
   const after=result.value.accounts[0];
   if(!after||after.owner!==SystemProgram.programId.toBase58()||
      !Number.isSafeInteger(after.lamports)||after.lamports<0||
