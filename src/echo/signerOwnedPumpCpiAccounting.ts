@@ -18,7 +18,8 @@ const decimal=(s:string):bigint|null=>
 export type EchoCpiRawInnerGroup={
  index:number;
  instructions:{programIdIndex:number;accounts:number[];data:string;
-  opaqueParsedNonSystem?:true}[];
+  opaqueParsedNonSystem?:true;
+  closesAccountToPayer?:true;closedAccountIndex?:number}[];
 };
 export type EchoSignerCpiLedger={
  ok:true;mode:'PAYER_LAMPORT_CPI_ONLY';
@@ -39,6 +40,8 @@ export type EchoSignerCpiLedger={
   unexplainedAgainstDebitOnlyLamports:string;
   unexplainedAgainstNetSystemLamports:string;
   programInstructionsReviewed:number;
+  candidateTokenCloseRefundCount:number;
+  candidateTokenCloseFundedLamports:string;
  }};
 const fail=(reason:string,diagnostic?:Extract<EchoSignerCpiLedger,{ok:false}>['diagnostic']):EchoSignerCpiLedger=>({
  ok:false,reason,...(diagnostic?{diagnostic}:{}),
@@ -77,6 +80,8 @@ export function reconcileEchoSignerPumpCpiLedger(input:{
  const keys=msg.staticAccountKeys.map(k=>k.toBase58());
  const systemIndex=keys.indexOf(SystemProgram.programId.toBase58());
  let debits=0n,credits=0n,scanned=0;
+ const sentTo=new Map<number,bigint>();
+ const tokenCloseSources=new Set<number>();
  const scan=(programIdIndex:number,accounts:readonly number[],raw:Uint8Array):string|null=>{
   if(!Number.isSafeInteger(programIdIndex)||programIdIndex<0||
      programIdIndex>=keys.length||
@@ -100,7 +105,10 @@ export function reconcileEchoSignerPumpCpiLedger(input:{
    return 'PAYER_SELF_TRANSFER_NOT_A_VALID_BUY_DEBIT';
   // Track System credits separately for discrepancy diagnostics; never
   // silently net them into an approved debit or certify token closes.
-  if(payerIsSource)debits+=buffer.readBigUInt64LE(4);
+  if(payerIsSource){
+   debits+=buffer.readBigUInt64LE(4);
+   sentTo.set(accounts[1],(sentTo.get(accounts[1])??0n)+buffer.readBigUInt64LE(4));
+  }
   else if(opcode===2&&payerIsDestination)
    credits+=buffer.readBigUInt64LE(4);
   else return 'UNKNOWN_SYSTEM_PAYER_CREDIT';
@@ -132,6 +140,13 @@ export function reconcileEchoSignerPumpCpiLedger(input:{
       'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA'
     ].includes(id)||ix.accounts.length!==0||ix.data!=='')
      return fail('UNTRUSTED_OPAQUE_PARSED_CPI');
+    if(ix.closesAccountToPayer===true){
+     if(!Number.isSafeInteger(ix.closedAccountIndex)||
+        ix.closedAccountIndex!<=0||ix.closedAccountIndex!>=keys.length||
+        tokenCloseSources.has(ix.closedAccountIndex!))
+      return fail('UNTRUSTED_TOKEN_CLOSE_REFUND_CANDIDATE');
+     tokenCloseSources.add(ix.closedAccountIndex!);
+    }
     scanned++;
     if(scanned>200)return fail('EXCESSIVE_CPI_INSTRUCTIONS');
     continue;
@@ -161,7 +176,10 @@ export function reconcileEchoSignerPumpCpiLedger(input:{
    networkFeeLamports:String(fee),
    unexplainedAgainstDebitOnlyLamports:String(delta-debits),
    unexplainedAgainstNetSystemLamports:String(delta-(debits-credits)),
-   programInstructionsReviewed:scanned
+   programInstructionsReviewed:scanned,
+   candidateTokenCloseRefundCount:tokenCloseSources.size,
+   candidateTokenCloseFundedLamports:String([...tokenCloseSources]
+    .reduce((sum,i)=>sum+(sentTo.get(i)??0n),0n))
   });
  }
  const upper=debits+fee;
