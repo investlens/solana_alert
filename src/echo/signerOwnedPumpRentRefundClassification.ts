@@ -25,7 +25,7 @@ export function classifyEchoRentRefundPattern(input:{
  liveTokenAccountMinimumRentLamports:string;
  closeToPayerCount:number;topLevelCloseToPayerCount:number;
  exactSameSimulationClosedAccount:boolean;
- closedSourceDidNotExistBeforeSimulation:boolean;
+ closedSourceAbsentAtLaterRpcObservation:boolean;
 }):EchoRentRefundClassification{
  const x=[input.observedPayerDeltaLamports,input.outboundSystemDebitsLamports,
   input.inboundSystemCreditsLamports,input.messageNetworkFeeLamports,
@@ -35,7 +35,7 @@ export function classifyEchoRentRefundPattern(input:{
  if(input.ledgerFailureReason!=='UNEXPLAINED_PAYER_LAMPORT_BALANCE_CHANGE'||
     !input.exactSameSimulationClosedAccount||
     input.closeToPayerCount!==1||input.topLevelCloseToPayerCount!==1||
-    !input.closedSourceDidNotExistBeforeSimulation||
+    !input.closedSourceAbsentAtLaterRpcObservation||
     fee<=0n||rent<=0n||observed<=0n||
     outbound<inbound||outbound-inbound<=observed)
   return blocked('INCOMPLETE_ACCOUNT_LIFECYCLE_EVIDENCE');
