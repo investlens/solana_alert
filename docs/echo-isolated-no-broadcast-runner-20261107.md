@@ -36,3 +36,7 @@ It deliberately has **no signing key or transaction signing implementation**, so
 The `echo-isolated-signer-real-rpc` job in `.github/workflows/echo-reliability.yml` runs ONLY on a push with the `[echo-isolated-test]` commit marker. It installs exactly `@pump-fun/pump-sdk@4.3.1` and `bn.js@5.2.2` inside the disposable GitHub Actions runner, invokes the official SDK read-only scenario against public RPC, exports a private-to-runner, unsigned-message payload, and passes it to the no-broadcast signer diagnostic. No production service is affected. This ephemeral install is NOT a reviewed production lockfile and does not prove transitive dependency integrity for a live signer image.
 
 A successful diagnostic job is NOT a complete funded-wallet simulation and does not prove all CPI or Phantom manual SELL fees. The generated transaction may fail immediately because the dedicated wallet is unfunded; that outcome is a real mainnet finding, not a reason to bypass checks. Treat `PROVISIONAL` and `BLOCKED` as trading OFF. Never interpret a shell-job success as an auto-BUY release acceptance.
+
+### CI correctness adjustment
+
+The isolated diagnostic refuses arbitrary RPC destinations and uses exactly `https://api.mainnet-beta.solana.com`. A missing SDK, unmatched official quote, unavailable RPC or unfunded/failed exact-message simulation exits nonzero. **No blocked diagnostic can be advertised as a passing readiness check.** The separate SDK scenario may still produce a provisional unsigned message without funding; that is not a BUY simulation success.
