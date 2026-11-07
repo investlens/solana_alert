@@ -156,7 +156,8 @@ export async function prepareEchoPumpNoBroadcastBridge(
   pinnedCoordinatorPublicKey:x.pinnedCoordinatorPublicKey,
   nowMs:x.now(),unsignedTransactionBytes:x.unsignedTransactionBytes,
   nonceStore:x.nonceStore,reservationReader:x.reservationReader,
-  evidenceReader:x.evidenceReader
+  evidenceReader:x.evidenceReader,
+  ownerAutoBuyEnabled:x.ownerAutoBuyStillEnabled
  }).catch(()=>null);
  if(!signer)return blocked('ISOLATED_SIGNER_REVIEW_UNAVAILABLE',reservation);
  if(!signer.ok)return blocked('ISOLATED_SIGNER_'+signer.reason,reservation,signer);
