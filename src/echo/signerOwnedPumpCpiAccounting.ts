@@ -149,7 +149,7 @@ export function reconcileEchoSignerPumpCpiLedger(input:{
  const delta=before-after;
  // Solana RPC versions differ on including network fee in simulated
  // payer snapshot. Accept only the two explicit, comprehensible cases.
- if(delta!==debits&&delta!==debits+fee){
+ if(delta!==debits-credits&&delta!==debits-credits+fee){
   // A non-System refund (e.g. SPL Token CloseAccount) can explain why a
   // post-simulation payer snapshot moves less than the System debit sum.
   // It is NOT safe to infer such a refund from the gap. Keep blocking and
