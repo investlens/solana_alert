@@ -30,9 +30,19 @@ export type EchoSignerCpiLedger={
  programInstructionsReviewed:number;
  tokenEffectsProven:false;poolMintContinuityProven:false;
  manualPhantomSellVerified:false;signingAllowed:false;broadcastAllowed:false;
-}|{ok:false;reason:string;signingAllowed:false;broadcastAllowed:false};
-const fail=(reason:string):EchoSignerCpiLedger=>({
- ok:false,reason,signingAllowed:false,broadcastAllowed:false
+}|{ok:false;reason:string;signingAllowed:false;broadcastAllowed:false;
+ diagnostic?:{
+  observedPayerDeltaLamports:string;
+  outboundSystemDebitsLamports:string;
+  inboundSystemCreditsLamports:string;
+  networkFeeLamports:string;
+  unexplainedAgainstDebitOnlyLamports:string;
+  unexplainedAgainstNetSystemLamports:string;
+  programInstructionsReviewed:number;
+ }};
+const fail=(reason:string,diagnostic?:Extract<EchoSignerCpiLedger,{ok:false}>['diagnostic']):EchoSignerCpiLedger=>({
+ ok:false,reason,...(diagnostic?{diagnostic}:{}),
+ signingAllowed:false,broadcastAllowed:false
 });
 
 export function reconcileEchoSignerPumpCpiLedger(input:{
@@ -66,7 +76,7 @@ export function reconcileEchoSignerPumpCpiLedger(input:{
   return fail('UNTRUSTED_TRANSACTION_SIGNER');
  const keys=msg.staticAccountKeys.map(k=>k.toBase58());
  const systemIndex=keys.indexOf(SystemProgram.programId.toBase58());
- let debits=0n,scanned=0;
+ let debits=0n,credits=0n,scanned=0;
  const scan=(programIdIndex:number,accounts:readonly number[],raw:Uint8Array):string|null=>{
   if(!Number.isSafeInteger(programIdIndex)||programIdIndex<0||
      programIdIndex>=keys.length||
@@ -78,16 +88,24 @@ export function reconcileEchoSignerPumpCpiLedger(input:{
   if(raw.length<4)return 'INVALID_SYSTEM_INSTRUCTION';
   const buffer=Buffer.from(raw);
   const opcode=buffer.readUInt32LE(0);
-  const signerIsSource=accounts[0]===0;
-  if(!signerIsSource)return null;
+  const payerIsSource=accounts[0]===0;
+  const payerIsDestination=accounts[1]===0;
+  if(!payerIsSource&&!payerIsDestination)return null;
   // SystemProgram Transfer (2) or CreateAccount (0), each has a fixed
   // instruction shape and debits account index 0 (the sealed fee payer).
   if(!((opcode===2&&buffer.length===12&&accounts.length===2)||
        (opcode===0&&buffer.length===52&&accounts.length===2)))
    return 'UNKNOWN_SYSTEM_PAYER_OPERATION';
-  if(accounts[1]===0)return 'PAYER_SELF_TRANSFER_NOT_A_VALID_BUY_DEBIT';
-  debits+=buffer.readBigUInt64LE(4);
-  if(debits>1_000_000_000n)return 'UNBOUNDED_SYSTEM_WALLET_DEBIT';
+  if(payerIsSource&&payerIsDestination)
+   return 'PAYER_SELF_TRANSFER_NOT_A_VALID_BUY_DEBIT';
+  // Track System credits separately for discrepancy diagnostics; never
+  // silently net them into an approved debit or certify token closes.
+  if(payerIsSource)debits+=buffer.readBigUInt64LE(4);
+  else if(opcode===2&&payerIsDestination)
+   credits+=buffer.readBigUInt64LE(4);
+  else return 'UNKNOWN_SYSTEM_PAYER_CREDIT';
+  if(debits>1_000_000_000n||credits>1_000_000_000n)
+   return 'UNBOUNDED_SYSTEM_WALLET_MOVEMENT';
   return null;
  };
  for(const ix of msg.compiledInstructions){
@@ -131,8 +149,21 @@ export function reconcileEchoSignerPumpCpiLedger(input:{
  const delta=before-after;
  // Solana RPC versions differ on including network fee in simulated
  // payer snapshot. Accept only the two explicit, comprehensible cases.
- if(delta!==debits&&delta!==debits+fee)
-  return fail('UNEXPLAINED_PAYER_LAMPORT_BALANCE_CHANGE');
+ if(delta!==debits&&delta!==debits+fee){
+  // A non-System refund (e.g. SPL Token CloseAccount) can explain why a
+  // post-simulation payer snapshot moves less than the System debit sum.
+  // It is NOT safe to infer such a refund from the gap. Keep blocking and
+  // expose only bounded public lamport totals for the next audit.
+  return fail('UNEXPLAINED_PAYER_LAMPORT_BALANCE_CHANGE',{
+   observedPayerDeltaLamports:String(delta),
+   outboundSystemDebitsLamports:String(debits),
+   inboundSystemCreditsLamports:String(credits),
+   networkFeeLamports:String(fee),
+   unexplainedAgainstDebitOnlyLamports:String(delta-debits),
+   unexplainedAgainstNetSystemLamports:String(delta-(debits-credits)),
+   programInstructionsReviewed:scanned
+  });
+ }
  const upper=debits+fee;
  return {ok:true,mode:'PAYER_LAMPORT_CPI_ONLY',
   unsignedSha256:input.expectedUnsignedSha256,
