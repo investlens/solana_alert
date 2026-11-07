@@ -16,6 +16,8 @@ import {reconcileEchoSignerPumpCpiLedger}
  from '../src/echo/signerOwnedPumpCpiAccounting.js';
 import {simulateSignerCompiledCpiOnPinnedRpc}
  from '../src/echo/signerOwnedCompiledCpiSimulation.js';
+import {observeTokenCloseSourcesReadOnly}
+ from '../src/echo/signerOwnedTokenCloseRefundEvidence.js';
 
 export const ECHO_TEST_RUNNER_CAN_SIGN=false as const;
 export const ECHO_TEST_RUNNER_CAN_BROADCAST=false as const;
@@ -32,6 +34,12 @@ export type EchoTestRunnerResult={
  provisionalNetworkFeeLamports?:string;
  provisionalCpiInstructionCount?:number;
  provisionalComputeUnitsConsumed?:number|null;
+ tokenClosePrestateEvidence?:{
+  status:string;sourceCount?:number;existingTokenAccounts?:number;
+  observedPrestateLamports?:string;observedSlot?:number;
+  exactSimulationBankMatched?:false;refundProven?:false;
+  signingAllowed:false;broadcastAllowed:false;reason?:string
+ };
  payerDebitMismatchDiagnostic?:{
   observedPayerDeltaLamports:string;
   outboundSystemDebitsLamports:string;
@@ -144,10 +152,25 @@ export async function runEchoSignerNoBroadcastTest(
   innerInstructions:snapshot.innerInstructions as Parameters<
    typeof reconcileEchoSignerPumpCpiLedger>[0]['innerInstructions']
  });
- if('reason' in ledger)return {
-  ...result('PAYER_CPI_LEDGER_'+ledger.reason,true,true),
-  ...(ledger.diagnostic?{payerDebitMismatchDiagnostic:ledger.diagnostic}:{})
- };
+ if('reason' in ledger){
+  const diagnostic=ledger.diagnostic;
+  // Never log the private exact-message account-index array.
+  const {candidateTokenCloseSourceIndexes:sourceIndexes,...publicDiagnostic}=
+   diagnostic??{candidateTokenCloseSourceIndexes:undefined};
+  let evidence;
+  if(sourceIndexes?.length){
+   evidence=await observeTokenCloseSourcesReadOnly({
+    tx,sourceIndexes,minSlot:snapshot.simulationSlot,
+    rpc:{getMultipleAccountsInfoAndContext:(keys,config)=>
+     connection.getMultipleAccountsInfoAndContext(keys,config)}
+   });
+  }
+  return {
+   ...result('PAYER_CPI_LEDGER_'+ledger.reason,true,true),
+   ...(diagnostic?{payerDebitMismatchDiagnostic:publicDiagnostic}:{}),
+   ...(evidence?{tokenClosePrestateEvidence:evidence}:{})
+  };
+ }
  // Observed payer SOL debit is reconciled; token effects, price freshness
  // and wallet-side Phantom SELL remain unverified. Never authorize trading.
  return {
