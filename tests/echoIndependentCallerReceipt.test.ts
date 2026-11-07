@@ -85,3 +85,18 @@ test('positive caller receipt still blocks without independent Pump quote and SE
  assert.equal(out.reason,'TRUSTED_PUMP_PROVIDER_NOT_CONNECTED');
  assert.equal(out.canBroadcast,false);
 });
+
+test('internal same-owner token-account transfers never count as a BUY',async()=>{
+ const receipt=tx();
+ receipt.meta!.preTokenBalances=[
+  {accountIndex:3,mint,owner:SLINGOOR_WALLET,uiTokenAmount:{amount:'1000'}} as any,
+  {accountIndex:4,mint,owner:SLINGOOR_WALLET,uiTokenAmount:{amount:'4000'}} as any
+ ];
+ receipt.meta!.postTokenBalances=[
+  {accountIndex:3,mint,owner:SLINGOOR_WALLET,uiTokenAmount:{amount:'3000'}} as any,
+  {accountIndex:4,mint,owner:SLINGOOR_WALLET,uiTokenAmount:{amount:'2000'}} as any
+ ];
+ const r=await verifyEchoCallerReceipt({...args,rpc:src(receipt)});
+ assert.equal(r.ok,false);
+ assert.equal('reason' in r?r.reason:null,'NO_INDEPENDENT_CALLER_NET_TOKEN_CREDIT');
+});
