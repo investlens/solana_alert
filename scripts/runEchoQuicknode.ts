@@ -20,7 +20,8 @@ import { readEchoTransaction } from '../src/echo/readTransaction.js';
 import { advanceFreshScan, type FreshScanState } from '../src/echo/freshScan.js';
 import { echoFreshPageBudget } from '../src/echo/freshBudget.js';
 import { EchoVerifiedBuyLatencyTracker } from '../src/echo/verifiedBuyLatencyTracker.js';
-import {inspectLiveCallerForPumpQuote} from '../src/echo/liveCallerPumpQuoteIngress.js';
+import {inspectIndependentlyVerifiedLiveCaller} from '../src/echo/liveCallerPumpQuoteIngress.js';
+import {Connection} from '@solana/web3.js';
 
 // Independent executable: no shared startup/config, database, bot polling,
 // Helius requests, private keys or trade execution imports.
@@ -71,6 +72,10 @@ const diagnostics = { fetched: 0, signals: 0, delivered: 0, noSignal: 0, rpcFail
 const rejectionCounts: Partial<Record<EchoRejectReason, number>> = {};
 // Read-only counters; no network calls, signing, or Telegram blocking.
 const echoShadowLatency = new EchoVerifiedBuyLatencyTracker();
+const echoIndependentReadOnlyRpc =
+ process.env.ECHO_PUMP_READ_ONLY_INGRESS_ENABLED==='true'&&config.fallbackRpcUrl?
+ new Connection(config.fallbackRpcUrl,'confirmed'):null;
+
 function historyRateLimited(retryHeader: string | null, fallback = false) {
   if (fallback) fallbackHistoryLimitStreak++; else historyLimitStreak++;
   const streak = fallback ? fallbackHistoryLimitStreak : historyLimitStreak;
@@ -299,17 +304,20 @@ const queue = new EchoQueue(async signature => {
     const echoVerifiedAtMs=Date.now();
     const echoLiveWsAtMs=echoShadowLatency.websocketTimestamp(signal.signature,signal.wallet);
     if(process.env.ECHO_PUMP_READ_ONLY_INGRESS_ENABLED==='true'){
-      void inspectLiveCallerForPumpQuote({
+      // Independent provider is required; never reuse the same primary
+      // scan result or invent an RPC fallback when there is none.
+      if(echoIndependentReadOnlyRpc)void inspectIndependentlyVerifiedLiveCaller({
         signal,nowMs:echoVerifiedAtMs,verifiedAtMs:echoVerifiedAtMs,
         websocketObservedAtMs:echoLiveWsAtMs,
         historicalReplay:echoLiveWsAtMs===null,
-        provider:null
+        rpc:echoIndependentReadOnlyRpc,provider:null
       }).then(review=>{
         // Sanitize: no token IDs, private wallet material, quote, or RPC dumps.
         console.log('[EchoPumpIngress] READ_ONLY', {
           status:review.status,reason:review.reason,canBroadcast:review.canBroadcast
         });
       }).catch(()=>console.warn('[EchoPumpIngress] READ_ONLY_UNAVAILABLE'));
+      else console.warn('[EchoPumpIngress] INDEPENDENT_RPC_NOT_CONFIGURED');
     }
     // Existing WebSocket + receipt latency metrics are not reset by shadow hook.
     echoShadowLatency.verifiedBuy({
