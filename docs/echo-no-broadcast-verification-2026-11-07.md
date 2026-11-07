@@ -18,3 +18,8 @@ This file records a **single explicit read-only GitHub Actions trigger** for the
 6. Separate owner approval before deploying any executable broadcaster or submitting one $5 all-in live purchase.
 
 Do not fund, migrate production database, expose secrets, deploy or change the live Telegram alert service based solely on this diagnostic.
+
+## November 7 — diagnostic failure investigation (second isolated probe)
+- The first signer real-RPC job denied signing with `OFFICIAL_REBUILT_MESSAGE_DIFFERS_FROM_SIGNER_REQUEST`. This confirms SHA matches the exported unsigned bytes, but rebuilding instructions from independently fetched SDK pool state yielded a different complete v0 transaction.
+- We **did not bypass** bytewise verification or turn on signing. Added distinct failure classifications for rebuilt account list, instruction count and instruction data so future logs can identify whether independently reread state or SDK-generated accounts drifted. Added negative tests for altered account lists and instruction bytes.
+- This commit explicitly requests one more safe no-key/no-broadcast signer RPC diagnostic. A failed job is evidence of remaining work, not a release denial to override.
