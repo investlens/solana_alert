@@ -88,3 +88,37 @@ test('opaque marker cannot conceal a System payer debit',()=>{
  });
  assert.equal(ledger.ok,false);
 });
+
+test('candidate parsed token CloseAccount refund is identified but never guessed as wallet credit',()=>{
+ const raw=[{index:1,instructions:[
+  {program:'spl-token',programId:token.toBase58(),parsed:{
+   type:'closeAccount',info:{account:dest.toBase58(),
+    destination:wallet.toBase58(),authority:wallet.toBase58()}}}
+ ]}];
+ const normalized=normalizeSignerSimulationCpi(raw,tx);
+ assert.equal(normalized[0].instructions[0].closesAccountToPayer,true);
+ assert.equal(normalized[0].instructions[0].closedAccountIndex,
+  compiled.indexOf(dest.toBase58()));
+ const ledger=reconcileEchoSignerPumpCpiLedger({
+  unsignedBytes:bytes,expectedUnsignedSha256:sha,
+  prePayerBalanceLamports:'100000000',
+  postSimulatedPayerBalanceLamports:'81000000',
+  networkFeeLamports:'5000',innerInstructions:normalized
+ });
+ assert.equal(ledger.ok,false);
+ if(!ledger.ok){
+  assert.equal(ledger.reason,'UNEXPLAINED_PAYER_LAMPORT_BALANCE_CHANGE');
+  assert.equal(ledger.diagnostic?.candidateTokenCloseRefundCount,1);
+  assert.equal(ledger.diagnostic?.candidateTokenCloseFundedLamports,'20000000');
+  assert.equal(ledger.broadcastAllowed,false);
+ }
+});
+test('token close to a different destination never becomes candidate payer refund',()=>{
+ const raw=[{index:1,instructions:[
+  {programId:token.toBase58(),parsed:{
+   type:'closeAccount',info:{account:dest.toBase58(),
+    destination:dest.toBase58(),authority:wallet.toBase58()}}}
+ ]}];
+ const normalized=normalizeSignerSimulationCpi(raw,tx);
+ assert.equal(normalized[0].instructions[0].closesAccountToPayer,undefined);
+});
