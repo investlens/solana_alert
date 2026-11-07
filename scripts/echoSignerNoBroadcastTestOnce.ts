@@ -94,11 +94,16 @@ export async function runEchoSignerNoBroadcastTest(
   principalLamports:env.ECHO_SIGNER_TEST_PRINCIPAL_LAMPORTS!,
   slippageBps:Number(env.ECHO_SIGNER_TEST_SLIPPAGE_BPS)
  });
- if(!quote.ok)return result('OFFICIAL_POOL_OR_QUOTE_'+quote.reason,true);
+ if('reason' in quote)return result('OFFICIAL_POOL_OR_QUOTE_'+quote.reason,true);
  const rpc=await probeSignerOwnedPumpRpc({
-  connection,unsignedBytes:bytes,expectedUnsignedSha256:sha!,nowMs:Date.now()
+  connection:{
+   getBalanceAndContext:(wallet,commitment)=>connection.getBalanceAndContext(wallet,commitment),
+   getFeeForMessage:(message,commitment)=>connection.getFeeForMessage(message,commitment),
+   isBlockhashValid:(blockhash,commitment)=>connection.isBlockhashValid(blockhash,{commitment}),
+   simulateTransaction:(transaction,config)=>connection.simulateTransaction(transaction,config)
+  },unsignedBytes:bytes,expectedUnsignedSha256:sha!,nowMs:Date.now()
  });
- if(!rpc.ok)return result('EXACT_WALLET_SIMULATION_'+rpc.reason,true,true);
+ if('reason' in rpc)return result('EXACT_WALLET_SIMULATION_'+rpc.reason,true,true);
  // A successful RPC probe remains PROVISIONAL. No real Phantom exit or
  // complete CPI/token ledger has been checked by this one-shot diagnostic.
  return result('PROVISIONAL_RPC_SIMULATION_NOT_LIVE_APPROVAL',true,true,true);
