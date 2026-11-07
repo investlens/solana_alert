@@ -42,6 +42,8 @@ export type EchoSignerCpiLedger={
   programInstructionsReviewed:number;
   candidateTokenCloseRefundCount:number;
   candidateTokenCloseFundedLamports:string;
+  /** Exact message indexes, internal only; caller must not print these. */
+  candidateTokenCloseSourceIndexes?:number[];
  }};
 const fail=(reason:string,diagnostic?:Extract<EchoSignerCpiLedger,{ok:false}>['diagnostic']):EchoSignerCpiLedger=>({
  ok:false,reason,...(diagnostic?{diagnostic}:{}),
@@ -179,7 +181,8 @@ export function reconcileEchoSignerPumpCpiLedger(input:{
    programInstructionsReviewed:scanned,
    candidateTokenCloseRefundCount:tokenCloseSources.size,
    candidateTokenCloseFundedLamports:String([...tokenCloseSources]
-    .reduce((sum,i)=>sum+(sentTo.get(i)??0n),0n))
+    .reduce((sum,i)=>sum+(sentTo.get(i)??0n),0n)),
+   candidateTokenCloseSourceIndexes:[...tokenCloseSources]
   });
  }
  const upper=debits+fee;
