@@ -9,6 +9,8 @@ import {SLINGOOR_WALLET,CHAIRMAN_WALLET} from './liveBuyPolicy.js';
 import {screenEchoFiveDollarCall,type EchoFiveDollarCall}
  from './fiveDollarCallPolicy.js';
 import type {EchoPerCallTrustedInput} from './perCallNoBroadcastCoordinator.js';
+import {verifyEchoCallerReceipt,type EchoPinnedCallerRpc}
+ from './independentCallerReceipt.js';
 
 export const ECHO_LIVE_CALLER_INGRESS_CAN_SIGN=false as const;
 export const ECHO_LIVE_CALLER_INGRESS_CAN_BROADCAST=false as const;
@@ -81,4 +83,28 @@ export async function inspectLiveCallerForPumpQuote(input:{
    websocketObservedAtMs:input.websocketObservedAtMs!,
    verifiedAtMs:input.verifiedAtMs},
   canSign:false,canBroadcast:false};
+}
+
+/** Release-oriented intake. Unlike the alert-only/synthetic ingress above,
+ * this NEVER accepts a queue-classified BUY unless a second signer-pinned
+ * Solana RPC independently verifies signer + positive token credit first.
+ *
+ * Full swap debit, verified market cap and exit proof are still required
+ * from the separate trusted provider, not invented from the receipt.
+ */
+export async function inspectIndependentlyVerifiedLiveCaller(input:{
+ signal:EchoSignal;nowMs:number;verifiedAtMs:number;
+ websocketObservedAtMs:number|null;historicalReplay:boolean;
+ rpc:EchoPinnedCallerRpc;provider:EchoTrustedPumpQuoteProvider|null;
+}):Promise<EchoIngressResult>{
+ if(input.historicalReplay)return deny('HISTORICAL_REPLAY_NO_BUY');
+ if(!input.websocketObservedAtMs)return deny('NO_LIVE_WEBSOCKET_OBSERVATION');
+ const receipt=await verifyEchoCallerReceipt({
+  rpc:input.rpc,callerWallet:input.signal.wallet,
+  sourceSignature:input.signal.signature,mint:input.signal.mint
+ });
+ if('reason' in receipt)return deny('INDEPENDENT_RECEIPT_'+receipt.reason);
+ // The positive signer/token-credit receipt is not evidence of an actual
+ // BUY by itself. Delegate to the separately verified swap and debit reader.
+ return inspectLiveCallerForPumpQuote(input);
 }
