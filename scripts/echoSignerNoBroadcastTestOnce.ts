@@ -34,6 +34,7 @@ export type EchoTestRunnerResult={
  provisionalNetworkFeeLamports?:string;
  provisionalCpiInstructionCount?:number;
  provisionalComputeUnitsConsumed?:number|null;
+ sameSimulationTokenCloseConfirmed?:boolean;
  tokenCloseRentHypothesis?:{
   classification:'RENT_AND_NETWORK_FEE_MATCH'|'RENT_OR_FEE_DOES_NOT_MATCH'|'UNVERIFIED_RENT_RPC';
   referenceAccountBytes:165;
@@ -218,7 +219,8 @@ export async function runEchoSignerNoBroadcastTest(
    ...result('PAYER_CPI_LEDGER_'+ledger.reason,true,true),
    ...(diagnostic?{payerDebitMismatchDiagnostic:publicDiagnostic}:{}),
    ...(evidence?{tokenClosePrestateEvidence:evidence}:{}),
-   ...(rentHypothesis?{tokenCloseRentHypothesis:rentHypothesis}:{})
+   ...(rentHypothesis?{tokenCloseRentHypothesis:rentHypothesis}:{}),
+   sameSimulationTokenCloseConfirmed:rpc.sameSimulationTokenCloseConfirmed
   };
  }
  // Observed payer SOL debit is reconciled; token effects, price freshness
@@ -230,7 +232,8 @@ export async function runEchoSignerNoBroadcastTest(
   provisionalWalletDebitUpperLamports:ledger.conservativeWalletDebitLamports,
   provisionalNetworkFeeLamports:rpc.networkFeeEstimateLamports,
   provisionalCpiInstructionCount:rpc.innerInstructionCount,
-  provisionalComputeUnitsConsumed:rpc.computeUnitsConsumed
+  provisionalComputeUnitsConsumed:rpc.computeUnitsConsumed,
+  sameSimulationTokenCloseConfirmed:rpc.sameSimulationTokenCloseConfirmed
  };
 }
 
