@@ -390,6 +390,7 @@ jobs:
       ECHO_SCENARIO_USE_PUBLIC_FX: 'true'
       ECHO_SCENARIO_SOL_USD_CENTS: '20000'
       ECHO_SCENARIO_CPI_ALLOWANCE_LAMPORTS: '1000000'
+      ECHO_SCENARIO_ALL_IN_CENTS: '500'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
