@@ -50,6 +50,8 @@ export type EchoTestRunnerResult={
   programInstructionsReviewed:number;
   candidateTokenCloseRefundCount:number;
   candidateTokenCloseFundedLamports:string;
+  candidateTopLevelTokenCloseCount:number;
+  candidateInnerTokenCloseCount:number;
  };
  completeCpiAndTokenEffectsVerified:false;
  manualPhantomExitVerified:false;
