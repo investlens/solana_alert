@@ -55,3 +55,9 @@ Do not fund, migrate production database, expose secrets, deploy or change the l
 - CI's sanitized result on success shows observed confirmed wallet balance in lamports, **conservative SOL payer debit including RPC fee**, CPI instruction count and RPC compute units consumed (or null). None is a token delivery, SOL/USD oracle freshness or manual SELL proof.
 - Mismatched payer balance, unexpected inner CPI operations, absent trace or stale slot fails closed. Full token effects and Phantom manual SELL are still false. No new signing or send paths.
 - One-shot `[echo-isolated-test]` push requests a new ephemeral runner on real public RPC; test uses existing **$5 scenario**, not a live $2.50 pilot. Any future pilot amount must be enforced in all stages before live approval.
+
+## November 7 — real funded simulation CPI encoding compatibility fix
+- Run #1071 diagnostic returned `EXACT_WALLET_SIMULATION_MALFORMED_SIGNER_CPI_INSTRUCTION` after `exactMessageHashVerified=true` and `poolAndQuoteVerified=true`.
+- The Solana RPC JSON structures specification documents that **simulation returns CPI instructions as JSON Parsed by default**, but the payer-side reconciliation requires compiled instruction indexes. This is a **response encoding mismatch**, not proof of an invalid swap or approval to trade.
+- Explicitly request `innerInstructionsEncoding:'json'` together with `innerInstructions:true` in signer-owned `simulateTransaction`; reject any parsed fallback with `RPC_RETURNED_PARSED_CPI_INSTEAD_OF_COMPILED`. No account re-indexing or unchecked transformation, and every CPI index/fee still requires validation. Added regression coverage for the requested encoding and for parsed fallback rejection.
+- Run the fresh **read-only actual-wallet** CI probe via `[echo-isolated-test]`. Never sign, broadcast, or deploy. Payer lamport CPI ledger, token effects and Phantom SELL still require evidence.
