@@ -106,6 +106,7 @@ function input(){
   pinnedCoordinatorPublicKey:coordinator.publicKey.toBase58(),nowMs:now,
   unsignedTransactionBytes:bytes,
   nonceStore:{consumeOnce:async(_nonce:string,_exp:number)=>true},
+  ownerAutoBuyEnabled:async()=>true,
   reservationReader:{getByCall:async():Promise<EchoPerCallReservation>=>row},
   evidenceReader:{readFromTrustedProviders:async()=>({call,probe,independent,sizing,debitEvidence})}
  };
@@ -479,4 +480,33 @@ test('signer-owned official quote rejection prevents any DB reservation',async()
  assert.equal(result.canSign,false);
  assert.equal(result.canBroadcast,false);
  assert.equal(reservations,0);
+});
+
+test('signer independently rejects owner sleep OFF before DB and nonce',async()=>{
+ const x=input();let db=0,nonce=0;
+ x.ownerAutoBuyEnabled=async()=>false;
+ x.reservationReader.getByCall=async()=>{db++;return row;};
+ x.nonceStore.consumeOnce=async()=>{nonce++;return true;};
+ const r=await reviewEchoPumpPerCallSignerNoBroadcast(x);
+ assert.deepEqual(r,{ok:false,reason:'SIGNER_OWNER_AUTO_BUY_OFF',
+  signingAllowed:false,broadcastAllowed:false});
+ assert.equal(db,0);assert.equal(nonce,0);
+});
+test('signer owner OFF during trusted provider read blocks before nonce',async()=>{
+ const x=input();let switches=0,nonce=0;
+ x.ownerAutoBuyEnabled=async()=>{switches++;return switches===1;};
+ x.nonceStore.consumeOnce=async()=>{nonce++;return true;};
+ const r=await reviewEchoPumpPerCallSignerNoBroadcast(x);
+ assert.deepEqual(r,{ok:false,reason:'SIGNER_OWNER_AUTO_BUY_OFF',
+  signingAllowed:false,broadcastAllowed:false});
+ assert.equal(switches,2);assert.equal(nonce,0);
+});
+test('signer owner toggle read outage must fail closed without nonce',async()=>{
+ const x=input();let nonce=0;
+ x.ownerAutoBuyEnabled=async()=>{throw Error('private owner switch outage');};
+ x.nonceStore.consumeOnce=async()=>{nonce++;return true;};
+ const r=await reviewEchoPumpPerCallSignerNoBroadcast(x);
+ assert.equal(r.ok,false);
+ assert.equal('reason' in r?r.reason:null,'SIGNER_OWNER_SWITCH_UNAVAILABLE');
+ assert.equal(nonce,0);
 });
