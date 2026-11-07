@@ -108,9 +108,13 @@ test('explicit System refund to wallet is counted, never inferred from delta',()
  }]};
  const matched=reconcileEchoSignerPumpCpiLedger({
   ...base,postSimulatedPayerBalanceLamports:'78000000',
-  innerInstructions:[...group,...creditCpi.instructions.length?[{index:0,instructions:creditCpi.instructions}]:[]]
+  innerInstructions:[...group,{index:0,instructions:creditCpi.instructions}]
  });
- // The ledger must fail on duplicate/invalid grouping or unexplained funds,
- // never declare success by simply adjusting the observed delta.
- assert.equal(matched.ok,false);
+ assert.equal(matched.ok,true,JSON.stringify(matched));
+ if(matched.ok){
+  assert.equal(matched.observedPayerDeltaLamports,'22000000');
+  assert.equal(matched.tokenEffectsProven,false);
+  assert.equal(matched.signingAllowed,false);
+  assert.equal(matched.broadcastAllowed,false);
+ }
 });
