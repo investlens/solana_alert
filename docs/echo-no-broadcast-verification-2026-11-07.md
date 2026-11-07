@@ -48,3 +48,10 @@ Do not fund, migrate production database, expose secrets, deploy or change the l
 - Prior diagnostic `EXACT_WALLET_SIMULATION_UNFUNDED_PAYER_CANNOT_SIMULATE_BUY` followed successful exact unsigned transaction hash and independently rebuilt official two-hop PumpSwap quote.
 - This tagged push requests a **read-only** CI rerun against fresh confirmed Solana RPC wallet state, with signing and broadcasting still explicitly disabled. This is a repeat of the actual-wallet scenario, NOT a live purchase or production rollout.
 - A passing provisional simulation will NOT certify CPI rent/priority-fee completeness, Phantom manual SELL, or signer signing authorization. The system stays trading OFF.
+
+## November 7 — funded-wallet CPI and compute evidence pass
+- Operator reports 0.1 SOL funded; current SOL balance, simulation outcome and token receipt **not independently verified here**. Neither funding nor simulation authorizes any buy.
+- Wired `probeSignerOwnedPumpRpc.onValidatedSimulation` to the existing strict `reconcileEchoSignerPumpCpiLedger` in the actual official-SDK one-shot diagnostic. A transaction now needs its exact SHA, independently checked quote, successful actual-wallet RPC simulation **and** decodable, reconciled payer SOL System/inner CPI ledger before getting PROVISIONAL status.
+- CI's sanitized result on success shows observed confirmed wallet balance in lamports, **conservative SOL payer debit including RPC fee**, CPI instruction count and RPC compute units consumed (or null). None is a token delivery, SOL/USD oracle freshness or manual SELL proof.
+- Mismatched payer balance, unexpected inner CPI operations, absent trace or stale slot fails closed. Full token effects and Phantom manual SELL are still false. No new signing or send paths.
+- One-shot `[echo-isolated-test]` push requests a new ephemeral runner on real public RPC; test uses existing **$5 scenario**, not a live $2.50 pilot. Any future pilot amount must be enforced in all stages before live approval.
