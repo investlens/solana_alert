@@ -17,6 +17,7 @@ export type EchoSignerRpcProbeResult=
    payerBalanceBeforeLamports:string;payerBalanceAfterSimulationLamports:string;
    observedDeltaLamports:string;networkFeeEstimateLamports:string;
    observedAtMs:number;simulationContextSlot:number;innerInstructionCount:number;
+   computeUnitsConsumed:number|null;
    fullCpiAndExitProven:false;
    signingAllowed:false;broadcastAllowed:false}
  |{ok:false;reason:string;signingAllowed:false;broadcastAllowed:false};
@@ -33,7 +34,8 @@ export type EchoSignerRpcReadOnly={
   innerInstructions:true;
   accounts:{encoding:'base64';addresses:string[]}
  }):Promise<{context:{slot:number};value:{err:unknown;innerInstructions?:unknown;
-  accounts?:({lamports:number;owner:string}|null)[]|null}}>;
+  accounts?:({lamports:number;owner:string}|null)[]|null;
+  unitsConsumed?:number|null}}>;
 };
 const deny=(reason:string):EchoSignerRpcProbeResult=>({
  ok:false,reason,signingAllowed:false,broadcastAllowed:false
@@ -106,6 +108,10 @@ export async function probeSignerOwnedPumpRpc(input:{
    accounts:{encoding:'base64',addresses:[ECHO_EXPECTED_EXECUTION_WALLET]}
   });
   if(result.value.err!==null)return deny('PUMPSWAP_SIMULATION_FAILED');
+  const units=result.value.unitsConsumed;
+  if(units!==undefined&&units!==null&&
+     (!Number.isSafeInteger(units)||units<0||units>1_400_000))
+   return deny('INVALID_SIMULATED_COMPUTE_CONSUMPTION');
   // Require an explicitly requested inner-CPI trace; absence is UNKNOWN,
   // never evidence that the transaction has no CPI debits.
   if(!Array.isArray(result.value.innerInstructions))
@@ -164,7 +170,8 @@ export async function probeSignerOwnedPumpRpc(input:{
    observedDeltaLamports:String(delta),
    networkFeeEstimateLamports:String(fee.value),
    observedAtMs:input.nowMs,simulationContextSlot:result.context.slot,
-   innerInstructionCount:count,fullCpiAndExitProven:false,
+   innerInstructionCount:count,computeUnitsConsumed:units??null,
+   fullCpiAndExitProven:false,
    signingAllowed:false,broadcastAllowed:false};
  }catch{return deny('SIGNER_RPC_READ_OR_SIMULATION_UNAVAILABLE');}
 }
