@@ -30,3 +30,9 @@ It deliberately has **no signing key or transaction signing implementation**, so
 ## Runtime evidence (read-only Railway)
 
 2026-11-07: production signer commit `fe4188ae` still runs `echoIsolatedSignerProveOnce.ts`; last successful `ECHO_ISOLATED_CUSTODY=VERIFIED;TRADING=OFF`. Admin service commit `b8943b0b` logs `quoteStage:'NOT_CONNECTED'` and `reservationStage:'NOT_CONNECTED'`. No current-head live signer-side end-to-end test has passed.
+
+## GitHub isolated real-RPC diagnostic (November 7)
+
+The `echo-isolated-signer-real-rpc` job in `.github/workflows/echo-reliability.yml` runs ONLY on a push with the `[echo-isolated-test]` commit marker. It installs exactly `@pump-fun/pump-sdk@4.3.1` and `bn.js@5.2.2` inside the disposable GitHub Actions runner, invokes the official SDK read-only scenario against public RPC, exports a private-to-runner, unsigned-message payload, and passes it to the no-broadcast signer diagnostic. No production service is affected. This ephemeral install is NOT a reviewed production lockfile and does not prove transitive dependency integrity for a live signer image.
+
+A successful diagnostic job is NOT a complete funded-wallet simulation and does not prove all CPI or Phantom manual SELL fees. The generated transaction may fail immediately because the dedicated wallet is unfunded; that outcome is a real mainnet finding, not a reason to bypass checks. Treat `PROVISIONAL` and `BLOCKED` as trading OFF. Never interpret a shell-job success as an auto-BUY release acceptance.
