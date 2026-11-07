@@ -31,7 +31,8 @@ const report:any={mode:'MAINNET_OFFICIAL_TWO_HOP_QUOTE_SIMULATION',
  amountLamports:INPUT,maxSlippageBps:1000,
  targetMint:B,quotedOutputRaw:null,minOutputRaw:null,
  poolAccountsRead:false,quoteVerified:false,additionalFeesFullyVerified:false,
- unsignedConstructed:false,simulationAttempted:false,simulationPassed:false,
+ unsignedConstructed:false,unsignedTransactionSha256:null,
+ simulationAttempted:false,simulationPassed:false,
  fullWalletDebitVerified:false,possibleCpiRentUnknown:true,
  signed:false,broadcast:false,signingApproved:false,
  outputMintMarketCapEligible:false,reason:'NOT_VERIFIED'};
@@ -104,6 +105,12 @@ try{
   payerKey:pub(WALLET),recentBlockhash:bh.blockhash,instructions:ixs
  }).compileToV0Message();
  const tx=new VersionedTransaction(message);
+ const {createHash}=await import('node:crypto');
+ // This hash binds the exact SDK-built unsigned transaction to a future
+ // signer-side independent audit. It is not an execution authorization.
+ report.unsignedTransactionSha256=createHash('sha256').update(tx.serialize()).digest('hex');
+ report.pumpSwapProgram=AMM;
+ report.pumpSwapRoute='TWO_HOP_SOL_INTERMEDIATE_TARGET';
  if(message.addressTableLookups.length!==0||tx.signatures.length!==1||
    tx.signatures[0].some(v=>v!==0))throw Error('UNSAFE_SIGNER_OR_ALT');
  report.unsignedConstructed=true;
@@ -161,9 +168,23 @@ try{
  // rents or all-in USD eligibility; simulation failure remains a safe result.
  report.stage='RPC_SIMULATE_UNSIGNED';
  report.simulationAttempted=true;
+ // Explicitly request the actual fee payer post-simulation account.
+ // Without this independent RPC field there is NO measured real-wallet debit.
  const simulated=await con.simulateTransaction(tx,{
-  sigVerify:false,replaceRecentBlockhash:true,commitment:'confirmed'
+  sigVerify:false,replaceRecentBlockhash:true,commitment:'confirmed',
+  accounts:{encoding:'base64',addresses:[WALLET]}
  });
+ report.simulatedWalletAccountReturned=false;
+ report.simulatedWalletPostLamports=null;
+ report.simulatedWalletDebitLamports=null;
+ const payerAfter=simulated.value?.accounts?.[0];
+ if(payerAfter&&Number.isSafeInteger(payerAfter.lamports)&&
+     payerAfter.lamports>=0&&payerAfter.owner===SystemProgram.programId.toBase58()){
+  report.simulatedWalletAccountReturned=true;
+  report.simulatedWalletPostLamports=payerAfter.lamports;
+  if(payerAfter.lamports<=walletBalance)
+   report.simulatedWalletDebitLamports=String(BigInt(walletBalance)-BigInt(payerAfter.lamports));
+ }
  report.unitsConsumed=simulated.value?.unitsConsumed??null;
  report.simulationPassed=simulated.value?.err===null;
  if(!report.simulationPassed) {
@@ -175,7 +196,9 @@ try{
     err&&typeof err==='object'?Object.keys(err).slice(0,2).join('_'):'UNKNOWN';
   throw Error('SIMULATION_FAILED_OR_UNFUNDED_WALLET');
  }
- report.reason='SIMULATION_PASSED_BUT_ECONOMICS_UNAUTHORIZED';
+ if(!report.simulatedWalletAccountReturned||report.simulatedWalletDebitLamports===null)
+  throw Error('SIMULATED_PAYER_BALANCE_EVIDENCE_MISSING');
+ report.reason='SIMULATION_PASSED_BUT_CPI_AND_EXIT_UNVERIFIED';
 }catch(e){
  const x=e instanceof Error?e.message:'UNKNOWN';
  const allowedReasons=['INCOMPLETE_POOL_OR_FEE_STATE','POOL_OWNER_NOT_VERIFIED',
@@ -184,7 +207,8 @@ try{
  'EXCESSIVE_SOL_TRANSFER_INSTRUCTIONS','UNPRICED_SYSTEM_INSTRUCTION',
  'UNREVIEWED_SOL_TRANSFER_SOURCE','SYSTEM_TRANSFER_NOT_EXACT_SWAP_PRINCIPAL','UNSAFE_SIGNER_OR_ALT',
  'INSUFFICIENT_PROVISIONAL_BALANCE','SIMULATION_FAILED_OR_UNFUNDED_WALLET','RPC_ENDPOINT_NOT_ALLOWLISTED',
- 'RPC_METHOD_NOT_READONLY','RPC_CALL_LIMIT_REACHED'];
+ 'RPC_METHOD_NOT_READONLY','RPC_CALL_LIMIT_REACHED',
+ 'SIMULATED_PAYER_BALANCE_EVIDENCE_MISSING'];
  report.reason=allowedReasons.includes(x)?x:'SDK_QUOTE_OR_SIMULATION_FAILED';
  report.errorType=e instanceof Error?e.name:'UNKNOWN';
 }

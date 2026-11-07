@@ -6,10 +6,12 @@ User-requested strategy change, for review and implementation on an isolated bra
 - Only **Slingoor** and **Chairman** verified on-chain own BUY swaps; transfers, gifts, and failed transactions are not calls.
 - Target **$5 USD all-in per eligible observed CALLER BUY**, with conversion from fresh independent SOL/USD source and a maximum wallet debit that includes network/priority fees, transaction rent, and all wallet-funded CPI costs; reject when these costs cannot be bounded. Never spend more than $5 per event merely because the SOL price moves.
 - A *new on-chain source transaction signature* for a previously purchased mint is eligible for a new $5 purchase, including when another position in that mint is currently held. Do not mistake duplicated webhook/RPC/Telegram notifications, restarts, replays or multi-path classification of the SAME source signature for new calls.
+- **No fixed $6 minimum-wallet threshold.** An enabled auto-BUY may continue for each eligible call until manually switched OFF, provided the independently attested wallet SOL is sufficient to pay the **exact $5-max all-in debit**, outstanding reserved/UNKNOWN orders, and manual-SELL network reserve. No fresh on-chain wallet-balance polling solely to enforce an arbitrary USD floor; use safe cached/subscription wallet state with short freshness limits and reconcile before any signature.
 - Remove the old $30 lifetime committed-budget constraint **from the proposed strategy**. Retain an independently enforced available-wallet SOL limit, mandatory manual-SELL network reserve, fee ceiling, kill switch, signed one-shot submission and account permission boundaries. Never allow unbounded SOL debit.
 - Manual Phantom SELL only. No automatic selling, no re-broadcast or retry after an uncertain send. A failed transaction must be investigated/reconciled before any other execution is authorized for the same caller transaction.
-- Other historical caller-specific rules remain unchanged unless explicitly revised: market cap below $100k, <=+50% price premium from source caller's buy, maximum slippage 10%, no liquidity or honeypot eligibility requirement for these two callers.
-- Open position and daily action limits must be **revisited explicitly** before changing the existing 2-position safeguard; an instruction to remove the USD lifetime cap is NOT permission to remove the kill switch or other account-risk safeguards.
+- New mandatory entry filter: token market capitalization must be **at or below $500,000 USD** using verified fresh market cap (not FDV); any value above $500,000 must reject. Previously agreed maximum slippage 10% and +50% verified caller-price premium continue unless separately revised; no liquidity/honeypot eligibility for these two callers.
+- **Multiple active positions and repeat buys are allowed. Remove the old 2-open-trade limit** from the proposed per-call strategy. Keep atomic wallet-balance and pending transaction accounting, the $5 all-in ceiling on *every* new call, the exit reserve, kill switch, and per-source one-shot protections. Remove any old daily action limit from this new proposed path.
+- **Latency goal:** measurable p95 time from confirmed/observed verified caller BUY to our submitted trade <=3 seconds when the Solana network and providers permit; instrument event observation, policy/quote, DB reserve, signing and RPC submission separately. A 1–3 second target is not a guarantee and cannot bypass the durable one-shot, fresh wallet evidence or signing checks. A manual owner kill switch remains effective.
 - Real-money signing and broadcasting are **OFF** until verified independent production recovery, accepted transaction simulation against real wallet state, verified fee and CPI wallet debit bound, preflight manual exit path, authenticated isolated signer signed-and-discarded test, end-to-end no-broadcast acceptance, and explicit separate launch approval.
 
 ## Data model changes required
@@ -17,9 +19,10 @@ The old unique identity `(execution_wallet, mint)` rejects deliberate repeat BUY
 
 ## Acceptance tests before release
 1. Same source transaction delivered 5 ways concurrently -> one intent, one signed message, <=1 broadcast.
-2. Same mint and 2 distinct valid source signatures -> 2 intents, each <=$5 all-in; no duplicate submission.
+2. Same mint and 4 distinct valid source signatures -> 4 intents, each <=$5 all-in, provided wallet balance covers committed and SELL-reserve costs; no duplicate submission.
+2a. Market cap $500,000 -> eligible at boundary; $500,000.01 -> reject even if other checks pass.
 3. Missing/incorrect USD conversion, CPI fee, rent, or SELL reserve -> fail closed without signing.
-4. Wallet balance shortage or kill switch engaged -> fail closed.
+4. No arbitrary balance floor: a balance below $6 may be eligible if actual all-in debit and reserve fit; insufficient SOL, stale/unknown balance, or kill switch always rejects.
 5. Restart or network failure after UNKNOWN submission -> reconcile on chain; no rebroadcast.
 6. Out-of-order source signature replay or a transfer classified as BUY -> no buy.
 7. No duplicate wallet-account deductions and no slot release from merely owner-reported manual SELL.

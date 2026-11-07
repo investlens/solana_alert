@@ -1,6 +1,13 @@
 name: Echo reliability checks
 
 on:
+  workflow_dispatch:
+    inputs:
+      echo_isolated_test:
+        description: "Run the isolated, no-broadcast real-RPC signer diagnostic"
+        type: boolean
+        required: false
+        default: false
   push:
     branches:
       - feat/echo-slingoor-livebuy-safety-20261027
@@ -20,6 +27,7 @@ on:
       - feat/echo-unsigned-route-audit-20261102
       - feat/echo-execution-economics-audit-20261102
       - feat/echo-pilot-total-budget-guard-20261102
+      - feat/echo-five-usd-per-call-safety-20261106
   pull_request:
     branches:
       - feat/echo-admin-pilot-20261021
@@ -52,7 +60,7 @@ jobs:
       - name: Validate recovery script syntax (never connect to production)
         run: bash -n scripts/echoPrivateTableBackupAndLocalRestore.sh
       - name: Echo-focused tests
-        run: npx tsx --test tests/echoPipelineIntegration.test.ts tests/echoResearchIntegration.test.ts tests/echoExecutionWallet.test.ts tests/echoPaperTradeEngine.test.ts tests/echoQueueCapacity.test.ts tests/echoFreshScan.test.ts tests/echoReservationPostgres.test.ts tests/echoSupabaseReservation.test.ts tests/echoPaperReservation.test.ts tests/echoSecureBuyGuard.test.ts tests/echoLandingBudget.test.ts tests/echoSlingoorReliability.test.ts tests/echoSubscriptionReliability.test.ts tests/echoBuyOnlyTransferRejection.test.ts tests/echoLogPrefilter.test.ts tests/echoJupiterRouteSignals.test.ts tests/echoPriorityQueue.test.ts tests/echoFallbackReliability.test.ts tests/echoTenDollarPilot.test.ts tests/echoManualSellAdmission.test.ts tests/echoAtomicPilotReservation.test.ts tests/echoSupabaseAtomicPilotStore.test.ts tests/echoIsolatedSignerContract.test.ts tests/echoIsolatedTransactionTransport.test.ts tests/echoSharedTradeExecution.test.ts tests/echoUnknownSubmissionRecovery.test.ts tests/echoReconcileTradeFromChain.test.ts tests/echoWalletOwnershipProof.test.ts tests/echoPilotSqlMigration.test.ts tests/echoAuthenticatedSignerRequest.test.ts tests/echoPhantomLocalVerifier.test.ts tests/echoIsolatedCustodyProbe.test.ts tests/echoLocalIsolatedTradeModel.test.ts tests/echoReadOnlyJupiterV2Swap.test.ts tests/echoUnsignedSwapAudit.test.ts tests/echoTrustedReservationPreview.test.ts tests/echoReadOnlyPumpLocalPreview.test.ts tests/echoSupabaseTrustedReservationReader.test.ts tests/echoReadOnlySignerAdmission.test.ts tests/echoSignerNonceJournal.test.ts tests/echoSignerNonceSqlSecurity.test.ts tests/echoSupabaseNonceStore.test.ts tests/echoReadOnlySimulationClassification.test.ts tests/echoReadOnlyAddressLookupInspection.test.ts tests/echoReadOnlyTransactionAccountAudit.test.ts tests/echoResolvedUnsignedBuyAudit.test.ts tests/echoRoundTripEconomicAudit.test.ts tests/echoObservedRoundTripReceipts.test.ts tests/echoProgramProvenanceResearch.test.ts tests/echoFastFollowerPriceGate.test.ts tests/echoFastFollowerShadowAdmission.test.ts tests/echoAutoBuyReadOnlyTrial.test.ts tests/echoAutoBuyDurableRestart.test.ts tests/echoAutoBuyShadowGate.test.ts tests/echoLandingFeeShadow.test.ts tests/echoRecentPriorityFeeReadOnly.test.ts tests/echoFastFollowerLatencyEvidence.test.ts tests/echoVerifiedBuyLatencyTracker.test.ts tests/echoVerifiedBuyTelemetryWiring.test.ts tests/echoPilotTotalBudgetGuard.test.ts tests/echoPilotRoundTripPreview.test.ts tests/echoPilotReadOnlyCoordinator.test.ts tests/echoPilotAllInSql.test.ts tests/echoAllInPilotReservation.test.ts tests/echoManualSellReadOnlyCallback.test.ts tests/echoConfiguredCustodyProof.test.ts tests/echoPilotBuyFirstPreview.test.ts tests/echoPilotBuyFirstCoordinator.test.ts tests/echoOfficialPumpRouteAdmission.test.ts tests/echoOfficialPumpTwoHopQuoteGate.test.ts tests/echoCallerAmountIndependence.test.ts tests/echoTrustedWalletCapitalReadOnly.test.ts tests/echoCheckLegacyWalletBinding.test.ts tests/echoPilotOneShotSql.test.ts tests/echoSupabaseOneShotBuyClaim.test.ts tests/echoOfflineSignedBuyDryRun.test.ts tests/echoIsolatedSealedCustodyProof.test.ts tests/echoSignedMessageAttestation.test.ts tests/echoOneShotBuyHandoff.test.ts tests/echoManualWalletAppExitVerifier.test.ts
+        run: npx tsx --test tests/echoPipelineIntegration.test.ts tests/echoResearchIntegration.test.ts tests/echoExecutionWallet.test.ts tests/echoPaperTradeEngine.test.ts tests/echoQueueCapacity.test.ts tests/echoFreshScan.test.ts tests/echoReservationPostgres.test.ts tests/echoSupabaseReservation.test.ts tests/echoPaperReservation.test.ts tests/echoSecureBuyGuard.test.ts tests/echoLandingBudget.test.ts tests/echoSlingoorReliability.test.ts tests/echoSubscriptionReliability.test.ts tests/echoBuyOnlyTransferRejection.test.ts tests/echoLogPrefilter.test.ts tests/echoJupiterRouteSignals.test.ts tests/echoPriorityQueue.test.ts tests/echoFallbackReliability.test.ts tests/echoFiveDollarCallPolicy.test.ts tests/echoFiveDollarCallStore.test.ts tests/echoPerCallNoBroadcastCoordinator.test.ts tests/echoLiveCallerPumpQuoteIngress.test.ts tests/echoIndependentCallerReceipt.test.ts tests/echoIntegratedPumpTradeAdmission.test.ts tests/echoSignerOwnedCanonicalPumpRoute.test.ts tests/echoSignerOwnedPumpFullSellPreview.test.ts tests/echoPerCallSignerAdmissionV2.test.ts tests/echoPumpUnsignedPerCallHandoff.test.ts tests/echoFiveDollarPumpInputSizing.test.ts tests/echoPumpPerCallSignerReview.test.ts tests/echoPumpSimulatedDebitEvidence.test.ts tests/echoPumpFundingReadiness.test.ts tests/echoSolUsdIndependentPrice.test.ts tests/echoPumpPerCallSignedDiscard.test.ts tests/echoSignerSdkScenarioPayloadContract.test.ts tests/echoSignerOwnedPilotNoRefundCostGate.test.ts tests/echoSignerOwnedRefundAwarePayerReview.test.ts tests/echoSignerOwnedPumpRentRefundClassification.test.ts tests/echoSignerOwnedSameBankTokenClose.test.ts tests/echoSignerRentRefundHypothesis.test.ts tests/echoSignerOwnedTokenCloseRefundEvidence.test.ts tests/echoNormalizeSignerSimulationCpi.test.ts tests/echoSignerOwnedCompiledCpiSimulation.test.ts tests/echoSignerOwnedPumpRpcProbe.test.ts tests/echoSignerOwnedPumpPoolEvidence.test.ts tests/echoSignerOwnedPumpCpiAccounting.test.ts tests/echoSignerOwnedOfficialPumpQuote.test.ts tests/echoSignerNoBroadcastTestOnce.test.ts tests/echoPumpRawCpiInspection.test.ts tests/echoPhantomSellReserveReview.test.ts tests/echoSignerDebitEnvelope.test.ts tests/echoPortfolioExitReserveReview.test.ts tests/echoIntegratedNoBroadcastReleaseGate.test.ts tests/echoUnfundedStageOneReadiness.test.ts tests/echoTenDollarPilot.test.ts tests/echoManualSellAdmission.test.ts tests/echoAtomicPilotReservation.test.ts tests/echoSupabaseAtomicPilotStore.test.ts tests/echoIsolatedSignerContract.test.ts tests/echoIsolatedTransactionTransport.test.ts tests/echoSharedTradeExecution.test.ts tests/echoUnknownSubmissionRecovery.test.ts tests/echoReconcileTradeFromChain.test.ts tests/echoWalletOwnershipProof.test.ts tests/echoPilotSqlMigration.test.ts tests/echoAuthenticatedSignerRequest.test.ts tests/echoPhantomLocalVerifier.test.ts tests/echoIsolatedCustodyProbe.test.ts tests/echoLocalIsolatedTradeModel.test.ts tests/echoReadOnlyJupiterV2Swap.test.ts tests/echoUnsignedSwapAudit.test.ts tests/echoTrustedReservationPreview.test.ts tests/echoReadOnlyPumpLocalPreview.test.ts tests/echoSupabaseTrustedReservationReader.test.ts tests/echoReadOnlySignerAdmission.test.ts tests/echoSignerNonceJournal.test.ts tests/echoSignerNonceSqlSecurity.test.ts tests/echoSupabaseNonceStore.test.ts tests/echoReadOnlySimulationClassification.test.ts tests/echoReadOnlyAddressLookupInspection.test.ts tests/echoReadOnlyTransactionAccountAudit.test.ts tests/echoResolvedUnsignedBuyAudit.test.ts tests/echoRoundTripEconomicAudit.test.ts tests/echoObservedRoundTripReceipts.test.ts tests/echoProgramProvenanceResearch.test.ts tests/echoFastFollowerPriceGate.test.ts tests/echoFastFollowerShadowAdmission.test.ts tests/echoAutoBuyReadOnlyTrial.test.ts tests/echoAutoBuyDurableRestart.test.ts tests/echoAutoBuyShadowGate.test.ts tests/echoLandingFeeShadow.test.ts tests/echoRecentPriorityFeeReadOnly.test.ts tests/echoFastFollowerLatencyEvidence.test.ts tests/echoVerifiedBuyLatencyTracker.test.ts tests/echoVerifiedBuyTelemetryWiring.test.ts tests/echoPilotTotalBudgetGuard.test.ts tests/echoPilotRoundTripPreview.test.ts tests/echoPilotReadOnlyCoordinator.test.ts tests/echoPilotAllInSql.test.ts tests/echoAllInPilotReservation.test.ts tests/echoManualSellReadOnlyCallback.test.ts tests/echoConfiguredCustodyProof.test.ts tests/echoPilotBuyFirstPreview.test.ts tests/echoPilotBuyFirstCoordinator.test.ts tests/echoOfficialPumpRouteAdmission.test.ts tests/echoOfficialPumpTwoHopQuoteGate.test.ts tests/echoCallerAmountIndependence.test.ts tests/echoTrustedWalletCapitalReadOnly.test.ts tests/echoCheckLegacyWalletBinding.test.ts tests/echoPilotOneShotSql.test.ts tests/echoSupabaseOneShotBuyClaim.test.ts tests/echoOfflineSignedBuyDryRun.test.ts tests/echoIsolatedSealedCustodyProof.test.ts tests/echoSignedMessageAttestation.test.ts tests/echoOneShotBuyHandoff.test.ts tests/echoManualWalletAppExitVerifier.test.ts
       - name: Historical Slingoor read-only classifier replay
         env:
           ECHO_REPLAY_SIGNATURE: '5W5d2xZT8K2QTmpixHviNrt5E38esAhqmjNVfqxmfm4Jz8RoEfwsW6efsEJ6ptxT1tj5sxeGFj8UicopFP5TT3Ed'
@@ -300,3 +308,116 @@ jobs:
       - uses: actions/checkout@v4
       - name: Four real Postgres clients, one-shot claim, nonce and hard restart
         run: bash scripts/echoDisposablePostgresPilotIntegration.sh
+
+  echo-five-dollar-postgres:
+    # Fully isolated disposable PostgreSQL 17 test; never touches Supabase.
+    if: github.event_name == 'push' && github.ref_name == 'feat/echo-five-usd-per-call-safety-20261106'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    env:
+      ADMIN_TRADING_ENABLED: 'false'
+      AUTO_TRADE_MODE: paper
+    steps:
+      - uses: actions/checkout@v4
+      - name: Atomic per-call SQL, duplicate replay, $5 ceiling and no-broadcast
+        run: bash scripts/echoFiveDollarDisposablePostgres.sh
+
+  echo-isolated-signer-real-rpc:
+    # An explicit one-shot commit marker only. Disposable GitHub runner, NOT
+    # a Railway service or key-bearing isolated signer. All requests read-only.
+    if: (github.event_name == 'push' && contains(github.event.head_commit.message, '[echo-isolated-test]')) || (github.event_name == 'workflow_dispatch' && inputs.echo_isolated_test == true && github.ref_name == 'feat/echo-five-usd-per-call-safety-20261106')
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    permissions:
+      contents: read
+    env:
+      ADMIN_TRADING_ENABLED: 'false'
+      AUTO_TRADE_MODE: paper
+      ECHO_SIGNER_MODE: PROOF_ONLY
+      ECHO_SIGNER_BROADCAST_ENABLED: 'false'
+      ECHO_SIGNER_REQUESTS_ENABLED: 'false'
+      ECHO_EXPORT_UNSIGNED_FOR_SIGNER_TEST: 'true'
+      ECHO_SCENARIO_ALL_IN_CENTS: '250'
+      ECHO_SCENARIO_USE_PUBLIC_FX: 'true'
+      # Never treated as CPI proof: this is only a provisional estimate.
+      ECHO_SCENARIO_CPI_ALLOWANCE_LAMPORTS: '1000000'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Package official SDK in disposable runner only
+        run: npm install --no-save --ignore-scripts --no-package-lock @pump-fun/pump-sdk@4.3.1 bn.js@5.2.2
+      - name: Enforce exact direct SDK and BN versions in isolated runner
+        run: |
+          node -e "const p=require('./node_modules/@pump-fun/pump-sdk/package.json');if(p.version!=='4.3.1')process.exit(1)"
+          node -e "const b=require('./node_modules/bn.js/package.json');if(b.version!=='5.2.2')process.exit(1)"
+      - name: Derive exact official PumpSwap unsigned transaction from real chain state
+        shell: bash
+        run: |
+          set +e
+          npx tsx scripts/echoOfficialFiveUsdScenarioQuote.ts
+          diagnostic_status=$?
+          if [ ! -s .echo-isolated-unsigned-payload.json ]; then
+            echo "OFFICIAL_UNSIGNED_MESSAGE_NOT_CONSTRUCTED; scenario status=${diagnostic_status}"
+            exit 1
+          fi
+          echo "EXACT_UNSIGNED_SDK_SCENARIO_GENERATED=YES; simulation may be blocked by unfunded wallet"
+      - name: Execute isolated test-only signer RPC diagnostic (never sign or send)
+        run: npx tsx scripts/echoRunSignerDiagnosticFromSdkScenario.ts
+      - name: Remove exact unsigned scenario payload from ephemeral runner
+        if: always()
+        run: rm -f .echo-isolated-unsigned-payload.json
+
+  echo-five-usd-mainnet-scenario:
+    # Only run from an explicitly tagged push, no keys, no real funds.
+    # $200/SOL is an ILLUSTRATIVE OPERATOR INPUT, not a verified live FX.
+    # CPI allowance is an assumption; output MUST remain non-executable.
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[echo-five-usd-scenario-probe]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      ADMIN_TRADING_ENABLED: 'false'
+      AUTO_TRADE_MODE: paper
+      # Public Coinbase/Kraken consensus overrides illustrative fallback;
+      # exchange tick age and CPI remain unverified; no signing or broadcasting.
+      ECHO_SCENARIO_USE_PUBLIC_FX: 'true'
+      ECHO_SCENARIO_SOL_USD_CENTS: '20000'
+      ECHO_SCENARIO_CPI_ALLOWANCE_LAMPORTS: '1000000'
+      ECHO_SCENARIO_ALL_IN_CENTS: '500'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm install --no-save --ignore-scripts --no-package-lock @pump-fun/pump-sdk@4.3.1
+      - name: One quote and unsigned fee-adjusted $5 scenario, never sign
+        run: npx tsx scripts/echoOfficialFiveUsdScenarioQuote.ts
+
+  echo-sol-fx-public-read-only:
+    # Explicit one-shot public FX check only. No wallet, key or trade capability.
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[echo-sol-fx-probe]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+    env:
+      ADMIN_TRADING_ENABLED: 'false'
+      AUTO_TRADE_MODE: paper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Cross-check two independent public SOL/USD market quotes (no execution)
+        run: npx tsx scripts/echoSolUsdPublicPriceDiagnostic.ts

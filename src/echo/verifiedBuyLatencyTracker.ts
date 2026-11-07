@@ -32,6 +32,12 @@ export class EchoVerifiedBuyLatencyTracker {
    if(first)this.observations.delete(first);
   }
  }
+ /** Returns a live WebSocket observation only, never a historical-replay
+  * timestamp. Non-consumptive so latency tracking stays unchanged.
+  */
+ websocketTimestamp(signature:string,wallet:string):number|null{
+  return this.observations.get(wallet+':'+signature)?.receivedAtMs??null;
+ }
  /** Must only be invoked after independent signer + spend/credit validation. */
  verifiedBuy(input:{signature:string;wallet:string;chainTimestampSec:number;
   fetchStartedAtMs:number;verifiedAtMs:number}):void{
