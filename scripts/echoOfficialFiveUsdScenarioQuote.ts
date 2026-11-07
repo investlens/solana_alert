@@ -13,6 +13,10 @@ const P1='8zBr6K8wxVy8SmkEkYNtZWSpfwnQYWE7S1ATSMa7D1WY';
 const P2='JBsGNXRZQr9ZPc5PAn3seDE7At6ELq9LjVDCujgLKaq8';
 const AMM='pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA';
 let INPUT=25_000_000;
+// CI may test either the current $5 scenario or the smaller $2.50 pilot.
+// Unknown caps fail closed, never silently default to a larger amount.
+const CAP_CENTS=process.env.ECHO_SCENARIO_ALL_IN_CENTS==='250'?250:
+ process.env.ECHO_SCENARIO_ALL_IN_CENTS==='500'?500:null;
 const MAX_REQUESTS=20;
 let requests=0;
 const allowed=new Set(['getMultipleAccounts','getAccountInfo','getLatestBlockhash',
@@ -38,6 +42,8 @@ const report:any={mode:'MAINNET_FIVE_USD_SCENARIO_UNSIGNED_QUOTE',
  signed:false,broadcast:false,signingApproved:false,
  outputMintMarketCapEligible:false,reason:'NOT_VERIFIED'};
 try{
+ if(CAP_CENTS===null)throw Error('EXPLICIT_SCENARIO_CAP_REQUIRED');
+ report.scenarioCapCents=CAP_CENTS;
  const {OnlinePumpAmmSdk,multiHopSwapQuote,PUMP_AMM_SDK}=await import('@pump-fun/pump-sdk/swap');
  const pub=(s:string)=>new PublicKey(s);
  const con=new Connection(RPC,{commitment:'confirmed',fetch:fetcher});
@@ -191,7 +197,7 @@ try{
   throw Error('SCENARIO_PRICE_AND_CPI_ALLOWANCE_REQUIRED');
  const price=BigInt(priceRaw),cpiAllowance=BigInt(cpiRaw);
  const ataAllowance=BigInt(missingAtaCount)*BigInt(ataRentUpperBound);
- const maxInput=500n*1000000000n/price-BigInt(networkFee.value)-
+ const maxInput=BigInt(CAP_CENTS)*1000000000n/price-BigInt(networkFee.value)-
   ataAllowance-cpiAllowance;
  if(maxInput<=0n||maxInput>100000000n)
   throw Error('SCENARIO_FEES_EXHAUST_ENTRY');
@@ -262,7 +268,7 @@ try{
  report.fiveUsdScenarioAllInCents=String(
   (BigInt(report.fiveUsdScenarioTotalWithAssumedCpiLamports)*price+
    999999999n)/1000000000n);
- if(BigInt(report.fiveUsdScenarioAllInCents)>500n)
+ if(BigInt(report.fiveUsdScenarioAllInCents)>BigInt(CAP_CENTS))
   throw Error('DYNAMIC_USD_CAP_EXCEEDED');
  report.realWalletDebitVerified=false;
  report.verifiedFundingRequirementLamports=null;
@@ -360,7 +366,8 @@ try{
  'DYNAMIC_UNREVIEWED_INSTRUCTIONS','DYNAMIC_UNREVIEWED_SYSTEM_TRANSFER',
  'DYNAMIC_TRANSFER_MISMATCH','DYNAMIC_ATA_SET_CHANGED','DYNAMIC_UNSAFE_SIGNER',
  'DYNAMIC_FEE_REQUOTE_REQUIRED','DYNAMIC_USD_CAP_EXCEEDED',
- 'PUBLIC_SOL_USD_CROSSCHECK_FAILED','INVALID_OFFICIAL_BUYBACK_RECIPIENTS'];
+ 'PUBLIC_SOL_USD_CROSSCHECK_FAILED','INVALID_OFFICIAL_BUYBACK_RECIPIENTS',
+ 'EXPLICIT_SCENARIO_CAP_REQUIRED'];
  report.reason=allowedReasons.includes(x)?x:'SDK_QUOTE_OR_SIMULATION_FAILED';
  report.errorType=e instanceof Error?e.name:'UNKNOWN';
 }
