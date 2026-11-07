@@ -55,20 +55,25 @@ try{
  };
  const r=await runEchoSignerNoBroadcastTest(env);
  const diagnostic=r.payerDebitMismatchDiagnostic;
+ // The provisional ledger upper already includes network fee; convert
+ // it back to reconstructed outgoing before applying the fee exactly once.
+ const feeInput=diagnostic?.networkFeeLamports??
+  r.provisionalNetworkFeeLamports;
  const upperInput=diagnostic?.outboundSystemDebitsLamports ??
-  r.provisionalWalletDebitUpperLamports;
+  (r.provisionalWalletDebitUpperLamports&&feeInput&&
+   BigInt(r.provisionalWalletDebitUpperLamports)>BigInt(feeInput)?
+   String(BigInt(r.provisionalWalletDebitUpperLamports)-BigInt(feeInput)):undefined);
  const diagnosticBudget=upperInput?evaluateEchoPilotNoRefundBudget({
   scenarioCapCents:x.scenarioAllInCents as 250|500,
   solUsdUpperCents:str('publicFxUpperCents'),
   reconstructedOutboundLamports:upperInput,
-  independentlyQuotedNetworkFeeLamports:diagnostic?.networkFeeLamports ??
-   r.provisionalNetworkFeeLamports??'0'
+  independentlyQuotedNetworkFeeLamports:feeInput??'0'
  }):null;
  // A quote-only budget check is not a signed exchange oracle and
  // cannot override any signer or full CPI verification failure.
  const budgetPassed=diagnosticBudget?.status==='CONSERVATIVE_UPPER_WITHIN_SCENARIO_CAP';
  const output={...r,
-  ...(!budgetPassed?{status:'BLOCKED' as const,
+  ...(!budgetPassed&&r.status==='PROVISIONAL'?{status:'BLOCKED' as const,
    reason:'PILOT_NO_REFUND_ALL_IN_CAP_NOT_VERIFIED'}:{}),
   ...(diagnosticBudget?{pilotNoRefundBudgetDiagnostic:diagnosticBudget}:{})};
  process.stdout.write('ECHO_SIGNER_DIAGNOSTIC='+JSON.stringify(output)+'\n');
