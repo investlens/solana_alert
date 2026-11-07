@@ -57,6 +57,17 @@ try{
    d1.isMayhemMode||d2.isMayhemMode)
   throw Error('POOL_MINT_CONTINUITY_FAILED');
  report.poolAccountsRead=true;
+ // Official PumpSwap's optional buyback recipient defaults to random.
+ // Fix one recipient from independently fetched global configuration in
+ // BOTH initial and dynamically sized builds; no blind random destination.
+ const buybackRecipients=snapshot.globalConfig.buybackFeeRecipients;
+ if(!Array.isArray(buybackRecipients)||buybackRecipients.length<1||
+    buybackRecipients.length>16||
+    buybackRecipients.some(p=>!(p instanceof PublicKey))||
+    new Set(buybackRecipients.map(p=>p.toBase58())).size!==buybackRecipients.length)
+  throw Error('INVALID_OFFICIAL_BUYBACK_RECIPIENTS');
+ const buybackFeeRecipient=buybackRecipients[0];
+ report.buybackRecipientPinned=true;
  report.stage='OFFICIAL_MULTI_HOP_QUOTE';
  const quoted=multiHopSwapQuote({
   inMint:pub(WSOL),hops,amountIn:new BN(INPUT),slippage:10,
@@ -71,7 +82,8 @@ try{
  report.stage='OFFICIAL_SWAP_INSTRUCTIONS';
  let ixs=await PUMP_AMM_SDK.multiHopSwapInstructions({
   user:pub(WALLET),inMint:pub(WSOL),venues:hops,amountIn:new BN(INPUT),
-  minAmountOut:minOut,globalConfig:snapshot.globalConfig
+  minAmountOut:minOut,globalConfig:snapshot.globalConfig,
+  buybackFeeRecipient
  });
  if(!Array.isArray(ixs)||ixs.length<1||ixs.length>16)
   throw Error('BAD_INSTRUCTION_SHAPE');
@@ -200,7 +212,8 @@ try{
   throw Error('DYNAMIC_MIN_OUTPUT_MISSING');
  const rebuilt=await PUMP_AMM_SDK.multiHopSwapInstructions({
   user:pub(WALLET),inMint:pub(WSOL),venues:hops,
-  amountIn:new BN(INPUT),minAmountOut:min,globalConfig:snapshot.globalConfig
+  amountIn:new BN(INPUT),minAmountOut:min,globalConfig:snapshot.globalConfig,
+  buybackFeeRecipient
  });
  if(!Array.isArray(rebuilt)||rebuilt.length<1||rebuilt.length>16||
     rebuilt.filter(ix=>ix.programId.toBase58()===AMM).length!==1||
@@ -347,7 +360,7 @@ try{
  'DYNAMIC_UNREVIEWED_INSTRUCTIONS','DYNAMIC_UNREVIEWED_SYSTEM_TRANSFER',
  'DYNAMIC_TRANSFER_MISMATCH','DYNAMIC_ATA_SET_CHANGED','DYNAMIC_UNSAFE_SIGNER',
  'DYNAMIC_FEE_REQUOTE_REQUIRED','DYNAMIC_USD_CAP_EXCEEDED',
- 'PUBLIC_SOL_USD_CROSSCHECK_FAILED'];
+ 'PUBLIC_SOL_USD_CROSSCHECK_FAILED','INVALID_OFFICIAL_BUYBACK_RECIPIENTS'];
  report.reason=allowedReasons.includes(x)?x:'SDK_QUOTE_OR_SIMULATION_FAILED';
  report.errorType=e instanceof Error?e.name:'UNKNOWN';
 }
