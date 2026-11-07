@@ -24,7 +24,7 @@ export const ECHO_OFFICIAL_PUMP_QUOTE_CAN_BROADCAST=false as const;
 const decimal=/^[1-9][0-9]{0,17}$/;
 
 type Pool={baseMint:PublicKey;quoteMint:PublicKey;isMayhemMode:boolean};
-type Snapshot={hops:unknown[];globalConfig:unknown;feeConfig:unknown};
+type Snapshot={hops:unknown[];globalConfig:{buybackFeeRecipients?:PublicKey[]};feeConfig:unknown};
 export type EchoOfficialPumpSdkAdapter={
  /** Wraps official OnlinePumpAmmSdk.multiHopPoolHops. */
  multiHopPoolHops(pools:PublicKey[]):Promise<Snapshot>;
@@ -37,7 +37,7 @@ export type EchoOfficialPumpSdkAdapter={
    outputAmount?:{toString():string}};
  swapInstructions(input:{user:PublicKey;inMint:PublicKey;
   venues:unknown[];amountIn:unknown;minAmountOut:unknown;
-  globalConfig:unknown}):Promise<TransactionInstruction[]>;
+  globalConfig:unknown;buybackFeeRecipient?:PublicKey}):Promise<TransactionInstruction[]>;
  amount(value:string):unknown;
 };
 export type EchoOfficialPumpQuoteRpc={
@@ -108,6 +108,15 @@ export async function inspectSignerOwnedOfficialPumpQuote(input:{
   if(!Array.isArray(snapshot.hops)||snapshot.hops.length!==2||
      !snapshot.globalConfig||!snapshot.feeConfig)
    return deny('OFFICIAL_POOL_HOPS_OR_FEE_CONFIG_MISSING');
+  // PumpSwap may randomly choose a fee-buyback recipient when the caller
+  // omits this parameter. A second build can then change a fixed AMM account
+  // despite identical pool state. Pin a recipient from signer-fetched config.
+  const recipients=snapshot.globalConfig.buybackFeeRecipients;
+  if(!Array.isArray(recipients)||recipients.length<1||recipients.length>16||
+     recipients.some(p=>!(p instanceof PublicKey))||
+     new Set(recipients.map(p=>p.toBase58())).size!==recipients.length)
+   return deny('INDEPENDENT_BUYBACK_RECIPIENT_LIST_MISSING_OR_INVALID');
+  const buybackFeeRecipient=recipients[0];
   const amount=input.sdk.amount(input.principalLamports);
   const quote=input.sdk.quote({
    inMint:new PublicKey(WSOL),hops:snapshot.hops,
@@ -122,7 +131,7 @@ export async function inspectSignerOwnedOfficialPumpQuote(input:{
    user:new PublicKey(ECHO_EXPECTED_EXECUTION_WALLET),
    inMint:new PublicKey(WSOL),venues:snapshot.hops,
    amountIn:amount,minAmountOut:quote.minAmountOut,
-   globalConfig:snapshot.globalConfig});
+   globalConfig:snapshot.globalConfig,buybackFeeRecipient});
   if(!Array.isArray(instructions)||instructions.length<1||
      instructions.length>16||
      instructions.filter(ix=>ix.programId.equals(AMM)).length!==1||
@@ -147,7 +156,7 @@ export async function inspectSignerOwnedOfficialPumpQuote(input:{
    user:new PublicKey(ECHO_EXPECTED_EXECUTION_WALLET),
    inMint:new PublicKey(WSOL),venues:snapshot.hops,
    amountIn:amount,minAmountOut:quote.minAmountOut,
-   globalConfig:snapshot.globalConfig
+   globalConfig:snapshot.globalConfig,buybackFeeRecipient
   });
   if(!Array.isArray(repeated)||repeated.length!==instructions.length)
    return deny('OFFICIAL_SDK_SAME_SNAPSHOT_INSTRUCTION_COUNT_DRIFT');
