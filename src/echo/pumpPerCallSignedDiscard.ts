@@ -35,6 +35,12 @@ export async function dryRunEchoPumpActualWalletBuySignedDiscard(input:{
  if(input.signer.publicWallet!==ECHO_EXPECTED_EXECUTION_WALLET||
     input.request.executionWallet!==ECHO_EXPECTED_EXECUTION_WALLET)
    return stop('REAL_PINNED_ECHO_WALLET_NOT_PROVISIONED');
+ // Verify durable sleep OFF before even asking for authenticated DB/RPC
+ // evidence; signer review rechecks it again before nonce consumption.
+ let enabled=false;
+ try{enabled=await input.ownerAutoBuyEnabled();}
+ catch{return stop('SIGNER_OWNER_SWITCH_UNAVAILABLE');}
+ if(!enabled)return stop('SIGNER_OWNER_AUTO_BUY_OFF');
  const review=await reviewEchoPumpPerCallSignerNoBroadcast({
   request:input.request,
   coordinatorSignatureBase58:input.coordinatorSignatureBase58,
