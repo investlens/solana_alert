@@ -57,6 +57,10 @@ export async function reviewEchoPumpPerCallSignerNoBroadcast(args:{
  nonceStore:EchoNonceStore;
  reservationReader:EchoPerCallReservationReader;
  evidenceReader:EchoTrustedPumpEvidenceReader;
+ /** Signer-owned durable owner toggle; must check current state independently
+  * of the coordinator, even if a request was already in the queue.
+  */
+ ownerAutoBuyEnabled:()=>Promise<boolean>;
 }):Promise<EchoPumpSignerReviewResult>{
  const deny=(reason:string):EchoPumpSignerReviewResult=>
   ({ok:false,reason,signingAllowed:false,broadcastAllowed:false});
@@ -101,6 +105,11 @@ export async function reviewEchoPumpPerCallSignerNoBroadcast(args:{
     createPublicKey({key:spki,format:'der',type:'spki'}),raw))
     return deny('INVALID_COORDINATOR_SIGNATURE');
  }catch{return deny('INVALID_COORDINATOR_SIGNATURE');}
+ // Signer must reject a previously queued BUY after owner sleep OFF.
+ let enabled=false;
+ try{enabled=await args.ownerAutoBuyEnabled();}
+ catch{return deny('SIGNER_OWNER_SWITCH_UNAVAILABLE');}
+ if(!enabled)return deny('SIGNER_OWNER_AUTO_BUY_OFF');
  // Fetch immutable reservation from DB and independently sourced chain/fee
  // evidence BEFORE consuming the nonce. No trust in supplied client flags.
  let row:Awaited<ReturnType<EchoPerCallReservationReader['getByCall']>>;
@@ -166,6 +175,11 @@ export async function reviewEchoPumpPerCallSignerNoBroadcast(args:{
  if(audited.perCallReservationKey!==r.reservationKey||
   audited.fingerprint!==r.transactionSha256)
   return deny('PUMP_REVIEW_FINGERPRINT_MISMATCH');
+ // Recheck after potentially slow provider/RPC/database reads. A disabled
+ // owner switch must not consume nonce or produce signer-admission success.
+ try{enabled=await args.ownerAutoBuyEnabled();}
+ catch{return deny('SIGNER_OWNER_SWITCH_UNAVAILABLE');}
+ if(!enabled)return deny('SIGNER_OWNER_AUTO_BUY_OFF');
  // Consume nonce once across all replicas. A passing review NEVER signs.
  try{
   if(!await args.nonceStore.consumeOnce(r.nonceHex,r.expiresAtMs))
