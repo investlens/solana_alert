@@ -50,10 +50,8 @@ try{
  };
  const r=await runEchoSignerNoBroadcastTest(env);
  process.stdout.write('ECHO_SIGNER_DIAGNOSTIC='+JSON.stringify(r)+'\n');
- // A BLOCKED result is evidence of no approval, not an accepted BUY.
- // The CI job may finish successfully for a correctly observed unfunded
- // wallet, but all trade activation gates remain blocked.
- if(r.reason.startsWith('PINNED_OFFICIAL_PUMP_SDK_NOT_INSTALLED')||
-    r.reason.startsWith('OFFICIAL_POOL_OR_QUOTE_'))
-  process.exitCode=2;
+ // A blocked funded-state simulation MUST produce a failing CI job,
+ // including when the wallet is unfunded. Never convert diagnostic failure
+ // into a green release gate or unconditionally swallow RPC errors.
+ if(r.status!=='PROVISIONAL')process.exitCode=2;
 }catch{fail('SCENARIO_MISSING_OR_INVALID');}
