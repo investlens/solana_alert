@@ -37,9 +37,11 @@ const result=(reason:string,hash=false,quote=false,sim=false):EchoTestRunnerResu
 });
 const address=(s:string|undefined)=>typeof s==='string'&&
  /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s);
-const urlAllowed=(s:string|undefined)=>typeof s==='string'&&
- /^https:\/\/[A-Za-z0-9.-]+(?::443)?(?:\/[A-Za-z0-9/_?=&%.-]*)?$/.test(s)&&
- !/\b(localhost|127\.0\.0\.1|0\.0\.0\.0|169\.254\.|192\.168\.|10\.)\b/.test(s);
+// Fixed allowlist for this disposable, no-secret public-mainnet job.
+// Do not permit arbitrary coordinator / Telegram / user supplied endpoints.
+const urlAllowed=(s:string|undefined)=>
+ s==='https://api.mainnet-beta.solana.com'||
+ s==='https://api.mainnet-beta.solana.com/';
 
 export async function runEchoSignerNoBroadcastTest(
  env:Env,createConnection:(url:string)=>Connection=url=>new Connection(url,'confirmed')
