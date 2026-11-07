@@ -20,6 +20,8 @@ import {observeTokenCloseSourcesReadOnly}
  from '../src/echo/signerOwnedTokenCloseRefundEvidence.js';
 import {classifyEchoRentRefundPattern}
  from '../src/echo/signerOwnedPumpRentRefundClassification.js';
+import {reviewEchoRefundAwarePayer}
+ from '../src/echo/signerOwnedRefundAwarePayerReview.js';
 
 export const ECHO_TEST_RUNNER_CAN_SIGN=false as const;
 export const ECHO_TEST_RUNNER_CAN_BROADCAST=false as const;
@@ -38,6 +40,14 @@ export type EchoTestRunnerResult={
  provisionalComputeUnitsConsumed?:number|null;
  sameSimulationTokenCloseConfirmed?:boolean;
  closeSourceDiagnostic?:{state:string;lamports?:string;ownerIsSystem?:boolean;dataBytes?:number};
+ refundAwarePayerReview?:{
+  status:'RENT_REFUND_ACCOUNTING_GAP'|'UNEXPLAINED_PAYER_EFFECT';
+  reason:'PAYER_TOKEN_RENT_REFUND_UNATTESTED'|'PAYER_EFFECT_STILL_UNEXPLAINED';
+  observedDebitLamports:string;systemOutflowsPlusNetworkFeeLamports:string;
+  expectedRentRefundLamports?:string;differenceFromExactRentLamports?:string;
+  signerEconomicAuthorization:false;completePayerLedgerReconciled:false;
+  fullTokenDeliveryVerified:false;signingAllowed:false;broadcastAllowed:false
+ };
  rentRefundClassification?:{
   status:'RENT_PATTERN_MATCHED_NOT_AUDITED'|'RENT_PATTERN_NOT_PROVEN';
   reason:string;inferredRentLamports?:string;
@@ -244,11 +254,27 @@ export async function runEchoSignerNoBroadcastTest(
      evidence?.status==='CANDIDATE_PRESTATE_ONLY'&&
      evidence.existingTokenAccounts===0
    }):undefined;
+  const refundAwareReview=diagnostic&&rentHypothesis?.rpcMinimumRentLamports?
+   reviewEchoRefundAwarePayer({
+    observedDebitLamports:diagnostic.observedPayerDeltaLamports,
+    outboundSystemDebitsLamports:diagnostic.outboundSystemDebitsLamports,
+    inboundSystemCreditsLamports:diagnostic.inboundSystemCreditsLamports,
+    independentlyEstimatedNetworkFeeLamports:diagnostic.networkFeeLamports,
+    independentlyQueriedTokenRentLamports:rentHypothesis.rpcMinimumRentLamports,
+    independentRentRpcMatched:
+     rentHypothesis.classification==='RENT_AND_NETWORK_FEE_MATCH',
+    exactlyOneTopLevelCloseToPayer:
+     diagnostic.candidateTopLevelTokenCloseCount===1&&
+     diagnostic.candidateInnerTokenCloseCount===0,
+    sameSimulationCloseStateObserved:rpc.sameSimulationTokenCloseConfirmed
+   }):undefined;
   return {
-   ...result('PAYER_CPI_LEDGER_'+ledger.reason,true,true),
+   ...result(refundAwareReview?.reason??
+    'PAYER_CPI_LEDGER_'+ledger.reason,true,true),
    ...(diagnostic?{payerDebitMismatchDiagnostic:publicDiagnostic}:{}),
    ...(evidence?{tokenClosePrestateEvidence:evidence}:{}),
    ...(classification?{rentRefundClassification:classification}:{}),
+   ...(refundAwareReview?{refundAwarePayerReview:refundAwareReview}:{}),
    ...(rentHypothesis?{tokenCloseRentHypothesis:rentHypothesis}:{}),
    sameSimulationTokenCloseConfirmed:rpc.sameSimulationTokenCloseConfirmed
   };
