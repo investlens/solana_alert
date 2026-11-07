@@ -67,9 +67,10 @@ export async function verifyEchoCallerReceipt(input:{
   const v=rawAmount(a);if(v===null)return fail('UNVERIFIED_TOKEN_BALANCE');
   credits.set(a.accountIndex,(credits.get(a.accountIndex)??0n)+v);
  }
- const received=[...credits.values()].reduce((sum,value)=>
-  sum+(value>0n?value:0n),0n);
- if(received<=0n)return fail('NO_INDEPENDENT_CALLER_TOKEN_CREDIT');
+ // Sum NET balance across all caller-owned token accounts. Transfers
+ // between the caller's own ATAs must not masquerade as a new BUY.
+ const received=[...credits.values()].reduce((sum,value)=>sum+value,0n);
+ if(received<=0n)return fail('NO_INDEPENDENT_CALLER_NET_TOKEN_CREDIT');
  // We do not assert a BUY solely because a token credit was observed:
  // gifts and transfers can credit the signer. The existing trusted swap
  // classifier must independently verify the trade debit and program route.
