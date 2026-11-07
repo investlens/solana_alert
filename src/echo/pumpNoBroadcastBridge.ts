@@ -108,7 +108,7 @@ export async function prepareEchoPumpNoBroadcastBridge(
    intermediateMint:q.intermediateMint,targetMint:r.mint,
    principalLamports:c.principalLamports,slippageBps:c.maxSlippageBps
   });
-  if(!quote.ok)return blocked('OFFICIAL_PUMP_QUOTE_'+quote.reason);
+  if('reason' in quote)return blocked('OFFICIAL_PUMP_QUOTE_'+quote.reason);
   // Exact SDK quote & pool-mint decode is real verification, but neither
   // the full CPI envelope nor future Phantom EXIT is yet proven.
   if(!quote.cpiAndRentFullyAudited||!quote.manualPhantomSellVerified)
@@ -126,7 +126,7 @@ export async function prepareEchoPumpNoBroadcastBridge(
    sdkDerivedPools:input.sdkDerivedPools,
    nowMs:x.now()
   });
-  if(!actual.ok)return blocked('SIGNER_OWNED_'+actual.reason);
+  if('reason' in actual)return blocked('SIGNER_OWNED_'+actual.reason);
   // Actual pool ownership alone cannot verify pool-mint continuity, a
   // fee-adjusted SDK quote, CPI economics or manual Phantom SELL reserve.
   // Fail BEFORE creating any DB reservation; no synthetic bool overrides.
