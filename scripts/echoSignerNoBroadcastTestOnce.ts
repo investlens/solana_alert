@@ -18,6 +18,8 @@ import {simulateSignerCompiledCpiOnPinnedRpc}
  from '../src/echo/signerOwnedCompiledCpiSimulation.js';
 import {observeTokenCloseSourcesReadOnly}
  from '../src/echo/signerOwnedTokenCloseRefundEvidence.js';
+import {classifyEchoRentRefundPattern}
+ from '../src/echo/signerOwnedPumpRentRefundClassification.js';
 
 export const ECHO_TEST_RUNNER_CAN_SIGN=false as const;
 export const ECHO_TEST_RUNNER_CAN_BROADCAST=false as const;
@@ -36,6 +38,13 @@ export type EchoTestRunnerResult={
  provisionalComputeUnitsConsumed?:number|null;
  sameSimulationTokenCloseConfirmed?:boolean;
  closeSourceDiagnostic?:{state:string;lamports?:string;ownerIsSystem?:boolean;dataBytes?:number};
+ rentRefundClassification?:{
+  status:'RENT_PATTERN_MATCHED_NOT_AUDITED'|'RENT_PATTERN_NOT_PROVEN';
+  reason:string;inferredRentLamports?:string;
+  conservativeDebitUpperLamports?:string;
+  independentlyAuditedRefund:false;payerCpiLedgerReconciled:false;
+  signingAllowed:false;broadcastAllowed:false
+ };
  tokenCloseRentHypothesis?:{
   classification:'RENT_AND_NETWORK_FEE_MATCH'|'RENT_OR_FEE_DOES_NOT_MATCH'|'UNVERIFIED_RENT_RPC';
   referenceAccountBytes:165;
@@ -219,10 +228,27 @@ export async function runEchoSignerNoBroadcastTest(
      connection.getMultipleAccountsInfoAndContext(keys,config)}
    });
   }
+  const classification=diagnostic&&
+   rentHypothesis?.classification==='RENT_AND_NETWORK_FEE_MATCH'?
+   classifyEchoRentRefundPattern({
+    ledgerFailureReason:ledger.reason,
+    observedPayerDeltaLamports:diagnostic.observedPayerDeltaLamports,
+    outboundSystemDebitsLamports:diagnostic.outboundSystemDebitsLamports,
+    inboundSystemCreditsLamports:diagnostic.inboundSystemCreditsLamports,
+    messageNetworkFeeLamports:diagnostic.networkFeeLamports,
+    liveTokenAccountMinimumRentLamports:rentHypothesis.rpcMinimumRentLamports!,
+    closeToPayerCount:diagnostic.candidateTokenCloseRefundCount,
+    topLevelCloseToPayerCount:diagnostic.candidateTopLevelTokenCloseCount,
+    exactSameSimulationClosedAccount:rpc.sameSimulationTokenCloseConfirmed,
+    closedSourceAbsentAtLaterRpcObservation:
+     evidence?.status==='CANDIDATE_PRESTATE_ONLY'&&
+     evidence.existingTokenAccounts===0
+   }):undefined;
   return {
    ...result('PAYER_CPI_LEDGER_'+ledger.reason,true,true),
    ...(diagnostic?{payerDebitMismatchDiagnostic:publicDiagnostic}:{}),
    ...(evidence?{tokenClosePrestateEvidence:evidence}:{}),
+   ...(classification?{rentRefundClassification:classification}:{}),
    ...(rentHypothesis?{tokenCloseRentHypothesis:rentHypothesis}:{}),
    sameSimulationTokenCloseConfirmed:rpc.sameSimulationTokenCloseConfirmed
   };
