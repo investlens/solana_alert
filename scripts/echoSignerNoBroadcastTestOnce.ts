@@ -40,6 +40,8 @@ export type EchoTestRunnerResult={
   unexplainedAgainstDebitOnlyLamports:string;
   unexplainedAgainstNetSystemLamports:string;
   programInstructionsReviewed:number;
+  candidateTokenCloseRefundCount:number;
+  candidateTokenCloseFundedLamports:string;
  };
  completeCpiAndTokenEffectsVerified:false;
  manualPhantomExitVerified:false;
