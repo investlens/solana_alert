@@ -3,6 +3,7 @@
 // Standalone SDK install only in isolated CI, never the live AlphaOS process.
 import {Connection,PublicKey,TransactionMessage,VersionedTransaction,SystemProgram} from '@solana/web3.js';
 import BN from 'bn.js';
+import {writeFileSync} from 'node:fs';
 const RPC='https://api.mainnet-beta.solana.com';
 const WSOL='So11111111111111111111111111111111111111112';
 const WALLET='8ndw7DJ6hyZBm1PD3JJMF8G4PD5CJhDCCUK13ECL2pgQ';
@@ -252,6 +253,21 @@ try{
   throw Error('DYNAMIC_USD_CAP_EXCEEDED');
  report.realWalletDebitVerified=false;
  report.verifiedFundingRequirementLamports=null;
+ // Export exact SDK-built UNSIGNED transaction only for ephemeral CI test.
+ // This does NOT verify CPI allowances, manual SELL or wallet solvency.
+ if(process.env.ECHO_EXPORT_UNSIGNED_FOR_SIGNER_TEST==='true'){
+  writeFileSync('.echo-isolated-unsigned-payload.json',JSON.stringify({
+   version:1,mode:'EXACT_UNSIGNED_SDK_SCENARIO_NOT_EXECUTABLE',
+   unsignedBase64:Buffer.from(tx.serialize()).toString('base64'),
+   unsignedSha256:report.unsignedTransactionSha256,
+   wallet:WALLET,firstPool:P1,secondPool:P2,
+   intermediateMint:A,targetMint:B,
+   principalLamports:String(INPUT),slippageBps:1000,
+   scenarioCpiAudited:false,manualSellReserveVerified:false
+  }),{encoding:'utf8',mode:0o600,flag:'wx'});
+  report.testOnlyUnsignedPayloadCreated=true;
+ }
+
  report.signingApproved=false;
 
  const auditedDebitLowerBound=BigInt(INPUT)+BigInt(networkFee.value);
