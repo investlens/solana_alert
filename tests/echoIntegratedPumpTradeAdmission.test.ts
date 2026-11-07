@@ -48,7 +48,13 @@ function setUp(){
    receiptReads++;return receipt();}},
   trustedProvider:{readIndependentlyVerifiedCall:async()=>{
    quoteReads++;return null;}},
-  bridge:stubBridge()
+  bridge:stubBridge(),
+  // These tests exercise receipt/quote gating. Provide placeholders for the
+  // required future preflights so the intended early stage can be reached;
+  // neither is ever invoked in these negative scenarios.
+  canonicalRoute:{rpc:{} as any,sdk:{} as any,intermediateMint:mint},
+  sellPreview:{rpc:{} as any,sdk:{} as any,
+   verifiedFullWalletTokenBalanceRaw:'1'}
  };
  return {input,counters:()=>({receiptReads,quoteReads})};
 }
