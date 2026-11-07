@@ -35,6 +35,7 @@ export type EchoTestRunnerResult={
  provisionalCpiInstructionCount?:number;
  provisionalComputeUnitsConsumed?:number|null;
  sameSimulationTokenCloseConfirmed?:boolean;
+ closeSourceDiagnostic?:{state:string;lamports?:string;ownerIsSystem?:boolean;dataBytes?:number};
  tokenCloseRentHypothesis?:{
   classification:'RENT_AND_NETWORK_FEE_MATCH'|'RENT_OR_FEE_DOES_NOT_MATCH'|'UNVERIFIED_RENT_RPC';
   referenceAccountBytes:165;
@@ -151,7 +152,10 @@ export async function runEchoSignerNoBroadcastTest(
   },unsignedBytes:bytes,expectedUnsignedSha256:sha!,nowMs:Date.now(),
   onValidatedSimulation:snapshot=>{cpiSnapshot=snapshot;}
  });
- if('reason' in rpc)return result('EXACT_WALLET_SIMULATION_'+rpc.reason,true,true);
+ if('reason' in rpc)return {
+  ...result('EXACT_WALLET_SIMULATION_'+rpc.reason,true,true),
+  ...(rpc.closeSourceDiagnostic?{closeSourceDiagnostic:rpc.closeSourceDiagnostic}:{})
+ };
  if(!cpiSnapshot)return result('MISSING_VALIDATED_SIMULATION_SNAPSHOT',true,true);
  const snapshot=cpiSnapshot as {
   innerInstructions:unknown;payerBeforeLamports:number;
