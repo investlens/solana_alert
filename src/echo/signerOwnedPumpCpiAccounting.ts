@@ -17,7 +17,8 @@ const decimal=(s:string):bigint|null=>
  typeof s==='string'&&/^(0|[1-9][0-9]{0,17})$/.test(s)?BigInt(s):null;
 export type EchoCpiRawInnerGroup={
  index:number;
- instructions:{programIdIndex:number;accounts:number[];data:string}[];
+ instructions:{programIdIndex:number;accounts:number[];data:string;
+  opaqueParsedNonSystem?:true}[];
 };
 export type EchoSignerCpiLedger={
  ok:true;mode:'PAYER_LAMPORT_CPI_ONLY';
@@ -101,6 +102,22 @@ export function reconcileEchoSignerPumpCpiLedger(input:{
    return fail('INVALID_CPI_GROUP');
   seen.add(group.index);
   for(const ix of group.instructions){
+   // JSON-parsed non-System token/ATA/AMM CPI has no original binary data.
+   // Explicitly record that limitation rather than forge instruction bytes.
+   // This result only attests payer System debits, never token effects.
+   if(ix?.opaqueParsedNonSystem===true){
+    const id=keys[ix.programIdIndex];
+    if(![
+      'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+      'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
+      'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
+      'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA'
+    ].includes(id)||ix.accounts.length!==0||ix.data!=='')
+     return fail('UNTRUSTED_OPAQUE_PARSED_CPI');
+    scanned++;
+    if(scanned>200)return fail('EXCESSIVE_CPI_INSTRUCTIONS');
+    continue;
+   }
    if(!ix||typeof ix.data!=='string'||ix.data.length>4096||
      !/^[1-9A-HJ-NP-Za-km-z]+$/.test(ix.data)||
      !Array.isArray(ix.accounts))
