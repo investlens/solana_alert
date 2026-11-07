@@ -31,6 +31,7 @@ const stub=(override:{balance?:number;fee?:number|null;after?:number|null;
    assert.equal(conf.sigVerify,false);
    assert.equal(conf.replaceRecentBlockhash,false);
    assert.equal(conf.innerInstructions,true);
+   assert.equal(conf.innerInstructionsEncoding,'json');
    assert.equal(conf.minContextSlot,Math.max(override.balanceSlot??12344,
     override.feeSlot??12344,override.blockhashSlot??12344));
    assert.deepEqual(conf.accounts.addresses,[wallet]);
@@ -66,6 +67,10 @@ test('bad simulation context and malformed CPI traces fail closed',async()=>{
   {feeSlot:12343},{blockhashSlot:12343},{blockhashValid:false},
   {feeSlot:12346},{blockhashSlot:12346},
   {innerInstructions:null},{extraAccounts:true},
+  {innerInstructions:[{index:0,instructions:[{
+   program:'system',programId:'11111111111111111111111111111111',
+   parsed:{type:'transfer',info:{lamports:1}}
+  }]}]},
   {innerInstructions:[{index:0,instructions:[{programIdIndex:0,accounts:[],data:'0'}]}]},
   {innerInstructions:[{index:99,instructions:[]}]},
   {innerInstructions:[{index:0,instructions:[]},{index:0,instructions:[]}]},
