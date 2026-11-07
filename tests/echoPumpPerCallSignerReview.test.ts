@@ -271,21 +271,21 @@ test('synthetic caller -> atomic reservation -> authenticated signer review is n
  assert.equal(reserved,true);
  assert.deepEqual(captured,[request.reservationKey]);
  const x=input();
- x.reservationReader.getByCall=async(w,sig)=>{
+ const boundReader={getByCall:async(w:string,sig:string)=>{
   assert.equal(w,wallet);
   assert.equal(sig,request.sourceSignature);
   return reserved?row:null;
- };
+ }};
  x.nonceStore.consumeOnce=async(nonce:string)=>{
   consumed++;
   if(nonces.has(nonce))return false;
   nonces.add(nonce);return true;
  };
- const first=await reviewEchoPumpPerCallSignerNoBroadcast(x);
+ const first=await reviewEchoPumpPerCallSignerNoBroadcast({...x,reservationReader:boundReader});
  assert.equal(first.ok,true,JSON.stringify(first));
  assert.equal(first.signingAllowed,false);
  assert.equal(first.broadcastAllowed,false);
- const second=await reviewEchoPumpPerCallSignerNoBroadcast(x);
+ const second=await reviewEchoPumpPerCallSignerNoBroadcast({...x,reservationReader:boundReader});
  assert.deepEqual(second,{
   ok:false,reason:'NONCE_ALREADY_CONSUMED',
   signingAllowed:false,broadcastAllowed:false
