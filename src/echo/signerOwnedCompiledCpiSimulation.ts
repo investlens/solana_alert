@@ -21,8 +21,14 @@ export async function simulateSignerCompiledCpiOnPinnedRpc(
     config.innerInstructionsEncoding!=='json'||
     !Number.isSafeInteger(config.minContextSlot)||config.minContextSlot<=0||
     config.accounts?.encoding!=='base64'||
-    config.accounts.addresses.length!==1||
+    !Array.isArray(config.accounts.addresses)||
+    config.accounts.addresses.length<1||
+    config.accounts.addresses.length>2||
     config.accounts.addresses[0]!==ECHO_EXPECTED_EXECUTION_WALLET||
+    (config.accounts.addresses.length===2&&(
+     config.accounts.addresses[1]===ECHO_EXPECTED_EXECUTION_WALLET||
+     !tx.message.staticAccountKeys.some(x=>
+      x.toBase58()===config.accounts.addresses[1])))||
     tx.message.version!==0||tx.message.addressTableLookups.length!==0||
     tx.message.header.numRequiredSignatures!==1||
     tx.signatures.length!==1||tx.signatures[0].some(x=>x!==0)||
@@ -37,7 +43,7 @@ export async function simulateSignerCompiledCpiOnPinnedRpc(
   {encoding:'base64',sigVerify:false,replaceRecentBlockhash:false,
    commitment:'confirmed',minContextSlot:config.minContextSlot,
    innerInstructions:true,innerInstructionsEncoding:'json',
-   accounts:{encoding:'base64',addresses:[ECHO_EXPECTED_EXECUTION_WALLET]}}
+   accounts:{encoding:'base64',addresses:config.accounts.addresses}}
  ]);
  if(!rpc||typeof rpc!=='object'||rpc.error||!rpc.result||
     typeof rpc.result!=='object')
