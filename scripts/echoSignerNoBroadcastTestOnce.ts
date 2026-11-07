@@ -14,6 +14,8 @@ import {loadSignerOwnedOfficialPumpSdk}
  from '../src/echo/loadSignerOwnedOfficialPumpSdk.js';
 import {reconcileEchoSignerPumpCpiLedger}
  from '../src/echo/signerOwnedPumpCpiAccounting.js';
+import {simulateSignerCompiledCpiOnPinnedRpc}
+ from '../src/echo/signerOwnedCompiledCpiSimulation.js';
 
 export const ECHO_TEST_RUNNER_CAN_SIGN=false as const;
 export const ECHO_TEST_RUNNER_CAN_BROADCAST=false as const;
@@ -112,7 +114,8 @@ export async function runEchoSignerNoBroadcastTest(
    getBalanceAndContext:(wallet,commitment)=>connection.getBalanceAndContext(wallet,commitment),
    getFeeForMessage:(message,commitment)=>connection.getFeeForMessage(message,commitment),
    isBlockhashValid:(blockhash,commitment)=>connection.isBlockhashValid(blockhash,{commitment}),
-   simulateTransaction:(transaction,config)=>connection.simulateTransaction(transaction,config)
+   simulateTransaction:(transaction,config)=>
+     simulateSignerCompiledCpiOnPinnedRpc(connection,transaction,config)
   },unsignedBytes:bytes,expectedUnsignedSha256:sha!,nowMs:Date.now(),
   onValidatedSimulation:snapshot=>{cpiSnapshot=snapshot;}
  });
