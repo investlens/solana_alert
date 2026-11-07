@@ -1,6 +1,7 @@
 name: Echo reliability checks
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - feat/echo-slingoor-livebuy-safety-20261027
