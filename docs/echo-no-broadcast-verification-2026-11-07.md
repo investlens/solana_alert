@@ -29,3 +29,9 @@ Do not fund, migrate production database, expose secrets, deploy or change the l
 - Separate causes now distinguished without exposing accounts/transaction bytes: (1) official SDK mutates account keys using identical snapshot and inputs across two calls; (2) independent later snapshot changes the account-key set, count, or ordering. Both are still fail-closed, no release.
 - Added same-snapshot deterministic SDK instruction comparison in `signerOwnedOfficialPumpQuote.ts` and regressions, and made existing changed-key test stable.
 - This last marked commit triggers exactly one read-only public mainnet diagnostic on a no-secret GitHub runner. **Not a Railway signer test or trading approval.**
+
+## November 7 — confirmed nondeterministic official SDK builder
+- Latest one-shot signer RPC diagnostic failed closed with `OFFICIAL_SDK_SAME_SNAPSHOT_NONDETERMINISTIC_INSTRUCTIONS`; caller confirmed ordinary regression #1057 green, isolated diagnostic #1058 blocked.
+- This proves the SDK's repeated instruction constructor does **not** output byte-identical instructions with fixed hops, amount and fee config. Whole-message independent recreation is not a sufficient authentication mechanism for these SDK builds.
+- Added instruction-family-level, no-public-account-logging diagnostic to identify whether PumpSwap instruction, System SOL operations or ATA/token setup changes, including address-vs-privilege-vs-data classification. Negative unit tests cover stochastic PumpSwap and ATA account addresses. Mismatch remains blocking. A follow-up architecture must audit the **original exact compiled transaction**, its setup instructions and signer-owned independently fetched core swap/route evidence; comparing a freshly created incidental setup account cannot substitute for that.
+- This marked commit triggers one read-only, no-key diagnostic; `[echo-isolated-test]` does not enable signing or broadcasting.
