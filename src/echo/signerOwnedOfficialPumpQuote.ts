@@ -155,7 +155,32 @@ export async function inspectSignerOwnedOfficialPumpQuote(input:{
    recentBlockhash:tx.message.recentBlockhash,
    instructions}).compileToV0Message());
   const rebuiltHash=createHash('sha256').update(rebuilt.serialize()).digest('hex');
-  if(rebuiltHash!==sha)return deny('OFFICIAL_REBUILT_MESSAGE_DIFFERS_FROM_SIGNER_REQUEST');
+  if(rebuiltHash!==sha){
+   // Do NOT weaken exact-byte matching. Classify safe structural drift
+   // without exporting instructions, account keys, amounts or message bytes.
+   // Fresh independent RPC fee/pool state can change SDK quote inputs,
+   // and SDK instructions may include nondeterministic created accounts.
+   const expected=tx.message,actual=rebuilt.message;
+   const originalKeys=expected.staticAccountKeys.map(k=>k.toBase58());
+   const recreatedKeys=actual.staticAccountKeys.map(k=>k.toBase58());
+   if(expected.recentBlockhash!==actual.recentBlockhash)
+    return deny('OFFICIAL_REBUILD_BLOCKHASH_DIFFERED');
+   if(originalKeys.length!==recreatedKeys.length||
+      originalKeys.some((k,i)=>k!==recreatedKeys[i]))
+    return deny('OFFICIAL_REBUILD_ACCOUNT_KEYS_DIFFERED');
+   const oldIxs=expected.compiledInstructions,newIxs=actual.compiledInstructions;
+   if(oldIxs.length!==newIxs.length)
+    return deny('OFFICIAL_REBUILD_INSTRUCTION_COUNT_DIFFERED');
+   const changed=oldIxs.some((ix,i)=>{
+    const other=newIxs[i];
+    return ix.programIdIndex!==other.programIdIndex||
+     Buffer.compare(Buffer.from(ix.accountKeyIndexes),
+       Buffer.from(other.accountKeyIndexes))!==0||
+     Buffer.compare(Buffer.from(ix.data),Buffer.from(other.data))!==0;
+   });
+   if(changed)return deny('OFFICIAL_REBUILD_INSTRUCTION_DATA_DIFFERED');
+   return deny('OFFICIAL_REBUILT_MESSAGE_DIFFERS_FROM_SIGNER_REQUEST');
+  }
   const fee=await input.rpc.getFeeForMessage(tx.message,'confirmed');
   if(!Number.isSafeInteger(fee.context?.slot)||fee.context.slot<=0||
      !Number.isSafeInteger(fee.value)||fee.value===null||fee.value<=0)
