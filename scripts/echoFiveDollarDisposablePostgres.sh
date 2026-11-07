@@ -50,9 +50,12 @@ claim(){
 # must make the second reservation fail instead of oversubscribing balance.
 race_sig_a="$(printf 'B%.0s' {1..64})"
 race_sig_b="$(printf 'C%.0s' {1..64})"
-reserve "$race_sig_a" 45000 2999990 > "$tmp/solvency-a" &
+# Each new lot: 20m principal + 50k network + 2m rent + 100k CPI
+# + 2m Phantom SELL reserve = 24,150,000 lamports.
+# Available balance covers ONE distinct lot, not two.
+reserve "$race_sig_a" 45000 24150000 > "$tmp/solvency-a" &
 cash_a=$!
-reserve "$race_sig_b" 45000 2999990 > "$tmp/solvency-b" &
+reserve "$race_sig_b" 45000 24150000 > "$tmp/solvency-b" &
 cash_b=$!
 wait "$cash_a"
 wait "$cash_b"
@@ -73,7 +76,9 @@ run "delete from public.echo_per_call_buy_intents
 
 # Two independent concurrent SQL clients race on the SAME verified source.
 # Exactly one may reserve. The other MUST fail as a durable duplicate.
-reserve "$sig1" 45000 2799999 > "$tmp/race-a" &
+# Both calls are independently solvent. Only the source-signature
+# uniqueness lock should decide this race, never the wallet balance.
+reserve "$sig1" 45000 30000000 > "$tmp/race-a" &
 a_pid=$!
 reserve "$sig1" 45000 30000000 > "$tmp/race-b" &
 b_pid=$!
