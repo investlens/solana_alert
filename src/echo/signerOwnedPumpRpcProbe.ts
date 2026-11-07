@@ -10,6 +10,7 @@
 import {createHash} from 'node:crypto';
 import {Connection,PublicKey,VersionedTransaction,SystemProgram} from '@solana/web3.js';
 import {ECHO_EXPECTED_EXECUTION_WALLET} from './executionWallet.js';
+import {normalizeSignerSimulationCpi} from './normalizeSignerSimulationCpi.js';
 export const ECHO_SIGNER_RPC_PROBE_CAN_SIGN=false as const;
 export const ECHO_SIGNER_RPC_PROBE_CAN_BROADCAST=false as const;
 export type EchoSignerRpcProbeResult=
@@ -121,12 +122,19 @@ export async function probeSignerOwnedPumpRpc(input:{
   if(!Number.isSafeInteger(result.context?.slot)||
      result.context.slot<Math.max(balance.context.slot,fee.context.slot,blockhash.context.slot))
    return deny('MISSING_SIMULATION_CONTEXT_SLOT');
+  // The pinned RPC may legally return jsonParsed despite the requested
+  // format. Normalize only recognized shapes against exact signed-message
+  // static account keys; ambiguous System payer effects fail closed.
+  let indexedCpi:ReturnType<typeof normalizeSignerSimulationCpi>;
+  try{indexedCpi=normalizeSignerSimulationCpi(
+   result.value.innerInstructions,tx);
+  }catch{return deny('UNRECONSTRUCTABLE_OR_UNTRUSTED_SIMULATION_CPI');}
   // Bind every returned inner group to a valid compiled instruction index.
   // This is structure validation only: it does not decode CPI effects or
   // prove that the simulated slot shares state with the balance read.
   let count=0;
   const seen=new Set<number>();
-  for(const group of result.value.innerInstructions){
+  for(const group of indexedCpi){
    if(!group||typeof group!=='object')
     return deny('MALFORMED_SIGNER_CPI_GROUP');
    const g=group as Record<string,unknown>;
@@ -164,7 +172,7 @@ export async function probeSignerOwnedPumpRpc(input:{
    return deny('MISSING_OR_INVALID_SIMULATED_PAYER_BALANCE');
   const delta=before-after.lamports;
   input.onValidatedSimulation?.({
-   innerInstructions:result.value.innerInstructions,
+   innerInstructions:indexedCpi,
    payerBeforeLamports:before,payerAfterLamports:after.lamports,
    networkFeeLamports:fee.value,simulationSlot:result.context.slot
   });
