@@ -28,6 +28,8 @@ export async function dryRunEchoPumpActualWalletBuySignedDiscard(input:{
  nonceStore:EchoNonceStore;
  reservationReader:EchoPerCallReservationReader;
  evidenceReader:EchoTrustedPumpEvidenceReader;
+ /** Durable owner switch from the signer trust boundary, never caller input. */
+ ownerAutoBuyEnabled:()=>Promise<boolean>;
 }):Promise<EchoOfflineSignedBuyResult>{
  const stop=(reason:string):EchoOfflineSignedBuyResult=>({ok:false,reason,broadcastAllowed:false});
  if(input.signer.publicWallet!==ECHO_EXPECTED_EXECUTION_WALLET||
@@ -41,7 +43,8 @@ export async function dryRunEchoPumpActualWalletBuySignedDiscard(input:{
   unsignedTransactionBytes:input.unsignedTransactionBytes,
   nonceStore:input.nonceStore,
   reservationReader:input.reservationReader,
-  evidenceReader:input.evidenceReader
+  evidenceReader:input.evidenceReader,
+  ownerAutoBuyEnabled:input.ownerAutoBuyEnabled
  });
  if(!review.ok)return stop('PUMP_PER_CALL_REVIEW_REJECTED');
  let message:Uint8Array;
