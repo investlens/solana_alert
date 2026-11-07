@@ -18,6 +18,9 @@ import {prepareEchoPumpNoBroadcastBridge,
  type EchoPumpBridgeInput,type EchoPumpBridgeResult}
  from './pumpNoBroadcastBridge.js';
 import {perCallKey} from './perCallSignerAdmissionV2.js';
+import {discoverEchoCanonicalPumpTwoHop,
+ type EchoCanonicalPumpRouteSdk,type EchoCanonicalPumpRouteRpc}
+ from './signerOwnedCanonicalPumpRoute.js';
 
 export const ECHO_INTEGRATED_PUMP_CAN_SIGN=false as const;
 export const ECHO_INTEGRATED_PUMP_CAN_BROADCAST=false as const;
@@ -28,6 +31,12 @@ export type EchoIntegratedPumpInput={
  historicalReplay:boolean;
  callerRpc:EchoPinnedCallerRpc;
  trustedProvider:EchoTrustedPumpQuoteProvider|null;
+ /** Required signer-owned canonical route derivation and real pool snapshot. */
+ canonicalRoute?:{
+  rpc:EchoCanonicalPumpRouteRpc;
+  sdk:EchoCanonicalPumpRouteSdk;
+  intermediateMint:string;
+ };
  /** Must be a pinned signer-side durable read, independent of Telegram. */
  ownerAutoBuyEnabled:()=>Promise<boolean>;
  /** The signer-owned exact message, authenticated request, persistent DB
@@ -61,7 +70,7 @@ export async function reviewIntegratedEchoPumpBuy(
  if(!x.trustedProvider)return block('TRUSTED_ECONOMICS_PROVIDER_NOT_CONNECTED',
   'RECEIPT_AND_QUOTE');
  if(!x.bridge?.signerOwnedPoolPreflight||
-    !x.bridge.signerOwnedOfficialQuotePreflight)
+    !x.bridge.signerOwnedOfficialQuotePreflight||!x.canonicalRoute)
   return block('SIGNER_OWNED_PUMPSWAP_PREFLIGHT_REQUIRED','SIGNER_PREFLIGHT');
  const nowMs=x.now();
  const observed=await inspectIndependentlyVerifiedLiveCaller({
@@ -71,6 +80,21 @@ export async function reviewIntegratedEchoPumpBuy(
  });
  if(!observed.source)return block(observed.reason,'RECEIPT_AND_QUOTE');
  const c=observed.source.call,r=x.bridge.signerRequest;
+ const route=await discoverEchoCanonicalPumpTwoHop({
+  rpc:x.canonicalRoute.rpc,sdk:x.canonicalRoute.sdk,
+  intermediateMint:x.canonicalRoute.intermediateMint,targetMint:c.mint
+ });
+ if('reason' in route)return block('CANONICAL_ROUTE_'+route.reason,'SIGNER_PREFLIGHT');
+ const official=x.bridge.signerOwnedOfficialQuotePreflight;
+ const pool=x.bridge.signerOwnedPoolPreflight;
+ if(official.firstPool!==route.firstPool||
+    official.secondPool!==route.secondPool||
+    official.intermediateMint!==route.intermediateMint||
+    pool.targetMint!==route.targetMint||
+    pool.sdkDerivedPools.length!==2||
+    pool.sdkDerivedPools[0]!==route.firstPool||
+    pool.sdkDerivedPools[1]!==route.secondPool)
+  return block('SIGNER_REQUEST_ROUTE_NOT_CANONICAL','SIGNER_PREFLIGHT');
  if(c.executionWallet!==r.executionWallet||
     c.callerWallet!==r.callerWallet||
     c.sourceSignature!==r.sourceSignature||c.mint!==r.mint||
