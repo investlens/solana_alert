@@ -14,6 +14,7 @@ const a=Keypair.generate().publicKey,b=Keypair.generate().publicKey;
 const p1=Keypair.generate().publicKey,p2=Keypair.generate().publicKey;
 const sink=Keypair.generate().publicKey;
 const extra=Keypair.generate().publicKey;
+const buyback=Keypair.generate().publicKey;
 const amount='20000000';
 const ixs=[
  SystemProgram.transfer({fromPubkey:payer,toPubkey:sink,lamports:Number(amount)}),
@@ -39,7 +40,7 @@ function sdk(override:{wrongMint?:boolean;wrongOutput?:boolean;
  return {
   async multiHopPoolHops(keys){
    assert.deepEqual(keys.map(k=>k.toBase58()),[p1.toBase58(),p2.toBase58()]);
-   return {hops:[{},{}],globalConfig:{},feeConfig:{}};
+   return {hops:[{},{}],globalConfig:{buybackFeeRecipients:[buyback]},feeConfig:{}};
   },
   decodePool(info){return info.data[0]===1?
    {baseMint:a,quoteMint:wsol,isMayhemMode:false}:
@@ -167,4 +168,30 @@ test('changing associated-token account address is identified and still blocked'
  assert.deepEqual(res,{ok:false,reason:'SDK_SNAPSHOT_ATA_ACCOUNT_ADDRESS_DRIFT',
   signingAllowed:false,broadcastAllowed:false});
  assert.equal(calls,2);
+});
+
+test('official recipient is selected from independently fetched config on every swap build',async()=>{
+ const observed:string[]=[];
+ const adapter=sdk();
+ const original=adapter.swapInstructions.bind(adapter);
+ adapter.swapInstructions=async x=>{
+  observed.push(x.buybackFeeRecipient?.toBase58()??'UNPINNED');
+  return original(x);
+ };
+ const result=await inspectSignerOwnedOfficialPumpQuote(input(adapter));
+ assert.equal(result.ok,true,JSON.stringify(result));
+ assert.deepEqual(observed,[buyback.toBase58(),buyback.toBase58()]);
+});
+test('missing verified buyback list stops before SDK construction',async()=>{
+ let builds=0;
+ const adapter=sdk();
+ adapter.multiHopPoolHops=async()=>({
+  hops:[{},{}],globalConfig:{},feeConfig:{}
+ });
+ adapter.swapInstructions=async()=>{builds++;return ixs;};
+ const result=await inspectSignerOwnedOfficialPumpQuote(input(adapter));
+ assert.deepEqual(result,{ok:false,
+  reason:'INDEPENDENT_BUYBACK_RECIPIENT_LIST_MISSING_OR_INVALID',
+  signingAllowed:false,broadcastAllowed:false});
+ assert.equal(builds,0);
 });
