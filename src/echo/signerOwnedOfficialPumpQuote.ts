@@ -156,9 +156,34 @@ export async function inspectSignerOwnedOfficialPumpQuote(input:{
    accounts:ix.keys.map(k=>[k.pubkey.toBase58(),k.isWritable,k.isSigner]),
    data:Buffer.from(ix.data).toString('hex')
   });
-  if(instructions.some((ix,i)=>
-   JSON.stringify(shape(ix))!==JSON.stringify(shape(repeated[i]))))
+  // The wrapper SDK may add token-account / SOL setup instructions.
+  // Identify which instruction family is unstable. Do not log addresses or
+  // skip, reorder, or replace a single original transaction instruction.
+  for(let i=0;i<instructions.length;i++){
+   const original=instructions[i],again=repeated[i];
+   if(JSON.stringify(shape(original))===JSON.stringify(shape(again)))continue;
+   const family=(id:string)=>id===PUMP_SWAP_PROGRAM_ID?'PUMPSWAP':
+    id===SystemProgram.programId.toBase58()?'SYSTEM':
+    id==='ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'?'ATA':
+    id==='TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'?'TOKEN':
+    id==='TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'?'TOKEN2022':
+    id==='ComputeBudget111111111111111111111111111111'?'COMPUTE':'OTHER';
+   const a=family(original.programId.toBase58()),b=family(again.programId.toBase58());
+   if(a!==b)return deny('SDK_SNAPSHOT_PROGRAM_ORDER_OR_FAMILY_DRIFT');
+   const originals=original.keys.map(k=>k.pubkey.toBase58());
+   const regenerated=again.keys.map(k=>k.pubkey.toBase58());
+   if(originals.length!==regenerated.length)
+    return deny('SDK_SNAPSHOT_'+a+'_ACCOUNT_COUNT_DRIFT');
+   if(originals.some((k,j)=>k!==regenerated[j]))
+    return deny('SDK_SNAPSHOT_'+a+'_ACCOUNT_ADDRESS_DRIFT');
+   if(original.keys.some((k,j)=>
+      k.isSigner!==again.keys[j].isSigner||
+      k.isWritable!==again.keys[j].isWritable))
+    return deny('SDK_SNAPSHOT_'+a+'_ACCOUNT_PRIVILEGE_DRIFT');
+   if(Buffer.compare(Buffer.from(original.data),Buffer.from(again.data))!==0)
+    return deny('SDK_SNAPSHOT_'+a+'_INSTRUCTION_DATA_DRIFT');
    return deny('OFFICIAL_SDK_SAME_SNAPSHOT_NONDETERMINISTIC_INSTRUCTIONS');
+  }
   const compiled=tx.message;
   const exactAccounts=compiled.staticAccountKeys.map(k=>k.toBase58());
   const pumpIndex=exactAccounts.indexOf(PUMP_SWAP_PROGRAM_ID);
