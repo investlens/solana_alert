@@ -12,6 +12,8 @@ import {inspectSignerOwnedOfficialPumpQuote}
  from '../src/echo/signerOwnedOfficialPumpQuote.js';
 import {loadSignerOwnedOfficialPumpSdk}
  from '../src/echo/loadSignerOwnedOfficialPumpSdk.js';
+import {reconcileEchoSignerPumpCpiLedger}
+ from '../src/echo/signerOwnedPumpCpiAccounting.js';
 
 export const ECHO_TEST_RUNNER_CAN_SIGN=false as const;
 export const ECHO_TEST_RUNNER_CAN_BROADCAST=false as const;
@@ -22,6 +24,11 @@ export type EchoTestRunnerResult={
  reason:string;exactMessageHashVerified:boolean;
  poolAndQuoteVerified:boolean;
  simulatedWalletProvisional:boolean;
+ payerCpiLedgerReconciled:boolean;
+ provisionalWalletBalanceLamports?:string;
+ provisionalWalletDebitUpperLamports?:string;
+ provisionalNetworkFeeLamports?:string;
+ provisionalCpiInstructionCount?:number;
  completeCpiAndTokenEffectsVerified:false;
  manualPhantomExitVerified:false;
  signingAllowed:false;broadcastAllowed:false;
@@ -30,7 +37,7 @@ const result=(reason:string,hash=false,quote=false,sim=false):EchoTestRunnerResu
  mode:'NO_BROADCAST_SIGNER_RPC_TEST',
  status:sim&&quote?'PROVISIONAL':'BLOCKED',reason,
  exactMessageHashVerified:hash,poolAndQuoteVerified:quote,
- simulatedWalletProvisional:sim,
+ simulatedWalletProvisional:sim,payerCpiLedgerReconciled:false,
  completeCpiAndTokenEffectsVerified:false,
  manualPhantomExitVerified:false,
  signingAllowed:false,broadcastAllowed:false
@@ -95,18 +102,44 @@ export async function runEchoSignerNoBroadcastTest(
   slippageBps:Number(env.ECHO_SIGNER_TEST_SLIPPAGE_BPS)
  });
  if('reason' in quote)return result('OFFICIAL_POOL_OR_QUOTE_'+quote.reason,true);
+ let cpiSnapshot:{
+  innerInstructions:unknown;payerBeforeLamports:number;
+  payerAfterLamports:number;networkFeeLamports:number;simulationSlot:number
+ }|null=null;
  const rpc=await probeSignerOwnedPumpRpc({
   connection:{
    getBalanceAndContext:(wallet,commitment)=>connection.getBalanceAndContext(wallet,commitment),
    getFeeForMessage:(message,commitment)=>connection.getFeeForMessage(message,commitment),
    isBlockhashValid:(blockhash,commitment)=>connection.isBlockhashValid(blockhash,{commitment}),
    simulateTransaction:(transaction,config)=>connection.simulateTransaction(transaction,config)
-  },unsignedBytes:bytes,expectedUnsignedSha256:sha!,nowMs:Date.now()
+  },unsignedBytes:bytes,expectedUnsignedSha256:sha!,nowMs:Date.now(),
+  onValidatedSimulation:snapshot=>{cpiSnapshot=snapshot;}
  });
  if('reason' in rpc)return result('EXACT_WALLET_SIMULATION_'+rpc.reason,true,true);
- // A successful RPC probe remains PROVISIONAL. No real Phantom exit or
- // complete CPI/token ledger has been checked by this one-shot diagnostic.
- return result('PROVISIONAL_RPC_SIMULATION_NOT_LIVE_APPROVAL',true,true,true);
+ if(!cpiSnapshot)return result('MISSING_VALIDATED_SIMULATION_SNAPSHOT',true,true);
+ const snapshot=cpiSnapshot as {
+  innerInstructions:unknown;payerBeforeLamports:number;
+  payerAfterLamports:number;networkFeeLamports:number;simulationSlot:number
+ };
+ const ledger=reconcileEchoSignerPumpCpiLedger({
+  unsignedBytes:bytes,expectedUnsignedSha256:sha!,
+  prePayerBalanceLamports:String(snapshot.payerBeforeLamports),
+  postSimulatedPayerBalanceLamports:String(snapshot.payerAfterLamports),
+  networkFeeLamports:String(snapshot.networkFeeLamports),
+  innerInstructions:snapshot.innerInstructions as Parameters<
+   typeof reconcileEchoSignerPumpCpiLedger>[0]['innerInstructions']
+ });
+ if('reason' in ledger)return result('PAYER_CPI_LEDGER_'+ledger.reason,true,true);
+ // Observed payer SOL debit is reconciled; token effects, price freshness
+ // and wallet-side Phantom SELL remain unverified. Never authorize trading.
+ return {
+  ...result('PROVISIONAL_PAYER_CPI_RECONCILED_NOT_LIVE_APPROVAL',true,true,true),
+  payerCpiLedgerReconciled:true,
+  provisionalWalletBalanceLamports:rpc.payerBalanceBeforeLamports,
+  provisionalWalletDebitUpperLamports:ledger.conservativeWalletDebitLamports,
+  provisionalNetworkFeeLamports:rpc.networkFeeEstimateLamports,
+  provisionalCpiInstructionCount:rpc.innerInstructionCount
+ };
 }
 
 // Opt-in command only. Imported tests never start the job.
