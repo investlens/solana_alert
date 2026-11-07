@@ -345,6 +345,10 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Package official SDK in disposable runner only
         run: npm install --no-save --ignore-scripts --no-package-lock @pump-fun/pump-sdk@4.3.1 bn.js@5.2.2
+      - name: Enforce exact direct SDK and BN versions in isolated runner
+        run: |
+          node -e "const p=require('@pump-fun/pump-sdk/package.json');if(p.version!=='4.3.1')process.exit(1)"
+          node -e "const b=require('bn.js/package.json');if(b.version!=='5.2.2')process.exit(1)"
       - name: Derive exact official PumpSwap unsigned transaction from real chain state
         shell: bash
         run: |
