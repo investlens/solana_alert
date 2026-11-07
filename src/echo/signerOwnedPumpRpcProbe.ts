@@ -32,6 +32,8 @@ export type EchoSignerRpcReadOnly={
   sigVerify:false;replaceRecentBlockhash:false;commitment:'confirmed';
   minContextSlot:number;
   innerInstructions:true;
+  /** Solana simulation defaults to jsonParsed; accounting requires indexes. */
+  innerInstructionsEncoding:'json';
   accounts:{encoding:'base64';addresses:string[]}
  }):Promise<{context:{slot:number};value:{err:unknown;innerInstructions?:unknown;
   accounts?:({lamports:number;owner:string}|null)[]|null;
@@ -104,7 +106,7 @@ export async function probeSignerOwnedPumpRpc(input:{
   const result=await input.connection.simulateTransaction(tx,{
    sigVerify:false,replaceRecentBlockhash:false,commitment:'confirmed',
    minContextSlot:Math.max(balance.context.slot,fee.context.slot,blockhash.context.slot),
-   innerInstructions:true,
+   innerInstructions:true,innerInstructionsEncoding:'json',
    accounts:{encoding:'base64',addresses:[ECHO_EXPECTED_EXECUTION_WALLET]}
   });
   if(result.value.err!==null)return deny('PUMPSWAP_SIMULATION_FAILED');
@@ -136,6 +138,10 @@ export async function probeSignerOwnedPumpRpc(input:{
    for(const ix of g.instructions){
     if(!ix||typeof ix!=='object')return deny('MALFORMED_SIGNER_CPI_INSTRUCTION');
     const item=ix as Record<string,unknown>;
+    // If the provider returned jsonParsed despite our explicit request,
+    // reject it; never reinterpret address strings as compiled indexes.
+    if('programId' in item||'parsed' in item||'program' in item)
+     return deny('RPC_RETURNED_PARSED_CPI_INSTEAD_OF_COMPILED');
     if(!Number.isSafeInteger(item.programIdIndex)||
        Number(item.programIdIndex)<0||
        Number(item.programIdIndex)>=tx.message.staticAccountKeys.length||
