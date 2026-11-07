@@ -68,3 +68,46 @@ test('payer must be close authority before any RPC',async()=>{
  assert.equal(result.ok,false);
  assert.equal(calls,0);
 });
+
+test('zero-lamport cleared system account is closed in same simulation',async()=>{
+ const requests:string[][]=[];
+ const result=await probeSignerOwnedPumpRpc({
+  connection:rpc({
+   lamports:0,owner:SystemProgram.programId.toBase58(),
+   executable:false,data:['','base64']
+  },requests) as any,unsignedBytes:tx,
+  expectedUnsignedSha256:sha,nowMs:1800000000000
+ });
+ assert.equal(result.ok,true,JSON.stringify(result));
+ if(result.ok)assert.equal(result.sameSimulationTokenCloseConfirmed,true);
+});
+test('zero-lamport account with stale token data is blocked and summarized',async()=>{
+ const result=await probeSignerOwnedPumpRpc({
+  connection:rpc({
+   lamports:0,owner:SystemProgram.programId.toBase58(),
+   executable:false,data:['AQ==','base64']
+  },[]) as any,unsignedBytes:tx,
+  expectedUnsignedSha256:sha,nowMs:1800000000000
+ });
+ assert.equal(result.ok,false);
+ if(!result.ok){
+  assert.equal(result.reason,'PAYER_TOKEN_CLOSE_SOURCE_NOT_ABSENT_AFTER_SIMULATION');
+  assert.equal(result.closeSourceDiagnostic?.state,'NONEMPTY_DATA');
+  assert.equal(result.closeSourceDiagnostic?.dataBytes,1);
+  assert.equal(result.broadcastAllowed,false);
+ }
+});
+test('funded token account cannot masquerade as closed even with empty data',async()=>{
+ const result=await probeSignerOwnedPumpRpc({
+  connection:rpc({
+   lamports:1488440,owner:SystemProgram.programId.toBase58(),
+   executable:false,data:['','base64']
+  },[]) as any,unsignedBytes:tx,
+  expectedUnsignedSha256:sha,nowMs:1800000000000
+ });
+ assert.equal(result.ok,false);
+ if(!result.ok){
+  assert.equal(result.closeSourceDiagnostic?.state,'NONZERO_LAMPORTS');
+  assert.equal(result.closeSourceDiagnostic?.lamports,'1488440');
+ }
+});
