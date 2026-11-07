@@ -8,6 +8,7 @@ import type {EchoOfficialPumpSdkAdapter}
  from '../src/echo/signerOwnedOfficialPumpQuote.js';
 const p1=Keypair.generate().publicKey,p2=Keypair.generate().publicKey;
 const mint=Keypair.generate().publicKey;
+const buyback=Keypair.generate().publicKey;
 const program=new PublicKey('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA');
 const instructions=[new TransactionInstruction({
  programId:program,keys:[
@@ -19,15 +20,15 @@ const instructions=[new TransactionInstruction({
 const sdk=(opts:{badMin?:boolean;unknown?:boolean}={}):EchoOfficialPumpSdkAdapter=>({
  multiHopPoolHops:async pools=>{
   assert.deepEqual(pools.map(p=>p.toBase58()),[p2.toBase58(),p1.toBase58()]);
-  return {hops:[{},{}],globalConfig:{},feeConfig:{}};
+  return {hops:[{},{}],globalConfig:{buybackFeeRecipients:[buyback]},feeConfig:{}};
  },
  decodePool:()=>{throw Error('not needed');},
  amount:v=>v,
  quote:()=>({minAmountOut:{toString:()=>opts.badMin?'101':'90'},
   amountOut:{toString:()=> '100'}}),
- swapInstructions:async()=>opts.unknown?
+ swapInstructions:async input=>opts.unknown?
   [new TransactionInstruction({programId:SystemProgram.programId,
-   keys:[],data:Buffer.from([2])})]:instructions
+   keys:[],data:Buffer.from([2])})]:(assert.equal(input.buybackFeeRecipient?.toBase58(),buyback.toBase58()),instructions)
 });
 const rpc={
  getLatestBlockhash:async()=>({blockhash:Keypair.generate().publicKey.toBase58()}),
@@ -61,4 +62,15 @@ test('unknown SELL program, invalid min output and zero holdings block',async()=
   assert.equal(r.ok,false,JSON.stringify(r));
   assert.equal(r.canBroadcast,false);
  }
+});
+
+test('missing signer-owned approved SELL buyback recipients fail closed',async()=>{
+ const noRecipients=sdk();
+ noRecipients.multiHopPoolHops=async()=>({
+  hops:[{},{}],globalConfig:{},feeConfig:{}
+ });
+ const r=await previewEchoPumpFullSell(args(noRecipients));
+ assert.equal(r.ok,false);
+ if(!r.ok)assert.equal(r.reason,'UNVERIFIED_SELL_BUYBACK_RECIPIENT_CONFIG');
+ assert.equal(r.canBroadcast,false);
 });
