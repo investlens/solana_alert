@@ -32,6 +32,15 @@ export type EchoTestRunnerResult={
  provisionalNetworkFeeLamports?:string;
  provisionalCpiInstructionCount?:number;
  provisionalComputeUnitsConsumed?:number|null;
+ payerDebitMismatchDiagnostic?:{
+  observedPayerDeltaLamports:string;
+  outboundSystemDebitsLamports:string;
+  inboundSystemCreditsLamports:string;
+  networkFeeLamports:string;
+  unexplainedAgainstDebitOnlyLamports:string;
+  unexplainedAgainstNetSystemLamports:string;
+  programInstructionsReviewed:number;
+ };
  completeCpiAndTokenEffectsVerified:false;
  manualPhantomExitVerified:false;
  signingAllowed:false;broadcastAllowed:false;
@@ -133,7 +142,10 @@ export async function runEchoSignerNoBroadcastTest(
   innerInstructions:snapshot.innerInstructions as Parameters<
    typeof reconcileEchoSignerPumpCpiLedger>[0]['innerInstructions']
  });
- if('reason' in ledger)return result('PAYER_CPI_LEDGER_'+ledger.reason,true,true);
+ if('reason' in ledger)return {
+  ...result('PAYER_CPI_LEDGER_'+ledger.reason,true,true),
+  ...(ledger.diagnostic?{payerDebitMismatchDiagnostic:ledger.diagnostic}:{})
+ };
  // Observed payer SOL debit is reconciled; token effects, price freshness
  // and wallet-side Phantom SELL remain unverified. Never authorize trading.
  return {
