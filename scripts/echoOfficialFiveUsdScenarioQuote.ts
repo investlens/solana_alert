@@ -282,6 +282,9 @@ try{
    wallet:WALLET,firstPool:P1,secondPool:P2,
    intermediateMint:A,targetMint:B,
    principalLamports:String(INPUT),slippageBps:1000,
+   scenarioAllInCents:CAP_CENTS,
+   publicFxUpperCents:priceRaw,
+   publicFxConsensusOnly:report.publicFxCrosscheckPassed===true,
    scenarioCpiAudited:false,manualSellReserveVerified:false
   }),{encoding:'utf8',mode:0o600,flag:'wx'});
   report.testOnlyUnsignedPayloadCreated=true;
