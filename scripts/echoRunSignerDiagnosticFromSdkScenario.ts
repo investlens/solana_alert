@@ -23,21 +23,25 @@ try{
  const str=(name:string)=>typeof x[name]==='string'?x[name] as string:'';
  const b64=str('unsignedBase64');
  const bytes=Buffer.from(b64,'base64');
- if(x.version!==1||
-    x.mode!=='EXACT_UNSIGNED_SDK_SCENARIO_NOT_EXECUTABLE'||
-    x.wallet!==ECHO_EXPECTED_EXECUTION_WALLET||
-    x.scenarioCpiAudited!==false||
-    x.manualSellReserveVerified!==false||
-    !hex.test(str('unsignedSha256'))||
+ const shapeValid=x.version===1&&
+    x.mode==='EXACT_UNSIGNED_SDK_SCENARIO_NOT_EXECUTABLE'&&
+    x.wallet===ECHO_EXPECTED_EXECUTION_WALLET&&
+    x.scenarioCpiAudited===false&&
+    x.manualSellReserveVerified===false;
+ if(!shapeValid)throw Error('INVALID_PAYLOAD_PROVENANCE');
+ if(!hex.test(str('unsignedSha256'))||
     bytes.length<80||bytes.length>3072||
     bytes.toString('base64')!==b64||
-    createHash('sha256').update(bytes).digest('hex')!==x.unsignedSha256||
-    !natural.test(str('principalLamports'))||
-    x.slippageBps!==1000||
-    (x.scenarioAllInCents!==250&&x.scenarioAllInCents!==500)||
-    !natural.test(str('publicFxUpperCents'))||
+    createHash('sha256').update(bytes).digest('hex')!==x.unsignedSha256)
+  throw Error('INVALID_EXACT_UNSIGNED_HASH');
+ if(!natural.test(str('principalLamports'))||
+    x.slippageBps!==1000)
+  throw Error('INVALID_PILOT_AMOUNT_OR_SLIPPAGE');
+ if(x.scenarioAllInCents!==250&&x.scenarioAllInCents!==500)
+  throw Error('MISSING_EXPLICIT_PILOT_CAP');
+ if(!natural.test(str('publicFxUpperCents'))||
     x.publicFxConsensusOnly!==true)
-  throw Error('UNTRUSTED_EXACT_UNSIGNED_SCENARIO');
+  throw Error('UNVERIFIED_PUBLIC_SPOT_PRICE');
  const env={
   ECHO_SIGNER_TEST_ONLY:'true',
   ECHO_SIGNER_BROADCAST_ENABLED:'false',
@@ -81,4 +85,12 @@ try{
  // including when the wallet is unfunded. Never convert diagnostic failure
  // into a green release gate or unconditionally swallow RPC errors.
  if(output.status!=='PROVISIONAL')process.exitCode=2;
-}catch{fail('SCENARIO_MISSING_OR_INVALID');}
+}catch(e){
+ const message=e instanceof Error?e.message:'';
+ const allowed=new Set([
+  'INVALID_PAYLOAD_PROVENANCE','INVALID_EXACT_UNSIGNED_HASH',
+  'INVALID_PILOT_AMOUNT_OR_SLIPPAGE','MISSING_EXPLICIT_PILOT_CAP',
+  'UNVERIFIED_PUBLIC_SPOT_PRICE'
+ ]);
+ fail(allowed.has(message)?message:'SCENARIO_MISSING_OR_INVALID');
+}
