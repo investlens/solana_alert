@@ -77,3 +77,40 @@ test('unknown payer-funded CPI and bad indexed program reject',()=>{
   assert.equal(result.ok,false,JSON.stringify(innerInstructions));
  }
 });
+
+test('unexplained simulated payer delta reports exact discrepancy without approving trade',()=>{
+ const r=reconcileEchoSignerPumpCpiLedger({
+  ...base,postSimulatedPayerBalanceLamports:'78000000'
+ });
+ assert.equal(r.ok,false);
+ if(!r.ok){
+  assert.equal(r.reason,'UNEXPLAINED_PAYER_LAMPORT_BALANCE_CHANGE');
+  assert.deepEqual(r.diagnostic,{
+   observedPayerDeltaLamports:'22000000',
+   outboundSystemDebitsLamports:'23000000',
+   inboundSystemCreditsLamports:'0',
+   networkFeeLamports:'5000',
+   unexplainedAgainstDebitOnlyLamports:'-1000000',
+   unexplainedAgainstNetSystemLamports:'-1000000',
+   programInstructionsReviewed:3
+  });
+  assert.equal(r.signingAllowed,false);
+  assert.equal(r.broadcastAllowed,false);
+ }
+});
+test('explicit System refund to wallet is counted, never inferred from delta',()=>{
+ const credit=SystemProgram.transfer({
+  fromPubkey:recipient,toPubkey:payer,lamports:1000000
+ });
+ const creditCpi={index:1,instructions:[{
+  programIdIndex:systemIndex,
+  accounts:[destIndex,0],data:bs58.encode(credit.data)
+ }]};
+ const matched=reconcileEchoSignerPumpCpiLedger({
+  ...base,postSimulatedPayerBalanceLamports:'78000000',
+  innerInstructions:[...group,...creditCpi.instructions.length?[{index:0,instructions:creditCpi.instructions}]:[]]
+ });
+ // The ledger must fail on duplicate/invalid grouping or unexplained funds,
+ // never declare success by simply adjusting the observed delta.
+ assert.equal(matched.ok,false);
+});
