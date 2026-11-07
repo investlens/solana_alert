@@ -2,6 +2,12 @@ name: Echo reliability checks
 
 on:
   workflow_dispatch:
+    inputs:
+      echo_isolated_test:
+        description: "Run the isolated, no-broadcast real-RPC signer diagnostic"
+        type: boolean
+        required: false
+        default: false
   push:
     branches:
       - feat/echo-slingoor-livebuy-safety-20261027
@@ -321,7 +327,7 @@ jobs:
   echo-isolated-signer-real-rpc:
     # An explicit one-shot commit marker only. Disposable GitHub runner, NOT
     # a Railway service or key-bearing isolated signer. All requests read-only.
-    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[echo-isolated-test]')
+    if: (github.event_name == 'push' && contains(github.event.head_commit.message, '[echo-isolated-test]')) || (github.event_name == 'workflow_dispatch' && inputs.echo_isolated_test == true && github.ref_name == 'feat/echo-five-usd-per-call-safety-20261106')
     runs-on: ubuntu-latest
     timeout-minutes: 9
     permissions:
