@@ -59,6 +59,16 @@ export async function previewEchoPumpFullSell(input:{
   if(!Array.isArray(snapshot.hops)||snapshot.hops.length!==2||
      !snapshot.globalConfig||!snapshot.feeConfig)
    return reject('SELL_POOL_AND_FEE_STATE_UNAVAILABLE');
+  // PumpSwap randomly selects a buyback recipient when none is passed.
+  // Pin the signer-read approved recipient, just as the BUY verifier does.
+  const recipients=(snapshot.globalConfig as {buybackFeeRecipients?:PublicKey[]})
+   .buybackFeeRecipients;
+  if(!Array.isArray(recipients)||recipients.length<1||
+     recipients.length>16||
+     recipients.some(x=>!(x instanceof PublicKey))||
+     new Set(recipients.map(x=>x.toBase58())).size!==recipients.length)
+   return reject('UNVERIFIED_SELL_BUYBACK_RECIPIENT_CONFIG');
+  const buybackFeeRecipient=recipients[0];
   const amount=input.sdk.amount(input.verifiedFullWalletTokenBalanceRaw);
   const quoted=input.sdk.quote({inMint:mint,hops:snapshot.hops,
    amountIn:amount,slippage:input.slippageBps/100,
@@ -72,7 +82,7 @@ export async function previewEchoPumpFullSell(input:{
    user:new PublicKey(ECHO_EXPECTED_EXECUTION_WALLET),
    inMint:mint,venues:snapshot.hops,amountIn:amount,
    minAmountOut:quoted.minAmountOut,
-   globalConfig:snapshot.globalConfig
+   globalConfig:snapshot.globalConfig,buybackFeeRecipient
   });
   if(!Array.isArray(instructions)||instructions.length<1||
      instructions.length>16||
