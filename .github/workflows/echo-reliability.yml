@@ -318,6 +318,50 @@ jobs:
       - name: Atomic per-call SQL, duplicate replay, $5 ceiling and no-broadcast
         run: bash scripts/echoFiveDollarDisposablePostgres.sh
 
+  echo-isolated-signer-real-rpc:
+    # An explicit one-shot commit marker only. Disposable GitHub runner, NOT
+    # a Railway service or key-bearing isolated signer. All requests read-only.
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[echo-isolated-test]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    permissions:
+      contents: read
+    env:
+      ADMIN_TRADING_ENABLED: 'false'
+      AUTO_TRADE_MODE: paper
+      ECHO_SIGNER_MODE: PROOF_ONLY
+      ECHO_SIGNER_BROADCAST_ENABLED: 'false'
+      ECHO_SIGNER_REQUESTS_ENABLED: 'false'
+      ECHO_EXPORT_UNSIGNED_FOR_SIGNER_TEST: 'true'
+      ECHO_SCENARIO_USE_PUBLIC_FX: 'true'
+      # Never treated as CPI proof: this is only a provisional estimate.
+      ECHO_SCENARIO_CPI_ALLOWANCE_LAMPORTS: '1000000'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Package official SDK in disposable runner only
+        run: npm install --no-save --ignore-scripts --no-package-lock @pump-fun/pump-sdk@4.3.1 bn.js@5.2.2
+      - name: Derive exact official PumpSwap unsigned transaction from real chain state
+        shell: bash
+        run: |
+          set +e
+          npx tsx scripts/echoOfficialFiveUsdScenarioQuote.ts
+          diagnostic_status=$?
+          if [ ! -s .echo-isolated-unsigned-payload.json ]; then
+            echo "OFFICIAL_UNSIGNED_MESSAGE_NOT_CONSTRUCTED; scenario status=${diagnostic_status}"
+            exit 1
+          fi
+          echo "EXACT_UNSIGNED_SDK_SCENARIO_GENERATED=YES; simulation may be blocked by unfunded wallet"
+      - name: Execute isolated test-only signer RPC diagnostic (never sign or send)
+        run: npx tsx scripts/echoRunSignerDiagnosticFromSdkScenario.ts
+      - name: Remove exact unsigned scenario payload from ephemeral runner
+        if: always()
+        run: rm -f .echo-isolated-unsigned-payload.json
+
   echo-five-usd-mainnet-scenario:
     # Only run from an explicitly tagged push, no keys, no real funds.
     # $200/SOL is an ILLUSTRATIVE OPERATOR INPUT, not a verified live FX.
