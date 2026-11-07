@@ -34,6 +34,16 @@ export type EchoTestRunnerResult={
  provisionalNetworkFeeLamports?:string;
  provisionalCpiInstructionCount?:number;
  provisionalComputeUnitsConsumed?:number|null;
+ tokenCloseRentHypothesis?:{
+  classification:'RENT_AND_NETWORK_FEE_MATCH'|'RENT_OR_FEE_DOES_NOT_MATCH'|'UNVERIFIED_RENT_RPC';
+  referenceAccountBytes:165;
+  rpcMinimumRentLamports?:string;
+  observedRefundGapLamports:string;
+  reportedNetworkFeeLamports:string;
+  candidateTopLevelCloseCount:number;
+  exactBankRefundProven:false;
+  canSign:false;canBroadcast:false
+ };
  tokenClosePrestateEvidence?:{
   status:string;sourceCount?:number;existingTokenAccounts?:number;
   observedPrestateLamports?:string;observedSlot?:number;
@@ -159,6 +169,43 @@ export async function runEchoSignerNoBroadcastTest(
   // Never log the private exact-message account-index array.
   const {candidateTokenCloseSourceIndexes:sourceIndexes,...publicDiagnostic}=
    diagnostic??{candidateTokenCloseSourceIndexes:undefined};
+  // The post-simulation payer delta can exclude refunded token-account
+  // rent while the modeled System debits include initial account funding.
+  // Compare the *observed* gap plus base fee to current RPC rent for a
+  // standard SPL token account (165 bytes), but DO NOT count a credit.
+  let rentHypothesis:EchoTestRunnerResult['tokenCloseRentHypothesis'];
+  if(diagnostic&&diagnostic.candidateTopLevelTokenCloseCount===1&&
+     diagnostic.candidateTokenCloseRefundCount===1&&
+     diagnostic.candidateInnerTokenCloseCount===0){
+   const difference=BigInt(diagnostic.outboundSystemDebitsLamports)-
+    BigInt(diagnostic.inboundSystemCreditsLamports)-
+    BigInt(diagnostic.observedPayerDeltaLamports);
+   const feeLamports=BigInt(diagnostic.networkFeeLamports);
+   try{
+    const referenceRent=await connection.getMinimumBalanceForRentExemption(
+     165,'confirmed');
+    if(!Number.isSafeInteger(referenceRent)||referenceRent<=0)
+     throw Error('INVALID_READONLY_RENT');
+    rentHypothesis={
+     classification:difference+feeLamports===BigInt(referenceRent)?
+      'RENT_AND_NETWORK_FEE_MATCH':'RENT_OR_FEE_DOES_NOT_MATCH',
+     referenceAccountBytes:165,
+     rpcMinimumRentLamports:String(referenceRent),
+     observedRefundGapLamports:String(difference),
+     reportedNetworkFeeLamports:String(feeLamports),
+     candidateTopLevelCloseCount:1,
+     exactBankRefundProven:false,canSign:false,canBroadcast:false
+    };
+   }catch{
+    rentHypothesis={
+     classification:'UNVERIFIED_RENT_RPC',referenceAccountBytes:165,
+     observedRefundGapLamports:String(difference),
+     reportedNetworkFeeLamports:String(feeLamports),
+     candidateTopLevelCloseCount:1,
+     exactBankRefundProven:false,canSign:false,canBroadcast:false
+    };
+   }
+  }
   let evidence;
   if(sourceIndexes?.length){
    evidence=await observeTokenCloseSourcesReadOnly({
@@ -170,7 +217,8 @@ export async function runEchoSignerNoBroadcastTest(
   return {
    ...result('PAYER_CPI_LEDGER_'+ledger.reason,true,true),
    ...(diagnostic?{payerDebitMismatchDiagnostic:publicDiagnostic}:{}),
-   ...(evidence?{tokenClosePrestateEvidence:evidence}:{})
+   ...(evidence?{tokenClosePrestateEvidence:evidence}:{}),
+   ...(rentHypothesis?{tokenCloseRentHypothesis:rentHypothesis}:{})
   };
  }
  // Observed payer SOL debit is reconciled; token effects, price freshness
