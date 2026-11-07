@@ -95,6 +95,8 @@ test('unexplained simulated payer delta reports exact discrepancy without approv
    programInstructionsReviewed:3,
    candidateTokenCloseRefundCount:0,
    candidateTokenCloseFundedLamports:'0',
+   candidateTopLevelTokenCloseCount:0,
+   candidateInnerTokenCloseCount:0,
    candidateTokenCloseSourceIndexes:[]
   });
   assert.equal(r.signingAllowed,false);
@@ -119,5 +121,64 @@ test('explicit System refund to wallet is counted, never inferred from delta',()
   assert.equal(matched.tokenEffectsProven,false);
   assert.equal(matched.signingAllowed,false);
   assert.equal(matched.broadcastAllowed,false);
+ }
+});
+
+test('detect top-level binary SPL token account close to payer; never infer refund',()=>{
+ const tokenProgram=new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+ const ix=new TransactionInstruction({programId:tokenProgram,
+  keys:[{pubkey:recipient,isSigner:false,isWritable:true},
+   {pubkey:payer,isSigner:false,isWritable:true},
+   {pubkey:payer,isSigner:true,isWritable:false}],
+  data:Buffer.from([9])});
+ const txWithClose=new VersionedTransaction(new TransactionMessage({
+  payerKey:payer,recentBlockhash:Keypair.generate().publicKey.toBase58(),
+  instructions:[transfer,ix]
+ }).compileToV0Message()).serialize();
+ const txHash=createHash('sha256').update(txWithClose).digest('hex');
+ const r=reconcileEchoSignerPumpCpiLedger({
+  unsignedBytes:txWithClose,expectedUnsignedSha256:txHash,
+  prePayerBalanceLamports:'100000000',
+  postSimulatedPayerBalanceLamports:'81000000',
+  networkFeeLamports:'5000',innerInstructions:[]
+ });
+ assert.equal(r.ok,false);
+ if(!r.ok){
+  assert.equal(r.reason,'UNEXPLAINED_PAYER_LAMPORT_BALANCE_CHANGE');
+  assert.equal(r.diagnostic?.candidateTopLevelTokenCloseCount,1);
+  assert.equal(r.diagnostic?.candidateInnerTokenCloseCount,0);
+  assert.equal(r.diagnostic?.candidateTokenCloseFundedLamports,'20000000');
+  assert.equal(r.signingAllowed,false);
+ }
+});
+test('detect compiled binary inner SPL token close only when payer is destination',()=>{
+ const tokenProgram=new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+ const swapIx=new TransactionInstruction({programId:amm,
+  keys:[{pubkey:payer,isSigner:false,isWritable:true},
+   {pubkey:recipient,isSigner:false,isWritable:true},
+   {pubkey:tokenProgram,isSigner:false,isWritable:false}],
+  data:Buffer.from([1])});
+ const withToken=new VersionedTransaction(new TransactionMessage({
+  payerKey:payer,recentBlockhash:Keypair.generate().publicKey.toBase58(),
+  instructions:[transfer,swapIx]
+ }).compileToV0Message()).serialize();
+ const decoded=VersionedTransaction.deserialize(withToken);
+ const keylist=decoded.message.staticAccountKeys.map(k=>k.toBase58());
+ const closing={index:1,instructions:[{
+  programIdIndex:keylist.indexOf(tokenProgram.toBase58()),
+  accounts:[keylist.indexOf(recipient.toBase58()),0,0],
+  data:bs58.encode(Buffer.from([9]))
+ }]};
+ const result=reconcileEchoSignerPumpCpiLedger({
+  unsignedBytes:withToken,expectedUnsignedSha256:createHash('sha256').update(withToken).digest('hex'),
+  prePayerBalanceLamports:'100000000',
+  postSimulatedPayerBalanceLamports:'81000000',
+  networkFeeLamports:'5000',innerInstructions:[closing]
+ });
+ assert.equal(result.ok,false);
+ if(!result.ok){
+  assert.equal(result.diagnostic?.candidateInnerTokenCloseCount,1);
+  assert.equal(result.diagnostic?.candidateTopLevelTokenCloseCount,0);
+  assert.equal(result.broadcastAllowed,false);
  }
 });
