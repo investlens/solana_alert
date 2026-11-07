@@ -271,6 +271,9 @@ export async function runEchoSignerNoBroadcastTest(
   return {
    ...result(refundAwareReview?.reason??
     'PAYER_CPI_LEDGER_'+ledger.reason,true,true),
+   // Exact wallet simulation completed; only the stricter payer ledger failed.
+   // Report that observation without changing the BLOCKED release status.
+   simulatedWalletProvisional:true,
    ...(diagnostic?{payerDebitMismatchDiagnostic:publicDiagnostic}:{}),
    ...(evidence?{tokenClosePrestateEvidence:evidence}:{}),
    ...(classification?{rentRefundClassification:classification}:{}),
