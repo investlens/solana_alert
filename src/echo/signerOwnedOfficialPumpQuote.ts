@@ -140,6 +140,25 @@ export async function inspectSignerOwnedOfficialPumpQuote(input:{
   }
   if(transfers!==1||amountTransferred!==BigInt(input.principalLamports))
    return deny('WRONG_OFFICIAL_SWAP_PRINCIPAL');
+  // Rebuild twice from the SAME signer-owned snapshot. A change between
+  // these two outputs means the SDK builder is not deterministic even with
+  // fixed route, fee configuration and minimum output. Never accept it.
+  const repeated=await input.sdk.swapInstructions({
+   user:new PublicKey(ECHO_EXPECTED_EXECUTION_WALLET),
+   inMint:new PublicKey(WSOL),venues:snapshot.hops,
+   amountIn:amount,minAmountOut:quote.minAmountOut,
+   globalConfig:snapshot.globalConfig
+  });
+  if(!Array.isArray(repeated)||repeated.length!==instructions.length)
+   return deny('OFFICIAL_SDK_SAME_SNAPSHOT_INSTRUCTION_COUNT_DRIFT');
+  const shape=(ix:TransactionInstruction)=>({
+   programId:ix.programId.toBase58(),
+   accounts:ix.keys.map(k=>[k.pubkey.toBase58(),k.isWritable,k.isSigner]),
+   data:Buffer.from(ix.data).toString('hex')
+  });
+  if(instructions.some((ix,i)=>
+   JSON.stringify(shape(ix))!==JSON.stringify(shape(repeated[i]))))
+   return deny('OFFICIAL_SDK_SAME_SNAPSHOT_NONDETERMINISTIC_INSTRUCTIONS');
   const compiled=tx.message;
   const exactAccounts=compiled.staticAccountKeys.map(k=>k.toBase58());
   const pumpIndex=exactAccounts.indexOf(PUMP_SWAP_PROGRAM_ID);
@@ -165,9 +184,15 @@ export async function inspectSignerOwnedOfficialPumpQuote(input:{
    const recreatedKeys=actual.staticAccountKeys.map(k=>k.toBase58());
    if(expected.recentBlockhash!==actual.recentBlockhash)
     return deny('OFFICIAL_REBUILD_BLOCKHASH_DIFFERED');
-   if(originalKeys.length!==recreatedKeys.length||
-      originalKeys.some((k,i)=>k!==recreatedKeys[i]))
-    return deny('OFFICIAL_REBUILD_ACCOUNT_KEYS_DIFFERED');
+   if(originalKeys.length!==recreatedKeys.length)
+    return deny('OFFICIAL_REBUILD_ACCOUNT_KEY_COUNT_DIFFERED');
+   const recreatedSet=new Set(recreatedKeys);
+   const originalSet=new Set(originalKeys);
+   if(originalKeys.some(k=>!recreatedSet.has(k))||
+      recreatedKeys.some(k=>!originalSet.has(k)))
+    return deny('OFFICIAL_REBUILD_ACCOUNT_KEY_SET_DIFFERED');
+   if(originalKeys.some((k,i)=>k!==recreatedKeys[i]))
+    return deny('OFFICIAL_REBUILD_ACCOUNT_KEY_ORDER_OR_PRIVILEGES_DIFFERED');
    const oldIxs=expected.compiledInstructions,newIxs=actual.compiledInstructions;
    if(oldIxs.length!==newIxs.length)
     return deny('OFFICIAL_REBUILD_INSTRUCTION_COUNT_DIFFERED');
