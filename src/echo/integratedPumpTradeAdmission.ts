@@ -21,6 +21,10 @@ import {perCallKey} from './perCallSignerAdmissionV2.js';
 import {discoverEchoCanonicalPumpTwoHop,
  type EchoCanonicalPumpRouteSdk,type EchoCanonicalPumpRouteRpc}
  from './signerOwnedCanonicalPumpRoute.js';
+import {previewEchoPumpFullSell,type EchoSellPreviewRpc}
+ from './signerOwnedPumpFullSellPreview.js';
+import type {EchoOfficialPumpSdkAdapter}
+ from './signerOwnedOfficialPumpQuote.js';
 
 export const ECHO_INTEGRATED_PUMP_CAN_SIGN=false as const;
 export const ECHO_INTEGRATED_PUMP_CAN_BROADCAST=false as const;
@@ -36,6 +40,14 @@ export type EchoIntegratedPumpInput={
   rpc:EchoCanonicalPumpRouteRpc;
   sdk:EchoCanonicalPumpRouteSdk;
   intermediateMint:string;
+ };
+ /** Entire currently held token balance, obtained from a signer-owned RPC.
+  * A reverse SELL quote is evidence of routability, not Phantom approval.
+  */
+ sellPreview?:{
+  rpc:EchoSellPreviewRpc;
+  sdk:EchoOfficialPumpSdkAdapter;
+  verifiedFullWalletTokenBalanceRaw:string;
  };
  /** Must be a pinned signer-side durable read, independent of Telegram. */
  ownerAutoBuyEnabled:()=>Promise<boolean>;
@@ -70,7 +82,8 @@ export async function reviewIntegratedEchoPumpBuy(
  if(!x.trustedProvider)return block('TRUSTED_ECONOMICS_PROVIDER_NOT_CONNECTED',
   'RECEIPT_AND_QUOTE');
  if(!x.bridge?.signerOwnedPoolPreflight||
-    !x.bridge.signerOwnedOfficialQuotePreflight||!x.canonicalRoute)
+    !x.bridge.signerOwnedOfficialQuotePreflight||!x.canonicalRoute||
+    !x.sellPreview)
   return block('SIGNER_OWNED_PUMPSWAP_PREFLIGHT_REQUIRED','SIGNER_PREFLIGHT');
  const nowMs=x.now();
  const observed=await inspectIndependentlyVerifiedLiveCaller({
@@ -95,6 +108,20 @@ export async function reviewIntegratedEchoPumpBuy(
     pool.sdkDerivedPools[0]!==route.firstPool||
     pool.sdkDerivedPools[1]!==route.secondPool)
   return block('SIGNER_REQUEST_ROUTE_NOT_CANONICAL','SIGNER_PREFLIGHT');
+ // A transaction-compatible route may be previewed using the official
+ // SDK. Without complete extra CPI/rent bounds and actual Phantom app
+ // validation it cannot yet justify a BUY or release reserved exit SOL.
+ const sell=await previewEchoPumpFullSell({
+  rpc:x.sellPreview.rpc,sdk:x.sellPreview.sdk,
+  targetMint:c.mint,firstPool:route.firstPool,secondPool:route.secondPool,
+  verifiedFullWalletTokenBalanceRaw:x.sellPreview.verifiedFullWalletTokenBalanceRaw,
+  slippageBps:c.maxSlippageBps
+ });
+ if('reason' in sell)
+  return block('FULL_SELL_ROUTE_'+sell.reason,'SIGNER_PREFLIGHT');
+ if(!sell.fullRentCpiAndPhantomAppVerified)
+  return block('COMPLETE_PHANTOM_SELL_AND_CPI_PROOF_MISSING',
+   'SIGNER_PREFLIGHT');
  if(c.executionWallet!==r.executionWallet||
     c.callerWallet!==r.callerWallet||
     c.sourceSignature!==r.sourceSignature||c.mint!==r.mint||
