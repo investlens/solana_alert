@@ -61,3 +61,25 @@ test('matching public wallet but unauthenticated request never invokes signer',a
  assert.equal(res.broadcastAllowed,false);
  assert.equal(signatures,0);
 });
+
+test('owner sleep OFF blocks real-wallet signed discard before DB, RPC or key access',async()=>{
+ let sign=0,db=0,nonce=0,provider=0;
+ const r=await dryRunEchoPumpActualWalletBuySignedDiscard({
+  signer:{publicWallet:pinned,
+   signTransactionMessageForDryRun:async()=>{sign++;return new Uint8Array(64);}},
+  request:{audience:'echo-isolated-signer',action:'BUY',
+   executionWallet:pinned,callerWallet:caller,mint:synthetic.publicKey.toBase58(),
+   sourceSignature:sourceSig,reservationKey:'not-reached',
+   transactionSha256:'a'.repeat(64),nonceHex:'b'.repeat(64),
+   issuedAtMs:1800000000000,expiresAtMs:1800000005000},
+  ownerAutoBuyEnabled:async()=>false,
+  coordinatorSignatureBase58:'not-reached',
+  pinnedCoordinatorPublicKey:synthetic.publicKey.toBase58(),
+  nowMs:1800000000100,unsignedTransactionBytes:bytes,
+  nonceStore:{consumeOnce:async()=>{nonce++;return true;}},
+  reservationReader:{getByCall:async()=>{db++;return null;}},
+  evidenceReader:{readFromTrustedProviders:async()=>{provider++;return null;}}
+ });
+ assert.deepEqual(r,{ok:false,reason:'SIGNER_OWNER_AUTO_BUY_OFF',broadcastAllowed:false});
+ assert.deepEqual({sign,db,nonce,provider},{sign:0,db:0,nonce:0,provider:0});
+});
