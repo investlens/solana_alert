@@ -34,7 +34,7 @@ const acc=(data:Buffer,owner=swapProgram):AccountInfo<Buffer>=>({
 });
 let rpcCalls=0;
 function sdk(override:{wrongMint?:boolean;wrongOutput?:boolean;
- wrongInstructions?:boolean}={}):EchoOfficialPumpSdkAdapter{
+ wrongInstructions?:boolean;alterSwapData?:boolean;alterSwapKey?:boolean}={}):EchoOfficialPumpSdkAdapter{
  return {
   async multiHopPoolHops(keys){
    assert.deepEqual(keys.map(k=>k.toBase58()),[p1.toBase58(),p2.toBase58()]);
@@ -47,7 +47,18 @@ function sdk(override:{wrongMint?:boolean;wrongOutput?:boolean;
   amount(v){assert.equal(v,amount);return v;},
   quote(){return {minAmountOut:{toString:()=>override.wrongOutput?'1001':'900'},
    amountOut:{toString:()=> '1000'}};},
-  async swapInstructions(){return override.wrongInstructions?ixs.slice(1):ixs;}
+  async swapInstructions(){
+   if(override.wrongInstructions)return ixs.slice(1);
+   if(override.alterSwapData||override.alterSwapKey)
+    return [ixs[0],new TransactionInstruction({
+     programId:swapProgram,
+     keys:override.alterSwapKey?
+      [...ixs[1].keys.slice(0,4),{pubkey:Keypair.generate().publicKey,
+       isSigner:false,isWritable:false}]:ixs[1].keys,
+     data:Buffer.from([override.alterSwapData?2:1])
+    })];
+   return ixs;
+  }
  };
 }
 function rpc(badOwner=false):EchoOfficialPumpQuoteRpc{
@@ -104,4 +115,15 @@ test('tampered message hash and invalid principal reject before RPC',async()=>{
   assert.equal(result.ok,false,JSON.stringify(change));
  }
  assert.equal(rpcCalls,0);
+});
+
+test('rebuilding exact transaction rejects differing SDK instruction bytes and account list',async()=>{
+ const data=await inspectSignerOwnedOfficialPumpQuote(input(sdk({alterSwapData:true})));
+ assert.deepEqual(data,{ok:false,
+  reason:'OFFICIAL_REBUILD_INSTRUCTION_DATA_DIFFERED',
+  signingAllowed:false,broadcastAllowed:false});
+ const keys=await inspectSignerOwnedOfficialPumpQuote(input(sdk({alterSwapKey:true})));
+ assert.deepEqual(keys,{ok:false,
+  reason:'OFFICIAL_REBUILD_ACCOUNT_KEYS_DIFFERED',
+  signingAllowed:false,broadcastAllowed:false});
 });
