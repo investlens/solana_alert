@@ -339,6 +339,7 @@ jobs:
       ECHO_SIGNER_BROADCAST_ENABLED: 'false'
       ECHO_SIGNER_REQUESTS_ENABLED: 'false'
       ECHO_EXPORT_UNSIGNED_FOR_SIGNER_TEST: 'true'
+      ECHO_SCENARIO_ALL_IN_CENTS: '250'
       ECHO_SCENARIO_USE_PUBLIC_FX: 'true'
       # Never treated as CPI proof: this is only a provisional estimate.
       ECHO_SCENARIO_CPI_ALLOWANCE_LAMPORTS: '1000000'
